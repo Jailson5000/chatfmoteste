@@ -140,10 +140,48 @@ export type Database = {
           },
         ]
       }
+      client_tags: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          tag_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          tag_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_tags_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address: string | null
           created_at: string
+          custom_status_id: string | null
+          department_id: string | null
           document: string | null
           email: string | null
           id: string
@@ -158,6 +196,8 @@ export type Database = {
         Insert: {
           address?: string | null
           created_at?: string
+          custom_status_id?: string | null
+          department_id?: string | null
           document?: string | null
           email?: string | null
           id?: string
@@ -172,6 +212,8 @@ export type Database = {
         Update: {
           address?: string | null
           created_at?: string
+          custom_status_id?: string | null
+          department_id?: string | null
           document?: string | null
           email?: string | null
           id?: string
@@ -184,6 +226,20 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "clients_custom_status_id_fkey"
+            columns: ["custom_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clients_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "clients_law_firm_id_fkey"
             columns: ["law_firm_id"]
@@ -306,6 +362,91 @@ export type Database = {
             columns: ["whatsapp_instance_id"]
             isOneToOne: false
             referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custom_statuses: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custom_statuses_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      departments: {
+        Row: {
+          color: string
+          created_at: string
+          icon: string | null
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "departments_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
         ]
@@ -535,6 +676,38 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "profiles_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tags: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          law_firm_id: string
+          name: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          name: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tags_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"

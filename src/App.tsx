@@ -12,6 +12,7 @@ import Conversations from "./pages/Conversations";
 import Kanban from "./pages/Kanban";
 import Automations from "./pages/Automations";
 import Settings from "./pages/Settings";
+import Contacts from "./pages/Contacts";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -81,6 +82,17 @@ const App = () => (
             }
           >
             <Route index element={<Settings />} />
+          </Route>
+          
+          <Route
+            path="/contacts"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Contacts />} />
           </Route>
           
           {/* Catch-all route */}
