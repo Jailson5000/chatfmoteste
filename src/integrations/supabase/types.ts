@@ -557,6 +557,7 @@ export type Database = {
           document: string | null
           email: string | null
           id: string
+          logo_url: string | null
           name: string
           phone: string | null
           updated_at: string
@@ -567,6 +568,7 @@ export type Database = {
           document?: string | null
           email?: string | null
           id?: string
+          logo_url?: string | null
           name: string
           phone?: string | null
           updated_at?: string
@@ -577,6 +579,7 @@ export type Database = {
           document?: string | null
           email?: string | null
           id?: string
+          logo_url?: string | null
           name?: string
           phone?: string | null
           updated_at?: string
@@ -708,6 +711,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "tags_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      templates: {
+        Row: {
+          category: string | null
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          shortcut: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          shortcut: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          shortcut?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "templates_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
