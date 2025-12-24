@@ -7,6 +7,12 @@ import {
   Database,
   FileText,
   Save,
+  Tag,
+  Layers,
+  Folder,
+  Plus,
+  Trash2,
+  GripVertical,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +37,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useTags } from "@/hooks/useTags";
+import { useDepartments } from "@/hooks/useDepartments";
 
 const teamMembers = [
   { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456" },
@@ -48,9 +64,33 @@ const roleLabels = {
   atendente: { label: "Atendente", color: "bg-muted text-muted-foreground" },
 };
 
+const defaultColors = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", 
+  "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#64748b"
+];
+
 export default function Settings() {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  
+  // Status management
+  const { statuses, createStatus, deleteStatus } = useCustomStatuses();
+  const [newStatusName, setNewStatusName] = useState("");
+  const [newStatusColor, setNewStatusColor] = useState("#6366f1");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  
+  // Tags management
+  const { tags, createTag, deleteTag } = useTags();
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#6366f1");
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  
+  // Departments management
+  const { departments, createDepartment, deleteDepartment, reorderDepartments } = useDepartments();
+  const [newDeptName, setNewDeptName] = useState("");
+  const [newDeptColor, setNewDeptColor] = useState("#6366f1");
+  const [deptDialogOpen, setDeptDialogOpen] = useState(false);
+  const [draggedDept, setDraggedDept] = useState<string | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -60,6 +100,52 @@ export default function Settings() {
       title: "Configurações salvas",
       description: "Suas alterações foram salvas com sucesso.",
     });
+  };
+
+  const handleCreateStatus = async () => {
+    if (!newStatusName.trim()) return;
+    await createStatus.mutateAsync({ name: newStatusName, color: newStatusColor });
+    setNewStatusName("");
+    setNewStatusColor("#6366f1");
+    setStatusDialogOpen(false);
+  };
+
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return;
+    await createTag.mutateAsync({ name: newTagName, color: newTagColor });
+    setNewTagName("");
+    setNewTagColor("#6366f1");
+    setTagDialogOpen(false);
+  };
+
+  const handleCreateDepartment = async () => {
+    if (!newDeptName.trim()) return;
+    await createDepartment.mutateAsync({ name: newDeptName, color: newDeptColor });
+    setNewDeptName("");
+    setNewDeptColor("#6366f1");
+    setDeptDialogOpen(false);
+  };
+
+  const handleDeptDragStart = (id: string) => {
+    setDraggedDept(id);
+  };
+
+  const handleDeptDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDeptDrop = (targetId: string) => {
+    if (!draggedDept || draggedDept === targetId) return;
+    
+    const orderedIds = [...departments].map(d => d.id);
+    const draggedIndex = orderedIds.indexOf(draggedDept);
+    const targetIndex = orderedIds.indexOf(targetId);
+    
+    orderedIds.splice(draggedIndex, 1);
+    orderedIds.splice(targetIndex, 0, draggedDept);
+    
+    reorderDepartments.mutate(orderedIds);
+    setDraggedDept(null);
   };
 
   return (
@@ -78,8 +164,20 @@ export default function Settings() {
         </Button>
       </div>
 
-      <Tabs defaultValue="office">
-        <TabsList className="grid w-full max-w-2xl grid-cols-5">
+      <Tabs defaultValue="status">
+        <TabsList className="grid w-full max-w-4xl grid-cols-8">
+          <TabsTrigger value="status">
+            <Layers className="h-4 w-4 mr-2" />
+            Status
+          </TabsTrigger>
+          <TabsTrigger value="tags">
+            <Tag className="h-4 w-4 mr-2" />
+            Etiquetas
+          </TabsTrigger>
+          <TabsTrigger value="departments">
+            <Folder className="h-4 w-4 mr-2" />
+            Departamentos
+          </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
             Escritório
@@ -101,6 +199,288 @@ export default function Settings() {
             LGPD
           </TabsTrigger>
         </TabsList>
+
+        {/* Status Settings */}
+        <TabsContent value="status" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Status Personalizados</CardTitle>
+                  <CardDescription>
+                    Crie status para classificar seus clientes (ex: Análise, Qualificado, Proposta Aceita)
+                  </CardDescription>
+                </div>
+                <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Novo Status
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Criar Status</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                      <div className="space-y-2">
+                        <Label>Nome do Status</Label>
+                        <Input
+                          value={newStatusName}
+                          onChange={(e) => setNewStatusName(e.target.value)}
+                          placeholder="Ex: Qualificado"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Cor</Label>
+                        <div className="flex gap-2 flex-wrap">
+                          {defaultColors.map((color) => (
+                            <button
+                              key={color}
+                              className={`w-8 h-8 rounded-full border-2 ${newStatusColor === color ? "border-foreground" : "border-transparent"}`}
+                              style={{ backgroundColor: color }}
+                              onClick={() => setNewStatusColor(color)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleCreateStatus} disabled={createStatus.isPending}>
+                          {createStatus.isPending ? "Criando..." : "Criar"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statuses.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhum status criado</p>
+                  <p className="text-sm">Clique em "Novo Status" para adicionar</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {statuses.map((status) => (
+                    <div
+                      key={status.id}
+                      className="flex items-center justify-between p-3 rounded-lg border"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: status.color }}
+                        />
+                        <span className="font-medium">{status.name}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => deleteStatus.mutate(status.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tags Settings */}
+        <TabsContent value="tags" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Etiquetas</CardTitle>
+                  <CardDescription>
+                    Crie etiquetas para organizar e filtrar seus clientes
+                  </CardDescription>
+                </div>
+                <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nova Etiqueta
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Criar Etiqueta</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                      <div className="space-y-2">
+                        <Label>Nome da Etiqueta</Label>
+                        <Input
+                          value={newTagName}
+                          onChange={(e) => setNewTagName(e.target.value)}
+                          placeholder="Ex: VIP"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Cor</Label>
+                        <div className="flex gap-2 flex-wrap">
+                          {defaultColors.map((color) => (
+                            <button
+                              key={color}
+                              className={`w-8 h-8 rounded-full border-2 ${newTagColor === color ? "border-foreground" : "border-transparent"}`}
+                              style={{ backgroundColor: color }}
+                              onClick={() => setNewTagColor(color)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setTagDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleCreateTag} disabled={createTag.isPending}>
+                          {createTag.isPending ? "Criando..." : "Criar"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {tags.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Tag className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhuma etiqueta criada</p>
+                  <p className="text-sm">Clique em "Nova Etiqueta" para adicionar</p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {tags.map((tag) => (
+                    <Badge
+                      key={tag.id}
+                      className="flex items-center gap-2 px-3 py-1.5"
+                      style={{ backgroundColor: tag.color, color: "#fff" }}
+                    >
+                      {tag.name}
+                      <button
+                        className="ml-1 hover:opacity-70"
+                        onClick={() => deleteTag.mutate(tag.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Departments Settings */}
+        <TabsContent value="departments" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Departamentos</CardTitle>
+                  <CardDescription>
+                    Departamentos aparecem como colunas no Kanban. Arraste para reordenar.
+                  </CardDescription>
+                </div>
+                <Dialog open={deptDialogOpen} onOpenChange={setDeptDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Novo Departamento
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Criar Departamento</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                      <div className="space-y-2">
+                        <Label>Nome do Departamento</Label>
+                        <Input
+                          value={newDeptName}
+                          onChange={(e) => setNewDeptName(e.target.value)}
+                          placeholder="Ex: Comercial"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Cor</Label>
+                        <div className="flex gap-2 flex-wrap">
+                          {defaultColors.map((color) => (
+                            <button
+                              key={color}
+                              className={`w-8 h-8 rounded-full border-2 ${newDeptColor === color ? "border-foreground" : "border-transparent"}`}
+                              style={{ backgroundColor: color }}
+                              onClick={() => setNewDeptColor(color)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setDeptDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleCreateDepartment} disabled={createDepartment.isPending}>
+                          {createDepartment.isPending ? "Criando..." : "Criar"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {departments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Folder className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhum departamento criado</p>
+                  <p className="text-sm">Clique em "Novo Departamento" para adicionar</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {departments.map((dept) => (
+                    <div
+                      key={dept.id}
+                      draggable
+                      onDragStart={() => handleDeptDragStart(dept.id)}
+                      onDragOver={handleDeptDragOver}
+                      onDrop={() => handleDeptDrop(dept.id)}
+                      className={`flex items-center justify-between p-3 rounded-lg border cursor-grab active:cursor-grabbing transition-opacity ${
+                        draggedDept === dept.id ? "opacity-50" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <GripVertical className="h-4 w-4 text-muted-foreground" />
+                        <div
+                          className="w-4 h-4 rounded"
+                          style={{ backgroundColor: dept.color }}
+                        />
+                        <span className="font-medium">{dept.name}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => deleteDepartment.mutate(dept.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">
