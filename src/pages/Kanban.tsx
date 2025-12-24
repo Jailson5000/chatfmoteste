@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Plus, GripVertical, Folder, Bot, User, Clock, MessageSquare, Phone, Wifi, Tag } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -93,10 +94,9 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
   return (
     <Card
       className={cn(
-        "cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5 border-l-4",
+        "cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5 bg-card",
         isDragging && "opacity-50"
       )}
-      style={{ borderLeftColor: status?.color || 'hsl(var(--border))' }}
       draggable
       onDragStart={(e) => {
         e.stopPropagation();
@@ -193,7 +193,7 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
 
 export default function Kanban() {
   const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
-  const { clients: dbClients, moveClientToDepartment } = useClients();
+  const { clients: dbClients, moveClientToDepartment, updateClient } = useClients();
   const { statuses } = useCustomStatuses();
   const { tags } = useTags();
   
@@ -218,6 +218,29 @@ export default function Kanban() {
 
   // Available connections for filter
   const availableConnections = ['WhatsApp Principal', 'WhatsApp Comercial', 'WhatsApp Suporte'];
+
+  // Real-time subscription for clients updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('clients-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'clients'
+        },
+        (payload) => {
+          console.log('Client realtime update:', payload);
+          // React Query will refetch automatically via invalidation
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Use mock clients if database is empty, distribute among departments
   const clients = useMemo(() => {
@@ -303,6 +326,26 @@ export default function Kanban() {
       custom_status_id: client.custom_status_id,
     });
     setSheetOpen(true);
+  };
+
+  const handleUpdateClientName = (clientId: string, newName: string) => {
+    if (!clientId.startsWith('mock-')) {
+      updateClient.mutate({ id: clientId, name: newName });
+    }
+    // Update local state for mock clients
+    if (selectedClient && selectedClient.id === clientId) {
+      setSelectedClient({ ...selectedClient, name: newName });
+    }
+  };
+
+  const handleTransferHandler = (clientId: string, handlerType: 'ai' | 'human', handlerName: string) => {
+    // Update mock data for demo purposes
+    const mockData = mockConversationData[clientId];
+    if (mockData) {
+      mockData.handler = handlerType;
+      mockData.handlerName = handlerName;
+    }
+    console.log(`Client ${clientId} transferred to ${handlerType}: ${handlerName}`);
   };
 
   const getClientsByDepartment = (deptId: string) =>
@@ -477,6 +520,8 @@ export default function Kanban() {
         status={selectedClient ? getStatusById(selectedClient.custom_status_id) : undefined}
         tags={selectedClient ? getClientTags(selectedClient.id) : []}
         mockData={selectedClient ? getMockData(selectedClient.id) : undefined}
+        onUpdateName={handleUpdateClientName}
+        onTransferHandler={handleTransferHandler}
       />
     </div>
   );

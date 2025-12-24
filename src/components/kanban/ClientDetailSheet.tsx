@@ -2,15 +2,18 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { 
-  Bot, User, Clock, MessageSquare, Phone, Mail, MapPin, 
-  FileText, Calendar, Tag, Wifi, Send
+  Bot, User, Clock, MessageSquare, Phone, Mail, 
+  Tag, Wifi, Send, Mic, Paperclip, FileSignature,
+  Edit2, Check, X, UserPlus, RefreshCw
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { toast } from "sonner";
 
 interface Message {
   id: string;
@@ -42,7 +45,24 @@ interface ClientDetailSheetProps {
     handlerName: string;
     arrivedAt: Date;
   };
+  onUpdateName?: (clientId: string, newName: string) => void;
+  onTransferHandler?: (clientId: string, handlerType: 'ai' | 'human', handlerName: string) => void;
 }
+
+// Mock handlers for transfer
+const availableHandlers = {
+  ai: [
+    { id: 'ai-1', name: 'Assistente Jurídico', description: 'IA para triagem inicial' },
+    { id: 'ai-2', name: 'IA Triagem', description: 'IA para classificação' },
+    { id: 'ai-3', name: 'IA Documentos', description: 'IA para análise de docs' },
+  ],
+  human: [
+    { id: 'human-1', name: 'Dr. Carlos Silva', role: 'Advogado' },
+    { id: 'human-2', name: 'Dra. Ana Costa', role: 'Advogada' },
+    { id: 'human-3', name: 'João Atendente', role: 'Atendente' },
+    { id: 'human-4', name: 'Maria Santos', role: 'Estagiária' },
+  ]
+};
 
 // Mock conversation messages
 const generateMockMessages = (clientName: string): Message[] => {
@@ -105,22 +125,98 @@ export function ClientDetailSheet({
   client, 
   status,
   tags = [],
-  mockData 
+  mockData,
+  onUpdateName,
+  onTransferHandler
 }: ClientDetailSheetProps) {
   const [newMessage, setNewMessage] = useState('');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [transferPopoverOpen, setTransferPopoverOpen] = useState(false);
   
   if (!client) return null;
   
   const messages = generateMockMessages(client.name);
   const lastFourDigits = client.phone.slice(-4);
   
+  const handleStartEditName = () => {
+    setEditedName(client.name);
+    setIsEditingName(true);
+  };
+  
+  const handleSaveName = () => {
+    if (editedName.trim() && onUpdateName) {
+      onUpdateName(client.id, editedName.trim());
+      toast.success('Nome atualizado com sucesso');
+    }
+    setIsEditingName(false);
+  };
+  
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName('');
+  };
+  
+  const handleTransfer = (type: 'ai' | 'human', handler: { id: string; name: string }) => {
+    if (onTransferHandler) {
+      onTransferHandler(client.id, type, handler.name);
+    }
+    toast.success(`Transferido para ${handler.name}`);
+    setTransferPopoverOpen(false);
+  };
+
+  const handleSendMessage = () => {
+    if (newMessage.trim()) {
+      toast.success('Mensagem enviada');
+      setNewMessage('');
+    }
+  };
+
+  const handleSendAudio = () => {
+    toast.info('Gravação de áudio iniciada...');
+  };
+
+  const handleSendFile = () => {
+    toast.info('Selecione um arquivo para enviar');
+  };
+
+  const handleInsertSignature = () => {
+    toast.info('Assinatura inserida na mensagem');
+  };
+  
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-xl p-0 flex flex-col">
         <SheetHeader className="p-4 border-b">
           <div className="flex items-start justify-between">
-            <div className="space-y-1">
-              <SheetTitle className="text-xl">{client.name}</SheetTitle>
+            <div className="space-y-1 flex-1">
+              {isEditingName ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    className="h-8 text-lg font-semibold"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveName();
+                      if (e.key === 'Escape') handleCancelEditName();
+                    }}
+                  />
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleSaveName}>
+                    <Check className="h-4 w-4 text-green-600" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleCancelEditName}>
+                    <X className="h-4 w-4 text-red-600" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <SheetTitle className="text-xl">{client.name}</SheetTitle>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={handleStartEditName}>
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Phone className="h-3.5 w-3.5" />
                 <span>•••• {lastFourDigits}</span>
@@ -173,17 +269,60 @@ export function ClientDetailSheet({
                 {mockData?.connection.replace('WhatsApp ', '') || '—'}
               </p>
             </div>
-            <div className="bg-muted/50 rounded-lg p-2 text-center">
-              {mockData?.handler === 'ai' ? (
-                <Bot className="h-4 w-4 mx-auto text-purple-500" />
-              ) : (
-                <User className="h-4 w-4 mx-auto text-green-500" />
-              )}
-              <p className="text-xs text-muted-foreground mt-1">Atendente</p>
-              <p className="text-xs font-medium truncate">
-                {mockData?.handlerName || '—'}
-              </p>
-            </div>
+            <Popover open={transferPopoverOpen} onOpenChange={setTransferPopoverOpen}>
+              <PopoverTrigger asChild>
+                <div className="bg-muted/50 rounded-lg p-2 text-center cursor-pointer hover:bg-muted transition-colors">
+                  {mockData?.handler === 'ai' ? (
+                    <Bot className="h-4 w-4 mx-auto text-purple-500" />
+                  ) : (
+                    <User className="h-4 w-4 mx-auto text-green-500" />
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">Atendente</p>
+                  <p className="text-xs font-medium truncate">
+                    {mockData?.handlerName || '—'}
+                  </p>
+                  <RefreshCw className="h-3 w-3 mx-auto mt-1 text-muted-foreground" />
+                </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <Command>
+                  <CommandInput placeholder="Buscar atendente..." />
+                  <CommandList>
+                    <CommandEmpty>Nenhum atendente encontrado.</CommandEmpty>
+                    <CommandGroup heading="Transferir para IA">
+                      {availableHandlers.ai.map((handler) => (
+                        <CommandItem
+                          key={handler.id}
+                          onSelect={() => handleTransfer('ai', handler)}
+                          className="flex items-center gap-2"
+                        >
+                          <Bot className="h-4 w-4 text-purple-500" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{handler.name}</p>
+                            <p className="text-xs text-muted-foreground">{handler.description}</p>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                    <CommandGroup heading="Transferir para Humano">
+                      {availableHandlers.human.map((handler) => (
+                        <CommandItem
+                          key={handler.id}
+                          onSelect={() => handleTransfer('human', handler)}
+                          className="flex items-center gap-2"
+                        >
+                          <User className="h-4 w-4 text-green-500" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">{handler.name}</p>
+                            <p className="text-xs text-muted-foreground">{handler.role}</p>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         </SheetHeader>
         
@@ -227,16 +366,49 @@ export function ClientDetailSheet({
             </div>
           </ScrollArea>
           
-          {/* Message input */}
-          <div className="p-4 border-t">
-            <div className="flex gap-2">
+          {/* Message input with media buttons */}
+          <div className="p-4 border-t space-y-2">
+            <div className="flex gap-2 items-center">
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                className="h-9 w-9 flex-shrink-0"
+                onClick={handleInsertSignature}
+                title="Inserir assinatura"
+              >
+                <FileSignature className="h-4 w-4" />
+              </Button>
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                className="h-9 w-9 flex-shrink-0"
+                onClick={handleSendFile}
+                title="Enviar arquivo"
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                className="h-9 w-9 flex-shrink-0"
+                onClick={handleSendAudio}
+                title="Gravar áudio"
+              >
+                <Mic className="h-4 w-4" />
+              </Button>
               <Input 
                 placeholder="Digite uma mensagem..."
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 className="flex-1"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
               />
-              <Button size="icon">
+              <Button size="icon" onClick={handleSendMessage}>
                 <Send className="h-4 w-4" />
               </Button>
             </div>
