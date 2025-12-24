@@ -43,6 +43,8 @@ interface WhatsAppInstance {
   status: "connected" | "disconnected" | "connecting";
   apiUrl: string;
   lastSync: string | null;
+  rejectCalls: boolean;
+  isActive: boolean;
 }
 
 const mockInstances: WhatsAppInstance[] = [];
@@ -127,6 +129,8 @@ export default function Connections() {
       status: "disconnected",
       apiUrl: evolutionUrl,
       lastSync: null,
+      rejectCalls: false,
+      isActive: true,
     };
     
     setInstances([...instances, newInstance]);
@@ -282,6 +286,8 @@ export default function Connections() {
                   <TableHead>Nome</TableHead>
                   <TableHead>Telefone</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Rejeitar Chamadas</TableHead>
+                  <TableHead>Ativo</TableHead>
                   <TableHead>Última Sincronização</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
@@ -292,6 +298,32 @@ export default function Connections() {
                     <TableCell className="font-medium">{instance.name}</TableCell>
                     <TableCell>{instance.phone || "—"}</TableCell>
                     <TableCell>{getStatusBadge(instance.status)}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={instance.rejectCalls}
+                        onCheckedChange={(checked) => {
+                          setInstances(instances.map(i => 
+                            i.id === instance.id ? { ...i, rejectCalls: checked } : i
+                          ));
+                          toast({
+                            title: checked ? "Chamadas serão rejeitadas" : "Chamadas permitidas",
+                          });
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={instance.isActive}
+                        onCheckedChange={(checked) => {
+                          setInstances(instances.map(i => 
+                            i.id === instance.id ? { ...i, isActive: checked } : i
+                          ));
+                          toast({
+                            title: checked ? "Instância ativada" : "Instância desativada",
+                          });
+                        }}
+                      />
+                    </TableCell>
                     <TableCell>
                       {instance.lastSync 
                         ? new Date(instance.lastSync).toLocaleString("pt-BR")
