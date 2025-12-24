@@ -210,11 +210,14 @@ export default function Kanban() {
     custom_status_id: string | null;
   } | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<{
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
     connections: string[];
-  }>({ statuses: [], handlers: [], connections: [] });
+    departments: string[];
+    tags: string[];
+  }>({ statuses: [], handlers: [], connections: [], departments: [], tags: [] });
 
   // Available connections for filter
   const availableConnections = ['WhatsApp Principal', 'WhatsApp Comercial', 'WhatsApp Suporte'];
@@ -254,10 +257,18 @@ export default function Kanban() {
     }));
   }, [dbClients, departments, statuses]);
 
-  // Apply filters
+  // Apply filters and search
   const filteredClients = useMemo(() => {
     return clients.filter(client => {
       const mockData = getMockData(client.id);
+      
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const nameMatch = client.name.toLowerCase().includes(query);
+        const phoneMatch = client.phone.includes(query);
+        if (!nameMatch && !phoneMatch) return false;
+      }
       
       // Status filter
       if (filters.statuses.length > 0 && client.custom_status_id) {
@@ -276,9 +287,21 @@ export default function Kanban() {
         if (!filters.connections.includes(mockData.connection)) return false;
       }
       
+      // Department filter
+      if (filters.departments.length > 0) {
+        if (!client.department_id || !filters.departments.includes(client.department_id)) return false;
+      }
+      
+      // Tags filter
+      if (filters.tags.length > 0) {
+        const clientTags = getClientTags(client.id);
+        const hasMatchingTag = clientTags.some(t => filters.tags.includes(t.id));
+        if (!hasMatchingTag) return false;
+      }
+      
       return true;
     });
-  }, [clients, filters]);
+  }, [clients, filters, searchQuery, tags]);
 
   // Mock tags for clients
   const getClientTags = (clientId: string) => {
@@ -386,8 +409,12 @@ export default function Kanban() {
           <KanbanFilters 
             filters={filters}
             onFiltersChange={setFilters}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
             availableStatuses={statuses}
             availableConnections={availableConnections}
+            availableDepartments={departments}
+            availableTags={tags}
           />
         </div>
       </div>
@@ -519,9 +546,16 @@ export default function Kanban() {
         client={selectedClient}
         status={selectedClient ? getStatusById(selectedClient.custom_status_id) : undefined}
         tags={selectedClient ? getClientTags(selectedClient.id) : []}
+        departments={departments}
+        currentDepartmentId={selectedClient ? clients.find(c => c.id === selectedClient.id)?.department_id : null}
         mockData={selectedClient ? getMockData(selectedClient.id) : undefined}
         onUpdateName={handleUpdateClientName}
         onTransferHandler={handleTransferHandler}
+        onTransferDepartment={(clientId, deptId) => {
+          if (!clientId.startsWith('mock-')) {
+            moveClientToDepartment.mutate({ clientId, departmentId: deptId });
+          }
+        }}
       />
     </div>
   );
