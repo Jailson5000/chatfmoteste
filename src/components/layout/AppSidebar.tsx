@@ -13,6 +13,7 @@ import {
   Moon,
   Sun,
   User,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: MessageSquare, label: "Atendimentos", path: "/conversations" },
+  { icon: Users, label: "Contatos", path: "/contacts" },
   { icon: Kanban, label: "Kanban", path: "/kanban" },
   { icon: Zap, label: "Automações", path: "/automations" },
   { icon: Settings, label: "Configurações", path: "/settings" },
