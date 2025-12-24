@@ -89,6 +89,7 @@ export default function Settings() {
   const [officeName, setOfficeName] = useState("");
   const [officeCnpj, setOfficeCnpj] = useState("");
   const [officePhone, setOfficePhone] = useState("");
+  const [officePhone2, setOfficePhone2] = useState("");
   const [officeEmail, setOfficeEmail] = useState("");
   const [officeAddress, setOfficeAddress] = useState("");
   
@@ -126,6 +127,7 @@ export default function Settings() {
       setOfficeName(lawFirm.name || "");
       setOfficeCnpj(lawFirm.document || "");
       setOfficePhone(lawFirm.phone || "");
+      setOfficePhone2((lawFirm as any).phone2 || "");
       setOfficeEmail(lawFirm.email || "");
       setOfficeAddress(lawFirm.address || "");
     }
@@ -138,9 +140,10 @@ export default function Settings() {
         name: officeName,
         document: officeCnpj,
         phone: officePhone,
+        phone2: officePhone2,
         email: officeEmail,
         address: officeAddress,
-      });
+      } as any);
     } catch (error) {
       // Error handled by mutation
     }
@@ -228,17 +231,11 @@ export default function Settings() {
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Configurações</h1>
-          <p className="text-muted-foreground mt-1">
-            Gerencie seu escritório, equipe e preferências
-          </p>
-        </div>
-        <Button onClick={handleSave} disabled={saving}>
-          <Save className="h-4 w-4 mr-2" />
-          {saving ? "Salvando..." : "Salvar alterações"}
-        </Button>
+      <div>
+        <h1 className="font-display text-3xl font-bold">Configurações</h1>
+        <p className="text-muted-foreground mt-1">
+          Gerencie seu escritório, equipe e preferências
+        </p>
       </div>
 
       <Tabs defaultValue="status">
@@ -768,12 +765,21 @@ export default function Settings() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="office-phone">Telefone</Label>
+                  <Label htmlFor="office-phone">Telefone 1</Label>
                   <Input 
                     id="office-phone" 
                     placeholder="(11) 3000-0000" 
                     value={officePhone}
                     onChange={(e) => setOfficePhone(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="office-phone2">Telefone 2</Label>
+                  <Input 
+                    id="office-phone2" 
+                    placeholder="(11) 99999-9999" 
+                    value={officePhone2}
+                    onChange={(e) => setOfficePhone2(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">

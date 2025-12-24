@@ -15,7 +15,6 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -39,9 +38,11 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { startOfDay, subDays, startOfMonth, isAfter, parseISO } from "date-fns";
+import { startOfDay, subDays, startOfMonth, isAfter, isBefore, parseISO } from "date-fns";
+import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
+import { DateRange } from "react-day-picker";
 
-type DateFilter = "today" | "7days" | "30days" | "month" | "all";
+type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
 const recentConversations = [
   {
@@ -92,6 +93,7 @@ const CHART_COLORS = [
 
 export default function Dashboard() {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { clients } = useClients();
@@ -102,6 +104,22 @@ export default function Dashboard() {
 
     const now = new Date();
     let startDate: Date;
+    let endDate: Date | undefined;
+
+    if (dateFilter === "custom" && customDateRange?.from) {
+      startDate = startOfDay(customDateRange.from);
+      endDate = customDateRange.to ? startOfDay(customDateRange.to) : undefined;
+      
+      return clients.filter((client) => {
+        const clientDate = parseISO(client.created_at);
+        const afterStart = isAfter(clientDate, startDate) || clientDate.toDateString() === startDate.toDateString();
+        if (endDate) {
+          const beforeEnd = isBefore(clientDate, endDate) || clientDate.toDateString() === endDate.toDateString();
+          return afterStart && beforeEnd;
+        }
+        return afterStart;
+      });
+    }
 
     switch (dateFilter) {
       case "today":
@@ -124,7 +142,7 @@ export default function Dashboard() {
       const clientDate = parseISO(client.created_at);
       return isAfter(clientDate, startDate);
     });
-  }, [clients, dateFilter]);
+  }, [clients, dateFilter, customDateRange]);
 
   // Calculate stats based on filtered clients
   const stats = useMemo(() => [
@@ -214,6 +232,7 @@ export default function Dashboard() {
     "30days": "Últimos 30 dias",
     month: "Este mês",
     all: "Todo o período",
+    custom: customDateRange?.from ? "Personalizado" : "Personalizado",
   };
 
   return (
@@ -226,7 +245,7 @@ export default function Dashboard() {
             Visão geral do seu escritório jurídico
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Calendar className="h-4 w-4 text-muted-foreground" />
           <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
             <SelectTrigger className="w-48">
@@ -238,8 +257,15 @@ export default function Dashboard() {
               <SelectItem value="30days">Últimos 30 dias</SelectItem>
               <SelectItem value="month">Este mês</SelectItem>
               <SelectItem value="all">Todo o período</SelectItem>
+              <SelectItem value="custom">Personalizado</SelectItem>
             </SelectContent>
           </Select>
+          {dateFilter === "custom" && (
+            <DateRangePicker 
+              dateRange={customDateRange}
+              onDateRangeChange={setCustomDateRange}
+            />
+          )}
         </div>
       </div>
 

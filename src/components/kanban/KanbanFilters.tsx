@@ -72,10 +72,12 @@ export function KanbanFilters({
   };
 
   const toggleDepartment = (deptId: string) => {
-    const newDepts = filters.departments.includes(deptId)
-      ? filters.departments.filter(d => d !== deptId)
-      : [...filters.departments, deptId];
-    onFiltersChange({ ...filters, departments: newDepts });
+    // Exclusive department filter - selecting one clears others
+    if (filters.departments.includes(deptId)) {
+      onFiltersChange({ ...filters, departments: [] });
+    } else {
+      onFiltersChange({ ...filters, departments: [deptId] });
+    }
   };
 
   const toggleTag = (tagId: string) => {
@@ -142,7 +144,7 @@ export function KanbanFilters({
             </div>
           </div>
           
-          <ScrollArea className="max-h-[400px]">
+          <ScrollArea className="max-h-[60vh] overflow-y-auto">
             <div className="p-3 space-y-4">
               {/* Status Filter */}
               <div className="space-y-2">
@@ -225,6 +227,17 @@ export function KanbanFilters({
                   )}
                 </div>
                 <div className="space-y-1.5 pl-6">
+                  {/* Sem Departamento option */}
+                  <label 
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1 rounded"
+                  >
+                    <Checkbox 
+                      checked={filters.departments.includes("none")}
+                      onCheckedChange={() => toggleDepartment("none")}
+                    />
+                    <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
+                    <span className="text-sm">Sem Departamento</span>
+                  </label>
                   {availableDepartments.map(dept => (
                     <label 
                       key={dept.id} 
