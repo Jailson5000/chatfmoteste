@@ -257,6 +257,14 @@ export default function Kanban() {
     }));
   }, [dbClients, departments, statuses]);
 
+  // Mock tags for clients - must be defined before filteredClients
+  const getClientTags = (clientId: string) => {
+    // Randomly assign 0-2 tags for demo
+    const seed = clientId.charCodeAt(clientId.length - 1);
+    const numTags = seed % 3;
+    return tags.slice(0, numTags);
+  };
+
   // Apply filters and search
   const filteredClients = useMemo(() => {
     return clients.filter(client => {
@@ -302,14 +310,6 @@ export default function Kanban() {
       return true;
     });
   }, [clients, filters, searchQuery, tags]);
-
-  // Mock tags for clients
-  const getClientTags = (clientId: string) => {
-    // Randomly assign 0-2 tags for demo
-    const seed = clientId.charCodeAt(clientId.length - 1);
-    const numTags = seed % 3;
-    return tags.slice(0, numTags);
-  };
 
   const handleClientDragStart = (clientId: string) => {
     setDraggedClient(clientId);
