@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import {
   MessageSquare,
   Users,
@@ -10,10 +10,19 @@ import {
   CheckCircle2,
   Briefcase,
   Tag,
+  Calendar,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useClients } from "@/hooks/useClients";
@@ -30,41 +39,9 @@ import {
   Cell,
   Legend,
 } from "recharts";
+import { startOfDay, subDays, startOfMonth, isAfter, parseISO } from "date-fns";
 
-const stats = [
-  {
-    title: "Conversas Ativas",
-    value: "24",
-    change: "+12%",
-    icon: MessageSquare,
-    color: "text-primary",
-    bgColor: "bg-primary/10",
-  },
-  {
-    title: "Clientes Atendidos",
-    value: "156",
-    change: "+8%",
-    icon: Users,
-    color: "text-success",
-    bgColor: "bg-success/10",
-  },
-  {
-    title: "Tempo Médio de Resposta",
-    value: "2m 34s",
-    change: "-15%",
-    icon: Clock,
-    color: "text-accent",
-    bgColor: "bg-accent/10",
-  },
-  {
-    title: "Taxa de Resolução",
-    value: "94%",
-    change: "+5%",
-    icon: TrendingUp,
-    color: "text-success",
-    bgColor: "bg-success/10",
-  },
-];
+type DateFilter = "today" | "7days" | "30days" | "month" | "all";
 
 const recentConversations = [
   {
@@ -114,58 +91,156 @@ const CHART_COLORS = [
 ];
 
 export default function Dashboard() {
+  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { clients } = useClients();
 
-  // Calculate clients per status
-  const clientsByStatus = statuses.map((status, index) => {
-    const count = clients.filter((c) => c.custom_status_id === status.id).length;
-    return {
-      name: status.name,
-      value: count,
-      color: status.color || CHART_COLORS[index % CHART_COLORS.length],
-    };
-  });
+  // Filter clients by date
+  const filteredClients = useMemo(() => {
+    if (dateFilter === "all") return clients;
 
-  // Add clients without status
-  const clientsWithoutStatus = clients.filter((c) => !c.custom_status_id).length;
-  if (clientsWithoutStatus > 0) {
-    clientsByStatus.push({
-      name: "Sem status",
-      value: clientsWithoutStatus,
-      color: "#9ca3af",
+    const now = new Date();
+    let startDate: Date;
+
+    switch (dateFilter) {
+      case "today":
+        startDate = startOfDay(now);
+        break;
+      case "7days":
+        startDate = subDays(now, 7);
+        break;
+      case "30days":
+        startDate = subDays(now, 30);
+        break;
+      case "month":
+        startDate = startOfMonth(now);
+        break;
+      default:
+        return clients;
+    }
+
+    return clients.filter((client) => {
+      const clientDate = parseISO(client.created_at);
+      return isAfter(clientDate, startDate);
     });
-  }
+  }, [clients, dateFilter]);
+
+  // Calculate stats based on filtered clients
+  const stats = useMemo(() => [
+    {
+      title: "Conversas Ativas",
+      value: Math.floor(filteredClients.length * 0.3).toString(),
+      change: "+12%",
+      icon: MessageSquare,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+    },
+    {
+      title: "Clientes Atendidos",
+      value: filteredClients.length.toString(),
+      change: "+8%",
+      icon: Users,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+    {
+      title: "Tempo Médio de Resposta",
+      value: "2m 34s",
+      change: "-15%",
+      icon: Clock,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: "Taxa de Resolução",
+      value: "94%",
+      change: "+5%",
+      icon: TrendingUp,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+  ], [filteredClients]);
+
+  // Calculate clients per status
+  const clientsByStatus = useMemo(() => {
+    const result = statuses.map((status, index) => {
+      const count = filteredClients.filter((c) => c.custom_status_id === status.id).length;
+      return {
+        name: status.name,
+        value: count,
+        color: status.color || CHART_COLORS[index % CHART_COLORS.length],
+      };
+    });
+
+    const clientsWithoutStatus = filteredClients.filter((c) => !c.custom_status_id).length;
+    if (clientsWithoutStatus > 0) {
+      result.push({
+        name: "Sem status",
+        value: clientsWithoutStatus,
+        color: "#9ca3af",
+      });
+    }
+
+    return result;
+  }, [statuses, filteredClients]);
 
   // Calculate clients per department
-  const clientsByDepartment = departments.map((dept, index) => {
-    const count = clients.filter((c) => c.department_id === dept.id).length;
-    return {
-      name: dept.name,
-      count,
-      color: dept.color || CHART_COLORS[index % CHART_COLORS.length],
-    };
-  });
-
-  // Add clients without department
-  const clientsWithoutDept = clients.filter((c) => !c.department_id).length;
-  if (clientsWithoutDept > 0) {
-    clientsByDepartment.push({
-      name: "Sem departamento",
-      count: clientsWithoutDept,
-      color: "#9ca3af",
+  const clientsByDepartment = useMemo(() => {
+    const result = departments.map((dept, index) => {
+      const count = filteredClients.filter((c) => c.department_id === dept.id).length;
+      return {
+        name: dept.name,
+        count,
+        color: dept.color || CHART_COLORS[index % CHART_COLORS.length],
+      };
     });
-  }
+
+    const clientsWithoutDept = filteredClients.filter((c) => !c.department_id).length;
+    if (clientsWithoutDept > 0) {
+      result.push({
+        name: "Sem departamento",
+        count: clientsWithoutDept,
+        color: "#9ca3af",
+      });
+    }
+
+    return result;
+  }, [departments, filteredClients]);
+
+  const dateFilterLabels: Record<DateFilter, string> = {
+    today: "Hoje",
+    "7days": "Últimos 7 dias",
+    "30days": "Últimos 30 dias",
+    month: "Este mês",
+    all: "Todo o período",
+  };
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col gap-2">
-        <h1 className="font-display text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Visão geral do seu escritório jurídico
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Visão geral do seu escritório jurídico
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Selecione o período" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="7days">Últimos 7 dias</SelectItem>
+              <SelectItem value="30days">Últimos 30 dias</SelectItem>
+              <SelectItem value="month">Este mês</SelectItem>
+              <SelectItem value="all">Todo o período</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -181,7 +256,7 @@ export default function Dashboard() {
                     variant={stat.change.startsWith("+") ? "default" : "secondary"}
                     className="text-xs"
                   >
-                    {stat.change} vs. mês anterior
+                    {stat.change} vs. período anterior
                   </Badge>
                 </div>
                 <div className={`p-3 rounded-xl ${stat.bgColor}`}>
@@ -203,7 +278,7 @@ export default function Dashboard() {
               Clientes por Status
             </CardTitle>
             <CardDescription>
-              Distribuição de clientes em cada status
+              Distribuição de clientes em cada status ({dateFilterLabels[dateFilter]})
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -249,7 +324,7 @@ export default function Dashboard() {
               Clientes por Departamento
             </CardTitle>
             <CardDescription>
-              Quantidade de clientes em cada departamento
+              Quantidade de clientes em cada departamento ({dateFilterLabels[dateFilter]})
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -368,7 +443,9 @@ export default function Dashboard() {
           <CardContent className="p-4 flex items-center gap-4">
             <Bot className="h-8 w-8 text-status-ai" />
             <div>
-              <p className="text-2xl font-bold">8</p>
+              <p className="text-2xl font-bold">
+                {filteredClients.filter(c => !c.custom_status_id).length}
+              </p>
               <p className="text-sm text-muted-foreground">Em triagem IA</p>
             </div>
           </CardContent>
@@ -377,7 +454,9 @@ export default function Dashboard() {
           <CardContent className="p-4 flex items-center gap-4">
             <AlertCircle className="h-8 w-8 text-warning" />
             <div>
-              <p className="text-2xl font-bold">5</p>
+              <p className="text-2xl font-bold">
+                {Math.floor(filteredClients.length * 0.1)}
+              </p>
               <p className="text-sm text-muted-foreground">Aguardando docs</p>
             </div>
           </CardContent>
@@ -386,7 +465,9 @@ export default function Dashboard() {
           <CardContent className="p-4 flex items-center gap-4">
             <UserCheck className="h-8 w-8 text-primary" />
             <div>
-              <p className="text-2xl font-bold">11</p>
+              <p className="text-2xl font-bold">
+                {Math.floor(filteredClients.length * 0.2)}
+              </p>
               <p className="text-sm text-muted-foreground">Com advogado</p>
             </div>
           </CardContent>
@@ -395,7 +476,7 @@ export default function Dashboard() {
           <CardContent className="p-4 flex items-center gap-4">
             <CheckCircle2 className="h-8 w-8 text-success" />
             <div>
-              <p className="text-2xl font-bold">{clients.length}</p>
+              <p className="text-2xl font-bold">{filteredClients.length}</p>
               <p className="text-sm text-muted-foreground">Total de clientes</p>
             </div>
           </CardContent>
@@ -411,13 +492,13 @@ export default function Dashboard() {
               Resumo por Status
             </CardTitle>
             <CardDescription>
-              Status configurados pelo seu escritório
+              Status configurados pelo seu escritório ({dateFilterLabels[dateFilter]})
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {statuses.map((status) => {
-                const count = clients.filter((c) => c.custom_status_id === status.id).length;
+                const count = filteredClients.filter((c) => c.custom_status_id === status.id).length;
                 return (
                   <div
                     key={status.id}

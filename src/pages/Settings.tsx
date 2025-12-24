@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   Building2,
   Users,
@@ -13,6 +13,9 @@ import {
   Plus,
   Trash2,
   GripVertical,
+  Upload,
+  MessageSquareText,
+  Image,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTags } from "@/hooks/useTags";
 import { useDepartments } from "@/hooks/useDepartments";
+import { useTemplates } from "@/hooks/useTemplates";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 const teamMembers = [
   { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456" },
@@ -72,6 +77,15 @@ const defaultColors = [
 export default function Settings() {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  
+  // Law firm data
+  const { lawFirm, updateLawFirm, uploadLogo } = useLawFirm();
+  const [officeName, setOfficeName] = useState("");
+  const [officeCnpj, setOfficeCnpj] = useState("");
+  const [officePhone, setOfficePhone] = useState("");
+  const [officeEmail, setOfficeEmail] = useState("");
+  const [officeAddress, setOfficeAddress] = useState("");
   
   // Status management
   const { statuses, createStatus, deleteStatus } = useCustomStatuses();
@@ -92,14 +106,45 @@ export default function Settings() {
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
   const [draggedDept, setDraggedDept] = useState<string | null>(null);
 
+  // Templates management
+  const { templates, createTemplate, deleteTemplate } = useTemplates();
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateShortcut, setNewTemplateShortcut] = useState("");
+  const [newTemplateContent, setNewTemplateContent] = useState("");
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+
+  // Initialize form with law firm data
+  useState(() => {
+    if (lawFirm) {
+      setOfficeName(lawFirm.name || "");
+      setOfficeCnpj(lawFirm.document || "");
+      setOfficePhone(lawFirm.phone || "");
+      setOfficeEmail(lawFirm.email || "");
+      setOfficeAddress(lawFirm.address || "");
+    }
+  });
+
   const handleSave = async () => {
     setSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      await updateLawFirm.mutateAsync({
+        name: officeName,
+        document: officeCnpj,
+        phone: officePhone,
+        email: officeEmail,
+        address: officeAddress,
+      });
+    } catch (error) {
+      // Error handled by mutation
+    }
     setSaving(false);
-    toast({
-      title: "Configurações salvas",
-      description: "Suas alterações foram salvas com sucesso.",
-    });
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await uploadLogo.mutateAsync(file);
+    }
   };
 
   const handleCreateStatus = async () => {
@@ -124,6 +169,19 @@ export default function Settings() {
     setNewDeptName("");
     setNewDeptColor("#6366f1");
     setDeptDialogOpen(false);
+  };
+
+  const handleCreateTemplate = async () => {
+    if (!newTemplateName.trim() || !newTemplateShortcut.trim() || !newTemplateContent.trim()) return;
+    await createTemplate.mutateAsync({ 
+      name: newTemplateName, 
+      shortcut: newTemplateShortcut, 
+      content: newTemplateContent 
+    });
+    setNewTemplateName("");
+    setNewTemplateShortcut("");
+    setNewTemplateContent("");
+    setTemplateDialogOpen(false);
   };
 
   const handleDeptDragStart = (id: string) => {
@@ -165,7 +223,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="status">
-        <TabsList className="grid w-full max-w-4xl grid-cols-8">
+        <TabsList className="grid w-full max-w-5xl grid-cols-9">
           <TabsTrigger value="status">
             <Layers className="h-4 w-4 mr-2" />
             Status
@@ -177,6 +235,10 @@ export default function Settings() {
           <TabsTrigger value="departments">
             <Folder className="h-4 w-4 mr-2" />
             Departamentos
+          </TabsTrigger>
+          <TabsTrigger value="templates">
+            <MessageSquareText className="h-4 w-4 mr-2" />
+            Templates
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
@@ -482,8 +544,154 @@ export default function Settings() {
           </Card>
         </TabsContent>
 
+        {/* Templates Settings */}
+        <TabsContent value="templates" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Templates de Mensagem</CardTitle>
+                  <CardDescription>
+                    Crie mensagens rápidas que podem ser usadas com comandos (ex: /a para aplicar)
+                  </CardDescription>
+                </div>
+                <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Novo Template
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>Criar Template</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-4">
+                      <div className="space-y-2">
+                        <Label>Nome do Template</Label>
+                        <Input
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                          placeholder="Ex: Boas-vindas"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Atalho (comando)</Label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">/</span>
+                          <Input
+                            value={newTemplateShortcut}
+                            onChange={(e) => setNewTemplateShortcut(e.target.value.toLowerCase().replace(/\s/g, ""))}
+                            placeholder="boasvindas"
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">Use /{newTemplateShortcut || "comando"} para aplicar</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Conteúdo da Mensagem</Label>
+                        <Textarea
+                          value={newTemplateContent}
+                          onChange={(e) => setNewTemplateContent(e.target.value)}
+                          placeholder="Olá! Seja bem-vindo ao nosso escritório..."
+                          rows={4}
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setTemplateDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleCreateTemplate} disabled={createTemplate.isPending}>
+                          {createTemplate.isPending ? "Criando..." : "Criar"}
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {templates.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <MessageSquareText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhum template criado</p>
+                  <p className="text-sm">Clique em "Novo Template" para adicionar</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {templates.map((template) => (
+                    <div
+                      key={template.id}
+                      className="flex items-start justify-between p-4 rounded-lg border"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium">{template.name}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            /{template.shortcut}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-2">{template.content}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive ml-2"
+                        onClick={() => deleteTemplate.mutate(template.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Logo da Empresa</CardTitle>
+              <CardDescription>
+                Faça upload do logo que será exibido no sistema
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div className="w-24 h-24 rounded-xl border-2 border-dashed flex items-center justify-center bg-muted/50 overflow-hidden">
+                  {lawFirm?.logo_url ? (
+                    <img 
+                      src={lawFirm.logo_url} 
+                      alt="Logo" 
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <Image className="h-8 w-8 text-muted-foreground" />
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="file"
+                    ref={logoInputRef}
+                    onChange={handleLogoUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={uploadLogo.isPending}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    {uploadLogo.isPending ? "Enviando..." : "Alterar Logo"}
+                  </Button>
+                  <p className="text-sm text-muted-foreground mt-2">PNG, JPG ou SVG. Max 2MB.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Dados do Escritório</CardTitle>
@@ -494,25 +702,51 @@ export default function Settings() {
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="office-name">Nome do Escritório</Label>
-                  <Input id="office-name" placeholder="Escritório de Advocacia" />
+                  <Label htmlFor="office-name">Nome da Empresa</Label>
+                  <Input 
+                    id="office-name" 
+                    placeholder="Escritório de Advocacia" 
+                    value={officeName}
+                    onChange={(e) => setOfficeName(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="office-cnpj">CNPJ</Label>
-                  <Input id="office-cnpj" placeholder="00.000.000/0001-00" />
+                  <Input 
+                    id="office-cnpj" 
+                    placeholder="00.000.000/0001-00" 
+                    value={officeCnpj}
+                    onChange={(e) => setOfficeCnpj(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="office-phone">Telefone</Label>
-                  <Input id="office-phone" placeholder="(11) 3000-0000" />
+                  <Input 
+                    id="office-phone" 
+                    placeholder="(11) 3000-0000" 
+                    value={officePhone}
+                    onChange={(e) => setOfficePhone(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="office-email">Email</Label>
-                  <Input id="office-email" type="email" placeholder="contato@escritorio.com" />
+                  <Input 
+                    id="office-email" 
+                    type="email" 
+                    placeholder="contato@escritorio.com" 
+                    value={officeEmail}
+                    onChange={(e) => setOfficeEmail(e.target.value)}
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="office-address">Endereço</Label>
-                <Textarea id="office-address" placeholder="Rua, número, bairro, cidade - UF" />
+                <Textarea 
+                  id="office-address" 
+                  placeholder="Rua, número, bairro, cidade - UF" 
+                  value={officeAddress}
+                  onChange={(e) => setOfficeAddress(e.target.value)}
+                />
               </div>
             </CardContent>
           </Card>
