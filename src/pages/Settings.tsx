@@ -18,6 +18,7 @@ import {
   Image,
   Video,
   Mic,
+  Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,8 @@ import { useDepartments } from "@/hooks/useDepartments";
 import { useTemplates } from "@/hooks/useTemplates";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { EditableItem } from "@/components/settings/EditableItem";
+import { EditableTemplate } from "@/components/settings/EditableTemplate";
 
 const teamMembers = [
   { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456" },
@@ -94,26 +97,26 @@ export default function Settings() {
   const [officeAddress, setOfficeAddress] = useState("");
   
   // Status management
-  const { statuses, createStatus, deleteStatus } = useCustomStatuses();
+  const { statuses, createStatus, updateStatus, deleteStatus } = useCustomStatuses();
   const [newStatusName, setNewStatusName] = useState("");
   const [newStatusColor, setNewStatusColor] = useState("#6366f1");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   
   // Tags management
-  const { tags, createTag, deleteTag } = useTags();
+  const { tags, createTag, updateTag, deleteTag } = useTags();
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#6366f1");
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   
   // Departments management
-  const { departments, createDepartment, deleteDepartment, reorderDepartments } = useDepartments();
+  const { departments, createDepartment, updateDepartment, deleteDepartment, reorderDepartments } = useDepartments();
   const [newDeptName, setNewDeptName] = useState("");
   const [newDeptColor, setNewDeptColor] = useState("#6366f1");
   const [deptDialogOpen, setDeptDialogOpen] = useState(false);
   const [draggedDept, setDraggedDept] = useState<string | null>(null);
 
   // Templates management
-  const { templates, createTemplate, deleteTemplate } = useTemplates();
+  const { templates, createTemplate, updateTemplate, deleteTemplate } = useTemplates();
   const [newTemplateName, setNewTemplateName] = useState("");
   const [newTemplateShortcut, setNewTemplateShortcut] = useState("");
   const [newTemplateContent, setNewTemplateContent] = useState("");
@@ -336,26 +339,16 @@ export default function Settings() {
               ) : (
                 <div className="space-y-2">
                   {statuses.map((status) => (
-                    <div
+                    <EditableItem
                       key={status.id}
-                      className="flex items-center justify-between p-3 rounded-lg border"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-4 h-4 rounded-full"
-                          style={{ backgroundColor: status.color }}
-                        />
-                        <span className="font-medium">{status.name}</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => deleteStatus.mutate(status.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                      id={status.id}
+                      name={status.name}
+                      color={status.color}
+                      type="status"
+                      onUpdate={({ id, name, color }) => updateStatus.mutate({ id, name, color })}
+                      onDelete={(id) => deleteStatus.mutate(id)}
+                      isPending={updateStatus.isPending}
+                    />
                   ))}
                 </div>
               )}
@@ -419,21 +412,18 @@ export default function Settings() {
                   <p className="text-sm">Clique em "Nova Etiqueta" para adicionar</p>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-2">
                   {tags.map((tag) => (
-                    <Badge
+                    <EditableItem
                       key={tag.id}
-                      className="flex items-center gap-2 px-3 py-1.5"
-                      style={{ backgroundColor: tag.color, color: "#fff" }}
-                    >
-                      {tag.name}
-                      <button
-                        className="ml-1 hover:opacity-70"
-                        onClick={() => deleteTag.mutate(tag.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </Badge>
+                      id={tag.id}
+                      name={tag.name}
+                      color={tag.color}
+                      type="tag"
+                      onUpdate={({ id, name, color }) => updateTag.mutate({ id, name, color })}
+                      onDelete={(id) => deleteTag.mutate(id)}
+                      isPending={updateTag.isPending}
+                    />
                   ))}
                 </div>
               )}
@@ -517,14 +507,29 @@ export default function Settings() {
                         />
                         <span className="font-medium">{dept.name}</span>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => deleteDepartment.mutate(dept.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            const newName = prompt("Novo nome:", dept.name);
+                            if (newName && newName !== dept.name) {
+                              updateDepartment.mutate({ id: dept.id, name: newName });
+                            }
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => deleteDepartment.mutate(dept.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -646,47 +651,21 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {templates.map((template) => {
-                    const templateType = templateTypes.find(t => t.value === template.category) || templateTypes[0];
-                    const TypeIcon = templateType.icon;
-                    return (
-                      <div
-                        key={template.id}
-                        className="flex items-start justify-between p-4 rounded-lg border"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="p-2 rounded-lg bg-muted">
-                            <TypeIcon className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium">{template.name}</span>
-                              <Badge variant="secondary" className="text-xs">
-                                /{template.shortcut}
-                              </Badge>
-                              <Badge variant="outline" className="text-xs capitalize">
-                                {templateType.label}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                              {template.content.startsWith("[") 
-                                ? template.content.split("\n").slice(1).join("\n") || "Mídia anexada"
-                                : template.content
-                              }
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive ml-2"
-                          onClick={() => deleteTemplate.mutate(template.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    );
-                  })}
+                  {templates.map((template) => (
+                    <EditableTemplate
+                      key={template.id}
+                      id={template.id}
+                      name={template.name}
+                      shortcut={template.shortcut}
+                      content={template.content}
+                      category={template.category || "text"}
+                      onUpdate={({ id, name, shortcut, content, category }) => 
+                        updateTemplate.mutate({ id, name, shortcut, content, category })
+                      }
+                      onDelete={(id) => deleteTemplate.mutate(id)}
+                      isPending={updateTemplate.isPending}
+                    />
+                  ))}
                 </div>
               )}
             </CardContent>

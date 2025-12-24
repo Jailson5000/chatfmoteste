@@ -16,13 +16,19 @@ import {
   Clock,
   Users,
   Inbox,
+  Pencil,
+  ArrowRightLeft,
+  Folder,
+  FileSignature,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -30,8 +36,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-// Mock data
+// Mock data with status and tags
 const conversations = [
   {
     id: "1",
@@ -41,9 +58,11 @@ const conversations = [
     time: "2 min",
     unread: 3,
     handler: "ai" as const,
-    status: "triagem_ia",
+    status: { id: "1", name: "Qualificado", color: "#22c55e" },
+    tags: [{ id: "1", name: "VIP", color: "#8b5cf6" }],
     avatar: null,
     assignedTo: null,
+    departmentId: null,
   },
   {
     id: "2",
@@ -53,9 +72,11 @@ const conversations = [
     time: "15 min",
     unread: 0,
     handler: "human" as const,
-    status: "em_andamento",
+    status: { id: "2", name: "Em Análise", color: "#f59e0b" },
+    tags: [],
     avatar: null,
     assignedTo: "Dr. Carlos",
+    departmentId: "1",
   },
   {
     id: "3",
@@ -65,9 +86,11 @@ const conversations = [
     time: "32 min",
     unread: 1,
     handler: "human" as const,
-    status: "aguardando_documentos",
+    status: { id: "3", name: "Aguardando Docs", color: "#3b82f6" },
+    tags: [{ id: "2", name: "Urgente", color: "#ef4444" }],
     avatar: null,
     assignedTo: "Dra. Fernanda",
+    departmentId: "2",
   },
   {
     id: "4",
@@ -77,9 +100,11 @@ const conversations = [
     time: "1h",
     unread: 2,
     handler: "ai" as const,
-    status: "novo_contato",
+    status: null,
+    tags: [],
     avatar: null,
     assignedTo: null,
+    departmentId: null,
   },
   {
     id: "5",
@@ -89,9 +114,11 @@ const conversations = [
     time: "2h",
     unread: 0,
     handler: "human" as const,
-    status: "em_andamento",
+    status: { id: "1", name: "Qualificado", color: "#22c55e" },
+    tags: [{ id: "1", name: "VIP", color: "#8b5cf6" }],
     avatar: null,
     assignedTo: "Dr. Carlos",
+    departmentId: "1",
   },
 ];
 
@@ -133,19 +160,29 @@ const messages = [
   },
 ];
 
+const mockDepartments = [
+  { id: "1", name: "Comercial", color: "#6366f1" },
+  { id: "2", name: "Trabalhista", color: "#22c55e" },
+  { id: "3", name: "Civil", color: "#f59e0b" },
+];
+
 type ConversationTab = "chat" | "ai" | "queue";
 
 export default function Conversations() {
+  const [conversationsList, setConversationsList] = useState(conversations);
   const [selectedConversation, setSelectedConversation] = useState<string | null>("1");
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [activeTab, setActiveTab] = useState<ConversationTab>("chat");
+  const [signatureEnabled, setSignatureEnabled] = useState(true);
+  const [editNameDialogOpen, setEditNameDialogOpen] = useState(false);
+  const [editingName, setEditingName] = useState("");
 
-  const selected = conversations.find((c) => c.id === selectedConversation);
+  const selected = conversationsList.find((c) => c.id === selectedConversation);
 
   // Filter conversations by tab
-  const filteredConversations = conversations.filter((conv) => {
+  const filteredConversations = conversationsList.filter((conv) => {
     const matchesSearch = conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.phone.includes(searchQuery);
     
@@ -157,7 +194,7 @@ export default function Conversations() {
       case "ai":
         return conv.handler === "ai";
       case "queue":
-        return true; // Show all in queue
+        return true;
       default:
         return true;
     }
@@ -175,14 +212,46 @@ export default function Conversations() {
     setShowMobileChat(true);
   };
 
+  const handleUpdateName = () => {
+    if (selected && editingName.trim()) {
+      setConversationsList(conversationsList.map(c => 
+        c.id === selected.id ? { ...c, name: editingName } : c
+      ));
+      setEditNameDialogOpen(false);
+    }
+  };
+
+  const handleTransferHandler = (handler: "ai" | "human") => {
+    if (selected) {
+      setConversationsList(conversationsList.map(c => 
+        c.id === selected.id ? { ...c, handler, assignedTo: handler === "human" ? "Você" : null } : c
+      ));
+    }
+  };
+
+  const handleTransferDepartment = (deptId: string) => {
+    if (selected) {
+      setConversationsList(conversationsList.map(c => 
+        c.id === selected.id ? { ...c, departmentId: deptId } : c
+      ));
+    }
+  };
+
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return conversations.filter(c => c.handler === "human" && c.assignedTo).length;
+        return conversationsList.filter(c => c.handler === "human" && c.assignedTo).length;
       case "ai":
-        return conversations.filter(c => c.handler === "ai").length;
+        return conversationsList.filter(c => c.handler === "ai").length;
       case "queue":
-        return conversations.length;
+        return conversationsList.length;
+    }
+  };
+
+  const openEditName = () => {
+    if (selected) {
+      setEditingName(selected.name);
+      setEditNameDialogOpen(true);
     }
   };
 
@@ -277,7 +346,7 @@ export default function Conversations() {
                       <p className="text-sm text-muted-foreground truncate mt-0.5">
                         {conv.lastMessage}
                       </p>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <Badge
                           variant="outline"
                           className={cn(
@@ -292,8 +361,31 @@ export default function Conversations() {
                           ) : (
                             <UserCheck className="h-3 w-3 mr-1" />
                           )}
-                          {conv.handler === "ai" ? "Triagem IA" : conv.assignedTo || "Advogado"}
+                          {conv.handler === "ai" ? "IA" : conv.assignedTo || "Advogado"}
                         </Badge>
+                        {/* Show status in queue */}
+                        {activeTab === "queue" && conv.status && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs"
+                            style={{ 
+                              borderColor: conv.status.color, 
+                              color: conv.status.color,
+                              backgroundColor: `${conv.status.color}10`
+                            }}
+                          >
+                            {conv.status.name}
+                          </Badge>
+                        )}
+                        {/* Show first tag in queue */}
+                        {activeTab === "queue" && conv.tags.length > 0 && (
+                          <Badge
+                            className="text-xs text-white"
+                            style={{ backgroundColor: conv.tags[0].color }}
+                          >
+                            {conv.tags[0].name}
+                          </Badge>
+                        )}
                         {conv.unread > 0 && (
                           <Badge className="bg-primary text-primary-foreground h-5 min-w-5 flex items-center justify-center p-0 text-xs">
                             {conv.unread}
@@ -335,7 +427,12 @@ export default function Conversations() {
                   </span>
                 </div>
                 <div>
-                  <p className="font-medium">{selected.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{selected.name}</p>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openEditName}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1">
                     <Phone className="h-3 w-3" />
                     {selected.phone}
@@ -343,6 +440,67 @@ export default function Conversations() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* Transfer Handler */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <ArrowRightLeft className="h-4 w-4 mr-2" />
+                      Transferir
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56" align="end">
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm">Transferir para</h4>
+                      <div className="space-y-2">
+                        <Button 
+                          variant={selected.handler === "ai" ? "default" : "outline"}
+                          size="sm" 
+                          className="w-full justify-start"
+                          onClick={() => handleTransferHandler("ai")}
+                        >
+                          <Bot className="h-4 w-4 mr-2" />
+                          IA
+                        </Button>
+                        <Button 
+                          variant={selected.handler === "human" ? "default" : "outline"}
+                          size="sm" 
+                          className="w-full justify-start"
+                          onClick={() => handleTransferHandler("human")}
+                        >
+                          <UserCheck className="h-4 w-4 mr-2" />
+                          Humano
+                        </Button>
+                      </div>
+                      <div className="pt-2 border-t">
+                        <h5 className="text-xs text-muted-foreground mb-2">Departamento</h5>
+                        {mockDepartments.map(dept => (
+                          <Button
+                            key={dept.id}
+                            variant={selected.departmentId === dept.id ? "default" : "ghost"}
+                            size="sm"
+                            className="w-full justify-start mb-1"
+                            onClick={() => handleTransferDepartment(dept.id)}
+                          >
+                            <Folder className="h-4 w-4 mr-2" style={{ color: dept.color }} />
+                            {dept.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Signature Toggle */}
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/50">
+                  <FileSignature className="h-4 w-4 text-muted-foreground" />
+                  <Label htmlFor="signature" className="text-xs cursor-pointer">Assinatura</Label>
+                  <Switch
+                    id="signature"
+                    checked={signatureEnabled}
+                    onCheckedChange={setSignatureEnabled}
+                  />
+                </div>
+
                 <Badge
                   variant="outline"
                   className={cn(
@@ -351,7 +509,7 @@ export default function Conversations() {
                       : "border-status-human text-status-human"
                   )}
                 >
-                  {selected.handler === "ai" ? "🤖 Triagem IA" : "⚖️ Advogado"}
+                  {selected.handler === "ai" ? "🤖 IA" : "⚖️ Advogado"}
                 </Badge>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -360,9 +518,9 @@ export default function Conversations() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem>
-                      <UserCheck className="h-4 w-4 mr-2" />
-                      Assumir atendimento
+                    <DropdownMenuItem onClick={openEditName}>
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Editar nome
                     </DropdownMenuItem>
                     <DropdownMenuItem>
                       <Tag className="h-4 w-4 mr-2" />
@@ -466,6 +624,30 @@ export default function Conversations() {
           </div>
         )}
       </div>
+
+      {/* Edit Name Dialog */}
+      <Dialog open={editNameDialogOpen} onOpenChange={setEditNameDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Nome</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <Input
+              value={editingName}
+              onChange={(e) => setEditingName(e.target.value)}
+              placeholder="Nome do contato"
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditNameDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleUpdateName}>
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
