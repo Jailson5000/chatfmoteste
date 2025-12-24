@@ -101,6 +101,13 @@ export default function Contacts() {
               name: values[nameIdx],
               phone: values[phoneIdx],
               email: emailIdx >= 0 ? values[emailIdx] : "",
+              document: "",
+              address: "",
+              notes: "",
+              lgpd_consent: false,
+              lgpd_consent_date: null,
+              custom_status_id: null,
+              department_id: null,
             });
             imported++;
           }
@@ -247,6 +254,7 @@ export default function Contacts() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Search */}
