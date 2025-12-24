@@ -60,6 +60,7 @@ import { useLawFirm } from "@/hooks/useLawFirm";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
+import { supabase } from "@/integrations/supabase/client";
 
 const teamMembers = [
   { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456", departments: [] },
@@ -124,6 +125,8 @@ export default function Settings() {
   const [newTemplateType, setNewTemplateType] = useState("text");
   const [newTemplateMediaUrl, setNewTemplateMediaUrl] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const templateMediaInputRef = useRef<HTMLInputElement>(null);
 
   // Initialize form with law firm data
   useEffect(() => {
@@ -183,6 +186,54 @@ export default function Settings() {
     setNewDeptName("");
     setNewDeptColor("#6366f1");
     setDeptDialogOpen(false);
+  };
+  const handleTemplateMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingMedia(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('template-media')
+        .upload(filePath, file);
+
+      if (error) throw error;
+
+      const { data: urlData } = supabase.storage
+        .from('template-media')
+        .getPublicUrl(filePath);
+
+      setNewTemplateMediaUrl(urlData.publicUrl);
+      toast({
+        title: "Upload concluído",
+        description: "Arquivo enviado com sucesso!",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro no upload",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const getAcceptedFileTypes = () => {
+    switch (newTemplateType) {
+      case "image":
+        return "image/jpeg,image/png,image/gif,image/webp";
+      case "video":
+        return "video/mp4,video/webm";
+      case "audio":
+        return "audio/mpeg,audio/ogg,audio/aac,audio/wav";
+      default:
+        return "";
+    }
   };
 
   const handleCreateTemplate = async () => {
@@ -606,17 +657,65 @@ export default function Settings() {
                       </div>
                       
                       {newTemplateType !== "text" && (
-                        <div className="space-y-2">
-                          <Label>URL da Mídia ({newTemplateType === "image" ? "Imagem" : newTemplateType === "video" ? "Vídeo" : "Áudio"})</Label>
+                        <div className="space-y-3">
+                          <Label>Mídia ({newTemplateType === "image" ? "Imagem" : newTemplateType === "video" ? "Vídeo" : "Áudio"})</Label>
+                          
+                          {/* Upload from computer */}
+                          <div className="flex gap-2">
+                            <input
+                              type="file"
+                              ref={templateMediaInputRef}
+                              onChange={handleTemplateMediaUpload}
+                              accept={getAcceptedFileTypes()}
+                              className="hidden"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => templateMediaInputRef.current?.click()}
+                              disabled={uploadingMedia}
+                              className="flex-1"
+                            >
+                              <Upload className="h-4 w-4 mr-2" />
+                              {uploadingMedia ? "Enviando..." : "Upload do Computador"}
+                            </Button>
+                          </div>
+                          
+                          {/* Or paste URL */}
+                          <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                              <span className="w-full border-t" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                              <span className="bg-background px-2 text-muted-foreground">ou cole uma URL</span>
+                            </div>
+                          </div>
+                          
                           <Input
                             value={newTemplateMediaUrl}
                             onChange={(e) => setNewTemplateMediaUrl(e.target.value)}
                             placeholder={`https://exemplo.com/${newTemplateType === "image" ? "imagem.jpg" : newTemplateType === "video" ? "video.mp4" : "audio.mp3"}`}
                           />
+                          
+                          {/* Preview */}
+                          {newTemplateMediaUrl && (
+                            <div className="border rounded-lg p-2 bg-muted/50">
+                              {newTemplateType === "image" && (
+                                <img src={newTemplateMediaUrl} alt="Preview" className="max-h-32 rounded mx-auto" />
+                              )}
+                              {newTemplateType === "video" && (
+                                <video src={newTemplateMediaUrl} controls className="max-h-32 rounded mx-auto" />
+                              )}
+                              {newTemplateType === "audio" && (
+                                <audio src={newTemplateMediaUrl} controls className="w-full" />
+                              )}
+                            </div>
+                          )}
+                          
                           <p className="text-xs text-muted-foreground">
                             {newTemplateType === "image" && "Formatos suportados: JPG, PNG, GIF, WebP"}
                             {newTemplateType === "video" && "Formatos suportados: MP4, WebM"}
-                            {newTemplateType === "audio" && "Formatos suportados: MP3, OGG, AAC"}
+                            {newTemplateType === "audio" && "Formatos suportados: MP3, OGG, AAC, WAV"}
                           </p>
                         </div>
                       )}
