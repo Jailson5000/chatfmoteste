@@ -15,7 +15,6 @@ import {
   Users,
   ChevronDown,
   ChevronUp,
-  Building2,
   Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,6 +35,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import fmoLogo from "@/assets/fmo-logo.jpg";
 
 const mainMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -127,21 +127,15 @@ export function AppSidebar() {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-sidebar-border">
-          {!collapsed && (
+        {!collapsed && (
             <div className="flex items-center gap-2">
-              {lawFirm?.logo_url ? (
-                <img 
-                  src={lawFirm.logo_url} 
-                  alt="Logo" 
-                  className="w-8 h-8 rounded-lg object-contain"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-lg bg-sidebar-primary flex items-center justify-center">
-                  <Building2 className="w-5 h-5 text-sidebar-primary-foreground" />
-                </div>
-              )}
+              <img 
+                src={fmoLogo} 
+                alt="FMO Advogados" 
+                className="w-8 h-8 rounded-lg object-contain bg-white"
+              />
               <span className="font-display font-semibold text-sidebar-foreground truncate max-w-[140px]">
-                {lawFirm?.name || "Minha Empresa"}
+                FMO Atendimentos
               </span>
             </div>
           )}
