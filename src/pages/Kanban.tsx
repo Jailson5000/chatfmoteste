@@ -7,89 +7,43 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useDepartments } from "@/hooks/useDepartments";
-import { useClients } from "@/hooks/useClients";
+import { useConversations } from "@/hooks/useConversations";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTags } from "@/hooks/useTags";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ClientDetailSheet } from "@/components/kanban/ClientDetailSheet";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-// Mock data for testing - simulating conversation info
-const mockConversationData: Record<string, {
-  lastMessage: string;
-  connection: string;
-  handler: 'ai' | 'human';
-  handlerName: string;
-  arrivedAt: Date;
-  tagIds: string[];
-}> = {};
-
-// Generate mock data for any client
-const getMockData = (clientId: string) => {
-  if (!mockConversationData[clientId]) {
-    const handlers: Array<{ type: 'ai' | 'human'; name: string }> = [
-      { type: 'ai', name: 'Assistente Jurídico' },
-      { type: 'ai', name: 'IA Triagem' },
-      { type: 'human', name: 'Dr. Carlos Silva' },
-      { type: 'human', name: 'Dra. Ana Costa' },
-      { type: 'human', name: 'João Atendente' },
-    ];
-    const connections = ['WhatsApp Principal', 'WhatsApp Comercial', 'WhatsApp Suporte'];
-    const messages = [
-      'Olá, preciso de ajuda com um processo...',
-      'Gostaria de agendar uma consulta sobre...',
-      'Tenho dúvidas sobre meus direitos...',
-      'Recebi uma notificação judicial e...',
-      'Quanto custa uma consulta para...',
-    ];
-    
-    const randomHandler = handlers[Math.floor(Math.random() * handlers.length)];
-    const hoursAgo = Math.floor(Math.random() * 72);
-    
-    mockConversationData[clientId] = {
-      lastMessage: messages[Math.floor(Math.random() * messages.length)],
-      connection: connections[Math.floor(Math.random() * connections.length)],
-      handler: randomHandler.type,
-      handlerName: randomHandler.name,
-      arrivedAt: new Date(Date.now() - hoursAgo * 60 * 60 * 1000),
-      tagIds: [],
-    };
-  }
-  return mockConversationData[clientId];
-};
-
-// Mock clients for testing when database is empty
-const mockClients = [
-  { id: 'mock-1', name: 'Maria Santos', phone: '11987654321', department_id: null, custom_status_id: null, email: 'maria@email.com', address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-2', name: 'João Oliveira', phone: '11976543210', department_id: null, custom_status_id: null, email: 'joao@email.com', address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-3', name: 'Ana Silva', phone: '21998765432', department_id: null, custom_status_id: null, email: null, address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-4', name: 'Carlos Souza', phone: '11965432109', department_id: null, custom_status_id: null, email: 'carlos@email.com', address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-5', name: 'Fernanda Lima', phone: '31987651234', department_id: null, custom_status_id: null, email: null, address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-6', name: 'Pedro Almeida', phone: '11912345678', department_id: null, custom_status_id: null, email: 'pedro@email.com', address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-7', name: 'Lucia Ferreira', phone: '21987612345', department_id: null, custom_status_id: null, email: null, address: null, notes: null, created_at: new Date().toISOString() },
-  { id: 'mock-8', name: 'Roberto Costa', phone: '11998761234', department_id: null, custom_status_id: null, email: 'roberto@email.com', address: null, notes: null, created_at: new Date().toISOString() },
-];
-
-interface ClientCardProps {
-  client: {
+interface ConversationCardProps {
+  conversation: {
     id: string;
-    name: string;
-    phone: string;
-    email?: string | null;
-    custom_status_id: string | null;
+    contact_name: string | null;
+    contact_phone: string | null;
+    status: string;
+    current_handler: 'ai' | 'human';
+    last_message_at: string | null;
+    tags: string[] | null;
+    last_message?: { content: string | null; created_at: string } | null;
+    whatsapp_instance?: { instance_name: string } | null;
+    assigned_profile?: { full_name: string } | null;
   };
-  status: { id: string; name: string; color: string } | undefined;
-  clientTags: Array<{ id: string; name: string; color: string }>;
   isDragging: boolean;
   onDragStart: () => void;
   onClick: () => void;
 }
 
-function ClientCard({ client, status, clientTags, isDragging, onDragStart, onClick }: ClientCardProps) {
-  const mockData = getMockData(client.id);
-  const lastFourDigits = client.phone.slice(-4);
-  const timeAgo = formatDistanceToNow(mockData.arrivedAt, { addSuffix: false, locale: ptBR });
+function ConversationCard({ conversation, isDragging, onDragStart, onClick }: ConversationCardProps) {
+  const lastFourDigits = conversation.contact_phone?.slice(-4) || "----";
+  const timeAgo = conversation.last_message_at 
+    ? formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: false, locale: ptBR })
+    : "---";
+  
+  const handlerName = conversation.current_handler === 'ai' 
+    ? 'IA' 
+    : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Humano');
+
+  const connectionName = conversation.whatsapp_instance?.instance_name || 'WhatsApp';
   
   return (
     <Card
@@ -107,7 +61,9 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
       <CardContent className="p-3 space-y-2">
         {/* Header: Name and Time */}
         <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-sm truncate flex-1">{client.name}</h4>
+          <h4 className="font-semibold text-sm truncate flex-1">
+            {conversation.contact_name || conversation.contact_phone || "Sem nome"}
+          </h4>
           <div className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
             <Clock className="h-3 w-3" />
             <span className="whitespace-nowrap">{timeAgo}</span>
@@ -115,32 +71,29 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
         </div>
         
         {/* Status Badge */}
-        {status && (
-          <Badge 
-            className="text-xs h-5 px-1.5"
-            style={{ backgroundColor: status.color, color: '#fff' }}
-          >
-            {status.name}
-          </Badge>
-        )}
+        <Badge 
+          className="text-xs h-5 px-1.5"
+          variant="secondary"
+        >
+          {conversation.status.replace('_', ' ')}
+        </Badge>
         
         {/* Tags */}
-        {clientTags.length > 0 && (
+        {conversation.tags && conversation.tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {clientTags.slice(0, 2).map(tag => (
+            {conversation.tags.slice(0, 2).map((tag, idx) => (
               <Badge 
-                key={tag.id}
+                key={idx}
                 variant="outline" 
                 className="text-xs h-5 px-1.5"
-                style={{ borderColor: tag.color, color: tag.color }}
               >
                 <Tag className="h-2.5 w-2.5 mr-0.5" />
-                {tag.name}
+                {tag}
               </Badge>
             ))}
-            {clientTags.length > 2 && (
+            {conversation.tags.length > 2 && (
               <Badge variant="outline" className="text-xs h-5 px-1.5">
-                +{clientTags.length - 2}
+                +{conversation.tags.length - 2}
               </Badge>
             )}
           </div>
@@ -149,7 +102,9 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
         {/* Message Preview */}
         <div className="flex items-start gap-2">
           <MessageSquare className="h-3 w-3 text-muted-foreground mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-muted-foreground line-clamp-2">{mockData.lastMessage}</p>
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {conversation.last_message?.content || "Sem mensagens"}
+          </p>
         </div>
         
         {/* Footer: Phone, Connection, Handler */}
@@ -164,7 +119,7 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
             {/* Connection */}
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Wifi className="h-3 w-3" />
-              <span className="truncate max-w-[60px]">{mockData.connection.replace('WhatsApp ', '')}</span>
+              <span className="truncate max-w-[60px]">{connectionName.replace('WhatsApp ', '')}</span>
             </div>
           </div>
           
@@ -173,17 +128,17 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
             variant="secondary"
             className={cn(
               "text-xs px-1.5 py-0 h-5 gap-1",
-              mockData.handler === 'ai' 
+              conversation.current_handler === 'ai' 
                 ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" 
                 : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
             )}
           >
-            {mockData.handler === 'ai' ? (
+            {conversation.current_handler === 'ai' ? (
               <Bot className="h-3 w-3" />
             ) : (
               <User className="h-3 w-3" />
             )}
-            <span className="truncate max-w-[50px]">{mockData.handlerName.split(' ')[0]}</span>
+            <span className="truncate max-w-[50px]">{handlerName}</span>
           </Badge>
         </div>
       </CardContent>
@@ -191,24 +146,24 @@ function ClientCard({ client, status, clientTags, isDragging, onDragStart, onCli
   );
 }
 
+// Status columns configuration based on case_status enum
+const statusColumns = [
+  { id: 'novo_contato', name: 'Novo Contato', color: '#6366f1' },
+  { id: 'triagem_ia', name: 'Triagem IA', color: '#8b5cf6' },
+  { id: 'aguardando_documentos', name: 'Aguardando Docs', color: '#f59e0b' },
+  { id: 'em_analise', name: 'Em Análise', color: '#3b82f6' },
+  { id: 'em_andamento', name: 'Em Andamento', color: '#22c55e' },
+  { id: 'encerrado', name: 'Encerrado', color: '#6b7280' },
+];
+
 export default function Kanban() {
   const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
-  const { clients: dbClients, moveClientToDepartment, updateClient } = useClients();
+  const { conversations, isLoading: convsLoading, updateConversationStatus, transferHandler } = useConversations();
   const { statuses } = useCustomStatuses();
   const { tags } = useTags();
   
-  const [draggedClient, setDraggedClient] = useState<string | null>(null);
-  const [draggedDept, setDraggedDept] = useState<string | null>(null);
-  const [selectedClient, setSelectedClient] = useState<{
-    id: string;
-    name: string;
-    phone: string;
-    email?: string | null;
-    address?: string | null;
-    notes?: string | null;
-    created_at: string;
-    custom_status_id: string | null;
-  } | null>(null);
+  const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<typeof conversations[0] | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<{
@@ -219,23 +174,30 @@ export default function Kanban() {
     tags: string[];
   }>({ statuses: [], handlers: [], connections: [], departments: [], tags: [] });
 
-  // Available connections for filter
-  const availableConnections = ['WhatsApp Principal', 'WhatsApp Comercial', 'WhatsApp Suporte'];
+  // Get available connections from conversations
+  const availableConnections = useMemo(() => {
+    const connections = new Set<string>();
+    conversations.forEach(conv => {
+      if (conv.whatsapp_instance?.instance_name) {
+        connections.add(conv.whatsapp_instance.instance_name);
+      }
+    });
+    return Array.from(connections);
+  }, [conversations]);
 
-  // Real-time subscription for clients updates
+  // Real-time subscription for conversations updates
   useEffect(() => {
     const channel = supabase
-      .channel('clients-realtime')
+      .channel('conversations-realtime')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'clients'
+          table: 'conversations'
         },
         (payload) => {
-          console.log('Client realtime update:', payload);
-          // React Query will refetch automatically via invalidation
+          console.log('Conversation realtime update:', payload);
         }
       )
       .subscribe();
@@ -245,139 +207,67 @@ export default function Kanban() {
     };
   }, []);
 
-  // Use mock clients if database is empty, distribute among departments
-  const clients = useMemo(() => {
-    if (dbClients.length > 0) return dbClients;
-    
-    // Distribute mock clients among departments
-    return mockClients.map((client, index) => ({
-      ...client,
-      department_id: departments[index % Math.max(departments.length, 1)]?.id || null,
-      custom_status_id: statuses[index % Math.max(statuses.length, 1)]?.id || null,
-    }));
-  }, [dbClients, departments, statuses]);
-
-  // Mock tags for clients - must be defined before filteredClients
-  const getClientTags = (clientId: string) => {
-    // Randomly assign 0-2 tags for demo
-    const seed = clientId.charCodeAt(clientId.length - 1);
-    const numTags = seed % 3;
-    return tags.slice(0, numTags);
-  };
-
   // Apply filters and search
-  const filteredClients = useMemo(() => {
-    return clients.filter(client => {
-      const mockData = getMockData(client.id);
-      
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(conv => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        const nameMatch = client.name.toLowerCase().includes(query);
-        const phoneMatch = client.phone.includes(query);
+        const nameMatch = conv.contact_name?.toLowerCase().includes(query);
+        const phoneMatch = conv.contact_phone?.includes(query);
         if (!nameMatch && !phoneMatch) return false;
       }
       
       // Status filter
-      if (filters.statuses.length > 0 && client.custom_status_id) {
-        if (!filters.statuses.includes(client.custom_status_id)) return false;
-      } else if (filters.statuses.length > 0 && !client.custom_status_id) {
-        return false;
+      if (filters.statuses.length > 0) {
+        if (!filters.statuses.includes(conv.status)) return false;
       }
       
       // Handler filter
       if (filters.handlers.length > 0) {
-        if (!filters.handlers.includes(mockData.handler)) return false;
+        if (!filters.handlers.includes(conv.current_handler)) return false;
       }
       
       // Connection filter
       if (filters.connections.length > 0) {
-        if (!filters.connections.includes(mockData.connection)) return false;
-      }
-      
-      // Department filter
-      if (filters.departments.length > 0) {
-        if (!client.department_id || !filters.departments.includes(client.department_id)) return false;
+        if (!conv.whatsapp_instance?.instance_name || 
+            !filters.connections.includes(conv.whatsapp_instance.instance_name)) {
+          return false;
+        }
       }
       
       // Tags filter
       if (filters.tags.length > 0) {
-        const clientTags = getClientTags(client.id);
-        const hasMatchingTag = clientTags.some(t => filters.tags.includes(t.id));
-        if (!hasMatchingTag) return false;
+        if (!conv.tags || !conv.tags.some(t => filters.tags.includes(t))) {
+          return false;
+        }
       }
       
       return true;
     });
-  }, [clients, filters, searchQuery, tags]);
+  }, [conversations, filters, searchQuery]);
 
-  const handleClientDragStart = (clientId: string) => {
-    setDraggedClient(clientId);
+  const handleConversationDragStart = (conversationId: string) => {
+    setDraggedConversation(conversationId);
   };
 
-  const handleClientDrop = (departmentId: string | null) => {
-    if (draggedClient && !draggedClient.startsWith('mock-')) {
-      moveClientToDepartment.mutate({ clientId: draggedClient, departmentId });
+  const handleConversationDrop = (status: string) => {
+    if (draggedConversation) {
+      updateConversationStatus.mutate({ 
+        conversationId: draggedConversation, 
+        status 
+      });
     }
-    setDraggedClient(null);
+    setDraggedConversation(null);
   };
 
-  const handleDeptDragStart = (deptId: string) => {
-    setDraggedDept(deptId);
-  };
-
-  const handleDeptDrop = (targetId: string) => {
-    if (!draggedDept || draggedDept === targetId) return;
-    const orderedIds = [...departments].map(d => d.id);
-    const draggedIndex = orderedIds.indexOf(draggedDept);
-    const targetIndex = orderedIds.indexOf(targetId);
-    orderedIds.splice(draggedIndex, 1);
-    orderedIds.splice(targetIndex, 0, draggedDept);
-    reorderDepartments.mutate(orderedIds);
-    setDraggedDept(null);
-  };
-
-  const handleClientClick = (client: typeof clients[0]) => {
-    setSelectedClient({
-      id: client.id,
-      name: client.name,
-      phone: client.phone,
-      email: client.email,
-      address: client.address,
-      notes: client.notes,
-      created_at: client.created_at,
-      custom_status_id: client.custom_status_id,
-    });
+  const handleConversationClick = (conversation: typeof conversations[0]) => {
+    setSelectedConversation(conversation);
     setSheetOpen(true);
   };
 
-  const handleUpdateClientName = (clientId: string, newName: string) => {
-    if (!clientId.startsWith('mock-')) {
-      updateClient.mutate({ id: clientId, name: newName });
-    }
-    // Update local state for mock clients
-    if (selectedClient && selectedClient.id === clientId) {
-      setSelectedClient({ ...selectedClient, name: newName });
-    }
-  };
-
-  const handleTransferHandler = (clientId: string, handlerType: 'ai' | 'human', handlerName: string) => {
-    // Update mock data for demo purposes
-    const mockData = mockConversationData[clientId];
-    if (mockData) {
-      mockData.handler = handlerType;
-      mockData.handlerName = handlerName;
-    }
-    console.log(`Client ${clientId} transferred to ${handlerType}: ${handlerName}`);
-  };
-
-  const getClientsByDepartment = (deptId: string) =>
-    filteredClients.filter((c) => c.department_id === deptId);
-
-  const getUnassignedClients = () =>
-    filteredClients.filter((c) => !c.department_id);
-
-  const getStatusById = (id: string | null) => statuses.find((s) => s.id === id);
+  const getConversationsByStatus = (status: string) =>
+    filteredConversations.filter((c) => c.status === status);
 
   // Check if any filters are active
   const hasActiveFilters = 
@@ -387,35 +277,20 @@ export default function Kanban() {
     filters.tags.length > 0 ||
     searchQuery.length > 0;
 
-  // Determine which departments to show based on filters
-  const visibleDepartments = departments.filter(dept => {
-    // If department filter is active, only show selected departments
-    if (filters.departments.length > 0) {
-      return filters.departments.includes(dept.id);
+  // Determine which columns to show based on filters
+  const visibleColumns = statusColumns.filter(col => {
+    if (filters.statuses.length > 0) {
+      return filters.statuses.includes(col.id);
     }
-    // If other filters are active, only show departments that have matching clients
     if (hasActiveFilters) {
-      return getClientsByDepartment(dept.id).length > 0;
+      return getConversationsByStatus(col.id).length > 0;
     }
-    // No filters - show all departments
     return true;
   });
 
-  // Determine if unassigned column should be visible
-  const showUnassignedColumn = () => {
-    // If department filter is active
-    if (filters.departments.length > 0) {
-      return filters.departments.includes("none");
-    }
-    // If other filters are active, only show if there are matching unassigned clients
-    if (hasActiveFilters) {
-      return getUnassignedClients().length > 0;
-    }
-    // No filters - show
-    return true;
-  };
+  const isLoading = deptsLoading || convsLoading;
 
-  if (deptsLoading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -431,7 +306,7 @@ export default function Kanban() {
           <div>
             <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Arraste para reordenar departamentos e mover clientes
+              Arraste para mover conversas entre status
             </p>
           </div>
           
@@ -441,7 +316,7 @@ export default function Kanban() {
             onFiltersChange={setFilters}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            availableStatuses={statuses}
+            availableStatuses={statusColumns.map(s => ({ id: s.id, name: s.name, color: s.color }))}
             availableConnections={availableConnections}
             availableDepartments={departments}
             availableTags={tags}
@@ -452,105 +327,58 @@ export default function Kanban() {
       {/* Kanban Board with horizontal scroll */}
       <ScrollArea className="flex-1">
         <div className="flex gap-4 p-4 md:p-6 min-w-max items-start">
-          {/* Unassigned column - show based on filters */}
-          {showUnassignedColumn() && (
-            <div
-              className="w-72 md:w-80 flex-shrink-0"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => handleClientDrop(null)}
-            >
-              <div className="rounded-xl bg-muted/40 border border-border/50">
-                <div className="flex items-center justify-between p-3 border-b border-border/30 sticky top-0 bg-muted/40 backdrop-blur-sm z-10 rounded-t-xl">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
-                    <h3 className="font-semibold text-sm">Sem Departamento</h3>
-                    <Badge variant="outline" className="text-xs h-5 px-1.5">
-                      {getUnassignedClients().length}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="p-3 space-y-2">
-                  {getUnassignedClients().map((client) => (
-                    <ClientCard
-                      key={client.id}
-                      client={client}
-                      status={getStatusById(client.custom_status_id)}
-                      clientTags={getClientTags(client.id)}
-                      isDragging={draggedClient === client.id}
-                      onDragStart={() => handleClientDragStart(client.id)}
-                      onClick={() => handleClientClick(client)}
-                    />
-                  ))}
-                  {getUnassignedClients().length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      Nenhum lead sem departamento
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Department columns - show based on filters */}
-          {visibleDepartments.map((dept) => {
-            const deptClients = getClientsByDepartment(dept.id);
+          {/* Status columns */}
+          {visibleColumns.map((column) => {
+            const columnConversations = getConversationsByStatus(column.id);
             return (
               <div
-                key={dept.id}
-                className={cn("w-72 md:w-80 flex-shrink-0", draggedDept === dept.id && "opacity-50")}
-                draggable
-                onDragStart={() => handleDeptDragStart(dept.id)}
+                key={column.id}
+                className="w-72 md:w-80 flex-shrink-0"
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
-                  if (draggedDept) handleDeptDrop(dept.id);
-                  else if (draggedClient) handleClientDrop(dept.id);
-                }}
+                onDrop={() => handleConversationDrop(column.id)}
               >
                 <div 
                   className="rounded-xl border"
                   style={{ 
-                    backgroundColor: `${dept.color}08`,
-                    borderColor: `${dept.color}30`
+                    backgroundColor: `${column.color}08`,
+                    borderColor: `${column.color}30`
                   }}
                 >
                   <div 
                     className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl"
                     style={{ 
-                      borderColor: `${dept.color}30`,
-                      backgroundColor: `${dept.color}10`
+                      borderColor: `${column.color}30`,
+                      backgroundColor: `${column.color}10`
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
-                      <h3 className="font-semibold text-sm">{dept.name}</h3>
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: column.color }} />
+                      <h3 className="font-semibold text-sm">{column.name}</h3>
                       <Badge 
                         variant="outline" 
                         className="text-xs h-5 px-1.5"
-                        style={{ borderColor: dept.color, color: dept.color }}
+                        style={{ borderColor: column.color, color: column.color }}
                       >
-                        {deptClients.length}
+                        {columnConversations.length}
                       </Badge>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <Plus className="h-4 w-4" />
-                    </Button>
                   </div>
                   <div className="p-3 space-y-2">
-                    {deptClients.map((client) => (
-                      <ClientCard
-                        key={client.id}
-                        client={client}
-                        status={getStatusById(client.custom_status_id)}
-                        clientTags={getClientTags(client.id)}
-                        isDragging={draggedClient === client.id}
-                        onDragStart={() => handleClientDragStart(client.id)}
-                        onClick={() => handleClientClick(client)}
+                    {columnConversations.map((conv) => (
+                      <ConversationCard
+                        key={conv.id}
+                        conversation={conv}
+                        isDragging={draggedConversation === conv.id}
+                        onDragStart={() => handleConversationDragStart(conv.id)}
+                        onClick={() => handleConversationClick(conv)}
                       />
                     ))}
-                    {deptClients.length === 0 && (
+                    {columnConversations.length === 0 && (
                       <div className="text-center py-8 text-muted-foreground text-sm">
-                        Arraste leads para cá
+                        {conversations.length === 0 
+                          ? "Nenhuma conversa ainda"
+                          : "Arraste conversas para cá"
+                        }
                       </div>
                     )}
                   </div>
@@ -559,11 +387,12 @@ export default function Kanban() {
             );
           })}
 
-          {departments.length === 0 && (
-            <div className="flex items-center justify-center w-72 md:w-80 h-48 border-2 border-dashed rounded-xl text-muted-foreground">
+          {conversations.length === 0 && (
+            <div className="flex items-center justify-center w-full h-48 border-2 border-dashed rounded-xl text-muted-foreground">
               <div className="text-center">
-                <Folder className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Crie departamentos em Configurações</p>
+                <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Nenhuma conversa encontrada</p>
+                <p className="text-xs mt-1">As conversas aparecerão aqui quando chegarem</p>
               </div>
             </div>
           )}
@@ -571,24 +400,68 @@ export default function Kanban() {
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
 
-      {/* Client Detail Sheet */}
-      <ClientDetailSheet
-        open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        client={selectedClient}
-        status={selectedClient ? getStatusById(selectedClient.custom_status_id) : undefined}
-        tags={selectedClient ? getClientTags(selectedClient.id) : []}
-        departments={departments}
-        currentDepartmentId={selectedClient ? clients.find(c => c.id === selectedClient.id)?.department_id : null}
-        mockData={selectedClient ? getMockData(selectedClient.id) : undefined}
-        onUpdateName={handleUpdateClientName}
-        onTransferHandler={handleTransferHandler}
-        onTransferDepartment={(clientId, deptId) => {
-          if (!clientId.startsWith('mock-')) {
-            moveClientToDepartment.mutate({ clientId, departmentId: deptId });
-          }
-        }}
-      />
+      {/* Conversation Detail Sheet */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent className="w-full sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>
+              {selectedConversation?.contact_name || selectedConversation?.contact_phone || "Conversa"}
+            </SheetTitle>
+          </SheetHeader>
+          {selectedConversation && (
+            <div className="mt-6 space-y-4">
+              <div>
+                <span className="text-sm text-muted-foreground">Telefone:</span>
+                <p className="font-medium">{selectedConversation.contact_phone || "---"}</p>
+              </div>
+              <div>
+                <span className="text-sm text-muted-foreground">Status:</span>
+                <p className="font-medium">{selectedConversation.status.replace('_', ' ')}</p>
+              </div>
+              <div>
+                <span className="text-sm text-muted-foreground">Handler:</span>
+                <Badge 
+                  variant="secondary"
+                  className={cn(
+                    "ml-2",
+                    selectedConversation.current_handler === 'ai' 
+                      ? "bg-purple-100 text-purple-700" 
+                      : "bg-green-100 text-green-700"
+                  )}
+                >
+                  {selectedConversation.current_handler === 'ai' ? 'IA' : 'Humano'}
+                </Badge>
+              </div>
+              {selectedConversation.last_message?.content && (
+                <div>
+                  <span className="text-sm text-muted-foreground">Última mensagem:</span>
+                  <p className="text-sm mt-1 p-3 bg-muted rounded-lg">
+                    {selectedConversation.last_message.content}
+                  </p>
+                </div>
+              )}
+              <div className="pt-4 space-y-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => {
+                    transferHandler.mutate({
+                      conversationId: selectedConversation.id,
+                      handlerType: selectedConversation.current_handler === 'ai' ? 'human' : 'ai'
+                    });
+                    setSheetOpen(false);
+                  }}
+                >
+                  {selectedConversation.current_handler === 'ai' 
+                    ? 'Transferir para Humano' 
+                    : 'Transferir para IA'
+                  }
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
