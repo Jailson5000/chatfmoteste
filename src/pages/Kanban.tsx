@@ -416,45 +416,49 @@ export default function Kanban() {
       {/* Kanban Board with horizontal scroll */}
       <ScrollArea className="flex-1">
         <div className="flex gap-4 p-4 md:p-6 min-w-max items-start">
-          {/* Unassigned column */}
-          <div
-            className="w-72 md:w-80 flex-shrink-0"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={() => handleClientDrop(null)}
-          >
-            <div className="rounded-xl bg-muted/40 border border-border/50">
-              <div className="flex items-center justify-between p-3 border-b border-border/30 sticky top-0 bg-muted/40 backdrop-blur-sm z-10 rounded-t-xl">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
-                  <h3 className="font-semibold text-sm">Sem Departamento</h3>
-                  <Badge variant="outline" className="text-xs h-5 px-1.5">
-                    {getUnassignedClients().length}
-                  </Badge>
+          {/* Unassigned column - only show if no department filter or "none" is selected */}
+          {(filters.departments.length === 0 || filters.departments.includes("none")) && (
+            <div
+              className="w-72 md:w-80 flex-shrink-0"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleClientDrop(null)}
+            >
+              <div className="rounded-xl bg-muted/40 border border-border/50">
+                <div className="flex items-center justify-between p-3 border-b border-border/30 sticky top-0 bg-muted/40 backdrop-blur-sm z-10 rounded-t-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
+                    <h3 className="font-semibold text-sm">Sem Departamento</h3>
+                    <Badge variant="outline" className="text-xs h-5 px-1.5">
+                      {getUnassignedClients().length}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="p-3 space-y-2">
+                  {getUnassignedClients().map((client) => (
+                    <ClientCard
+                      key={client.id}
+                      client={client}
+                      status={getStatusById(client.custom_status_id)}
+                      clientTags={getClientTags(client.id)}
+                      isDragging={draggedClient === client.id}
+                      onDragStart={() => handleClientDragStart(client.id)}
+                      onClick={() => handleClientClick(client)}
+                    />
+                  ))}
+                  {getUnassignedClients().length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      Nenhum lead sem departamento
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="p-3 space-y-2">
-                {getUnassignedClients().map((client) => (
-                  <ClientCard
-                    key={client.id}
-                    client={client}
-                    status={getStatusById(client.custom_status_id)}
-                    clientTags={getClientTags(client.id)}
-                    isDragging={draggedClient === client.id}
-                    onDragStart={() => handleClientDragStart(client.id)}
-                    onClick={() => handleClientClick(client)}
-                  />
-                ))}
-                {getUnassignedClients().length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    Nenhum lead sem departamento
-                  </div>
-                )}
-              </div>
             </div>
-          </div>
+          )}
 
-          {/* Department columns */}
-          {departments.map((dept) => {
+          {/* Department columns - filter based on selected department */}
+          {departments
+            .filter(dept => filters.departments.length === 0 || filters.departments.includes(dept.id))
+            .map((dept) => {
             const deptClients = getClientsByDepartment(dept.id);
             return (
               <div
