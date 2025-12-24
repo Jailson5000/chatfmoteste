@@ -48,12 +48,13 @@ function ConversationCard({ conversation, isDragging, onDragStart, onClick }: Co
   return (
     <Card
       className={cn(
-        "cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5 bg-card",
-        isDragging && "opacity-50"
+        "cursor-grab active:cursor-grabbing transition-all hover:shadow-lg hover:-translate-y-0.5 bg-card",
+        isDragging && "opacity-50 scale-95"
       )}
       draggable
       onDragStart={(e) => {
-        e.stopPropagation();
+        e.dataTransfer.setData("text/plain", conversation.id);
+        e.dataTransfer.effectAllowed = "move";
         onDragStart();
       }}
       onClick={onClick}
@@ -334,8 +335,22 @@ export default function Kanban() {
               <div
                 key={column.id}
                 className="w-72 md:w-80 flex-shrink-0"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => handleConversationDrop(column.id)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add("ring-2", "ring-primary/50");
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+                  handleConversationDrop(column.id);
+                }}
               >
                 <div 
                   className="rounded-xl border"

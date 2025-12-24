@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Bot,
   UserCheck,
@@ -18,6 +18,7 @@ import {
   ArrowRightLeft,
   Folder,
   FileSignature,
+  MessageSquare,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -46,146 +47,42 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConversationFilters } from "@/components/conversations/ConversationFilters";
-
-// Mock statuses and tags for filter
-const mockStatuses = [
-  { id: "1", name: "Qualificado", color: "#22c55e" },
-  { id: "2", name: "Em Análise", color: "#f59e0b" },
-  { id: "3", name: "Aguardando Docs", color: "#3b82f6" },
-];
-
-const mockTags = [
-  { id: "1", name: "VIP", color: "#8b5cf6" },
-  { id: "2", name: "Urgente", color: "#ef4444" },
-];
-
-// Mock data with status and tags
-const conversations = [
-  {
-    id: "1",
-    name: "Maria Silva",
-    phone: "+55 11 99999-1234",
-    lastMessage: "Preciso de orientação sobre divórcio consensual...",
-    time: "2 min",
-    unread: 3,
-    handler: "ai" as const,
-    status: { id: "1", name: "Qualificado", color: "#22c55e" },
-    tags: [{ id: "1", name: "VIP", color: "#8b5cf6" }],
-    avatar: null,
-    assignedTo: null,
-    departmentId: null,
-  },
-  {
-    id: "2",
-    name: "João Santos",
-    phone: "+55 11 98888-5678",
-    lastMessage: "Obrigado pela ajuda com o contrato!",
-    time: "15 min",
-    unread: 0,
-    handler: "human" as const,
-    status: { id: "2", name: "Em Análise", color: "#f59e0b" },
-    tags: [],
-    avatar: null,
-    assignedTo: "Dr. Carlos",
-    departmentId: "1",
-  },
-  {
-    id: "3",
-    name: "Ana Costa",
-    phone: "+55 21 97777-9012",
-    lastMessage: "Quando posso enviar os documentos?",
-    time: "32 min",
-    unread: 1,
-    handler: "human" as const,
-    status: { id: "3", name: "Aguardando Docs", color: "#3b82f6" },
-    tags: [{ id: "2", name: "Urgente", color: "#ef4444" }],
-    avatar: null,
-    assignedTo: "Dra. Fernanda",
-    departmentId: "2",
-  },
-  {
-    id: "4",
-    name: "Pedro Oliveira",
-    phone: "+55 31 96666-3456",
-    lastMessage: "Tenho uma dúvida sobre rescisão trabalhista...",
-    time: "1h",
-    unread: 2,
-    handler: "ai" as const,
-    status: null,
-    tags: [],
-    avatar: null,
-    assignedTo: null,
-    departmentId: null,
-  },
-  {
-    id: "5",
-    name: "Carla Mendes",
-    phone: "+55 21 95555-7890",
-    lastMessage: "Aguardando retorno...",
-    time: "2h",
-    unread: 0,
-    handler: "human" as const,
-    status: { id: "1", name: "Qualificado", color: "#22c55e" },
-    tags: [{ id: "1", name: "VIP", color: "#8b5cf6" }],
-    avatar: null,
-    assignedTo: "Dr. Carlos",
-    departmentId: "1",
-  },
-];
-
-const messages = [
-  {
-    id: "1",
-    content: "Olá, boa tarde! Preciso de orientação sobre divórcio consensual.",
-    time: "14:30",
-    isFromMe: false,
-    senderType: "client",
-  },
-  {
-    id: "2",
-    content: "Olá! Sou a assistente virtual do escritório. Ficarei feliz em ajudar com a triagem inicial do seu caso. Poderia me informar há quanto tempo vocês estão casados?",
-    time: "14:31",
-    isFromMe: true,
-    senderType: "ai",
-  },
-  {
-    id: "3",
-    content: "Estamos casados há 8 anos. Temos 2 filhos menores.",
-    time: "14:33",
-    isFromMe: false,
-    senderType: "client",
-  },
-  {
-    id: "4",
-    content: "Entendo. Por haver filhos menores, o divórcio precisará ser homologado judicialmente. Vocês já conversaram sobre a guarda e pensão alimentícia?",
-    time: "14:34",
-    isFromMe: true,
-    senderType: "ai",
-  },
-  {
-    id: "5",
-    content: "Sim, queremos guarda compartilhada. Sobre a pensão, ainda não definimos valores.",
-    time: "14:36",
-    isFromMe: false,
-    senderType: "client",
-  },
-];
-
-const mockDepartments = [
-  { id: "1", name: "Comercial", color: "#6366f1" },
-  { id: "2", name: "Trabalhista", color: "#22c55e" },
-  { id: "3", name: "Civil", color: "#f59e0b" },
-];
+import { useConversations } from "@/hooks/useConversations";
+import { useDepartments } from "@/hooks/useDepartments";
+import { useTags } from "@/hooks/useTags";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
 
 type ConversationTab = "chat" | "ai" | "queue";
 
+interface Message {
+  id: string;
+  content: string | null;
+  created_at: string;
+  is_from_me: boolean;
+  sender_type: string;
+  ai_generated: boolean;
+}
+
 export default function Conversations() {
-  const [conversationsList, setConversationsList] = useState(conversations);
-  const [selectedConversation, setSelectedConversation] = useState<string | null>("1");
+  const { conversations, isLoading, transferHandler, updateConversation } = useConversations();
+  const { departments } = useDepartments();
+  const { tags } = useTags();
+  const { statuses } = useCustomStatuses();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
-  const [activeTab, setActiveTab] = useState<ConversationTab>("chat");
+  const [activeTab, setActiveTab] = useState<ConversationTab>("queue");
   const [signatureEnabled, setSignatureEnabled] = useState(true);
   const [editNameDialogOpen, setEditNameDialogOpen] = useState(false);
   const [editingName, setEditingName] = useState("");
@@ -197,104 +94,194 @@ export default function Conversations() {
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
 
-  const selected = conversationsList.find((c) => c.id === selectedConversation);
+  const selectedConversation = useMemo(() => 
+    conversations.find((c) => c.id === selectedConversationId),
+    [conversations, selectedConversationId]
+  );
+
+  // Load messages when conversation is selected
+  useEffect(() => {
+    if (!selectedConversationId) {
+      setMessages([]);
+      return;
+    }
+
+    const loadMessages = async () => {
+      setMessagesLoading(true);
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, content, created_at, is_from_me, sender_type, ai_generated")
+        .eq("conversation_id", selectedConversationId)
+        .order("created_at", { ascending: true });
+      
+      if (!error && data) {
+        setMessages(data);
+      }
+      setMessagesLoading(false);
+    };
+
+    loadMessages();
+
+    // Subscribe to new messages
+    const channel = supabase
+      .channel(`messages-${selectedConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${selectedConversationId}`
+        },
+        (payload) => {
+          setMessages(prev => [...prev, payload.new as Message]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedConversationId]);
+
+  // Map conversations for display
+  const mappedConversations = useMemo(() => {
+    return conversations.map(conv => ({
+      id: conv.id,
+      name: conv.contact_name || conv.contact_phone || "Sem nome",
+      phone: conv.contact_phone || "",
+      lastMessage: conv.last_message?.content || "Sem mensagens",
+      time: conv.last_message_at 
+        ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
+        : "---",
+      unread: 0, // TODO: Implement unread count
+      handler: conv.current_handler as 'ai' | 'human',
+      status: conv.status,
+      tags: conv.tags || [],
+      assignedTo: conv.assigned_profile?.full_name || null,
+      whatsappInstance: conv.whatsapp_instance?.instance_name || null,
+    }));
+  }, [conversations]);
 
   // Filter conversations by tab and filters
-  const filteredConversations = conversationsList.filter((conv) => {
-    // Search filter (name or phone)
-    const matchesSearch = searchQuery === '' || 
-      conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conv.phone.includes(searchQuery);
+  const filteredConversations = useMemo(() => {
+    return mappedConversations.filter((conv) => {
+      // Search filter (name or phone)
+      const matchesSearch = searchQuery === '' || 
+        conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        conv.phone.includes(searchQuery);
+      
+      if (!matchesSearch) return false;
+
+      // Handler filter
+      if (conversationFilters.handlers.length > 0) {
+        if (!conversationFilters.handlers.includes(conv.handler)) {
+          return false;
+        }
+      }
+
+      // Tags filter
+      if (conversationFilters.tags.length > 0) {
+        const hasMatchingTag = conv.tags.some(t => conversationFilters.tags.includes(t));
+        if (!hasMatchingTag) return false;
+      }
+
+      // Tab filter
+      switch (activeTab) {
+        case "chat":
+          return conv.handler === "human" && conv.assignedTo;
+        case "ai":
+          return conv.handler === "ai";
+        case "queue":
+          return true;
+        default:
+          return true;
+      }
+    });
+  }, [mappedConversations, conversationFilters, searchQuery, activeTab]);
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedConversationId) return;
     
-    if (!matchesSearch) return false;
-
-    // Status filter
-    if (conversationFilters.statuses.length > 0) {
-      if (!conv.status || !conversationFilters.statuses.includes(conv.status.id)) {
-        return false;
-      }
-    }
-
-    // Handler filter
-    if (conversationFilters.handlers.length > 0) {
-      if (!conversationFilters.handlers.includes(conv.handler)) {
-        return false;
-      }
-    }
-
-    // Tags filter
-    if (conversationFilters.tags.length > 0) {
-      const hasMatchingTag = conv.tags.some(t => conversationFilters.tags.includes(t.id));
-      if (!hasMatchingTag) return false;
-    }
-
-    // Tab filter
-    switch (activeTab) {
-      case "chat":
-        return conv.handler === "human" && conv.assignedTo;
-      case "ai":
-        return conv.handler === "ai";
-      case "queue":
-        return true;
-      default:
-        return true;
-    }
-  });
-
-  const handleSendMessage = () => {
-    if (messageInput.trim()) {
-      // TODO: Send message
-      setMessageInput("");
-    }
+    // For now, just add to local state - real send would go through API
+    const newMessage: Message = {
+      id: crypto.randomUUID(),
+      content: messageInput,
+      created_at: new Date().toISOString(),
+      is_from_me: true,
+      sender_type: "human",
+      ai_generated: false,
+    };
+    
+    setMessages(prev => [...prev, newMessage]);
+    setMessageInput("");
+    
+    // TODO: Implement actual message sending via API
+    toast({
+      title: "Mensagem enviada",
+      description: "Funcionalidade de envio será integrada com a API do WhatsApp.",
+    });
   };
 
   const handleSelectConversation = (id: string) => {
-    setSelectedConversation(id);
+    setSelectedConversationId(id);
     setShowMobileChat(true);
   };
 
-  const handleUpdateName = () => {
-    if (selected && editingName.trim()) {
-      setConversationsList(conversationsList.map(c => 
-        c.id === selected.id ? { ...c, name: editingName } : c
-      ));
+  const handleUpdateName = async () => {
+    if (selectedConversation && editingName.trim()) {
+      updateConversation.mutate({
+        id: selectedConversation.id,
+        contact_name: editingName,
+      });
       setEditNameDialogOpen(false);
     }
   };
 
   const handleTransferHandler = (handler: "ai" | "human") => {
-    if (selected) {
-      setConversationsList(conversationsList.map(c => 
-        c.id === selected.id ? { ...c, handler, assignedTo: handler === "human" ? "Você" : null } : c
-      ));
-    }
-  };
-
-  const handleTransferDepartment = (deptId: string) => {
-    if (selected) {
-      setConversationsList(conversationsList.map(c => 
-        c.id === selected.id ? { ...c, departmentId: deptId } : c
-      ));
+    if (selectedConversation) {
+      transferHandler.mutate({
+        conversationId: selectedConversation.id,
+        handlerType: handler,
+      });
     }
   };
 
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return conversationsList.filter(c => c.handler === "human" && c.assignedTo).length;
+        return mappedConversations.filter(c => c.handler === "human" && c.assignedTo).length;
       case "ai":
-        return conversationsList.filter(c => c.handler === "ai").length;
+        return mappedConversations.filter(c => c.handler === "ai").length;
       case "queue":
-        return conversationsList.length;
+        return mappedConversations.length;
     }
   };
 
   const openEditName = () => {
-    if (selected) {
-      setEditingName(selected.name);
+    if (selectedConversation) {
+      setEditingName(selectedConversation.contact_name || "");
       setEditNameDialogOpen(true);
     }
   };
+
+  // Get available statuses for filters
+  const availableStatuses = useMemo(() => {
+    return statuses.map(s => ({ id: s.id, name: s.name, color: s.color }));
+  }, [statuses]);
+
+  // Get available tags for filters
+  const availableTags = useMemo(() => {
+    return tags.map(t => ({ id: t.id, name: t.name, color: t.color }));
+  }, [tags]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex animate-fade-in">
@@ -341,8 +328,8 @@ export default function Conversations() {
             onFiltersChange={setConversationFilters}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            availableStatuses={mockStatuses}
-            availableTags={mockTags}
+            availableStatuses={availableStatuses}
+            availableTags={availableTags}
           />
         </div>
 
@@ -352,7 +339,12 @@ export default function Conversations() {
             {filteredConversations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Nenhuma conversa encontrada</p>
+                <p className="text-sm">
+                  {conversations.length === 0 
+                    ? "Nenhuma conversa ainda" 
+                    : "Nenhuma conversa encontrada"
+                  }
+                </p>
               </div>
             ) : (
               filteredConversations.map((conv) => (
@@ -362,13 +354,13 @@ export default function Conversations() {
                   className={cn(
                     "p-3 rounded-lg cursor-pointer transition-all duration-200",
                     "hover:bg-muted",
-                    selectedConversation === conv.id && "bg-muted ring-1 ring-primary/20"
+                    selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20"
                   )}
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <span className="text-sm font-semibold text-primary">
-                        {conv.name.split(" ").map((n) => n[0]).join("")}
+                        {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -387,8 +379,8 @@ export default function Conversations() {
                           className={cn(
                             "text-xs",
                             conv.handler === "ai"
-                              ? "border-status-ai/50 text-status-ai bg-status-ai/10"
-                              : "border-status-human/50 text-status-human bg-status-human/10"
+                              ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                              : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
                           )}
                         >
                           {conv.handler === "ai" ? (
@@ -396,29 +388,11 @@ export default function Conversations() {
                           ) : (
                             <UserCheck className="h-3 w-3 mr-1" />
                           )}
-                          {conv.handler === "ai" ? "IA" : conv.assignedTo || "Advogado"}
+                          {conv.handler === "ai" ? "IA" : conv.assignedTo || "Humano"}
                         </Badge>
-                        {/* Show status in all tabs */}
                         {conv.status && (
-                          <Badge
-                            variant="outline"
-                            className="text-xs"
-                            style={{ 
-                              borderColor: conv.status.color, 
-                              color: conv.status.color,
-                              backgroundColor: `${conv.status.color}10`
-                            }}
-                          >
-                            {conv.status.name}
-                          </Badge>
-                        )}
-                        {/* Show first tag in all tabs */}
-                        {conv.tags.length > 0 && (
-                          <Badge
-                            className="text-xs text-white"
-                            style={{ backgroundColor: conv.tags[0].color }}
-                          >
-                            {conv.tags[0].name}
+                          <Badge variant="outline" className="text-xs">
+                            {conv.status.replace('_', ' ')}
                           </Badge>
                         )}
                         {conv.unread > 0 && (
@@ -443,7 +417,7 @@ export default function Conversations() {
           !showMobileChat && "hidden md:flex"
         )}
       >
-        {selected ? (
+        {selectedConversation ? (
           <>
             {/* Chat Header */}
             <div className="p-4 border-b border-border flex items-center justify-between">
@@ -458,19 +432,26 @@ export default function Conversations() {
                 </Button>
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                   <span className="text-sm font-semibold text-primary">
-                    {selected.name.split(" ").map((n) => n[0]).join("")}
+                    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
+                      .split(" ")
+                      .map((n) => n[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
                   </span>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <p className="font-medium">{selected.name}</p>
+                    <p className="font-medium">
+                      {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
+                    </p>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openEditName}>
                       <Pencil className="h-3 w-3" />
                     </Button>
                   </div>
                   <p className="text-sm text-muted-foreground flex items-center gap-1">
                     <Phone className="h-3 w-3" />
-                    {selected.phone}
+                    {selectedConversation.contact_phone || "---"}
                   </p>
                 </div>
               </div>
@@ -488,7 +469,7 @@ export default function Conversations() {
                       <h4 className="font-medium text-sm">Transferir para</h4>
                       <div className="space-y-2">
                         <Button 
-                          variant={selected.handler === "ai" ? "default" : "outline"}
+                          variant={selectedConversation.current_handler === "ai" ? "default" : "outline"}
                           size="sm" 
                           className="w-full justify-start"
                           onClick={() => handleTransferHandler("ai")}
@@ -497,7 +478,7 @@ export default function Conversations() {
                           IA
                         </Button>
                         <Button 
-                          variant={selected.handler === "human" ? "default" : "outline"}
+                          variant={selectedConversation.current_handler === "human" ? "default" : "outline"}
                           size="sm" 
                           className="w-full justify-start"
                           onClick={() => handleTransferHandler("human")}
@@ -506,21 +487,22 @@ export default function Conversations() {
                           Humano
                         </Button>
                       </div>
-                      <div className="pt-2 border-t">
-                        <h5 className="text-xs text-muted-foreground mb-2">Departamento</h5>
-                        {mockDepartments.map(dept => (
-                          <Button
-                            key={dept.id}
-                            variant={selected.departmentId === dept.id ? "default" : "ghost"}
-                            size="sm"
-                            className="w-full justify-start mb-1"
-                            onClick={() => handleTransferDepartment(dept.id)}
-                          >
-                            <Folder className="h-4 w-4 mr-2" style={{ color: dept.color }} />
-                            {dept.name}
-                          </Button>
-                        ))}
-                      </div>
+                      {departments.length > 0 && (
+                        <div className="pt-2 border-t">
+                          <h5 className="text-xs text-muted-foreground mb-2">Departamento</h5>
+                          {departments.map(dept => (
+                            <Button
+                              key={dept.id}
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start mb-1"
+                            >
+                              <Folder className="h-4 w-4 mr-2" style={{ color: dept.color }} />
+                              {dept.name}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </PopoverContent>
                 </Popover>
@@ -539,12 +521,12 @@ export default function Conversations() {
                 <Badge
                   variant="outline"
                   className={cn(
-                    selected.handler === "ai"
-                      ? "border-status-ai text-status-ai"
-                      : "border-status-human text-status-human"
+                    selectedConversation.current_handler === "ai"
+                      ? "border-purple-500 text-purple-600"
+                      : "border-green-500 text-green-600"
                   )}
                 >
-                  {selected.handler === "ai" ? "🤖 IA" : "⚖️ Advogado"}
+                  {selectedConversation.current_handler === "ai" ? "🤖 IA" : "⚖️ Advogado"}
                 </Badge>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -573,42 +555,56 @@ export default function Conversations() {
             {/* Messages */}
             <ScrollArea className="flex-1 p-4">
               <div className="space-y-4 max-w-3xl mx-auto">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      "flex",
-                      msg.isFromMe ? "justify-end" : "justify-start"
-                    )}
-                  >
+                {messagesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">Nenhuma mensagem ainda</p>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
                     <div
+                      key={msg.id}
                       className={cn(
-                        "max-w-[80%] rounded-2xl px-4 py-2.5",
-                        msg.isFromMe
-                          ? msg.senderType === "ai"
-                            ? "bg-status-ai/10 text-foreground rounded-br-md"
-                            : "bg-primary text-primary-foreground rounded-br-md"
-                          : "bg-muted rounded-bl-md"
+                        "flex",
+                        msg.is_from_me ? "justify-end" : "justify-start"
                       )}
                     >
-                      {msg.senderType === "ai" && msg.isFromMe && (
-                        <div className="flex items-center gap-1 text-xs text-status-ai mb-1">
-                          <Bot className="h-3 w-3" />
-                          Assistente IA
-                        </div>
-                      )}
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                      <p
+                      <div
                         className={cn(
-                          "text-xs mt-1",
-                          msg.isFromMe ? "text-primary-foreground/70" : "text-muted-foreground"
+                          "max-w-[80%] rounded-2xl px-4 py-2.5",
+                          msg.is_from_me
+                            ? msg.ai_generated
+                              ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
+                              : "bg-primary text-primary-foreground rounded-br-md"
+                            : "bg-muted rounded-bl-md"
                         )}
                       >
-                        {msg.time}
-                      </p>
+                        {msg.ai_generated && msg.is_from_me && (
+                          <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
+                            <Bot className="h-3 w-3" />
+                            Assistente IA
+                          </div>
+                        )}
+                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                        <p
+                          className={cn(
+                            "text-xs mt-1",
+                            msg.is_from_me ? "text-primary-foreground/70" : "text-muted-foreground"
+                          )}
+                        >
+                          {new Date(msg.created_at).toLocaleTimeString('pt-BR', { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                          })}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </ScrollArea>
 
@@ -653,7 +649,7 @@ export default function Conversations() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-muted-foreground">
-              <MessageSquareIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>Selecione uma conversa para começar</p>
             </div>
           </div>
@@ -684,24 +680,5 @@ export default function Conversations() {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function MessageSquareIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
   );
 }

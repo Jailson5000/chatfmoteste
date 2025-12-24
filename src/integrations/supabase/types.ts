@@ -647,6 +647,42 @@ export type Database = {
         }
         Relationships: []
       }
+      member_departments: {
+        Row: {
+          created_at: string
+          department_id: string
+          id: string
+          member_id: string
+        }
+        Insert: {
+          created_at?: string
+          department_id: string
+          id?: string
+          member_id: string
+        }
+        Update: {
+          created_at?: string
+          department_id?: string
+          id?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_departments_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_departments_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           ai_generated: boolean

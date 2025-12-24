@@ -82,12 +82,11 @@ export function KanbanFilters({
   };
 
   const toggleDepartment = (deptId: string) => {
-    // Exclusive department filter - selecting one clears others
-    if (filters.departments.includes(deptId)) {
-      onFiltersChange({ ...filters, departments: [] });
-    } else {
-      onFiltersChange({ ...filters, departments: [deptId] });
-    }
+    // Multi-select departments
+    const newDepartments = filters.departments.includes(deptId)
+      ? filters.departments.filter(d => d !== deptId)
+      : [...filters.departments, deptId];
+    onFiltersChange({ ...filters, departments: newDepartments });
   };
 
   const toggleTag = (tagId: string) => {
