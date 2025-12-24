@@ -55,11 +55,17 @@ export function useTeamMembers() {
 
       if (rolesError) throw rolesError;
 
-      // Get member departments (from a junction table if exists, otherwise empty)
-      const { data: memberDepts } = await supabase
-        .from("member_departments")
-        .select("*")
-        .catch(() => ({ data: [] }));
+      // Get member departments
+      let memberDepts: Array<{ member_id: string; department_id: string }> = [];
+      try {
+        const { data } = await supabase
+          .from("member_departments")
+          .select("member_id, department_id");
+        memberDepts = data || [];
+      } catch (e) {
+        // Table might not exist yet
+        memberDepts = [];
+      }
 
       // Map profiles with their roles and departments
       return profiles.map((p) => {
@@ -115,14 +121,14 @@ export function useTeamMembers() {
     mutationFn: async ({ memberId, departmentIds }: { memberId: string; departmentIds: string[] }) => {
       // First delete existing departments
       await supabase
-        .from("member_departments")
+        .from("member_departments" as any)
         .delete()
         .eq("member_id", memberId);
 
       // Then insert new ones
       if (departmentIds.length > 0) {
         const { error } = await supabase
-          .from("member_departments")
+          .from("member_departments" as any)
           .insert(departmentIds.map((deptId) => ({
             member_id: memberId,
             department_id: deptId,
