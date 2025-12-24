@@ -1,7 +1,5 @@
 import { useState } from "react";
 import {
-  Search,
-  Filter,
   Bot,
   UserCheck,
   Phone,
@@ -47,6 +45,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConversationFilters } from "@/components/conversations/ConversationFilters";
+
+// Mock statuses and tags for filter
+const mockStatuses = [
+  { id: "1", name: "Qualificado", color: "#22c55e" },
+  { id: "2", name: "Em Análise", color: "#f59e0b" },
+  { id: "3", name: "Aguardando Docs", color: "#3b82f6" },
+];
+
+const mockTags = [
+  { id: "1", name: "VIP", color: "#8b5cf6" },
+  { id: "2", name: "Urgente", color: "#ef4444" },
+];
 
 // Mock data with status and tags
 const conversations = [
@@ -178,16 +189,46 @@ export default function Conversations() {
   const [signatureEnabled, setSignatureEnabled] = useState(true);
   const [editNameDialogOpen, setEditNameDialogOpen] = useState(false);
   const [editingName, setEditingName] = useState("");
+  const [conversationFilters, setConversationFilters] = useState<{
+    statuses: string[];
+    handlers: Array<'ai' | 'human'>;
+    tags: string[];
+    searchName: string;
+    searchPhone: string;
+  }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
 
   const selected = conversationsList.find((c) => c.id === selectedConversation);
 
-  // Filter conversations by tab
+  // Filter conversations by tab and filters
   const filteredConversations = conversationsList.filter((conv) => {
-    const matchesSearch = conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    // Search filter (name or phone)
+    const matchesSearch = searchQuery === '' || 
+      conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.phone.includes(searchQuery);
     
     if (!matchesSearch) return false;
 
+    // Status filter
+    if (conversationFilters.statuses.length > 0) {
+      if (!conv.status || !conversationFilters.statuses.includes(conv.status.id)) {
+        return false;
+      }
+    }
+
+    // Handler filter
+    if (conversationFilters.handlers.length > 0) {
+      if (!conversationFilters.handlers.includes(conv.handler)) {
+        return false;
+      }
+    }
+
+    // Tags filter
+    if (conversationFilters.tags.length > 0) {
+      const hasMatchingTag = conv.tags.some(t => conversationFilters.tags.includes(t.id));
+      if (!hasMatchingTag) return false;
+    }
+
+    // Tab filter
     switch (activeTab) {
       case "chat":
         return conv.handler === "human" && conv.assignedTo;
@@ -295,20 +336,14 @@ export default function Conversations() {
             </TabsList>
           </Tabs>
 
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar conversa..."
-                className="pl-9"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button variant="outline" size="icon">
-              <Filter className="h-4 w-4" />
-            </Button>
-          </div>
+          <ConversationFilters
+            filters={conversationFilters}
+            onFiltersChange={setConversationFilters}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            availableStatuses={mockStatuses}
+            availableTags={mockTags}
+          />
         </div>
 
         {/* Conversation List */}
@@ -363,8 +398,8 @@ export default function Conversations() {
                           )}
                           {conv.handler === "ai" ? "IA" : conv.assignedTo || "Advogado"}
                         </Badge>
-                        {/* Show status in queue */}
-                        {activeTab === "queue" && conv.status && (
+                        {/* Show status in all tabs */}
+                        {conv.status && (
                           <Badge
                             variant="outline"
                             className="text-xs"
@@ -377,8 +412,8 @@ export default function Conversations() {
                             {conv.status.name}
                           </Badge>
                         )}
-                        {/* Show first tag in queue */}
-                        {activeTab === "queue" && conv.tags.length > 0 && (
+                        {/* Show first tag in all tabs */}
+                        {conv.tags.length > 0 && (
                           <Badge
                             className="text-xs text-white"
                             style={{ backgroundColor: conv.tags[0].color }}

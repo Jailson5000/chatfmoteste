@@ -28,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -61,11 +62,11 @@ import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
 
 const teamMembers = [
-  { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456" },
-  { id: "2", name: "Dra. Fernanda Lima", email: "fernanda@escritorio.com", role: "advogado", oab: "OAB/SP 234567" },
-  { id: "3", name: "Dr. Roberto Alves", email: "roberto@escritorio.com", role: "advogado", oab: "OAB/SP 345678" },
-  { id: "4", name: "Ana Silva", email: "ana@escritorio.com", role: "estagiario", oab: null },
-  { id: "5", name: "João Santos", email: "joao@escritorio.com", role: "atendente", oab: null },
+  { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456", departments: [] },
+  { id: "2", name: "Dra. Fernanda Lima", email: "fernanda@escritorio.com", role: "advogado", oab: "OAB/SP 234567", departments: [] },
+  { id: "3", name: "Dr. Roberto Alves", email: "roberto@escritorio.com", role: "advogado", oab: "OAB/SP 345678", departments: [] },
+  { id: "4", name: "Ana Silva", email: "ana@escritorio.com", role: "estagiario", oab: null, departments: [] },
+  { id: "5", name: "João Santos", email: "joao@escritorio.com", role: "atendente", oab: null, departments: ["1", "2"] },
 ];
 
 const roleLabels = {
@@ -816,6 +817,7 @@ export default function Settings() {
                     <TableHead>Email</TableHead>
                     <TableHead>Função</TableHead>
                     <TableHead>OAB</TableHead>
+                    <TableHead>Permissões</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -830,10 +832,81 @@ export default function Settings() {
                         </Badge>
                       </TableCell>
                       <TableCell>{member.oab || "—"}</TableCell>
+                      <TableCell>
+                        {member.role === "admin" && (
+                          <span className="text-xs text-muted-foreground">Acesso total</span>
+                        )}
+                        {member.role === "atendente" && (
+                          <div className="flex flex-wrap gap-1">
+                            {member.departments.length > 0 ? (
+                              member.departments.map(deptId => {
+                                const dept = departments.find(d => d.id === deptId);
+                                return dept ? (
+                                  <Badge key={deptId} variant="outline" className="text-xs" style={{ borderColor: dept.color, color: dept.color }}>
+                                    {dept.name}
+                                  </Badge>
+                                ) : null;
+                              })
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Sem departamentos</span>
+                            )}
+                          </div>
+                        )}
+                        {(member.role === "advogado" || member.role === "estagiario") && (
+                          <span className="text-xs text-muted-foreground">Acesso completo</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm">
-                          Editar
-                        </Button>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              <Pencil className="h-3 w-3 mr-1" />
+                              Editar
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Editar Permissões - {member.name}</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4 mt-4">
+                              <div className="space-y-2">
+                                <Label>Função</Label>
+                                <Select defaultValue={member.role}>
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="admin">Administrador - Acesso total ao sistema</SelectItem>
+                                    <SelectItem value="advogado">Advogado - Acesso completo</SelectItem>
+                                    <SelectItem value="estagiario">Estagiário - Acesso completo</SelectItem>
+                                    <SelectItem value="atendente">Atendente - Apenas departamentos selecionados</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              {member.role === "atendente" && (
+                                <div className="space-y-2">
+                                  <Label>Departamentos com acesso</Label>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Atendente não pode: modificar configurações, conexões ou automações.
+                                  </p>
+                                  <div className="space-y-2 border rounded-lg p-3">
+                                    {departments.map(dept => (
+                                      <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
+                                        <Checkbox defaultChecked={member.departments.includes(dept.id)} />
+                                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
+                                        <span className="text-sm">{dept.name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex justify-end gap-2 pt-4">
+                                <Button variant="outline">Cancelar</Button>
+                                <Button>Salvar</Button>
+                              </div>
+                            </div>
+                          </DialogContent>
+                        </Dialog>
                       </TableCell>
                     </TableRow>
                   ))}
