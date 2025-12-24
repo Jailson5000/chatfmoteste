@@ -55,11 +55,10 @@ export default function Auth() {
     });
 
     if (error) {
+      // Use generic error message to prevent user enumeration attacks
       toast({
-        title: "Erro ao entrar",
-        description: error.message === "Invalid login credentials" 
-          ? "Email ou senha incorretos" 
-          : error.message,
+        title: "Falha na autenticação",
+        description: "Email ou senha incorretos. Por favor, tente novamente.",
         variant: "destructive",
       });
     } else {
@@ -97,12 +96,10 @@ export default function Auth() {
     });
 
     if (error) {
-      const message = error.message === "User already registered" 
-        ? "Este email já está cadastrado" 
-        : error.message;
+      // Use generic error message to prevent user enumeration attacks
       toast({
         title: "Erro ao criar conta",
-        description: message,
+        description: "Não foi possível criar a conta. Verifique os dados e tente novamente.",
         variant: "destructive",
       });
     } else {
