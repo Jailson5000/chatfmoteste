@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Building2,
   Users,
@@ -16,6 +16,8 @@ import {
   Upload,
   MessageSquareText,
   Image,
+  Video,
+  Mic,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +55,7 @@ import { useTags } from "@/hooks/useTags";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTemplates } from "@/hooks/useTemplates";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { ColorPicker } from "@/components/ui/color-picker";
 
 const teamMembers = [
   { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456" },
@@ -69,9 +72,11 @@ const roleLabels = {
   atendente: { label: "Atendente", color: "bg-muted text-muted-foreground" },
 };
 
-const defaultColors = [
-  "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", 
-  "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#64748b"
+const templateTypes = [
+  { value: "text", label: "Texto", icon: MessageSquareText },
+  { value: "image", label: "Imagem", icon: Image },
+  { value: "video", label: "Vídeo", icon: Video },
+  { value: "audio", label: "Áudio", icon: Mic },
 ];
 
 export default function Settings() {
@@ -111,6 +116,8 @@ export default function Settings() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [newTemplateShortcut, setNewTemplateShortcut] = useState("");
   const [newTemplateContent, setNewTemplateContent] = useState("");
+  const [newTemplateType, setNewTemplateType] = useState("text");
+  const [newTemplateMediaUrl, setNewTemplateMediaUrl] = useState("");
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   // Initialize form with law firm data
@@ -295,16 +302,7 @@ export default function Settings() {
                       </div>
                       <div className="space-y-2">
                         <Label>Cor</Label>
-                        <div className="flex gap-2 flex-wrap">
-                          {defaultColors.map((color) => (
-                            <button
-                              key={color}
-                              className={`w-8 h-8 rounded-full border-2 ${newStatusColor === color ? "border-foreground" : "border-transparent"}`}
-                              style={{ backgroundColor: color }}
-                              onClick={() => setNewStatusColor(color)}
-                            />
-                          ))}
-                        </div>
+                        <ColorPicker value={newStatusColor} onChange={setNewStatusColor} />
                       </div>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
@@ -389,16 +387,7 @@ export default function Settings() {
                       </div>
                       <div className="space-y-2">
                         <Label>Cor</Label>
-                        <div className="flex gap-2 flex-wrap">
-                          {defaultColors.map((color) => (
-                            <button
-                              key={color}
-                              className={`w-8 h-8 rounded-full border-2 ${newTagColor === color ? "border-foreground" : "border-transparent"}`}
-                              style={{ backgroundColor: color }}
-                              onClick={() => setNewTagColor(color)}
-                            />
-                          ))}
-                        </div>
+                        <ColorPicker value={newTagColor} onChange={setNewTagColor} />
                       </div>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" onClick={() => setTagDialogOpen(false)}>
@@ -476,16 +465,7 @@ export default function Settings() {
                       </div>
                       <div className="space-y-2">
                         <Label>Cor</Label>
-                        <div className="flex gap-2 flex-wrap">
-                          {defaultColors.map((color) => (
-                            <button
-                              key={color}
-                              className={`w-8 h-8 rounded-full border-2 ${newDeptColor === color ? "border-foreground" : "border-transparent"}`}
-                              style={{ backgroundColor: color }}
-                              onClick={() => setNewDeptColor(color)}
-                            />
-                          ))}
-                        </div>
+                        <ColorPicker value={newDeptColor} onChange={setNewDeptColor} />
                       </div>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" onClick={() => setDeptDialogOpen(false)}>

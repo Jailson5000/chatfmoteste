@@ -13,6 +13,7 @@ import Kanban from "./pages/Kanban";
 import Automations from "./pages/Automations";
 import Settings from "./pages/Settings";
 import Contacts from "./pages/Contacts";
+import Connections from "./pages/Connections";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -93,6 +94,17 @@ const App = () => (
             }
           >
             <Route index element={<Contacts />} />
+          </Route>
+          
+          <Route
+            path="/connections"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Connections />} />
           </Route>
           
           {/* Catch-all route */}

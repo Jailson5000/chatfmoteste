@@ -827,6 +827,7 @@ export type Database = {
       whatsapp_instances: {
         Row: {
           api_key: string | null
+          api_key_encrypted: boolean | null
           api_url: string
           created_at: string
           id: string
@@ -839,6 +840,7 @@ export type Database = {
         }
         Insert: {
           api_key?: string | null
+          api_key_encrypted?: boolean | null
           api_url: string
           created_at?: string
           id?: string
@@ -851,6 +853,7 @@ export type Database = {
         }
         Update: {
           api_key?: string | null
+          api_key_encrypted?: boolean | null
           api_url?: string
           created_at?: string
           id?: string
