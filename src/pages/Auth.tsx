@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Scale, Mail, Lock, User, ArrowRight } from "lucide-react";
+import { Mail, Lock, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
+import fmoLogo from "@/assets/fmo-logo.jpg";
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido").max(255),
@@ -115,7 +116,7 @@ export default function Auth() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse-soft">
-          <Scale className="w-12 h-12 text-primary" />
+          <img src={fmoLogo} alt="FMO Advogados" className="w-16 h-16 object-contain" />
         </div>
       </div>
     );
@@ -128,6 +129,7 @@ export default function Auth() {
         <div className="absolute inset-0 bg-gradient-to-br from-sidebar-primary/20 to-transparent" />
         <div className="relative z-10 flex flex-col justify-between p-12">
           <div className="flex items-center gap-3">
+            <img src={fmoLogo} alt="FMO Advogados" className="w-12 h-12 object-contain rounded-lg bg-white p-1" />
             <span className="font-display text-2xl font-bold text-sidebar-foreground">
               FMO ADVOGADOS
             </span>
@@ -164,6 +166,7 @@ export default function Auth() {
         <Card className="w-full max-w-md border-0 shadow-2xl">
           <CardHeader className="text-center pb-2">
             <div className="lg:hidden flex items-center justify-center gap-2 mb-4">
+              <img src={fmoLogo} alt="FMO Advogados" className="w-10 h-10 object-contain rounded-lg" />
               <span className="font-display text-xl font-bold">FMO ADVOGADOS</span>
             </div>
             <CardTitle className="text-2xl font-display">Acesse sua conta</CardTitle>
