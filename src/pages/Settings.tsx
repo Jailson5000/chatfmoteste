@@ -121,7 +121,7 @@ export default function Settings() {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   // Initialize form with law firm data
-  useState(() => {
+  useEffect(() => {
     if (lawFirm) {
       setOfficeName(lawFirm.name || "");
       setOfficeCnpj(lawFirm.document || "");
@@ -129,7 +129,7 @@ export default function Settings() {
       setOfficeEmail(lawFirm.email || "");
       setOfficeAddress(lawFirm.address || "");
     }
-  });
+  }, [lawFirm]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -179,15 +179,27 @@ export default function Settings() {
   };
 
   const handleCreateTemplate = async () => {
-    if (!newTemplateName.trim() || !newTemplateShortcut.trim() || !newTemplateContent.trim()) return;
+    if (!newTemplateName.trim() || !newTemplateShortcut.trim()) return;
+    
+    // For media templates, require media URL; for text, require content
+    if (newTemplateType === "text" && !newTemplateContent.trim()) return;
+    if (newTemplateType !== "text" && !newTemplateMediaUrl.trim()) return;
+    
+    const content = newTemplateType === "text" 
+      ? newTemplateContent 
+      : `[${newTemplateType.toUpperCase()}]${newTemplateMediaUrl}${newTemplateContent ? `\n${newTemplateContent}` : ""}`;
+    
     await createTemplate.mutateAsync({ 
       name: newTemplateName, 
       shortcut: newTemplateShortcut, 
-      content: newTemplateContent 
+      content: content,
+      category: newTemplateType,
     });
     setNewTemplateName("");
     setNewTemplateShortcut("");
     setNewTemplateContent("");
+    setNewTemplateType("text");
+    setNewTemplateMediaUrl("");
     setTemplateDialogOpen(false);
   };
 
@@ -548,6 +560,28 @@ export default function Settings() {
                     </DialogHeader>
                     <div className="space-y-4 mt-4">
                       <div className="space-y-2">
+                        <Label>Tipo de Template</Label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {templateTypes.map((type) => (
+                            <button
+                              key={type.value}
+                              type="button"
+                              onClick={() => setNewTemplateType(type.value)}
+                              className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                                newTemplateType === type.value 
+                                  ? "border-primary bg-primary/10" 
+                                  : "border-border hover:border-primary/50"
+                              }`}
+                            >
+                              <type.icon className={`h-5 w-5 ${newTemplateType === type.value ? "text-primary" : "text-muted-foreground"}`} />
+                              <span className={`text-xs ${newTemplateType === type.value ? "text-primary font-medium" : "text-muted-foreground"}`}>
+                                {type.label}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
                         <Label>Nome do Template</Label>
                         <Input
                           value={newTemplateName}
@@ -567,13 +601,30 @@ export default function Settings() {
                         </div>
                         <p className="text-xs text-muted-foreground">Use /{newTemplateShortcut || "comando"} para aplicar</p>
                       </div>
+                      
+                      {newTemplateType !== "text" && (
+                        <div className="space-y-2">
+                          <Label>URL da Mídia ({newTemplateType === "image" ? "Imagem" : newTemplateType === "video" ? "Vídeo" : "Áudio"})</Label>
+                          <Input
+                            value={newTemplateMediaUrl}
+                            onChange={(e) => setNewTemplateMediaUrl(e.target.value)}
+                            placeholder={`https://exemplo.com/${newTemplateType === "image" ? "imagem.jpg" : newTemplateType === "video" ? "video.mp4" : "audio.mp3"}`}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {newTemplateType === "image" && "Formatos suportados: JPG, PNG, GIF, WebP"}
+                            {newTemplateType === "video" && "Formatos suportados: MP4, WebM"}
+                            {newTemplateType === "audio" && "Formatos suportados: MP3, OGG, AAC"}
+                          </p>
+                        </div>
+                      )}
+                      
                       <div className="space-y-2">
-                        <Label>Conteúdo da Mensagem</Label>
+                        <Label>{newTemplateType === "text" ? "Conteúdo da Mensagem" : "Legenda (opcional)"}</Label>
                         <Textarea
                           value={newTemplateContent}
                           onChange={(e) => setNewTemplateContent(e.target.value)}
-                          placeholder="Olá! Seja bem-vindo ao nosso escritório..."
-                          rows={4}
+                          placeholder={newTemplateType === "text" ? "Olá! Seja bem-vindo ao nosso escritório..." : "Legenda para a mídia..."}
+                          rows={newTemplateType === "text" ? 4 : 2}
                         />
                       </div>
                       <div className="flex justify-end gap-2">
@@ -598,30 +649,47 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {templates.map((template) => (
-                    <div
-                      key={template.id}
-                      className="flex items-start justify-between p-4 rounded-lg border"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium">{template.name}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            /{template.shortcut}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground line-clamp-2">{template.content}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive ml-2"
-                        onClick={() => deleteTemplate.mutate(template.id)}
+                  {templates.map((template) => {
+                    const templateType = templateTypes.find(t => t.value === template.category) || templateTypes[0];
+                    const TypeIcon = templateType.icon;
+                    return (
+                      <div
+                        key={template.id}
+                        className="flex items-start justify-between p-4 rounded-lg border"
                       >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 rounded-lg bg-muted">
+                            <TypeIcon className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium">{template.name}</span>
+                              <Badge variant="secondary" className="text-xs">
+                                /{template.shortcut}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {templateType.label}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2">
+                              {template.content.startsWith("[") 
+                                ? template.content.split("\n").slice(1).join("\n") || "Mídia anexada"
+                                : template.content
+                              }
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive ml-2"
+                          onClick={() => deleteTemplate.mutate(template.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -727,6 +795,12 @@ export default function Settings() {
                   value={officeAddress}
                   onChange={(e) => setOfficeAddress(e.target.value)}
                 />
+              </div>
+              <div className="flex justify-end pt-4 border-t">
+                <Button onClick={handleSave} disabled={saving}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {saving ? "Salvando..." : "Salvar Alterações"}
+                </Button>
               </div>
             </CardContent>
           </Card>
