@@ -379,6 +379,42 @@ export default function Kanban() {
 
   const getStatusById = (id: string | null) => statuses.find((s) => s.id === id);
 
+  // Check if any filters are active
+  const hasActiveFilters = 
+    filters.statuses.length > 0 || 
+    filters.handlers.length > 0 || 
+    filters.connections.length > 0 || 
+    filters.tags.length > 0 ||
+    searchQuery.length > 0;
+
+  // Determine which departments to show based on filters
+  const visibleDepartments = departments.filter(dept => {
+    // If department filter is active, only show selected departments
+    if (filters.departments.length > 0) {
+      return filters.departments.includes(dept.id);
+    }
+    // If other filters are active, only show departments that have matching clients
+    if (hasActiveFilters) {
+      return getClientsByDepartment(dept.id).length > 0;
+    }
+    // No filters - show all departments
+    return true;
+  });
+
+  // Determine if unassigned column should be visible
+  const showUnassignedColumn = () => {
+    // If department filter is active
+    if (filters.departments.length > 0) {
+      return filters.departments.includes("none");
+    }
+    // If other filters are active, only show if there are matching unassigned clients
+    if (hasActiveFilters) {
+      return getUnassignedClients().length > 0;
+    }
+    // No filters - show
+    return true;
+  };
+
   if (deptsLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -416,8 +452,8 @@ export default function Kanban() {
       {/* Kanban Board with horizontal scroll */}
       <ScrollArea className="flex-1">
         <div className="flex gap-4 p-4 md:p-6 min-w-max items-start">
-          {/* Unassigned column - only show if no department filter or "none" is selected */}
-          {(filters.departments.length === 0 || filters.departments.includes("none")) && (
+          {/* Unassigned column - show based on filters */}
+          {showUnassignedColumn() && (
             <div
               className="w-72 md:w-80 flex-shrink-0"
               onDragOver={(e) => e.preventDefault()}
@@ -455,10 +491,8 @@ export default function Kanban() {
             </div>
           )}
 
-          {/* Department columns - filter based on selected department */}
-          {departments
-            .filter(dept => filters.departments.length === 0 || filters.departments.includes(dept.id))
-            .map((dept) => {
+          {/* Department columns - show based on filters */}
+          {visibleDepartments.map((dept) => {
             const deptClients = getClientsByDepartment(dept.id);
             return (
               <div
