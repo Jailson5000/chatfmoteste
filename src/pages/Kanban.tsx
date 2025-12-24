@@ -392,17 +392,11 @@ export default function Kanban() {
       {/* Header */}
       <div className="p-4 md:p-6 border-b border-border flex-shrink-0">
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Arraste para reordenar departamentos e mover clientes
-              </p>
-            </div>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Cliente
-            </Button>
+          <div>
+            <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Arraste para reordenar departamentos e mover clientes
+            </p>
           </div>
           
           {/* Filters */}

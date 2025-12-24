@@ -24,6 +24,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useUserRole } from "@/hooks/useUserRole";
 import {
   Tooltip,
   TooltipContent,
@@ -46,11 +47,13 @@ const atendimentoItems = [
   { icon: Users, label: "Contatos", path: "/contacts" },
 ];
 
-const bottomMenuItems = [
+// Items that require admin/non-attendant access
+const adminOnlyItems = [
   { icon: Zap, label: "Automações", path: "/automations" },
   { icon: Link2, label: "Conexões", path: "/connections" },
-  { icon: Settings, label: "Configurações", path: "/settings" },
 ];
+
+const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -59,6 +62,12 @@ export function AppSidebar() {
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
   const { lawFirm } = useLawFirm();
+  const { isAttendant } = useUserRole();
+
+  // Build bottom menu items based on user role
+  const bottomMenuItems = isAttendant 
+    ? [settingsItem] 
+    : [...adminOnlyItems, settingsItem];
 
   // Open atendimento section if on one of its pages
   useEffect(() => {
