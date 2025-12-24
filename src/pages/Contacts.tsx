@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, Search, Phone, Mail, FileText, MoreHorizontal, User } from "lucide-react";
+import { useState, useRef } from "react";
+import { Plus, Search, Phone, Mail, FileText, MoreHorizontal, User, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,13 +30,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { useClients } from "@/hooks/useClients";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Contacts() {
   const { clients, isLoading, createClient, deleteClient } = useClients();
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -74,26 +78,96 @@ export default function Contacts() {
     });
   };
 
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const lines = text.split('\n').filter(line => line.trim());
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        
+        let imported = 0;
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+          const nameIdx = headers.findIndex(h => h.includes('nome') || h === 'name');
+          const phoneIdx = headers.findIndex(h => h.includes('telefone') || h.includes('phone') || h.includes('celular'));
+          const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail'));
+          
+          if (nameIdx >= 0 && phoneIdx >= 0 && values[nameIdx] && values[phoneIdx]) {
+            await createClient.mutateAsync({
+              name: values[nameIdx],
+              phone: values[phoneIdx],
+              email: emailIdx >= 0 ? values[emailIdx] : "",
+            });
+            imported++;
+          }
+        }
+        
+        toast({ title: `${imported} contatos importados com sucesso` });
+        setImportDialogOpen(false);
+      } catch (error) {
+        toast({ title: "Erro ao importar arquivo", variant: "destructive" });
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const getStatusById = (id: string | null) => statuses.find((s) => s.id === id);
   const getDepartmentById = (id: string | null) => departments.find((d) => d.id === id);
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-display text-3xl font-bold">Contatos</h1>
           <p className="text-muted-foreground mt-1">
             Gerencie todos os seus contatos e clientes
           </p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Contato
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Upload className="h-4 w-4 mr-2" />
+                Importar
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Importar Contatos</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-4">
+                <p className="text-sm text-muted-foreground">
+                  Selecione um arquivo CSV com as colunas: Nome, Telefone, Email (opcional)
+                </p>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".csv,.txt"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+                <Button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Selecionar Arquivo CSV
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Contato
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Novo Contato</DialogTitle>

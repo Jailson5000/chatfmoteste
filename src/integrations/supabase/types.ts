@@ -140,6 +140,64 @@ export type Database = {
           },
         ]
       }
+      client_actions: {
+        Row: {
+          action_type: string
+          client_id: string
+          created_at: string
+          description: string | null
+          from_value: string | null
+          id: string
+          law_firm_id: string
+          performed_by: string | null
+          to_value: string | null
+        }
+        Insert: {
+          action_type: string
+          client_id: string
+          created_at?: string
+          description?: string | null
+          from_value?: string | null
+          id?: string
+          law_firm_id: string
+          performed_by?: string | null
+          to_value?: string | null
+        }
+        Update: {
+          action_type?: string
+          client_id?: string
+          created_at?: string
+          description?: string | null
+          from_value?: string | null
+          id?: string
+          law_firm_id?: string
+          performed_by?: string | null
+          to_value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_actions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_actions_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_actions_performed_by_fkey"
+            columns: ["performed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_tags: {
         Row: {
           client_id: string
@@ -560,6 +618,7 @@ export type Database = {
           logo_url: string | null
           name: string
           phone: string | null
+          phone2: string | null
           updated_at: string
         }
         Insert: {
@@ -571,6 +630,7 @@ export type Database = {
           logo_url?: string | null
           name: string
           phone?: string | null
+          phone2?: string | null
           updated_at?: string
         }
         Update: {
@@ -582,6 +642,7 @@ export type Database = {
           logo_url?: string | null
           name?: string
           phone?: string | null
+          phone2?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -726,6 +787,8 @@ export type Database = {
           id: string
           is_active: boolean
           law_firm_id: string
+          media_type: string | null
+          media_url: string | null
           name: string
           shortcut: string
           updated_at: string
@@ -737,6 +800,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           law_firm_id: string
+          media_type?: string | null
+          media_url?: string | null
           name: string
           shortcut: string
           updated_at?: string
@@ -748,6 +813,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           law_firm_id?: string
+          media_type?: string | null
+          media_url?: string | null
           name?: string
           shortcut?: string
           updated_at?: string

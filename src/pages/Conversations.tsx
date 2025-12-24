@@ -14,12 +14,15 @@ import {
   FileText,
   Tag,
   Clock,
+  Users,
+  Inbox,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -40,6 +43,7 @@ const conversations = [
     handler: "ai" as const,
     status: "triagem_ia",
     avatar: null,
+    assignedTo: null,
   },
   {
     id: "2",
@@ -51,6 +55,7 @@ const conversations = [
     handler: "human" as const,
     status: "em_andamento",
     avatar: null,
+    assignedTo: "Dr. Carlos",
   },
   {
     id: "3",
@@ -62,6 +67,7 @@ const conversations = [
     handler: "human" as const,
     status: "aguardando_documentos",
     avatar: null,
+    assignedTo: "Dra. Fernanda",
   },
   {
     id: "4",
@@ -73,6 +79,19 @@ const conversations = [
     handler: "ai" as const,
     status: "novo_contato",
     avatar: null,
+    assignedTo: null,
+  },
+  {
+    id: "5",
+    name: "Carla Mendes",
+    phone: "+55 21 95555-7890",
+    lastMessage: "Aguardando retorno...",
+    time: "2h",
+    unread: 0,
+    handler: "human" as const,
+    status: "em_andamento",
+    avatar: null,
+    assignedTo: "Dr. Carlos",
   },
 ];
 
@@ -114,13 +133,35 @@ const messages = [
   },
 ];
 
+type ConversationTab = "chat" | "ai" | "queue";
+
 export default function Conversations() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>("1");
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
+  const [activeTab, setActiveTab] = useState<ConversationTab>("chat");
 
   const selected = conversations.find((c) => c.id === selectedConversation);
+
+  // Filter conversations by tab
+  const filteredConversations = conversations.filter((conv) => {
+    const matchesSearch = conv.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.phone.includes(searchQuery);
+    
+    if (!matchesSearch) return false;
+
+    switch (activeTab) {
+      case "chat":
+        return conv.handler === "human" && conv.assignedTo;
+      case "ai":
+        return conv.handler === "ai";
+      case "queue":
+        return true; // Show all in queue
+      default:
+        return true;
+    }
+  });
 
   const handleSendMessage = () => {
     if (messageInput.trim()) {
@@ -132,6 +173,17 @@ export default function Conversations() {
   const handleSelectConversation = (id: string) => {
     setSelectedConversation(id);
     setShowMobileChat(true);
+  };
+
+  const getTabCount = (tab: ConversationTab) => {
+    switch (tab) {
+      case "chat":
+        return conversations.filter(c => c.handler === "human" && c.assignedTo).length;
+      case "ai":
+        return conversations.filter(c => c.handler === "ai").length;
+      case "queue":
+        return conversations.length;
+    }
   };
 
   return (
@@ -146,6 +198,34 @@ export default function Conversations() {
         {/* Header */}
         <div className="p-4 border-b border-border space-y-4">
           <h1 className="font-display text-xl font-bold">Atendimentos</h1>
+          
+          {/* Tabs */}
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="chat" className="gap-2">
+                <Users className="h-4 w-4" />
+                Chat
+                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  {getTabCount("chat")}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="ai" className="gap-2">
+                <Bot className="h-4 w-4" />
+                IA
+                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  {getTabCount("ai")}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="queue" className="gap-2">
+                <Inbox className="h-4 w-4" />
+                Fila
+                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  {getTabCount("queue")}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -165,59 +245,66 @@ export default function Conversations() {
         {/* Conversation List */}
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                onClick={() => handleSelectConversation(conv.id)}
-                className={cn(
-                  "p-3 rounded-lg cursor-pointer transition-all duration-200",
-                  "hover:bg-muted",
-                  selectedConversation === conv.id && "bg-muted ring-1 ring-primary/20"
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-semibold text-primary">
-                      {conv.name.split(" ").map((n) => n[0]).join("")}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium truncate">{conv.name}</span>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">
-                        {conv.time}
+            {filteredConversations.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Nenhuma conversa encontrada</p>
+              </div>
+            ) : (
+              filteredConversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  onClick={() => handleSelectConversation(conv.id)}
+                  className={cn(
+                    "p-3 rounded-lg cursor-pointer transition-all duration-200",
+                    "hover:bg-muted",
+                    selectedConversation === conv.id && "bg-muted ring-1 ring-primary/20"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-semibold text-primary">
+                        {conv.name.split(" ").map((n) => n[0]).join("")}
                       </span>
                     </div>
-                    <p className="text-sm text-muted-foreground truncate mt-0.5">
-                      {conv.lastMessage}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-xs",
-                          conv.handler === "ai"
-                            ? "border-status-ai/50 text-status-ai bg-status-ai/10"
-                            : "border-status-human/50 text-status-human bg-status-human/10"
-                        )}
-                      >
-                        {conv.handler === "ai" ? (
-                          <Bot className="h-3 w-3 mr-1" />
-                        ) : (
-                          <UserCheck className="h-3 w-3 mr-1" />
-                        )}
-                        {conv.handler === "ai" ? "Triagem IA" : "Advogado"}
-                      </Badge>
-                      {conv.unread > 0 && (
-                        <Badge className="bg-primary text-primary-foreground h-5 min-w-5 flex items-center justify-center p-0 text-xs">
-                          {conv.unread}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium truncate">{conv.name}</span>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                          {conv.time}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground truncate mt-0.5">
+                        {conv.lastMessage}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-xs",
+                            conv.handler === "ai"
+                              ? "border-status-ai/50 text-status-ai bg-status-ai/10"
+                              : "border-status-human/50 text-status-human bg-status-human/10"
+                          )}
+                        >
+                          {conv.handler === "ai" ? (
+                            <Bot className="h-3 w-3 mr-1" />
+                          ) : (
+                            <UserCheck className="h-3 w-3 mr-1" />
+                          )}
+                          {conv.handler === "ai" ? "Triagem IA" : conv.assignedTo || "Advogado"}
                         </Badge>
-                      )}
+                        {conv.unread > 0 && (
+                          <Badge className="bg-primary text-primary-foreground h-5 min-w-5 flex items-center justify-center p-0 text-xs">
+                            {conv.unread}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </ScrollArea>
       </div>
@@ -373,7 +460,7 @@ export default function Conversations() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-muted-foreground">
-              <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <MessageSquareIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>Selecione uma conversa para começar</p>
             </div>
           </div>
@@ -383,7 +470,7 @@ export default function Conversations() {
   );
 }
 
-function MessageSquare(props: React.SVGProps<SVGSVGElement>) {
+function MessageSquareIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
