@@ -4,7 +4,6 @@ import {
   Zap,
   Bot,
   Webhook,
-  Settings2,
   MoreVertical,
   Pencil,
   Trash2,
@@ -16,6 +15,7 @@ import {
   MessageSquare,
   ArrowRight,
   Wand2,
+  Folder,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,6 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -56,7 +55,8 @@ interface Automation {
   name: string;
   description: string;
   webhookUrl: string;
-  triggerType: "new_conversation" | "keyword" | "scheduled" | "status_change";
+  triggerType: "new_conversation" | "keyword" | "scheduled" | "status_change" | "department_entry";
+  triggerDepartmentId?: string;
   aiPrompt: string;
   isActive: boolean;
   lastTriggered: string | null;
@@ -102,6 +102,7 @@ const triggerTypeLabels = {
   keyword: "Palavra-chave",
   scheduled: "Agendado",
   status_change: "Mudança de status",
+  department_entry: "Entrada em departamento",
 };
 
 export default function Automations() {
@@ -116,6 +117,16 @@ export default function Automations() {
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
 
+  // Form states
+  const [formName, setFormName] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formWebhookUrl, setFormWebhookUrl] = useState("");
+  const [formTriggerType, setFormTriggerType] = useState<Automation["triggerType"]>("new_conversation");
+  const [formTriggerDepartmentId, setFormTriggerDepartmentId] = useState("");
+  const [formAiPrompt, setFormAiPrompt] = useState("");
+  const [formCanChangeStatus, setFormCanChangeStatus] = useState(true);
+  const [formCanMoveDepartment, setFormCanMoveDepartment] = useState(true);
+
   const toggleAutomation = (id: string) => {
     setAutomations((prev) =>
       prev.map((a) => (a.id === id ? { ...a, isActive: !a.isActive } : a))
@@ -124,12 +135,122 @@ export default function Automations() {
 
   const handleEdit = (automation: Automation) => {
     setEditingAutomation(automation);
+    setFormName(automation.name);
+    setFormDescription(automation.description);
+    setFormWebhookUrl(automation.webhookUrl);
+    setFormTriggerType(automation.triggerType);
+    setFormTriggerDepartmentId(automation.triggerDepartmentId || "");
+    setFormAiPrompt(automation.aiPrompt);
+    setFormCanChangeStatus(automation.canChangeStatus);
+    setFormCanMoveDepartment(automation.canMoveDepartment);
     setIsDialogOpen(true);
   };
 
   const handleCreate = () => {
     setEditingAutomation(null);
+    setFormName("");
+    setFormDescription("");
+    setFormWebhookUrl("");
+    setFormTriggerType("new_conversation");
+    setFormTriggerDepartmentId("");
+    setFormAiPrompt("");
+    setFormCanChangeStatus(true);
+    setFormCanMoveDepartment(true);
     setIsDialogOpen(true);
+  };
+
+  const handleSaveAutomation = () => {
+    if (!formName.trim()) {
+      toast({
+        title: "Nome obrigatório",
+        description: "Por favor, informe um nome para a automação",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate webhook URL if provided
+    if (formWebhookUrl.trim()) {
+      try {
+        const url = new URL(formWebhookUrl);
+        if (url.protocol !== "https:") {
+          toast({
+            title: "URL inválida",
+            description: "A URL do webhook deve usar HTTPS",
+            variant: "destructive",
+          });
+          return;
+        }
+        // Check for internal IPs
+        const hostname = url.hostname.toLowerCase();
+        if (
+          hostname === "localhost" ||
+          hostname.startsWith("127.") ||
+          hostname.startsWith("10.") ||
+          hostname.startsWith("172.16.") ||
+          hostname.startsWith("172.17.") ||
+          hostname.startsWith("172.18.") ||
+          hostname.startsWith("192.168.") ||
+          hostname === "0.0.0.0"
+        ) {
+          toast({
+            title: "URL inválida",
+            description: "URLs de rede interna não são permitidas",
+            variant: "destructive",
+          });
+          return;
+        }
+      } catch {
+        toast({
+          title: "URL inválida",
+          description: "Por favor, informe uma URL válida",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    if (formTriggerType === "department_entry" && !formTriggerDepartmentId) {
+      toast({
+        title: "Departamento obrigatório",
+        description: "Selecione um departamento para o gatilho",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const automation: Automation = {
+      id: editingAutomation?.id || Date.now().toString(),
+      name: formName,
+      description: formDescription,
+      webhookUrl: formWebhookUrl,
+      triggerType: formTriggerType,
+      triggerDepartmentId: formTriggerDepartmentId || undefined,
+      aiPrompt: formAiPrompt,
+      isActive: editingAutomation?.isActive ?? false,
+      lastTriggered: editingAutomation?.lastTriggered ?? null,
+      successCount: editingAutomation?.successCount ?? 0,
+      errorCount: editingAutomation?.errorCount ?? 0,
+      canChangeStatus: formCanChangeStatus,
+      canMoveDepartment: formCanMoveDepartment,
+    };
+
+    if (editingAutomation) {
+      setAutomations((prev) =>
+        prev.map((a) => (a.id === editingAutomation.id ? automation : a))
+      );
+      toast({ title: "Automação atualizada" });
+    } else {
+      setAutomations((prev) => [...prev, automation]);
+      toast({ title: "Automação criada" });
+    }
+
+    setIsDialogOpen(false);
+  };
+
+  const handleDeleteAutomation = (id: string) => {
+    setAutomations((prev) => prev.filter((a) => a.id !== id));
+    toast({ title: "Automação excluída" });
   };
 
   const handleCreateAgent = () => {
@@ -149,7 +270,6 @@ export default function Automations() {
 
     setIsGenerating(true);
     
-    // Simula geração de agente (aqui seria integração com IA real)
     await new Promise((resolve) => setTimeout(resolve, 2000));
     
     const newAutomation: Automation = {
@@ -175,6 +295,11 @@ export default function Automations() {
       title: "Agente criado com sucesso!",
       description: "Seu agente foi configurado. Ative-o quando estiver pronto.",
     });
+  };
+
+  const getDepartmentName = (id: string) => {
+    const dept = departments.find((d) => d.id === id);
+    return dept?.name || "Departamento";
   };
 
   return (
@@ -253,21 +378,25 @@ export default function Automations() {
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <Tabs defaultValue="automations">
-        <TabsList>
-          <TabsTrigger value="automations">
-            <Zap className="h-4 w-4 mr-2" />
-            Automações
-          </TabsTrigger>
-          <TabsTrigger value="whatsapp">
-            <Settings2 className="h-4 w-4 mr-2" />
-            WhatsApp / Evolution
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="automations" className="space-y-4 mt-6">
-          {automations.map((automation) => (
+      {/* Automations List */}
+      <div className="space-y-4">
+        <h2 className="font-semibold text-lg flex items-center gap-2">
+          <Zap className="h-5 w-5" />
+          Automações Ativas
+        </h2>
+        
+        {automations.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Zap className="h-16 w-16 mb-4 opacity-50" />
+              <p className="font-medium mb-1">Nenhuma automação configurada</p>
+              <p className="text-sm text-center">
+                Clique em "Nova Automação" ou "Criar Agente IA" para começar
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          automations.map((automation) => (
             <Card key={automation.id}>
               <CardContent className="p-6">
                 <div className="flex items-start justify-between gap-4">
@@ -295,6 +424,12 @@ export default function Automations() {
                         <Badge variant="outline" className="text-xs">
                           {triggerTypeLabels[automation.triggerType]}
                         </Badge>
+                        {automation.triggerType === "department_entry" && automation.triggerDepartmentId && (
+                          <Badge variant="secondary" className="text-xs">
+                            <Folder className="h-3 w-3 mr-1" />
+                            {getDepartmentName(automation.triggerDepartmentId)}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {automation.description}
@@ -368,7 +503,10 @@ export default function Automations() {
                           <ExternalLink className="h-4 w-4 mr-2" />
                           Abrir n8n
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => handleDeleteAutomation(automation.id)}
+                        >
                           <Trash2 className="h-4 w-4 mr-2" />
                           Excluir
                         </DropdownMenuItem>
@@ -378,75 +516,22 @@ export default function Automations() {
                 </div>
 
                 {/* AI Prompt Preview */}
-                <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-dashed">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                    <Bot className="h-3 w-3" />
-                    Prompt da IA
+                {automation.aiPrompt && (
+                  <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-dashed">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                      <Bot className="h-3 w-3" />
+                      Prompt da IA
+                    </div>
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {automation.aiPrompt}
+                    </p>
                   </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {automation.aiPrompt}
-                  </p>
-                </div>
+                )}
               </CardContent>
             </Card>
-          ))}
-        </TabsContent>
-
-        <TabsContent value="whatsapp" className="space-y-4 mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings2 className="h-5 w-5" />
-                Configuração Evolution API
-              </CardTitle>
-              <CardDescription>
-                Configure a conexão com sua instância do Evolution API
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="evolution-url">URL da API</Label>
-                  <Input
-                    id="evolution-url"
-                    placeholder="https://evolution.example.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="evolution-key">API Key</Label>
-                  <Input
-                    id="evolution-key"
-                    type="password"
-                    placeholder="••••••••••••••••"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button>Salvar Configuração</Button>
-                <Button variant="outline">Testar Conexão</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Instâncias WhatsApp</CardTitle>
-              <CardDescription>
-                Gerencie as instâncias de WhatsApp conectadas
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-center py-8 text-muted-foreground">
-                <div className="text-center">
-                  <Settings2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma instância configurada</p>
-                  <p className="text-sm">Configure a Evolution API para adicionar instâncias</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          ))
+        )}
+      </div>
 
       {/* Create/Edit Automation Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -463,35 +548,65 @@ export default function Automations() {
           <div className="space-y-4 py-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="name">Nome</Label>
+                <Label htmlFor="name">Nome da automação</Label>
                 <Input
                   id="name"
-                  placeholder="Nome da automação"
-                  defaultValue={editingAutomation?.name}
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Ex: Triagem Inicial"
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="trigger">Gatilho</Label>
-                <Select defaultValue={editingAutomation?.triggerType || "new_conversation"}>
+                <Select value={formTriggerType} onValueChange={(v) => setFormTriggerType(v as Automation["triggerType"])}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione o gatilho" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="new_conversation">Nova conversa</SelectItem>
                     <SelectItem value="keyword">Palavra-chave</SelectItem>
                     <SelectItem value="scheduled">Agendado</SelectItem>
                     <SelectItem value="status_change">Mudança de status</SelectItem>
+                    <SelectItem value="department_entry">Entrada em departamento</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
+            {formTriggerType === "department_entry" && (
+              <div className="space-y-2">
+                <Label htmlFor="department">Departamento</Label>
+                <Select value={formTriggerDepartmentId} onValueChange={setFormTriggerDepartmentId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um departamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((dept) => (
+                      <SelectItem key={dept.id} value={dept.id}>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: dept.color }}
+                          />
+                          {dept.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  A automação será disparada quando um cliente entrar neste departamento
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="description">Descrição</Label>
               <Input
                 id="description"
-                placeholder="Descreva o objetivo desta automação"
-                defaultValue={editingAutomation?.description}
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+                placeholder="Descrição breve da automação"
               />
             </div>
 
@@ -499,73 +614,51 @@ export default function Automations() {
               <Label htmlFor="webhook">URL do Webhook (n8n)</Label>
               <Input
                 id="webhook"
+                value={formWebhookUrl}
+                onChange={(e) => setFormWebhookUrl(e.target.value)}
                 placeholder="https://n8n.example.com/webhook/..."
-                defaultValue={editingAutomation?.webhookUrl}
               />
-            </div>
-
-            {/* AI Capabilities */}
-            <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
-              <Label className="text-base font-medium">Permissões do Agente IA</Label>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="can-status" className="text-sm font-normal">Pode alterar status</Label>
-                  <Switch id="can-status" defaultChecked={editingAutomation?.canChangeStatus ?? true} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="can-dept" className="text-sm font-normal">Pode mover departamento</Label>
-                  <Switch id="can-dept" defaultChecked={editingAutomation?.canMoveDepartment ?? true} />
-                </div>
-              </div>
-              
-              {statuses.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="text-sm">Status disponíveis para o agente:</Label>
-                  <div className="flex flex-wrap gap-1">
-                    {statuses.map((status) => (
-                      <Badge
-                        key={status.id}
-                        variant="outline"
-                        className="text-xs"
-                        style={{ borderColor: status.color, color: status.color }}
-                      >
-                        {status.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {departments.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="text-sm">Departamentos disponíveis:</Label>
-                  <div className="flex flex-wrap gap-1">
-                    {departments.map((dept) => (
-                      <Badge
-                        key={dept.id}
-                        variant="outline"
-                        className="text-xs"
-                        style={{ borderColor: dept.color, color: dept.color }}
-                      >
-                        {dept.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <p className="text-xs text-muted-foreground">
+                Apenas URLs HTTPS são permitidas por segurança
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="prompt">Prompt da IA</Label>
               <Textarea
                 id="prompt"
-                placeholder="Instruções para a IA..."
+                value={formAiPrompt}
+                onChange={(e) => setFormAiPrompt(e.target.value)}
+                placeholder="Descreva como a IA deve se comportar..."
                 rows={4}
-                defaultValue={editingAutomation?.aiPrompt}
               />
-              <p className="text-xs text-muted-foreground">
-                Lembre-se: A IA não pode fornecer aconselhamento jurídico, apenas triagem e coleta de informações.
-              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex items-center justify-between p-3 rounded-lg border">
+                <div>
+                  <Label>Pode alterar status</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Permite que a IA mude o status do cliente
+                  </p>
+                </div>
+                <Switch
+                  checked={formCanChangeStatus}
+                  onCheckedChange={setFormCanChangeStatus}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border">
+                <div>
+                  <Label>Pode mover departamento</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Permite que a IA transfira o cliente
+                  </p>
+                </div>
+                <Switch
+                  checked={formCanMoveDepartment}
+                  onCheckedChange={setFormCanMoveDepartment}
+                />
+              </div>
             </div>
           </div>
 
@@ -573,7 +666,7 @@ export default function Automations() {
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => setIsDialogOpen(false)}>
+            <Button onClick={handleSaveAutomation}>
               {editingAutomation ? "Salvar" : "Criar"}
             </Button>
           </DialogFooter>
@@ -582,55 +675,49 @@ export default function Automations() {
 
       {/* Create Agent Dialog */}
       <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
               Criar Agente de IA
             </DialogTitle>
             <DialogDescription>
-              Descreva o que você quer que seu agente faça e nós configuramos automaticamente
+              Descreva o que você quer que o agente faça. Nós configuramos o resto.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="agent-description">Descreva seu agente</Label>
+              <Label htmlFor="agent-description">O que seu agente deve fazer?</Label>
               <Textarea
                 id="agent-description"
-                placeholder="Ex: Quero um agente que faça a triagem inicial dos clientes, colete nome e telefone, identifique a área jurídica do caso e mova o cliente para o departamento correto..."
-                rows={6}
                 value={agentDescription}
                 onChange={(e) => setAgentDescription(e.target.value)}
+                placeholder="Ex: Fazer a triagem inicial dos clientes, coletar dados básicos (nome, telefone, descrição do problema) e classificar o tipo de caso jurídico."
+                rows={5}
               />
             </div>
-
-            <div className="p-4 rounded-lg bg-muted/50 border space-y-3">
-              <h4 className="font-medium text-sm">O agente terá acesso a:</h4>
-              <div className="grid gap-2 md:grid-cols-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            
+            <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+              <h4 className="font-medium text-sm">O agente poderá:</h4>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
-                  {statuses.length > 0 ? `${statuses.length} status configurados` : "Nenhum status configurado"}
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Responder automaticamente os clientes
+                </li>
+                <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
-                  {departments.length > 0 ? `${departments.length} departamentos` : "Nenhum departamento"}
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Alterar o status dos atendimentos
+                </li>
+                <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
                   Mover clientes entre departamentos
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                </li>
+                <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
-                  Alterar status dos clientes
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
-              <p className="text-sm text-warning-foreground">
-                <strong>Lembrete:</strong> O agente não fornecerá aconselhamento jurídico, apenas realizará triagem e coleta de informações.
-              </p>
+                  Coletar e organizar informações
+                </li>
+              </ul>
             </div>
           </div>
 
@@ -641,7 +728,7 @@ export default function Automations() {
             <Button onClick={generateAgentFromDescription} disabled={isGenerating}>
               {isGenerating ? (
                 <>
-                  <span className="animate-spin mr-2">⏳</span>
+                  <Sparkles className="h-4 w-4 mr-2 animate-spin" />
                   Gerando...
                 </>
               ) : (

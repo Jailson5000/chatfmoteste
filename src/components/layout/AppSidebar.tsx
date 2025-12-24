@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   Building2,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ const atendimentoItems = [
 
 const bottomMenuItems = [
   { icon: Zap, label: "Automações", path: "/automations" },
+  { icon: Link2, label: "Conexões", path: "/connections" },
   { icon: Settings, label: "Configurações", path: "/settings" },
 ];
 
