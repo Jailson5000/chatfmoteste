@@ -210,15 +210,22 @@ function AudioPlayer({
 
   if (isDecrypting) {
     return (
-      <div className="flex items-center gap-3 min-w-[240px] max-w-[300px] p-2 rounded-xl bg-background/20">
-        <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+      <div className="flex items-center gap-3 min-w-[260px] max-w-[320px] p-3 rounded-xl bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 animate-in fade-in duration-300">
+        <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center flex-shrink-0">
+          <Mic className="h-5 w-5 text-primary/60 animate-pulse" />
+          <div className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
         </div>
-        <div className="flex-1">
-          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-            <div className="h-full bg-primary/50 rounded-full animate-pulse w-1/3" />
+        <div className="flex-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="h-2 flex-1 bg-muted/50 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-primary/60 via-primary/40 to-primary/60 rounded-full animate-shimmer" 
+                   style={{ backgroundSize: '200% 100%' }} />
+            </div>
           </div>
-          <span className="text-xs opacity-70 mt-1 block">Carregando...</span>
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-3 w-3 animate-spin text-primary/70" />
+            <span className="text-xs text-primary/70 font-medium">Descriptografando áudio...</span>
+          </div>
         </div>
       </div>
     );
@@ -392,10 +399,31 @@ function ImageViewer({
 
   if (isDecrypting) {
     return (
-      <div className="flex items-center justify-center min-w-[200px] min-h-[150px] bg-muted/50 rounded-lg">
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          <span className="text-xs opacity-70">Carregando imagem...</span>
+      <div className="relative min-w-[200px] min-h-[150px] max-w-[240px] rounded-xl overflow-hidden bg-gradient-to-br from-muted/80 to-muted/40 border border-border/50 animate-in fade-in duration-300">
+        {/* Shimmer effect overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" 
+             style={{ backgroundSize: '200% 100%' }} />
+        
+        {/* Content */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+          <div className="relative">
+            <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+              <svg className="h-7 w-7 text-primary/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-primary/20 flex items-center justify-center">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+            </div>
+          </div>
+          <div className="text-center">
+            <span className="text-xs font-medium text-foreground/70">Descriptografando...</span>
+            <div className="flex items-center justify-center gap-1 mt-1">
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -512,10 +540,29 @@ function VideoPlayer({
 
   if (isDecrypting) {
     return (
-      <div className="flex items-center justify-center min-w-[200px] min-h-[120px] bg-muted/50 rounded-lg">
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span className="text-xs opacity-70">Carregando vídeo...</span>
+      <div className="relative min-w-[240px] min-h-[140px] max-w-[280px] rounded-xl overflow-hidden bg-gradient-to-br from-muted/80 to-muted/40 border border-border/50 animate-in fade-in duration-300">
+        {/* Shimmer effect overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" 
+             style={{ backgroundSize: '200% 100%' }} />
+        
+        {/* Content */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+          <div className="relative">
+            <div className="h-16 w-16 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+              <Play className="h-8 w-8 text-primary/60 ml-1" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-background border-2 border-primary/30 flex items-center justify-center">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            </div>
+          </div>
+          <div className="text-center">
+            <span className="text-xs font-medium text-foreground/70">Descriptografando vídeo...</span>
+            <div className="flex items-center justify-center gap-1 mt-1">
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
         </div>
       </div>
     );
