@@ -160,12 +160,38 @@ export function useConversations() {
     },
   });
 
+  const updateConversationDepartment = useMutation({
+    mutationFn: async ({ conversationId, departmentId }: { conversationId: string; departmentId: string | null }) => {
+      const { error } = await supabase
+        .from("conversations")
+        .update({ department_id: departmentId })
+        .eq("id", conversationId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast({
+        title: "Departamento atualizado",
+        description: "A conversa foi movida para o novo departamento.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao mover conversa",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     conversations,
     isLoading,
     error,
     updateConversation,
     updateConversationStatus,
+    updateConversationDepartment,
     transferHandler,
   };
 }

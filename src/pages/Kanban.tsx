@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Plus, GripVertical, Folder, Bot, User, Clock, MessageSquare, Phone, Wifi, Tag } from "lucide-react";
+import { Plus, GripVertical, Folder, Bot, User, Clock, MessageSquare, Phone, Wifi, Tag, FolderPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,12 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useConversations } from "@/hooks/useConversations";
-import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTags } from "@/hooks/useTags";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Link } from "react-router-dom";
 
 interface ConversationCardProps {
   conversation: {
@@ -24,6 +24,7 @@ interface ConversationCardProps {
     current_handler: 'ai' | 'human';
     last_message_at: string | null;
     tags: string[] | null;
+    department_id: string | null;
     last_message?: { content: string | null; created_at: string } | null;
     whatsapp_instance?: { instance_name: string } | null;
     assigned_profile?: { full_name: string } | null;
@@ -147,20 +148,9 @@ function ConversationCard({ conversation, isDragging, onDragStart, onClick }: Co
   );
 }
 
-// Status columns configuration based on case_status enum
-const statusColumns = [
-  { id: 'novo_contato', name: 'Novo Contato', color: '#6366f1' },
-  { id: 'triagem_ia', name: 'Triagem IA', color: '#8b5cf6' },
-  { id: 'aguardando_documentos', name: 'Aguardando Docs', color: '#f59e0b' },
-  { id: 'em_analise', name: 'Em Análise', color: '#3b82f6' },
-  { id: 'em_andamento', name: 'Em Andamento', color: '#22c55e' },
-  { id: 'encerrado', name: 'Encerrado', color: '#6b7280' },
-];
-
 export default function Kanban() {
-  const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
-  const { conversations, isLoading: convsLoading, updateConversationStatus, transferHandler } = useConversations();
-  const { statuses } = useCustomStatuses();
+  const { departments, isLoading: deptsLoading } = useDepartments();
+  const { conversations, isLoading: convsLoading, updateConversationDepartment, transferHandler } = useConversations();
   const { tags } = useTags();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
@@ -237,6 +227,28 @@ export default function Kanban() {
         }
       }
       
+      // Department filter
+      if (filters.departments.length > 0) {
+        // Handle "none" filter for unassigned conversations
+        const hasNoneFilter = filters.departments.includes("none");
+        const otherDeptFilters = filters.departments.filter(d => d !== "none");
+        
+        if (hasNoneFilter && otherDeptFilters.length > 0) {
+          // Include unassigned OR selected departments
+          if (conv.department_id && !otherDeptFilters.includes(conv.department_id)) {
+            return false;
+          }
+        } else if (hasNoneFilter) {
+          // Only unassigned
+          if (conv.department_id) return false;
+        } else {
+          // Only selected departments
+          if (!conv.department_id || !otherDeptFilters.includes(conv.department_id)) {
+            return false;
+          }
+        }
+      }
+      
       // Tags filter
       if (filters.tags.length > 0) {
         if (!conv.tags || !conv.tags.some(t => filters.tags.includes(t))) {
@@ -252,11 +264,11 @@ export default function Kanban() {
     setDraggedConversation(conversationId);
   };
 
-  const handleConversationDrop = (status: string) => {
+  const handleConversationDrop = (departmentId: string | null) => {
     if (draggedConversation) {
-      updateConversationStatus.mutate({ 
+      updateConversationDepartment.mutate({ 
         conversationId: draggedConversation, 
-        status 
+        departmentId 
       });
     }
     setDraggedConversation(null);
@@ -267,27 +279,15 @@ export default function Kanban() {
     setSheetOpen(true);
   };
 
-  const getConversationsByStatus = (status: string) =>
-    filteredConversations.filter((c) => c.status === status);
+  // Get conversations by department
+  const getConversationsByDepartment = (departmentId: string | null) =>
+    filteredConversations.filter((c) => c.department_id === departmentId);
 
-  // Check if any filters are active
-  const hasActiveFilters = 
-    filters.statuses.length > 0 || 
-    filters.handlers.length > 0 || 
-    filters.connections.length > 0 || 
-    filters.tags.length > 0 ||
-    searchQuery.length > 0;
+  // Get unassigned conversations (no department)
+  const unassignedConversations = filteredConversations.filter(c => !c.department_id);
 
-  // Determine which columns to show based on filters
-  const visibleColumns = statusColumns.filter(col => {
-    if (filters.statuses.length > 0) {
-      return filters.statuses.includes(col.id);
-    }
-    if (hasActiveFilters) {
-      return getConversationsByStatus(col.id).length > 0;
-    }
-    return true;
-  });
+  // Active departments only
+  const activeDepartments = departments.filter(d => d.is_active);
 
   const isLoading = deptsLoading || convsLoading;
 
@@ -295,6 +295,38 @@ export default function Kanban() {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // Empty state - no departments created
+  if (activeDepartments.length === 0) {
+    return (
+      <div className="h-screen flex flex-col animate-fade-in">
+        <div className="p-4 md:p-6 border-b border-border flex-shrink-0">
+          <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Organize conversas por departamentos
+          </p>
+        </div>
+        
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-8">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+              <FolderPlus className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
+            <p className="text-muted-foreground mb-6">
+              Crie departamentos para organizar suas conversas no Kanban. Os departamentos representam as áreas de atuação do seu escritório.
+            </p>
+            <Button asChild>
+              <Link to="/settings">
+                <Plus className="h-4 w-4 mr-2" />
+                Criar Departamentos
+              </Link>
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -307,7 +339,7 @@ export default function Kanban() {
           <div>
             <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Arraste para mover conversas entre status
+              Arraste conversas entre departamentos para organizar
             </p>
           </div>
           
@@ -317,7 +349,6 @@ export default function Kanban() {
             onFiltersChange={setFilters}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            availableStatuses={statusColumns.map(s => ({ id: s.id, name: s.name, color: s.color }))}
             availableConnections={availableConnections}
             availableDepartments={departments}
             availableTags={tags}
@@ -328,12 +359,73 @@ export default function Kanban() {
       {/* Kanban Board with horizontal scroll */}
       <ScrollArea className="flex-1">
         <div className="flex gap-4 p-4 md:p-6 min-w-max items-start">
-          {/* Status columns */}
-          {visibleColumns.map((column) => {
-            const columnConversations = getConversationsByStatus(column.id);
+          {/* Unassigned column - conversations without department */}
+          {unassignedConversations.length > 0 && (
+            <div
+              className="w-72 md:w-80 flex-shrink-0"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.currentTarget.classList.add("ring-2", "ring-primary/50");
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
+                handleConversationDrop(null);
+              }}
+            >
+              <div 
+                className="rounded-xl border"
+                style={{ 
+                  backgroundColor: `#71717a08`,
+                  borderColor: `#71717a30`
+                }}
+              >
+                <div 
+                  className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl"
+                  style={{ 
+                    borderColor: `#71717a30`,
+                    backgroundColor: `#71717a10`
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
+                    <h3 className="font-semibold text-sm">Sem Departamento</h3>
+                    <Badge 
+                      variant="outline" 
+                      className="text-xs h-5 px-1.5"
+                    >
+                      {unassignedConversations.length}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="p-3 space-y-2">
+                  {unassignedConversations.map((conv) => (
+                    <ConversationCard
+                      key={conv.id}
+                      conversation={conv}
+                      isDragging={draggedConversation === conv.id}
+                      onDragStart={() => handleConversationDragStart(conv.id)}
+                      onClick={() => handleConversationClick(conv)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Department columns */}
+          {activeDepartments.map((department) => {
+            const departmentConversations = getConversationsByDepartment(department.id);
             return (
               <div
-                key={column.id}
+                key={department.id}
                 className="w-72 md:w-80 flex-shrink-0"
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -349,37 +441,37 @@ export default function Kanban() {
                 onDrop={(e) => {
                   e.preventDefault();
                   e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-                  handleConversationDrop(column.id);
+                  handleConversationDrop(department.id);
                 }}
               >
                 <div 
                   className="rounded-xl border"
                   style={{ 
-                    backgroundColor: `${column.color}08`,
-                    borderColor: `${column.color}30`
+                    backgroundColor: `${department.color}08`,
+                    borderColor: `${department.color}30`
                   }}
                 >
                   <div 
                     className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl"
                     style={{ 
-                      borderColor: `${column.color}30`,
-                      backgroundColor: `${column.color}10`
+                      borderColor: `${department.color}30`,
+                      backgroundColor: `${department.color}10`
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: column.color }} />
-                      <h3 className="font-semibold text-sm">{column.name}</h3>
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: department.color }} />
+                      <h3 className="font-semibold text-sm">{department.name}</h3>
                       <Badge 
                         variant="outline" 
                         className="text-xs h-5 px-1.5"
-                        style={{ borderColor: column.color, color: column.color }}
+                        style={{ borderColor: department.color, color: department.color }}
                       >
-                        {columnConversations.length}
+                        {departmentConversations.length}
                       </Badge>
                     </div>
                   </div>
                   <div className="p-3 space-y-2">
-                    {columnConversations.map((conv) => (
+                    {departmentConversations.map((conv) => (
                       <ConversationCard
                         key={conv.id}
                         conversation={conv}
@@ -388,12 +480,9 @@ export default function Kanban() {
                         onClick={() => handleConversationClick(conv)}
                       />
                     ))}
-                    {columnConversations.length === 0 && (
+                    {departmentConversations.length === 0 && (
                       <div className="text-center py-8 text-muted-foreground text-sm">
-                        {conversations.length === 0 
-                          ? "Nenhuma conversa ainda"
-                          : "Arraste conversas para cá"
-                        }
+                        Arraste conversas para cá
                       </div>
                     )}
                   </div>
@@ -434,6 +523,12 @@ export default function Kanban() {
                 <p className="font-medium">{selectedConversation.status.replace('_', ' ')}</p>
               </div>
               <div>
+                <span className="text-sm text-muted-foreground">Departamento:</span>
+                <p className="font-medium">
+                  {departments.find(d => d.id === selectedConversation.department_id)?.name || "Não atribuído"}
+                </p>
+              </div>
+              <div>
                 <span className="text-sm text-muted-foreground">Handler:</span>
                 <Badge 
                   variant="secondary"
@@ -469,8 +564,7 @@ export default function Kanban() {
                 >
                   {selectedConversation.current_handler === 'ai' 
                     ? 'Transferir para Humano' 
-                    : 'Transferir para IA'
-                  }
+                    : 'Transferir para IA'}
                 </Button>
               </div>
             </div>

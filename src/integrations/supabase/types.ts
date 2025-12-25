@@ -353,6 +353,7 @@ export type Database = {
           contact_phone: string | null
           created_at: string
           current_handler: Database["public"]["Enums"]["message_handler"]
+          department_id: string | null
           id: string
           internal_notes: string | null
           last_message_at: string | null
@@ -371,6 +372,7 @@ export type Database = {
           contact_phone?: string | null
           created_at?: string
           current_handler?: Database["public"]["Enums"]["message_handler"]
+          department_id?: string | null
           id?: string
           internal_notes?: string | null
           last_message_at?: string | null
@@ -389,6 +391,7 @@ export type Database = {
           contact_phone?: string | null
           created_at?: string
           current_handler?: Database["public"]["Enums"]["message_handler"]
+          department_id?: string | null
           id?: string
           internal_notes?: string | null
           last_message_at?: string | null
@@ -406,6 +409,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
             referencedColumns: ["id"]
           },
           {
