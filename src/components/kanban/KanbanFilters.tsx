@@ -30,7 +30,6 @@ interface KanbanFiltersProps {
   onFiltersChange: (filters: FilterState) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  availableStatuses: Array<{ id: string; name: string; color: string }>;
   availableConnections: string[];
   availableDepartments: Array<{ id: string; name: string; color: string }>;
   availableTags: Array<{ id: string; name: string; color: string }>;
@@ -41,31 +40,21 @@ export function KanbanFilters({
   onFiltersChange,
   searchQuery,
   onSearchChange,
-  availableStatuses,
   availableConnections,
   availableDepartments,
   availableTags
 }: KanbanFiltersProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [statusOpen, setStatusOpen] = useState(false);
   const [handlerOpen, setHandlerOpen] = useState(false);
   const [deptOpen, setDeptOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
   
   const activeFiltersCount = 
-    filters.statuses.length + 
     filters.handlers.length + 
     filters.connections.length +
     filters.departments.length +
     filters.tags.length;
-
-  const toggleStatus = (statusId: string) => {
-    const newStatuses = filters.statuses.includes(statusId)
-      ? filters.statuses.filter(s => s !== statusId)
-      : [...filters.statuses, statusId];
-    onFiltersChange({ ...filters, statuses: newStatuses });
-  };
 
   const toggleHandler = (handler: 'ai' | 'human') => {
     const newHandlers = filters.handlers.includes(handler)
@@ -155,53 +144,6 @@ export function KanbanFilters({
           
           <ScrollArea className="max-h-[60vh] overflow-y-auto">
             <div className="p-2 space-y-1">
-              {/* Status Filter - Cascade */}
-              <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    className="w-full justify-between h-9 px-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Tag className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">Status</span>
-                      {filters.statuses.length > 0 && (
-                        <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                          {filters.statuses.length}
-                        </Badge>
-                      )}
-                    </div>
-                    {statusOpen ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
-                  {availableStatuses.map(status => (
-                    <label 
-                      key={status.id} 
-                      className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
-                    >
-                      <Checkbox 
-                        checked={filters.statuses.includes(status.id)}
-                        onCheckedChange={() => toggleStatus(status.id)}
-                      />
-                      <div 
-                        className="w-2.5 h-2.5 rounded-full" 
-                        style={{ backgroundColor: status.color }} 
-                      />
-                      <span className="text-sm">{status.name}</span>
-                    </label>
-                  ))}
-                  {availableStatuses.length === 0 && (
-                    <p className="text-xs text-muted-foreground py-1">Nenhum status</p>
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
-
-              <Separator className="my-1" />
 
               {/* Handler Filter - Cascade */}
               <Collapsible open={handlerOpen} onOpenChange={setHandlerOpen}>
