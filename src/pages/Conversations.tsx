@@ -530,9 +530,11 @@ export default function Conversations() {
       }
 
       // Optimistically add message to local state
+      // Use friendly display name for audio (remove .webm extension)
+      const friendlyFileName = mediaType === "audio" ? "Mensagem de voz" : file.name;
       const newMessage: Message = {
         id: response.data.messageId || crypto.randomUUID(),
-        content: `[${mediaType === "image" ? "Imagem" : mediaType === "audio" ? "Áudio" : mediaType === "video" ? "Vídeo" : "Documento"}: ${file.name}]`,
+        content: `[${mediaType === "image" ? "Imagem" : mediaType === "audio" ? "Áudio" : mediaType === "video" ? "Vídeo" : "Documento"}: ${friendlyFileName}]`,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
@@ -543,7 +545,7 @@ export default function Conversations() {
       
       toast({
         title: "Mídia enviada",
-        description: `${file.name} enviado com sucesso!`,
+        description: mediaType === "audio" ? "Áudio enviado com sucesso!" : `${file.name} enviado com sucesso!`,
       });
     } catch (error) {
       console.error("Erro ao enviar mídia:", error);
