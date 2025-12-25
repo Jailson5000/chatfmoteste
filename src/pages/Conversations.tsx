@@ -18,9 +18,13 @@ import {
   Folder,
   FileSignature,
   MessageSquare,
+  Search,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
+import { MessageSearch, highlightText } from "@/components/conversations/MessageSearch";
+import { ReplyPreview } from "@/components/conversations/ReplyPreview";
+import { useNotificationSound } from "@/hooks/useNotificationSound";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +77,13 @@ interface Message {
   media_mime_type?: string | null;
   message_type?: string;
   status?: MessageStatus;
+  read_at?: string | null;
+  reply_to_message_id?: string | null;
+  reply_to?: {
+    id: string;
+    content: string | null;
+    is_from_me: boolean;
+  } | null;
 }
 
 export default function Conversations() {
@@ -81,6 +92,7 @@ export default function Conversations() {
   const { tags } = useTags();
   const { statuses } = useCustomStatuses();
   const { toast } = useToast();
+  const { playNotification } = useNotificationSound();
   const queryClient = useQueryClient();
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -103,6 +115,19 @@ export default function Conversations() {
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
 
+  // Message search state
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState("");
+  const [currentSearchMatch, setCurrentSearchMatch] = useState(0);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  
+  // Reply state
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  
+  // Refs
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
   // Media preview state
   const [mediaPreview, setMediaPreview] = useState<{
     open: boolean;
@@ -120,10 +145,52 @@ export default function Conversations() {
     [conversations, selectedConversationId]
   );
 
+  // Calculate unread counts for each conversation
+  const unreadCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    conversations.forEach(conv => {
+      // This is a placeholder - real implementation would need a separate query
+      // For now, we'll use a simple approach based on last_message_at
+      counts[conv.id] = 0;
+    });
+    return counts;
+  }, [conversations]);
+
+  // Search matches
+  const searchMatches = useMemo(() => {
+    if (!messageSearchQuery.trim()) return [];
+    const query = messageSearchQuery.toLowerCase();
+    return messages
+      .map((msg, index) => ({ msg, index }))
+      .filter(({ msg }) => msg.content?.toLowerCase().includes(query))
+      .map(({ msg }) => msg.id);
+  }, [messages, messageSearchQuery]);
+
+  // Scroll to message function
+  const scrollToMessage = useCallback((messageId: string) => {
+    const element = messageRefs.current.get(messageId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMessageId(messageId);
+      setTimeout(() => setHighlightedMessageId(null), 2000);
+    }
+  }, []);
+
+  // Handle reply
+  const handleReply = useCallback((messageId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (message) {
+      setReplyToMessage(message);
+    }
+  }, [messages]);
+
   // Load messages when conversation is selected
   useEffect(() => {
     if (!selectedConversationId) {
       setMessages([]);
+      setReplyToMessage(null);
+      setShowMessageSearch(false);
+      setMessageSearchQuery("");
       return;
     }
 
@@ -131,12 +198,33 @@ export default function Conversations() {
       setMessagesLoading(true);
       const { data, error } = await supabase
         .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type")
+        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id")
         .eq("conversation_id", selectedConversationId)
         .order("created_at", { ascending: true });
       
       if (!error && data) {
-        setMessages(data);
+        // Map reply_to data
+        const messagesWithReplies = data.map(msg => {
+          if (msg.reply_to_message_id) {
+            const replyTo = data.find(m => m.id === msg.reply_to_message_id);
+            return {
+              ...msg,
+              reply_to: replyTo ? {
+                id: replyTo.id,
+                content: replyTo.content,
+                is_from_me: replyTo.is_from_me,
+              } : null
+            };
+          }
+          return msg;
+        });
+        setMessages(messagesWithReplies);
+        
+        // Mark messages as read
+        await supabase.rpc('mark_messages_as_read', {
+          _conversation_id: selectedConversationId,
+          _user_id: (await supabase.auth.getUser()).data.user?.id
+        });
       }
       setMessagesLoading(false);
     };
@@ -155,7 +243,13 @@ export default function Conversations() {
           filter: `conversation_id=eq.${selectedConversationId}`
         },
         (payload) => {
-          setMessages(prev => [...prev, payload.new as Message]);
+          const newMsg = payload.new as Message;
+          setMessages(prev => [...prev, newMsg]);
+          
+          // Play sound for incoming messages
+          if (!newMsg.is_from_me) {
+            playNotification();
+          }
         }
       )
       .subscribe();
@@ -163,7 +257,7 @@ export default function Conversations() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedConversationId]);
+  }, [selectedConversationId, playNotification]);
 
   // Map conversations for display
   const mappedConversations = useMemo(() => {
@@ -845,6 +939,10 @@ export default function Conversations() {
                       <Pencil className="h-4 w-4 mr-2" />
                       Editar nome
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setShowMessageSearch(true)}>
+                      <Search className="h-4 w-4 mr-2" />
+                      Buscar mensagens
+                    </DropdownMenuItem>
                     <DropdownMenuItem>
                       <Tag className="h-4 w-4 mr-2" />
                       Adicionar tag
@@ -857,6 +955,30 @@ export default function Conversations() {
                 </DropdownMenu>
               </div>
             </div>
+
+            {/* Message Search Bar */}
+            <MessageSearch
+              isOpen={showMessageSearch}
+              onClose={() => { setShowMessageSearch(false); setMessageSearchQuery(""); }}
+              searchQuery={messageSearchQuery}
+              onSearchChange={setMessageSearchQuery}
+              matchCount={searchMatches.length}
+              currentMatch={currentSearchMatch}
+              onPrevMatch={() => {
+                if (searchMatches.length > 0) {
+                  const newIndex = (currentSearchMatch - 1 + searchMatches.length) % searchMatches.length;
+                  setCurrentSearchMatch(newIndex);
+                  scrollToMessage(searchMatches[newIndex]);
+                }
+              }}
+              onNextMatch={() => {
+                if (searchMatches.length > 0) {
+                  const newIndex = (currentSearchMatch + 1) % searchMatches.length;
+                  setCurrentSearchMatch(newIndex);
+                  scrollToMessage(searchMatches[newIndex]);
+                }
+              }}
+            />
 
             {/* Messages */}
             <ScrollArea className="flex-1 p-4">
@@ -872,23 +994,36 @@ export default function Conversations() {
                   </div>
                 ) : (
                   messages.map((msg) => (
-                    <MessageBubble
-                      key={msg.id}
-                      id={msg.id}
-                      content={msg.content}
-                      createdAt={msg.created_at}
-                      isFromMe={msg.is_from_me}
-                      senderType={msg.sender_type}
-                      aiGenerated={msg.ai_generated}
-                      mediaUrl={msg.media_url}
-                      mediaMimeType={msg.media_mime_type}
-                      messageType={msg.message_type}
-                      status={msg.status || "sent"}
-                    />
+                    <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
+                      <MessageBubble
+                        id={msg.id}
+                        content={msg.content}
+                        createdAt={msg.created_at}
+                        isFromMe={msg.is_from_me}
+                        senderType={msg.sender_type}
+                        aiGenerated={msg.ai_generated}
+                        mediaUrl={msg.media_url}
+                        mediaMimeType={msg.media_mime_type}
+                        messageType={msg.message_type}
+                        status={msg.status || "sent"}
+                        replyTo={msg.reply_to}
+                        onReply={handleReply}
+                        onScrollToMessage={scrollToMessage}
+                        highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
+                        isHighlighted={highlightedMessageId === msg.id}
+                      />
+                    </div>
                   ))
                 )}
+                <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
+
+            {/* Reply Preview */}
+            <ReplyPreview
+              replyToMessage={replyToMessage}
+              onCancelReply={() => setReplyToMessage(null)}
+            />
 
             {/* Input Area */}
             <div className="p-4 border-t border-border bg-card">
