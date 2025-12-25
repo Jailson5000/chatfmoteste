@@ -774,6 +774,14 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Sending to ${targetRemoteJid} via ${instance.instance_name}`);
 
+        // Evolution sendText is typically faster/more reliable with the raw phone number (no JID suffix)
+        const targetNumber = (targetRemoteJid || "").split("@")[0];
+        if (!targetNumber) {
+          throw new Error("remoteJid inválido para envio");
+        }
+
+        const startedAt = Date.now();
+
         // Send message via Evolution API with longer timeout
         const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
           method: "POST",
@@ -782,12 +790,12 @@ serve(async (req) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            number: targetRemoteJid,
+            number: targetNumber,
             text: body.message,
           }),
         }, SEND_MESSAGE_TIMEOUT_MS);
 
-        console.log(`[Evolution API] Send message response status: ${sendResponse.status}`);
+        console.log(`[Evolution API] Send message response status: ${sendResponse.status} (${Date.now() - startedAt}ms)`);
 
         if (!sendResponse.ok) {
           const errorText = await safeReadResponseText(sendResponse);
@@ -891,9 +899,14 @@ serve(async (req) => {
         console.log(`[Evolution API] Sending ${body.mediaType} to ${targetRemoteJid} via ${instance.instance_name}`);
 
         // Determine the endpoint based on media type
+        const targetNumber = (targetRemoteJid || "").split("@")[0];
+        if (!targetNumber) {
+          throw new Error("remoteJid inválido para envio de mídia");
+        }
+
         let endpoint = "";
         let payload: Record<string, unknown> = {
-          number: targetRemoteJid,
+          number: targetNumber,
         };
 
         switch (body.mediaType) {
@@ -1005,9 +1018,20 @@ serve(async (req) => {
   } catch (error) {
     console.error("[Evolution API] Error:", error);
 
-    const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+    // IMPORTANT: return 200 so the client can read the error message in response.data
+    // (when we return 400, supabase-js collapses it into a generic "Edge function returned 400")
+    const errorMessage = (() => {
+      if (error instanceof Error) return error.message;
+      if (typeof error === "string") return error;
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return "An unexpected error occurred";
+      }
+    })();
+
     return new Response(JSON.stringify({ success: false, error: errorMessage }), {
-      status: 400,
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
