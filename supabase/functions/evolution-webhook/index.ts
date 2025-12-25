@@ -404,6 +404,200 @@ serve(async (req) => {
         } else {
           logDebug('DB', `Updated conversation last_message_at`, { requestId, conversationId: conversation.id });
         }
+
+        // Trigger n8n automation if:
+        // 1. Message is NOT from me (incoming from client)
+        // 2. Conversation handler is 'ai' (not handed off to human)
+        // 3. needs_human_handoff is false
+        if (!isFromMe && conversation.current_handler === 'ai' && !conversation.needs_human_handoff) {
+          logDebug('N8N', `Checking for active automations`, { requestId, conversationId: conversation.id });
+
+          // Find active automation for this conversation
+          const { data: automations, error: autoError } = await supabaseClient
+            .from('automations')
+            .select('*')
+            .eq('law_firm_id', lawFirmId)
+            .eq('is_active', true)
+            .or('trigger_type.eq.new_conversation,trigger_type.eq.keyword');
+
+          if (autoError) {
+            logDebug('ERROR', `Failed to fetch automations`, { requestId, error: autoError });
+          } else if (automations && automations.length > 0) {
+            // Find matching automation
+            let matchedAutomation = null;
+
+            for (const auto of automations) {
+              if (auto.trigger_type === 'new_conversation') {
+                // Check if this is a new conversation (no previous messages from system)
+                const { count } = await supabaseClient
+                  .from('messages')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('conversation_id', conversation.id)
+                  .eq('is_from_me', true);
+
+                if (count === 0 || count === null) {
+                  matchedAutomation = auto;
+                  break;
+                }
+              } else if (auto.trigger_type === 'keyword' && auto.trigger_config?.keywords) {
+                // Check for keyword match
+                const keywords = auto.trigger_config.keywords as string[];
+                const msgLower = messageContent.toLowerCase();
+                if (keywords.some(kw => msgLower.includes(kw.toLowerCase()))) {
+                  matchedAutomation = auto;
+                  break;
+                }
+              } else if (auto.trigger_type === 'department_entry' && auto.trigger_config?.departmentId) {
+                // Check if conversation is in the specified department
+                if (conversation.department_id === auto.trigger_config.departmentId) {
+                  matchedAutomation = auto;
+                  break;
+                }
+              }
+            }
+
+            if (matchedAutomation && matchedAutomation.webhook_url) {
+              logDebug('N8N', `Matched automation, triggering n8n`, { 
+                requestId, 
+                automationId: matchedAutomation.id,
+                automationName: matchedAutomation.name,
+                webhookUrl: matchedAutomation.webhook_url
+              });
+
+              // Fetch recent messages for context
+              const { data: recentMessages } = await supabaseClient
+                .from('messages')
+                .select('*')
+                .eq('conversation_id', conversation.id)
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              // Fetch department name
+              let departmentName = null;
+              if (conversation.department_id) {
+                const { data: dept } = await supabaseClient
+                  .from('departments')
+                  .select('name')
+                  .eq('id', conversation.department_id)
+                  .single();
+                departmentName = dept?.name;
+              }
+
+              // Prepare n8n payload
+              const callbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/n8n-callback`;
+              
+              const n8nPayload = {
+                conversationId: conversation.id,
+                leadPhone: phoneNumber,
+                leadName: conversation.contact_name || data.pushName || phoneNumber,
+                department: departmentName,
+                departmentId: conversation.department_id,
+                messages: (recentMessages || []).reverse().map((msg: any) => ({
+                  id: msg.id,
+                  content: msg.content || '',
+                  type: msg.message_type,
+                  isFromMe: msg.is_from_me,
+                  senderType: msg.sender_type,
+                  createdAt: msg.created_at,
+                })),
+                rules: {
+                  noLegalAdvice: true,
+                  handoffRequired: true,
+                  canChangeStatus: matchedAutomation.trigger_config?.canChangeStatus ?? true,
+                  canMoveDepartment: matchedAutomation.trigger_config?.canMoveDepartment ?? true,
+                },
+                automation: {
+                  id: matchedAutomation.id,
+                  name: matchedAutomation.name,
+                  prompt: matchedAutomation.ai_prompt || '',
+                },
+                callbackUrl,
+              };
+
+              // Send to n8n asynchronously (don't wait for response)
+              // Use EdgeRuntime.waitUntil for background processing
+              const sendToN8n = async () => {
+                try {
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+                  const n8nResponse = await fetch(matchedAutomation.webhook_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(n8nPayload),
+                    signal: controller.signal,
+                  });
+
+                  clearTimeout(timeoutId);
+
+                  const n8nStatus = n8nResponse.status;
+                  logDebug('N8N', `n8n response`, { requestId, status: n8nStatus });
+
+                  // Log the trigger
+                  await supabaseClient
+                    .from('webhook_logs')
+                    .insert({
+                      automation_id: matchedAutomation.id,
+                      direction: 'outgoing',
+                      payload: n8nPayload as unknown as Record<string, unknown>,
+                      status_code: n8nStatus,
+                    });
+
+                  // Update automation stats - ignore if RPC doesn't exist
+                  if (n8nResponse.ok) {
+                    try {
+                      await supabaseClient.rpc('increment_automation_success', { 
+                        automation_id: matchedAutomation.id 
+                      });
+                    } catch {
+                      // RPC may not exist, ignore
+                    }
+                  }
+                } catch (n8nError) {
+                  const isTimeout = n8nError instanceof Error && n8nError.name === 'AbortError';
+                  logDebug('ERROR', isTimeout ? `n8n timeout` : `n8n error`, { 
+                    requestId, 
+                    error: n8nError instanceof Error ? n8nError.message : n8nError 
+                  });
+
+                  // Flag for human handoff on timeout/error
+                  await supabaseClient
+                    .from('conversations')
+                    .update({ 
+                      needs_human_handoff: true,
+                      current_handler: 'human',
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', conversation.id);
+
+                  // Log error
+                  await supabaseClient
+                    .from('webhook_logs')
+                    .insert({
+                      automation_id: matchedAutomation.id,
+                      direction: 'outgoing',
+                      payload: n8nPayload as unknown as Record<string, unknown>,
+                      error_message: isTimeout ? 'Timeout' : String(n8nError),
+                      status_code: isTimeout ? 408 : 500,
+                    });
+                }
+              };
+
+              // Run in background - don't await
+              sendToN8n();
+              logDebug('N8N', `n8n trigger dispatched to background`, { requestId });
+            } else {
+              logDebug('N8N', `No matching automation found`, { requestId });
+            }
+          }
+        } else {
+          logDebug('N8N', `Skipping n8n trigger`, { 
+            requestId, 
+            isFromMe, 
+            handler: conversation.current_handler,
+            needsHuman: conversation.needs_human_handoff
+          });
+        }
         break;
       }
 
