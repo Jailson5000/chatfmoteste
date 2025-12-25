@@ -312,7 +312,128 @@ function AudioPlayer({
   );
 }
 
-// Custom video player component with decryption support
+// Custom image component with decryption support
+function ImageViewer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+  const [imageOpen, setImageOpen] = useState(false);
+
+  // Check if needs decryption
+  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+
+  // Decrypt image on mount if needed
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadImage = async () => {
+      // Check memory cache first
+      const memoryCached = memoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      // Check IndexedDB cache
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        memoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      // Fetch from API
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          console.error("Failed to decrypt image:", response.error || response.data?.error);
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "image/jpeg";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        // Cache in both memory and IndexedDB
+        memoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        console.error("Error decrypting image:", err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadImage();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  const imageSrc = needsDecryption ? decryptedSrc : src;
+
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center justify-center min-w-[200px] min-h-[150px] bg-muted/50 rounded-lg">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <span className="text-xs opacity-70">Carregando imagem...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || (!imageSrc && needsDecryption)) {
+    return (
+      <div className="flex items-center justify-center min-w-[200px] min-h-[150px] bg-destructive/10 rounded-lg">
+        <div className="flex flex-col items-center gap-2">
+          <X className="h-6 w-6 text-destructive" />
+          <span className="text-xs text-destructive">Imagem não disponível</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <img
+        src={imageSrc || src}
+        alt="Imagem"
+        className="max-w-[240px] max-h-[240px] rounded-lg cursor-pointer object-cover hover:opacity-90 transition-opacity"
+        onClick={() => setImageOpen(true)}
+        onError={() => setError(true)}
+      />
+      <Dialog open={imageOpen} onOpenChange={setImageOpen}>
+        <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
+          <img
+            src={imageSrc || src}
+            alt="Imagem ampliada"
+            className="w-full h-auto rounded-lg"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function VideoPlayer({ 
   src, 
   mimeType,
@@ -440,7 +561,6 @@ export function MessageBubble({
   highlightText,
   isHighlighted = false,
 }: MessageBubbleProps) {
-  const [imageOpen, setImageOpen] = useState(false);
   const [showActions, setShowActions] = useState(false);
 
   // Determine actual status based on read_at if available
@@ -497,23 +617,12 @@ export function MessageBubble({
 
     if (isImage) {
       return (
-        <>
-          <img
-            src={mediaUrl}
-            alt="Imagem"
-            className="max-w-[240px] max-h-[240px] rounded-lg cursor-pointer object-cover hover:opacity-90 transition-opacity"
-            onClick={() => setImageOpen(true)}
-          />
-          <Dialog open={imageOpen} onOpenChange={setImageOpen}>
-            <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
-              <img
-                src={mediaUrl}
-                alt="Imagem ampliada"
-                className="w-full h-auto rounded-lg"
-              />
-            </DialogContent>
-          </Dialog>
-        </>
+        <ImageViewer 
+          src={mediaUrl} 
+          mimeType={mediaMimeType || undefined}
+          whatsappMessageId={whatsappMessageId || undefined}
+          conversationId={conversationId}
+        />
       );
     }
 
