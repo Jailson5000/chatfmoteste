@@ -48,6 +48,7 @@ function normalizeUrl(url: string): string {
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
+const SEND_MESSAGE_TIMEOUT_MS = 30000; // Longer timeout for sending messages
 
 async function fetchWithTimeout(
   url: string,
@@ -59,6 +60,11 @@ async function fetchWithTimeout(
 
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (error === "timeout" || error?.name === "AbortError") {
+      throw new Error("timeout");
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -768,7 +774,7 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Sending to ${targetRemoteJid} via ${instance.instance_name}`);
 
-        // Send message via Evolution API
+        // Send message via Evolution API with longer timeout
         const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
           method: "POST",
           headers: {
@@ -779,7 +785,7 @@ serve(async (req) => {
             number: targetRemoteJid,
             text: body.message,
           }),
-        });
+        }, SEND_MESSAGE_TIMEOUT_MS);
 
         console.log(`[Evolution API] Send message response status: ${sendResponse.status}`);
 
