@@ -18,7 +18,9 @@ type EvolutionAction =
   | "refresh_status"
   | "refresh_phone"
   | "send_message"
-  | "send_media";
+  | "send_message_async"
+  | "send_media"
+  | "get_media";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -38,6 +40,8 @@ interface EvolutionRequest {
   mediaUrl?: string;
   fileName?: string;
   caption?: string;
+  // For get_media
+  whatsappMessageId?: string;
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -733,7 +737,10 @@ serve(async (req) => {
         );
       }
 
-      case "send_message": {
+      // =========================
+      // ASYNC SEND MESSAGE (<1s response) - uses background task
+      // =========================
+      case "send_message_async": {
         if (!body.conversationId && !body.remoteJid) {
           throw new Error("conversationId or remoteJid is required");
         }
@@ -741,7 +748,8 @@ serve(async (req) => {
           throw new Error("message is required");
         }
 
-        console.log(`[Evolution API] Sending message`, { conversationId: body.conversationId, remoteJid: body.remoteJid });
+        const startTime = Date.now();
+        console.log(`[Evolution API] ASYNC Sending message`, { conversationId: body.conversationId });
 
         let targetRemoteJid = body.remoteJid;
         let conversationId = body.conversationId;
@@ -771,18 +779,159 @@ serve(async (req) => {
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
         const apiUrl = normalizeUrl(instance.api_url);
-
-        console.log(`[Evolution API] Sending to ${targetRemoteJid} via ${instance.instance_name}`);
-
-        // Evolution sendText is typically faster/more reliable with the raw phone number (no JID suffix)
         const targetNumber = (targetRemoteJid || "").split("@")[0];
+        
+        if (!targetNumber) {
+          throw new Error("remoteJid inválido para envio");
+        }
+
+        // Generate a temporary ID for the message
+        const tempMessageId = crypto.randomUUID();
+
+        // Save message to database IMMEDIATELY with pending status
+        if (conversationId) {
+          const { error: msgError } = await supabaseClient
+            .from("messages")
+            .insert({
+              id: tempMessageId,
+              conversation_id: conversationId,
+              whatsapp_message_id: tempMessageId, // Will be updated by webhook
+              content: body.message,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+            });
+
+          if (msgError) {
+            console.error("[Evolution API] Failed to save pending message:", msgError);
+          }
+
+          // Update conversation last_message_at
+          await supabaseClient
+            .from("conversations")
+            .update({ last_message_at: new Date().toISOString() })
+            .eq("id", conversationId);
+        }
+
+        console.log(`[Evolution API] ASYNC DB saved in ${Date.now() - startTime}ms, starting background send`);
+
+        // Background task: send to Evolution API
+        const backgroundSend = async () => {
+          try {
+            const sendResponse = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+              method: "POST",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                number: targetNumber,
+                text: body.message,
+              }),
+            });
+
+            if (!sendResponse.ok) {
+              const errorText = await sendResponse.text();
+              console.error(`[Evolution API] Background send failed:`, errorText);
+              // Mark message as failed in DB
+              if (conversationId) {
+                await supabaseClient
+                  .from("messages")
+                  .delete()
+                  .eq("id", tempMessageId);
+              }
+              return;
+            }
+
+            const sendData = await sendResponse.json();
+            const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id;
+            console.log(`[Evolution API] Background send completed, whatsapp_message_id: ${whatsappMessageId}`);
+
+            // Update the message with the real whatsapp_message_id
+            if (conversationId && whatsappMessageId) {
+              await supabaseClient
+                .from("messages")
+                .update({ whatsapp_message_id: whatsappMessageId })
+                .eq("id", tempMessageId);
+            }
+          } catch (error) {
+            console.error("[Evolution API] Background send error:", error);
+            // Delete failed message
+            if (conversationId) {
+              await supabaseClient
+                .from("messages")
+                .delete()
+                .eq("id", tempMessageId);
+            }
+          }
+        };
+
+        // Start background task (fire-and-forget)
+        // @ts-ignore: EdgeRuntime is available in Supabase Edge Functions
+        (globalThis as any).EdgeRuntime?.waitUntil?.(backgroundSend()) || backgroundSend();
+
+        console.log(`[Evolution API] ASYNC Response in ${Date.now() - startTime}ms`);
+
+        // Return immediately
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageId: tempMessageId,
+            async: true,
+            message: "Message queued for sending",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // =========================
+      // SYNC SEND MESSAGE (legacy, waits for Evolution response)
+      // =========================
+      case "send_message": {
+        if (!body.conversationId && !body.remoteJid) {
+          throw new Error("conversationId or remoteJid is required");
+        }
+        if (!body.message) {
+          throw new Error("message is required");
+        }
+
+        console.log(`[Evolution API] Sending message`, { conversationId: body.conversationId, remoteJid: body.remoteJid });
+
+        let targetRemoteJid = body.remoteJid;
+        let conversationId = body.conversationId;
+        let instanceId = body.instanceId;
+
+        if (conversationId && !targetRemoteJid) {
+          const { data: conversation, error: convError } = await supabaseClient
+            .from("conversations")
+            .select("remote_jid, whatsapp_instance_id")
+            .eq("id", conversationId)
+            .eq("law_firm_id", lawFirmId)
+            .single();
+
+          if (convError || !conversation) {
+            throw new Error("Conversation not found");
+          }
+
+          targetRemoteJid = conversation.remote_jid;
+          instanceId = conversation.whatsapp_instance_id;
+        }
+
+        if (!instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+        const targetNumber = (targetRemoteJid || "").split("@")[0];
+        
         if (!targetNumber) {
           throw new Error("remoteJid inválido para envio");
         }
 
         const startedAt = Date.now();
 
-        // Send message via Evolution API with longer timeout
         const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
           method: "POST",
           headers: {
@@ -799,19 +948,14 @@ serve(async (req) => {
 
         if (!sendResponse.ok) {
           const errorText = await safeReadResponseText(sendResponse);
-          console.error(`[Evolution API] Send message failed:`, errorText);
           throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
         }
 
         const sendData = await sendResponse.json();
-        console.log(`[Evolution API] Message sent successfully:`, JSON.stringify(sendData));
-
-        // Extract the message ID from the response
         const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
 
-        // Save message to database
         if (conversationId) {
-          const { data: savedMessage, error: msgError } = await supabaseClient
+          await supabaseClient
             .from("messages")
             .insert({
               conversation_id: conversationId,
@@ -821,17 +965,8 @@ serve(async (req) => {
               is_from_me: true,
               sender_type: "human",
               ai_generated: false,
-            })
-            .select()
-            .single();
+            });
 
-          if (msgError) {
-            console.error("[Evolution API] Failed to save message to DB:", msgError);
-          } else {
-            console.log(`[Evolution API] Message saved to DB with ID: ${savedMessage.id}`);
-          }
-
-          // Update conversation last_message_at
           await supabaseClient
             .from("conversations")
             .update({ last_message_at: new Date().toISOString() })
@@ -843,6 +978,74 @@ serve(async (req) => {
             success: true,
             messageId: whatsappMessageId,
             message: "Message sent successfully",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // =========================
+      // GET MEDIA (decrypt WhatsApp .enc media)
+      // =========================
+      case "get_media": {
+        if (!body.conversationId) {
+          throw new Error("conversationId is required");
+        }
+        if (!body.whatsappMessageId) {
+          throw new Error("whatsappMessageId is required");
+        }
+
+        console.log(`[Evolution API] Getting media for message: ${body.whatsappMessageId}`);
+
+        // Get instance from conversation
+        const { data: conversation, error: convError } = await supabaseClient
+          .from("conversations")
+          .select("whatsapp_instance_id")
+          .eq("id", body.conversationId)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (convError || !conversation?.whatsapp_instance_id) {
+          throw new Error("Conversation not found");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, conversation.whatsapp_instance_id);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        // Call Evolution API to get decrypted media
+        const mediaResponse = await fetchWithTimeout(
+          `${apiUrl}/chat/getBase64FromMediaMessage/${instance.instance_name}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: instance.api_key || "",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              message: {
+                key: {
+                  id: body.whatsappMessageId,
+                },
+              },
+              convertToMp4: false,
+            }),
+          },
+          DEFAULT_TIMEOUT_MS
+        );
+
+        if (!mediaResponse.ok) {
+          const errorText = await safeReadResponseText(mediaResponse);
+          console.error(`[Evolution API] Get media failed:`, errorText);
+          throw new Error(simplifyEvolutionError(mediaResponse.status, errorText));
+        }
+
+        const mediaData = await mediaResponse.json();
+        console.log(`[Evolution API] Media retrieved, base64 length: ${mediaData.base64?.length || 0}`);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            base64: mediaData.base64,
+            mimetype: mediaData.mimetype,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
