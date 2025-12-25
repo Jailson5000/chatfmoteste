@@ -1,6 +1,6 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useRef, ReactNode, useEffect } from "react";
+import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { QuotedMessage } from "./ReplyPreview";
 import { Slider } from "@/components/ui/slider";
+import { supabase } from "@/integrations/supabase/client";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -23,6 +24,8 @@ interface MessageBubbleProps {
   messageType?: string;
   status?: MessageStatus;
   readAt?: string | null;
+  whatsappMessageId?: string | null;
+  conversationId?: string;
   replyTo?: {
     id: string;
     content: string | null;
@@ -34,13 +37,84 @@ interface MessageBubbleProps {
   isHighlighted?: boolean;
 }
 
-// Custom audio player component for better control
-function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
+// Simple in-memory cache for decrypted media
+const mediaCache = new Map<string, string>();
+
+// Check if URL is encrypted WhatsApp media
+function isEncryptedMedia(url: string): boolean {
+  return url.includes(".enc") || url.includes("mmg.whatsapp.net");
+}
+
+// Custom audio player component with decryption support
+function AudioPlayer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+
+  // Check if needs decryption
+  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+
+  // Decrypt audio on mount if needed
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    // Check cache first
+    const cached = mediaCache.get(whatsappMessageId!);
+    if (cached) {
+      setDecryptedSrc(cached);
+      return;
+    }
+
+    const decrypt = async () => {
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          console.error("Failed to decrypt audio:", response.error || response.data?.error);
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "audio/ogg";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        // Cache the result
+        mediaCache.set(whatsappMessageId!, dataUrl);
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        console.error("Error decrypting audio:", err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    decrypt();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  // Use decrypted source or original
+  const audioSrc = needsDecryption ? decryptedSrc : src;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -49,7 +123,12 @@ function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
     const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
     const handleDurationChange = () => setDuration(audio.duration);
     const handleEnded = () => setIsPlaying(false);
-    const handleError = () => setError(true);
+    const handleError = () => {
+      // Only set error if we're not still decrypting
+      if (!isDecrypting && audioSrc) {
+        setError(true);
+      }
+    };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('durationchange', handleDurationChange);
@@ -62,11 +141,11 @@ function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
     };
-  }, []);
+  }, [isDecrypting, audioSrc]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !audioSrc) return;
 
     if (isPlaying) {
       audio.pause();
@@ -91,7 +170,25 @@ function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  if (error) {
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center gap-3 min-w-[220px] max-w-[280px]">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-10 w-10 rounded-full flex-shrink-0"
+          disabled
+        >
+          <Loader2 className="h-5 w-5 animate-spin" />
+        </Button>
+        <div className="flex-1">
+          <span className="text-xs opacity-70">Carregando áudio...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || (!audioSrc && needsDecryption)) {
     return (
       <div className="flex items-center gap-2 min-w-[200px] text-xs opacity-70">
         <Play className="h-4 w-4" />
@@ -102,12 +199,13 @@ function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
 
   return (
     <div className="flex items-center gap-3 min-w-[220px] max-w-[280px]">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
       <Button
         variant="ghost"
         size="icon"
         className="h-10 w-10 rounded-full flex-shrink-0"
         onClick={togglePlay}
+        disabled={!audioSrc}
       >
         {isPlaying ? (
           <Pause className="h-5 w-5" />
@@ -122,6 +220,7 @@ function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
           step={0.1}
           onValueChange={handleSeek}
           className="cursor-pointer"
+          disabled={!audioSrc}
         />
         <div className="flex justify-between text-xs opacity-70">
           <span>{formatTime(currentTime)}</span>
@@ -143,6 +242,8 @@ export function MessageBubble({
   messageType,
   status = "sent",
   readAt,
+  whatsappMessageId,
+  conversationId,
   replyTo,
   onReply,
   onScrollToMessage,
@@ -214,7 +315,14 @@ export function MessageBubble({
     }
 
     if (isAudio) {
-      return <AudioPlayer src={mediaUrl} mimeType={mediaMimeType || undefined} />;
+      return (
+        <AudioPlayer 
+          src={mediaUrl} 
+          mimeType={mediaMimeType || undefined}
+          whatsappMessageId={whatsappMessageId || undefined}
+          conversationId={conversationId}
+        />
+      );
     }
 
     if (isVideo) {

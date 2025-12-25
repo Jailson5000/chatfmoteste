@@ -82,6 +82,7 @@ interface Message {
   status?: MessageStatus;
   read_at?: string | null;
   reply_to_message_id?: string | null;
+  whatsapp_message_id?: string | null;
   reply_to?: {
     id: string;
     content: string | null;
@@ -225,7 +226,7 @@ export default function Conversations() {
       setMessagesLoading(true);
       const { data, error } = await supabase
         .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id")
+        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id")
         .eq("conversation_id", selectedConversationId)
         .order("created_at", { ascending: true });
       
@@ -372,9 +373,10 @@ export default function Conversations() {
     setMessages(prev => [...prev, newMessage]);
     
     try {
+      // Use async send for <1s response
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
-          action: "send_message",
+          action: "send_message_async",
           conversationId: selectedConversationId,
           message: messageToSend,
         },
@@ -388,7 +390,7 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mensagem");
       }
 
-      // Update to "sent" after successful response
+      // Update to "sent" - message is now queued
       setMessages(prev => prev.map(m => 
         m.id === tempId 
           ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
@@ -1039,6 +1041,9 @@ export default function Conversations() {
                         mediaMimeType={msg.media_mime_type}
                         messageType={msg.message_type}
                         status={msg.status || "sent"}
+                        readAt={msg.read_at}
+                        whatsappMessageId={msg.whatsapp_message_id}
+                        conversationId={selectedConversationId || undefined}
                         replyTo={msg.reply_to}
                         onReply={handleReply}
                         onScrollToMessage={scrollToMessage}
