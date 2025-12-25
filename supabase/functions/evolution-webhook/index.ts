@@ -75,12 +75,21 @@ function normalizeEventName(event: string): string {
   return normalized;
 }
 
+// Detailed logging helper
+function logDebug(section: string, message: string, data?: unknown) {
+  const timestamp = new Date().toISOString();
+  const dataStr = data ? ` | Data: ${JSON.stringify(data)}` : '';
+  console.log(`[${timestamp}] [Evolution Webhook] [${section}] ${message}${dataStr}`);
+}
+
 // Update instance with last webhook event info
 async function updateInstanceWebhookEvent(
   supabaseClient: any,
   instanceId: string,
   eventName: string
 ) {
+  logDebug('DIAG', `Updating last_webhook_event to "${eventName}" for instance ${instanceId}`);
+  
   const { error } = await supabaseClient
     .from('whatsapp_instances')
     .update({
@@ -91,12 +100,15 @@ async function updateInstanceWebhookEvent(
     .eq('id', instanceId);
 
   if (error) {
-    console.log(`[Evolution Webhook] Failed to update last_webhook_event (non-fatal):`, error);
+    logDebug('DIAG', `Failed to update last_webhook_event (non-fatal)`, error);
+  } else {
+    logDebug('DIAG', `Successfully updated last_webhook_event`);
   }
 }
 
 serve(async (req) => {
-  console.log(`[Evolution Webhook] Received ${req.method} request`);
+  const requestId = crypto.randomUUID().slice(0, 8);
+  logDebug('REQUEST', `Received ${req.method} request`, { requestId });
   
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -105,7 +117,7 @@ serve(async (req) => {
 
   // Only accept POST requests
   if (req.method !== 'POST') {
-    console.log(`[Evolution Webhook] Rejected non-POST request: ${req.method}`);
+    logDebug('REQUEST', `Rejected non-POST request: ${req.method}`, { requestId });
     return new Response(
       JSON.stringify({ error: 'Method not allowed' }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -119,13 +131,14 @@ serve(async (req) => {
     );
 
     const rawBody = await req.text();
-    console.log(`[Evolution Webhook] Raw body (first 500 chars):`, rawBody.substring(0, 500));
+    logDebug('PAYLOAD', `Raw body length: ${rawBody.length} chars`, { requestId });
+    logDebug('PAYLOAD', `First 800 chars: ${rawBody.substring(0, 800)}`, { requestId });
     
     let body: EvolutionEvent;
     try {
       body = JSON.parse(rawBody);
     } catch (parseError) {
-      console.error(`[Evolution Webhook] Failed to parse JSON:`, parseError);
+      logDebug('ERROR', `Failed to parse JSON`, { requestId, error: parseError });
       return new Response(
         JSON.stringify({ success: false, error: 'Invalid JSON' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -133,9 +146,18 @@ serve(async (req) => {
     }
     
     const normalizedEvent = normalizeEventName(body.event);
-    console.log(`[Evolution Webhook] Event: ${body.event} (normalized: ${normalizedEvent}), Instance: ${body.instance}`);
+    logDebug('EVENT', `Received event`, { 
+      requestId, 
+      event: body.event, 
+      normalized: normalizedEvent, 
+      instance: body.instance,
+      destination: body.destination,
+      server_url: body.server_url
+    });
 
     // Find the WhatsApp instance by instance_name
+    logDebug('DB', `Looking up instance: ${body.instance}`, { requestId });
+    
     const { data: instance, error: instanceError } = await supabaseClient
       .from('whatsapp_instances')
       .select('*, law_firms(id, name)')
@@ -143,7 +165,7 @@ serve(async (req) => {
       .single();
 
     if (instanceError || !instance) {
-      console.log(`[Evolution Webhook] Instance not found: ${body.instance}, error:`, instanceError);
+      logDebug('DB', `Instance not found: ${body.instance}`, { requestId, error: instanceError });
       // Return 200 to avoid Evolution API retrying
       return new Response(
         JSON.stringify({ success: true, message: 'Instance not found, event ignored' }),
@@ -151,7 +173,13 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[Evolution Webhook] Found instance: ${instance.id} for law firm: ${instance.law_firm_id}`);
+    logDebug('DB', `Found instance`, { 
+      requestId, 
+      instanceId: instance.id, 
+      lawFirmId: instance.law_firm_id,
+      instanceName: instance.instance_name
+    });
+    
     const lawFirmId = instance.law_firm_id;
 
     // Update last webhook event for diagnostics
@@ -161,7 +189,7 @@ serve(async (req) => {
     switch (normalizedEvent) {
       case 'connection.update': {
         const data = body.data as ConnectionUpdateData;
-        console.log(`[Evolution Webhook] Connection update: ${data.state}`);
+        logDebug('CONNECTION', `Connection state update`, { requestId, state: data.state, statusReason: data.statusReason });
         
         let dbStatus = 'disconnected';
         if (data.state === 'open') {
@@ -182,15 +210,15 @@ serve(async (req) => {
           .eq('id', instance.id);
 
         if (updateError) {
-          console.error(`[Evolution Webhook] Failed to update status:`, updateError);
+          logDebug('ERROR', `Failed to update status`, { requestId, error: updateError });
         } else {
-          console.log(`[Evolution Webhook] Updated instance ${instance.instance_name} status to ${dbStatus}`);
+          logDebug('CONNECTION', `Updated instance status to ${dbStatus}`, { requestId });
         }
         break;
       }
 
       case 'qrcode.updated': {
-        console.log(`[Evolution Webhook] QR code updated for instance: ${body.instance}`);
+        logDebug('QRCODE', `QR code updated for instance`, { requestId, instance: body.instance });
         
         // Update status to connecting/awaiting_qr
         await supabaseClient
@@ -205,10 +233,17 @@ serve(async (req) => {
 
       case 'messages.upsert': {
         const data = body.data as MessageData;
-        console.log(`[Evolution Webhook] New message - remoteJid: ${data.key?.remoteJid}, fromMe: ${data.key?.fromMe}`);
+        logDebug('MESSAGE', `New message received`, { 
+          requestId, 
+          remoteJid: data.key?.remoteJid, 
+          fromMe: data.key?.fromMe,
+          messageId: data.key?.id,
+          pushName: data.pushName,
+          messageType: data.messageType
+        });
         
         if (!data.key?.remoteJid) {
-          console.log(`[Evolution Webhook] No remoteJid in message, skipping`);
+          logDebug('MESSAGE', `No remoteJid in message, skipping`, { requestId });
           break;
         }
 
@@ -217,9 +252,11 @@ serve(async (req) => {
         const phoneNumber = remoteJid.split('@')[0];
         const isFromMe = data.key.fromMe;
 
-        console.log(`[Evolution Webhook] Processing message from ${phoneNumber}, isFromMe: ${isFromMe}`);
+        logDebug('MESSAGE', `Processing message`, { requestId, phoneNumber, isFromMe });
 
         // Get or create conversation
+        logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid}`, { requestId });
+        
         let { data: conversation, error: convError } = await supabaseClient
           .from('conversations')
           .select('*')
@@ -230,7 +267,7 @@ serve(async (req) => {
         if (convError && convError.code === 'PGRST116') {
           // Conversation doesn't exist, create it
           const contactName = data.pushName || phoneNumber;
-          console.log(`[Evolution Webhook] Creating new conversation for: ${contactName}`);
+          logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
           const { data: newConv, error: createError } = await supabaseClient
             .from('conversations')
@@ -248,16 +285,16 @@ serve(async (req) => {
             .single();
 
           if (createError) {
-            console.error(`[Evolution Webhook] Failed to create conversation:`, createError);
+            logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
             break;
           }
           conversation = newConv;
-          console.log(`[Evolution Webhook] Created new conversation: ${conversation.id}`);
+          logDebug('DB', `Created new conversation`, { requestId, conversationId: conversation.id });
         } else if (convError) {
-          console.error(`[Evolution Webhook] Error fetching conversation:`, convError);
+          logDebug('ERROR', `Error fetching conversation`, { requestId, error: convError });
           break;
         } else {
-          console.log(`[Evolution Webhook] Found existing conversation: ${conversation.id}`);
+          logDebug('DB', `Found existing conversation`, { requestId, conversationId: conversation.id });
         }
 
         // Extract message content
@@ -291,10 +328,18 @@ serve(async (req) => {
           mediaMimeType = data.message.documentMessage.mimetype || 'application/octet-stream';
         }
 
-        console.log(`[Evolution Webhook] Message content: "${messageContent.substring(0, 50)}...", type: ${messageType}`);
+        logDebug('MESSAGE', `Message content extracted`, { 
+          requestId, 
+          contentLength: messageContent.length,
+          contentPreview: messageContent.substring(0, 100),
+          type: messageType,
+          hasMedia: !!mediaUrl
+        });
 
         // Save message
-        const { error: msgError } = await supabaseClient
+        logDebug('DB', `Saving message to database`, { requestId, messageId: data.key.id });
+        
+        const { data: savedMessage, error: msgError } = await supabaseClient
           .from('messages')
           .insert({
             conversation_id: conversation.id,
@@ -306,21 +351,23 @@ serve(async (req) => {
             is_from_me: isFromMe,
             sender_type: isFromMe ? 'system' : 'client',
             ai_generated: false,
-          });
+          })
+          .select()
+          .single();
 
         if (msgError) {
           // Check if it's a duplicate message
           if (msgError.code === '23505') {
-            console.log(`[Evolution Webhook] Duplicate message ignored: ${data.key.id}`);
+            logDebug('MESSAGE', `Duplicate message ignored`, { requestId, messageId: data.key.id });
           } else {
-            console.error(`[Evolution Webhook] Failed to save message:`, msgError);
+            logDebug('ERROR', `Failed to save message`, { requestId, error: msgError, code: msgError.code });
           }
         } else {
-          console.log(`[Evolution Webhook] Saved message: ${data.key.id}`);
+          logDebug('MESSAGE', `Message saved successfully`, { requestId, dbMessageId: savedMessage?.id, whatsappId: data.key.id });
         }
 
         // Update conversation last_message_at
-        await supabaseClient
+        const { error: updateConvError } = await supabaseClient
           .from('conversations')
           .update({ 
             last_message_at: new Date().toISOString(),
@@ -328,27 +375,31 @@ serve(async (req) => {
           })
           .eq('id', conversation.id);
 
-        console.log(`[Evolution Webhook] Updated conversation last_message_at`);
+        if (updateConvError) {
+          logDebug('ERROR', `Failed to update conversation last_message_at`, { requestId, error: updateConvError });
+        } else {
+          logDebug('DB', `Updated conversation last_message_at`, { requestId, conversationId: conversation.id });
+        }
         break;
       }
 
       case 'messages.update': {
-        console.log(`[Evolution Webhook] Message update event received`);
+        logDebug('MESSAGE', `Message update event received`, { requestId, data: body.data });
         break;
       }
 
       case 'messages.delete': {
-        console.log(`[Evolution Webhook] Message delete event received`);
+        logDebug('MESSAGE', `Message delete event received`, { requestId, data: body.data });
         break;
       }
 
       case 'send.message': {
-        console.log(`[Evolution Webhook] Send message event received`);
+        logDebug('MESSAGE', `Send message event received`, { requestId, data: body.data });
         break;
       }
 
       default:
-        console.log(`[Evolution Webhook] Unhandled event: ${body.event} (normalized: ${normalizedEvent})`);
+        logDebug('EVENT', `Unhandled event`, { requestId, event: body.event, normalized: normalizedEvent });
     }
 
     // Log webhook event for auditing
@@ -360,17 +411,20 @@ serve(async (req) => {
           payload: body as unknown as Record<string, unknown>,
           status_code: 200,
         });
+      logDebug('AUDIT', `Webhook logged successfully`, { requestId });
     } catch (logError) {
-      console.log(`[Evolution Webhook] Failed to log webhook (non-fatal):`, logError);
+      logDebug('AUDIT', `Failed to log webhook (non-fatal)`, { requestId, error: logError });
     }
 
+    logDebug('REQUEST', `Request completed successfully`, { requestId, event: body.event });
+
     return new Response(
-      JSON.stringify({ success: true, event: body.event }),
+      JSON.stringify({ success: true, event: body.event, requestId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('[Evolution Webhook] Error:', error);
+    logDebug('ERROR', `Unhandled error`, { error: error instanceof Error ? error.message : error });
     const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
     
     return new Response(

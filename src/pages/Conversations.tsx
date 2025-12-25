@@ -201,26 +201,61 @@ export default function Conversations() {
   }, [mappedConversations, conversationFilters, searchQuery, activeTab]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversationId) return;
+    if (!messageInput.trim() || !selectedConversationId || !selectedConversation) return;
     
-    // For now, just add to local state - real send would go through API
-    const newMessage: Message = {
-      id: crypto.randomUUID(),
-      content: messageInput,
-      created_at: new Date().toISOString(),
-      is_from_me: true,
-      sender_type: "human",
-      ai_generated: false,
-    };
+    const messageToSend = messageInput.trim();
+    setMessageInput(""); // Clear input immediately for better UX
     
-    setMessages(prev => [...prev, newMessage]);
-    setMessageInput("");
-    
-    // TODO: Implement actual message sending via API
-    toast({
-      title: "Mensagem enviada",
-      description: "Funcionalidade de envio será integrada com a API do WhatsApp.",
-    });
+    try {
+      // Send message via Evolution API
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        throw new Error("Não autenticado");
+      }
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_message",
+          conversationId: selectedConversationId,
+          message: messageToSend,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Falha ao enviar mensagem");
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar mensagem");
+      }
+
+      // Message will appear via realtime subscription when webhook receives it
+      // Or we can optimistically add it to local state
+      const newMessage: Message = {
+        id: response.data.messageId || crypto.randomUUID(),
+        content: messageToSend,
+        created_at: new Date().toISOString(),
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
+      
+      toast({
+        title: "Mensagem enviada",
+        description: "Mensagem enviada com sucesso!",
+      });
+    } catch (error) {
+      console.error("Erro ao enviar mensagem:", error);
+      setMessageInput(messageToSend); // Restore message on error
+      toast({
+        title: "Erro ao enviar",
+        description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSelectConversation = (id: string) => {

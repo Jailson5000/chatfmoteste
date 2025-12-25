@@ -16,7 +16,8 @@ type EvolutionAction =
   | "get_settings"
   | "set_settings"
   | "refresh_status"
-  | "refresh_phone";
+  | "refresh_phone"
+  | "send_message";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -26,6 +27,10 @@ interface EvolutionRequest {
   instanceId?: string;
   rejectCall?: boolean;
   msgCall?: string;
+  // For send_message
+  conversationId?: string;
+  message?: string;
+  remoteJid?: string;
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -710,6 +715,113 @@ serve(async (req) => {
             success: true,
             phoneNumber,
             instance: updatedInstance,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "send_message": {
+        if (!body.conversationId && !body.remoteJid) {
+          throw new Error("conversationId or remoteJid is required");
+        }
+        if (!body.message) {
+          throw new Error("message is required");
+        }
+
+        console.log(`[Evolution API] Sending message`, { conversationId: body.conversationId, remoteJid: body.remoteJid });
+
+        let targetRemoteJid = body.remoteJid;
+        let conversationId = body.conversationId;
+        let instanceId = body.instanceId;
+
+        // If we have a conversationId, get the remoteJid and instanceId from it
+        if (conversationId && !targetRemoteJid) {
+          const { data: conversation, error: convError } = await supabaseClient
+            .from("conversations")
+            .select("remote_jid, whatsapp_instance_id")
+            .eq("id", conversationId)
+            .eq("law_firm_id", lawFirmId)
+            .single();
+
+          if (convError || !conversation) {
+            console.error("[Evolution API] Conversation not found:", convError);
+            throw new Error("Conversation not found");
+          }
+
+          targetRemoteJid = conversation.remote_jid;
+          instanceId = conversation.whatsapp_instance_id;
+        }
+
+        if (!instanceId) {
+          throw new Error("instanceId is required (either directly or via conversationId)");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        console.log(`[Evolution API] Sending to ${targetRemoteJid} via ${instance.instance_name}`);
+
+        // Send message via Evolution API
+        const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+          method: "POST",
+          headers: {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            number: targetRemoteJid,
+            text: body.message,
+          }),
+        });
+
+        console.log(`[Evolution API] Send message response status: ${sendResponse.status}`);
+
+        if (!sendResponse.ok) {
+          const errorText = await safeReadResponseText(sendResponse);
+          console.error(`[Evolution API] Send message failed:`, errorText);
+          throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
+        }
+
+        const sendData = await sendResponse.json();
+        console.log(`[Evolution API] Message sent successfully:`, JSON.stringify(sendData));
+
+        // Extract the message ID from the response
+        const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
+
+        // Save message to database
+        if (conversationId) {
+          const { data: savedMessage, error: msgError } = await supabaseClient
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              whatsapp_message_id: whatsappMessageId,
+              content: body.message,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+            })
+            .select()
+            .single();
+
+          if (msgError) {
+            console.error("[Evolution API] Failed to save message to DB:", msgError);
+          } else {
+            console.log(`[Evolution API] Message saved to DB with ID: ${savedMessage.id}`);
+          }
+
+          // Update conversation last_message_at
+          await supabaseClient
+            .from("conversations")
+            .update({ last_message_at: new Date().toISOString() })
+            .eq("id", conversationId);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageId: whatsappMessageId,
+            message: "Message sent successfully",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
