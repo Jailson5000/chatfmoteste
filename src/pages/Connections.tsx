@@ -474,6 +474,52 @@ export default function Connections() {
         </CardContent>
       </Card>
 
+      {/* Webhook Info Card */}
+      {evolutionUrl && evolutionKey && (
+        <Card className="border-info/30 bg-info/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Settings2 className="h-4 w-4 text-info" />
+              Configuração do Webhook na Evolution API
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Configure o webhook na sua Evolution API apontando para a URL abaixo. 
+                Isso permite que as mensagens do WhatsApp cheguem ao sistema.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-3 py-2 bg-background rounded-md text-xs font-mono border overflow-x-auto">
+                  {import.meta.env.VITE_SUPABASE_URL}/functions/v1/evolution-webhook
+                </code>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(
+                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/evolution-webhook`
+                    );
+                    toast({
+                      title: "URL copiada",
+                      description: "Cole na configuração do webhook da Evolution API",
+                    });
+                  }}
+                >
+                  Copiar
+                </Button>
+              </div>
+            </div>
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                <strong>Fluxo:</strong> Evolution API → Backend (webhook) → n8n (automação) → Backend (callback) → Evolution API → WhatsApp
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Instances */}
       <Card>
         <CardHeader>
