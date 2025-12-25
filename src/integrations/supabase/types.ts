@@ -946,6 +946,8 @@ export type Database = {
           id: string
           instance_id: string | null
           instance_name: string
+          last_webhook_at: string | null
+          last_webhook_event: string | null
           law_firm_id: string
           phone_number: string | null
           status: string
@@ -959,6 +961,8 @@ export type Database = {
           id?: string
           instance_id?: string | null
           instance_name: string
+          last_webhook_at?: string | null
+          last_webhook_event?: string | null
           law_firm_id: string
           phone_number?: string | null
           status?: string
@@ -972,6 +976,8 @@ export type Database = {
           id?: string
           instance_id?: string | null
           instance_name?: string
+          last_webhook_at?: string | null
+          last_webhook_event?: string | null
           law_firm_id?: string
           phone_number?: string | null
           status?: string

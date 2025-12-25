@@ -12,6 +12,8 @@ import {
   EyeOff,
   Loader2,
   AlertCircle,
+  Phone,
+  Activity,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -60,6 +68,8 @@ export default function Connections() {
     configureWebhook,
     getSettings,
     setSettings,
+    refreshStatus,
+    refreshPhone,
     refetch,
   } = useWhatsAppInstances();
 
@@ -489,79 +499,152 @@ export default function Connections() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Telefone</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Rejeitar ligações</TableHead>
-                  <TableHead>Última Atualização</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {instances.map((instance) => {
-                  const rejectCall = rejectCalls[instance.id] ?? false;
-                  const isBusy = rejectBusyId === instance.id;
-                  const canToggle = instance.status === "connected";
+            <TooltipProvider>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Telefone</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Último Evento</TableHead>
+                    <TableHead>Rejeitar ligações</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {instances.map((instance) => {
+                    const rejectCall = rejectCalls[instance.id] ?? false;
+                    const isBusy = rejectBusyId === instance.id;
+                    const canToggle = instance.status === "connected";
+                    const lastWebhookAt = (instance as any).last_webhook_at;
+                    const lastWebhookEvent = (instance as any).last_webhook_event;
 
-                  return (
-                    <TableRow key={instance.id}>
-                      <TableCell className="font-medium">{instance.instance_name}</TableCell>
-                      <TableCell>{instance.phone_number || "—"}</TableCell>
-                      <TableCell>{getStatusBadge(instance.status)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-start gap-2">
-                          <Switch
-                            checked={rejectCall}
-                            onCheckedChange={(checked) => handleToggleRejectCalls(instance, checked)}
-                            disabled={!canToggle || isBusy}
-                          />
-                          <span className="text-xs text-muted-foreground">{rejectCall ? "Lig." : "Aceitar"}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {instance.updated_at ? new Date(instance.updated_at).toLocaleString("pt-BR") : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-1 justify-end">
-                          {instance.status !== "connected" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleConnectInstance(instance)}
-                              disabled={getQRCode.isPending}
-                            >
-                              <QrCode className="h-4 w-4 mr-1" />
-                              Conectar
-                            </Button>
+                    return (
+                      <TableRow key={instance.id}>
+                        <TableCell className="font-medium">{instance.instance_name}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span>{instance.phone_number || "—"}</span>
+                            {instance.status === "connected" && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => refreshPhone.mutate(instance.id)}
+                                    disabled={refreshPhone.isPending}
+                                  >
+                                    {refreshPhone.isPending ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Phone className="h-3 w-3" />
+                                    )}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Atualizar número</TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {getStatusBadge(instance.status)}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => refreshStatus.mutate(instance.id)}
+                                  disabled={refreshStatus.isPending}
+                                >
+                                  {refreshStatus.isPending ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3 w-3" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Atualizar status</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {lastWebhookEvent ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1 text-xs">
+                                  <Activity className="h-3 w-3 text-success" />
+                                  <span className="truncate max-w-[100px]">{lastWebhookEvent}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Evento: {lastWebhookEvent}</p>
+                                <p>
+                                  {lastWebhookAt
+                                    ? new Date(lastWebhookAt).toLocaleString("pt-BR")
+                                    : "—"}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Nenhum</span>
                           )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => configureWebhook.mutate(instance.id)}
-                            disabled={configureWebhook.isPending}
-                            title="Reconfigurar webhook"
-                          >
-                            <Settings2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteInstance(instance.id)}
-                            disabled={deleteInstance.isPending}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-start gap-2">
+                            <Switch
+                              checked={rejectCall}
+                              onCheckedChange={(checked) => handleToggleRejectCalls(instance, checked)}
+                              disabled={!canToggle || isBusy}
+                            />
+                            <span className="text-xs text-muted-foreground">{rejectCall ? "Lig." : "Aceitar"}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex gap-1 justify-end">
+                            {instance.status !== "connected" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleConnectInstance(instance)}
+                                disabled={getQRCode.isPending}
+                              >
+                                <QrCode className="h-4 w-4 mr-1" />
+                                Conectar
+                              </Button>
+                            )}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => configureWebhook.mutate(instance.id)}
+                                  disabled={configureWebhook.isPending}
+                                >
+                                  <Settings2 className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Reconfigurar webhook</TooltipContent>
+                            </Tooltip>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteInstance(instance.id)}
+                              disabled={deleteInstance.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TooltipProvider>
           )}
         </CardContent>
       </Card>

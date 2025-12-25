@@ -29,6 +29,7 @@ interface EvolutionResponse {
   message?: string;
   evolutionState?: string;
   settings?: EvolutionSettings;
+  phoneNumber?: string | null;
 }
 
 function normalizeApiUrl(url: string): string {
@@ -311,6 +312,74 @@ export function useWhatsAppInstances() {
     },
   });
 
+  const refreshStatus = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Refreshing status for:", instanceId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "refresh_status",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to refresh status");
+
+      return response.data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Status atualizado",
+        description: "O status da instância foi atualizado.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar status",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const refreshPhone = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Refreshing phone for:", instanceId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "refresh_phone",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to refresh phone");
+
+      return response.data;
+    },
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Número atualizado",
+        description: data.phoneNumber ? `Número: ${data.phoneNumber}` : "Número não encontrado",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar número",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     isLoading,
@@ -324,5 +393,7 @@ export function useWhatsAppInstances() {
     configureWebhook,
     getSettings,
     setSettings,
+    refreshStatus,
+    refreshPhone,
   };
 }
