@@ -149,11 +149,12 @@ function ConversationCard({ conversation, isDragging, onDragStart, onClick }: Co
 }
 
 export default function Kanban() {
-  const { departments, isLoading: deptsLoading } = useDepartments();
+  const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
   const { conversations, isLoading: convsLoading, updateConversationDepartment, transferHandler } = useConversations();
   const { tags } = useTags();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
+  const [draggedDepartment, setDraggedDepartment] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<typeof conversations[0] | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -272,6 +273,35 @@ export default function Kanban() {
       });
     }
     setDraggedConversation(null);
+  };
+
+  // Department drag handlers
+  const handleDepartmentDragStart = (departmentId: string) => {
+    setDraggedDepartment(departmentId);
+  };
+
+  const handleDepartmentDrop = (targetDepartmentId: string) => {
+    if (!draggedDepartment || draggedDepartment === targetDepartmentId) {
+      setDraggedDepartment(null);
+      return;
+    }
+
+    const currentIndex = activeDepartments.findIndex(d => d.id === draggedDepartment);
+    const targetIndex = activeDepartments.findIndex(d => d.id === targetDepartmentId);
+    
+    if (currentIndex === -1 || targetIndex === -1) {
+      setDraggedDepartment(null);
+      return;
+    }
+
+    // Create new order
+    const newOrder = [...activeDepartments];
+    const [removed] = newOrder.splice(currentIndex, 1);
+    newOrder.splice(targetIndex, 0, removed);
+
+    // Update positions
+    reorderDepartments.mutate(newOrder.map(d => d.id));
+    setDraggedDepartment(null);
   };
 
   const handleConversationClick = (conversation: typeof conversations[0]) => {
@@ -423,17 +453,27 @@ export default function Kanban() {
           {/* Department columns */}
           {activeDepartments.map((department) => {
             const departmentConversations = getConversationsByDepartment(department.id);
+            const isDraggingThis = draggedDepartment === department.id;
+            
             return (
               <div
                 key={department.id}
-                className="w-72 md:w-80 flex-shrink-0"
+                className={cn(
+                  "w-72 md:w-80 flex-shrink-0 transition-all",
+                  isDraggingThis && "opacity-50 scale-95"
+                )}
                 onDragOver={(e) => {
                   e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
+                  // Only show drop effect if dragging a conversation
+                  if (draggedConversation) {
+                    e.dataTransfer.dropEffect = "move";
+                  }
                 }}
                 onDragEnter={(e) => {
                   e.preventDefault();
-                  e.currentTarget.classList.add("ring-2", "ring-primary/50");
+                  if (draggedConversation) {
+                    e.currentTarget.classList.add("ring-2", "ring-primary/50");
+                  }
                 }}
                 onDragLeave={(e) => {
                   e.currentTarget.classList.remove("ring-2", "ring-primary/50");
@@ -441,24 +481,51 @@ export default function Kanban() {
                 onDrop={(e) => {
                   e.preventDefault();
                   e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-                  handleConversationDrop(department.id);
+                  if (draggedConversation) {
+                    handleConversationDrop(department.id);
+                  }
                 }}
               >
                 <div 
-                  className="rounded-xl border"
+                  className={cn(
+                    "rounded-xl border transition-shadow",
+                    draggedDepartment && !isDraggingThis && "hover:ring-2 hover:ring-primary/30"
+                  )}
                   style={{ 
                     backgroundColor: `${department.color}08`,
                     borderColor: `${department.color}30`
                   }}
                 >
+                  {/* Draggable header */}
                   <div 
-                    className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl"
+                    className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl cursor-grab active:cursor-grabbing"
                     style={{ 
                       borderColor: `${department.color}30`,
                       backgroundColor: `${department.color}10`
                     }}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("department", department.id);
+                      e.dataTransfer.effectAllowed = "move";
+                      handleDepartmentDragStart(department.id);
+                    }}
+                    onDragEnd={() => setDraggedDepartment(null)}
+                    onDragOver={(e) => {
+                      if (draggedDepartment && draggedDepartment !== department.id) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (draggedDepartment) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDepartmentDrop(department.id);
+                      }
+                    }}
                   >
                     <div className="flex items-center gap-2">
+                      <GripVertical className="h-4 w-4 text-muted-foreground/50" />
                       <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: department.color }} />
                       <h3 className="font-semibold text-sm">{department.name}</h3>
                       <Badge 
