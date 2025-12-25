@@ -14,6 +14,11 @@ interface EvolutionRequest {
   instanceId?: string;
 }
 
+// Helper to normalize URL (remove trailing slashes)
+function normalizeUrl(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
 // Get the webhook URL for this project
 const WEBHOOK_URL = `${Deno.env.get('SUPABASE_URL')}/functions/v1/evolution-webhook`;
 
@@ -66,9 +71,10 @@ serve(async (req) => {
           throw new Error('apiUrl and apiKey are required for test_connection');
         }
 
-        console.log(`[Evolution API] Testing connection to: ${body.apiUrl}`);
+        const apiUrl = normalizeUrl(body.apiUrl);
+        console.log(`[Evolution API] Testing connection to: ${apiUrl}`);
         
-        const response = await fetch(`${body.apiUrl}/instance/fetchInstances`, {
+        const response = await fetch(`${apiUrl}/instance/fetchInstances`, {
           method: 'GET',
           headers: {
             'apikey': body.apiKey,
@@ -95,10 +101,12 @@ serve(async (req) => {
           throw new Error('instanceName, apiUrl, and apiKey are required');
         }
 
-        console.log(`[Evolution API] Creating instance: ${body.instanceName}`);
+        const apiUrl = normalizeUrl(body.apiUrl);
+        console.log(`[Evolution API] Creating instance: ${body.instanceName} at ${apiUrl}`);
+        console.log(`[Evolution API] Webhook URL: ${WEBHOOK_URL}`);
 
         // Create instance in Evolution API with webhook configuration
-        const createResponse = await fetch(`${body.apiUrl}/instance/create`, {
+        const createResponse = await fetch(`${apiUrl}/instance/create`, {
           method: 'POST',
           headers: {
             'apikey': body.apiKey,
@@ -135,9 +143,19 @@ serve(async (req) => {
         const createData = await createResponse.json();
         console.log(`[Evolution API] Create instance response:`, JSON.stringify(createData));
 
-        // Extract QR code from response
-        const qrCode = createData.qrcode?.base64 || createData.qrcode || null;
+        // Extract QR code from response - handle various formats
+        let qrCode = null;
+        if (createData.qrcode?.base64) {
+          qrCode = createData.qrcode.base64;
+        } else if (createData.qrcode && typeof createData.qrcode === 'string') {
+          qrCode = createData.qrcode;
+        } else if (createData.base64) {
+          qrCode = createData.base64;
+        }
+        
         const instanceId = createData.instance?.instanceId || createData.instanceId || body.instanceName;
+
+        console.log(`[Evolution API] Saving instance to database. QR Code available: ${!!qrCode}`);
 
         // Save instance to database
         const { data: instance, error: insertError } = await supabaseClient
@@ -146,7 +164,7 @@ serve(async (req) => {
             law_firm_id: lawFirmId,
             instance_name: body.instanceName,
             instance_id: instanceId,
-            api_url: body.apiUrl,
+            api_url: apiUrl,
             api_key: body.apiKey,
             status: qrCode ? 'awaiting_qr' : 'disconnected',
           })
@@ -158,6 +176,7 @@ serve(async (req) => {
           throw new Error(`Failed to save instance: ${insertError.message}`);
         }
 
+        console.log(`[Evolution API] Instance saved with ID: ${instance.id}`);
         console.log(`[Evolution API] Webhook configured at: ${WEBHOOK_URL}`);
 
         return new Response(
@@ -188,11 +207,15 @@ serve(async (req) => {
           .single();
 
         if (fetchError || !instance) {
+          console.error(`[Evolution API] Instance not found:`, fetchError);
           throw new Error('Instance not found');
         }
 
+        const apiUrl = normalizeUrl(instance.api_url);
+        console.log(`[Evolution API] Fetching QR from: ${apiUrl}/instance/connect/${instance.instance_name}`);
+
         // Request QR code from Evolution API
-        const qrResponse = await fetch(`${instance.api_url}/instance/connect/${instance.instance_name}`, {
+        const qrResponse = await fetch(`${apiUrl}/instance/connect/${instance.instance_name}`, {
           method: 'GET',
           headers: {
             'apikey': instance.api_key || '',
@@ -212,8 +235,19 @@ serve(async (req) => {
         console.log(`[Evolution API] QR code response:`, JSON.stringify(qrData));
 
         // Extract QR code - handle different response formats
-        const qrCode = qrData.base64 || qrData.qrcode?.base64 || qrData.qrcode || null;
-        const status = qrData.state || qrData.status || 'unknown';
+        let qrCode = null;
+        if (qrData.base64) {
+          qrCode = qrData.base64;
+        } else if (qrData.qrcode?.base64) {
+          qrCode = qrData.qrcode.base64;
+        } else if (qrData.qrcode && typeof qrData.qrcode === 'string') {
+          qrCode = qrData.qrcode;
+        } else if (qrData.code) {
+          qrCode = qrData.code;
+        }
+        
+        const status = qrData.state || qrData.status || qrData.instance?.state || 'unknown';
+        console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}`);
 
         // Update instance status if connected
         if (status === 'open' || status === 'connected') {
@@ -253,8 +287,10 @@ serve(async (req) => {
           throw new Error('Instance not found');
         }
 
+        const apiUrl = normalizeUrl(instance.api_url);
+        
         // Get status from Evolution API
-        const statusResponse = await fetch(`${instance.api_url}/instance/connectionState/${instance.instance_name}`, {
+        const statusResponse = await fetch(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
           method: 'GET',
           headers: {
             'apikey': instance.api_key || '',
@@ -293,16 +329,19 @@ serve(async (req) => {
         }
 
         // Update status in database
-        await supabaseClient
+        const { data: updatedInstance } = await supabaseClient
           .from('whatsapp_instances')
           .update({ status: dbStatus, updated_at: new Date().toISOString() })
-          .eq('id', body.instanceId);
+          .eq('id', body.instanceId)
+          .select()
+          .single();
 
         return new Response(
           JSON.stringify({ 
             success: true, 
             status: dbStatus,
             evolutionState: state,
+            instance: updatedInstance,
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
@@ -327,15 +366,18 @@ serve(async (req) => {
           throw new Error('Instance not found');
         }
 
+        const apiUrl = normalizeUrl(instance.api_url);
+
         // Delete from Evolution API (best effort)
         try {
-          await fetch(`${instance.api_url}/instance/delete/${instance.instance_name}`, {
+          const deleteResponse = await fetch(`${apiUrl}/instance/delete/${instance.instance_name}`, {
             method: 'DELETE',
             headers: {
               'apikey': instance.api_key || '',
               'Content-Type': 'application/json',
             },
           });
+          console.log(`[Evolution API] Evolution delete response: ${deleteResponse.status}`);
         } catch (e) {
           console.log(`[Evolution API] Evolution delete failed (non-fatal):`, e);
         }
@@ -350,6 +392,8 @@ serve(async (req) => {
         if (deleteError) {
           throw new Error(`Failed to delete instance: ${deleteError.message}`);
         }
+
+        console.log(`[Evolution API] Instance deleted successfully`);
 
         return new Response(
           JSON.stringify({ success: true, message: 'Instance deleted' }),
@@ -376,8 +420,10 @@ serve(async (req) => {
           throw new Error('Instance not found');
         }
 
+        const apiUrl = normalizeUrl(instance.api_url);
+
         // Configure webhook in Evolution API
-        const webhookResponse = await fetch(`${instance.api_url}/webhook/set/${instance.instance_name}`, {
+        const webhookResponse = await fetch(`${apiUrl}/webhook/set/${instance.instance_name}`, {
           method: 'POST',
           headers: {
             'apikey': instance.api_key || '',

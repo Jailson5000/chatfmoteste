@@ -49,7 +49,9 @@ export default function Connections() {
     createInstance, 
     getQRCode, 
     getStatus,
-    deleteInstance 
+    deleteInstance,
+    configureWebhook,
+    refetch,
   } = useWhatsAppInstances();
   
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -162,15 +164,22 @@ export default function Connections() {
       setNewInstanceName("");
       setIsInstanceDialogOpen(false);
 
+      // Refetch to ensure list is updated
+      await refetch();
+
       // If QR code was returned, show it
       if (result.qrCode && result.instance) {
         setCurrentQRCode(result.qrCode);
         setCurrentInstanceId(result.instance.id);
         setIsQRDialogOpen(true);
         startPolling(result.instance.id);
+      } else if (result.instance) {
+        // Instance created but no QR code, try to get it
+        handleConnectInstance(result.instance);
       }
     } catch (error) {
       // Error is handled by the mutation
+      console.error("Create instance error:", error);
     }
   };
   
@@ -424,6 +433,15 @@ export default function Connections() {
                             Conectar
                           </Button>
                         )}
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => configureWebhook.mutate(instance.id)}
+                          disabled={configureWebhook.isPending}
+                          title="Reconfigurar webhook"
+                        >
+                          <Settings2 className="h-4 w-4" />
+                        </Button>
                         <Button 
                           variant="ghost" 
                           size="icon"
