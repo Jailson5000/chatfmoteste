@@ -1,1 +1,4 @@
 project_id = "jiragtersejnarxruqyd"
+
+[functions.evolution-api]
+verify_jwt = false
