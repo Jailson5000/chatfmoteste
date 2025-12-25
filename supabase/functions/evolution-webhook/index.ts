@@ -75,6 +75,26 @@ function normalizeEventName(event: string): string {
   return normalized;
 }
 
+// Update instance with last webhook event info
+async function updateInstanceWebhookEvent(
+  supabaseClient: any,
+  instanceId: string,
+  eventName: string
+) {
+  const { error } = await supabaseClient
+    .from('whatsapp_instances')
+    .update({
+      last_webhook_event: eventName,
+      last_webhook_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', instanceId);
+
+  if (error) {
+    console.log(`[Evolution Webhook] Failed to update last_webhook_event (non-fatal):`, error);
+  }
+}
+
 serve(async (req) => {
   console.log(`[Evolution Webhook] Received ${req.method} request`);
   
@@ -99,7 +119,7 @@ serve(async (req) => {
     );
 
     const rawBody = await req.text();
-    console.log(`[Evolution Webhook] Raw body:`, rawBody);
+    console.log(`[Evolution Webhook] Raw body (first 500 chars):`, rawBody.substring(0, 500));
     
     let body: EvolutionEvent;
     try {
@@ -133,6 +153,9 @@ serve(async (req) => {
 
     console.log(`[Evolution Webhook] Found instance: ${instance.id} for law firm: ${instance.law_firm_id}`);
     const lawFirmId = instance.law_firm_id;
+
+    // Update last webhook event for diagnostics
+    await updateInstanceWebhookEvent(supabaseClient, instance.id, body.event);
 
     // Handle events (support both formats: CONNECTION_UPDATE and connection.update)
     switch (normalizedEvent) {

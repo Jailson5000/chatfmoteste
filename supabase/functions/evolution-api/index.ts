@@ -14,7 +14,9 @@ type EvolutionAction =
   | "test_connection"
   | "configure_webhook"
   | "get_settings"
-  | "set_settings";
+  | "set_settings"
+  | "refresh_status"
+  | "refresh_phone";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -612,6 +614,105 @@ serve(async (req) => {
         return new Response(JSON.stringify({ success: true, settings: { rejectCall: body.rejectCall } }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      case "refresh_status": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        console.log(`[Evolution API] Refreshing status for instance: ${body.instanceId}`);
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
+          method: "GET",
+          headers: {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          },
+        });
+
+        let dbStatus = "disconnected";
+        let evolutionState = "unknown";
+
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          evolutionState = statusData.state || statusData.instance?.state || "unknown";
+          
+          if (evolutionState === "open" || evolutionState === "connected") {
+            dbStatus = "connected";
+          } else if (evolutionState === "connecting" || evolutionState === "qr") {
+            dbStatus = "connecting";
+          }
+        }
+
+        const { data: updatedInstance } = await supabaseClient
+          .from("whatsapp_instances")
+          .update({
+            status: dbStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", body.instanceId)
+          .select()
+          .single();
+
+        console.log(`[Evolution API] Status refreshed: ${dbStatus}`);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            status: dbStatus,
+            evolutionState,
+            instance: updatedInstance,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "refresh_phone": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        console.log(`[Evolution API] Refreshing phone number for instance: ${body.instanceId}`);
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        let phoneNumber: string | null = null;
+
+        try {
+          phoneNumber = await fetchConnectedPhoneNumber(apiUrl, instance.api_key || "", instance.instance_name);
+        } catch (e) {
+          console.log("[Evolution API] Failed to fetch phone number:", e);
+        }
+
+        const updatePayload: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (phoneNumber) {
+          updatePayload.phone_number = phoneNumber;
+        }
+
+        const { data: updatedInstance } = await supabaseClient
+          .from("whatsapp_instances")
+          .update(updatePayload)
+          .eq("id", body.instanceId)
+          .select()
+          .single();
+
+        console.log(`[Evolution API] Phone number refreshed: ${phoneNumber || "not found"}`);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            phoneNumber,
+            instance: updatedInstance,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
 
       default:
