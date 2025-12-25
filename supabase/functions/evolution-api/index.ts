@@ -17,7 +17,8 @@ type EvolutionAction =
   | "set_settings"
   | "refresh_status"
   | "refresh_phone"
-  | "send_message";
+  | "send_message"
+  | "send_media";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -31,6 +32,12 @@ interface EvolutionRequest {
   conversationId?: string;
   message?: string;
   remoteJid?: string;
+  // For send_media
+  mediaType?: "image" | "audio" | "video" | "document";
+  mediaBase64?: string;
+  mediaUrl?: string;
+  fileName?: string;
+  caption?: string;
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -822,6 +829,165 @@ serve(async (req) => {
             success: true,
             messageId: whatsappMessageId,
             message: "Message sent successfully",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "send_media": {
+        if (!body.conversationId && !body.remoteJid) {
+          throw new Error("conversationId or remoteJid is required");
+        }
+        if (!body.mediaBase64 && !body.mediaUrl) {
+          throw new Error("mediaBase64 or mediaUrl is required");
+        }
+        if (!body.mediaType) {
+          throw new Error("mediaType is required (image, audio, video, document)");
+        }
+
+        console.log(`[Evolution API] Sending media`, { 
+          conversationId: body.conversationId, 
+          remoteJid: body.remoteJid,
+          mediaType: body.mediaType,
+          hasBase64: !!body.mediaBase64,
+          hasUrl: !!body.mediaUrl
+        });
+
+        let targetRemoteJid = body.remoteJid;
+        let conversationId = body.conversationId;
+        let instanceId = body.instanceId;
+
+        // If we have a conversationId, get the remoteJid and instanceId from it
+        if (conversationId && !targetRemoteJid) {
+          const { data: conversation, error: convError } = await supabaseClient
+            .from("conversations")
+            .select("remote_jid, whatsapp_instance_id")
+            .eq("id", conversationId)
+            .eq("law_firm_id", lawFirmId)
+            .single();
+
+          if (convError || !conversation) {
+            console.error("[Evolution API] Conversation not found:", convError);
+            throw new Error("Conversation not found");
+          }
+
+          targetRemoteJid = conversation.remote_jid;
+          instanceId = conversation.whatsapp_instance_id;
+        }
+
+        if (!instanceId) {
+          throw new Error("instanceId is required (either directly or via conversationId)");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        console.log(`[Evolution API] Sending ${body.mediaType} to ${targetRemoteJid} via ${instance.instance_name}`);
+
+        // Determine the endpoint based on media type
+        let endpoint = "";
+        let payload: Record<string, unknown> = {
+          number: targetRemoteJid,
+        };
+
+        switch (body.mediaType) {
+          case "image":
+            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+            payload = {
+              ...payload,
+              mediatype: "image",
+              mimetype: "image/jpeg",
+              caption: body.caption || "",
+              media: body.mediaBase64 || body.mediaUrl,
+            };
+            break;
+          case "audio":
+            endpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+            payload = {
+              ...payload,
+              audio: body.mediaBase64 || body.mediaUrl,
+            };
+            break;
+          case "video":
+            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+            payload = {
+              ...payload,
+              mediatype: "video",
+              mimetype: "video/mp4",
+              caption: body.caption || "",
+              media: body.mediaBase64 || body.mediaUrl,
+            };
+            break;
+          case "document":
+            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+            payload = {
+              ...payload,
+              mediatype: "document",
+              mimetype: "application/octet-stream",
+              fileName: body.fileName || "document",
+              media: body.mediaBase64 || body.mediaUrl,
+            };
+            break;
+        }
+
+        console.log(`[Evolution API] Sending to endpoint: ${endpoint}`);
+
+        const sendResponse = await fetchWithTimeout(endpoint, {
+          method: "POST",
+          headers: {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        console.log(`[Evolution API] Send media response status: ${sendResponse.status}`);
+
+        if (!sendResponse.ok) {
+          const errorText = await safeReadResponseText(sendResponse);
+          console.error(`[Evolution API] Send media failed:`, errorText);
+          throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
+        }
+
+        const sendData = await sendResponse.json();
+        console.log(`[Evolution API] Media sent successfully:`, JSON.stringify(sendData));
+
+        const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
+
+        // Save message to database
+        if (conversationId) {
+          const { data: savedMessage, error: msgError } = await supabaseClient
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              whatsapp_message_id: whatsappMessageId,
+              content: body.caption || body.fileName || `[${body.mediaType}]`,
+              message_type: body.mediaType,
+              media_url: body.mediaUrl || null,
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+            })
+            .select()
+            .single();
+
+          if (msgError) {
+            console.error("[Evolution API] Failed to save media message to DB:", msgError);
+          } else {
+            console.log(`[Evolution API] Media message saved to DB with ID: ${savedMessage.id}`);
+          }
+
+          await supabaseClient
+            .from("conversations")
+            .update({ last_message_at: new Date().toISOString() })
+            .eq("id", conversationId);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageId: whatsappMessageId,
+            message: "Media sent successfully",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );

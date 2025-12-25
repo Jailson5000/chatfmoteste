@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Bot,
   UserCheck,
@@ -86,6 +86,7 @@ export default function Conversations() {
   const [signatureEnabled, setSignatureEnabled] = useState(true);
   const [editNameDialogOpen, setEditNameDialogOpen] = useState(false);
   const [editingName, setEditingName] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const [conversationFilters, setConversationFilters] = useState<{
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
@@ -93,6 +94,11 @@ export default function Conversations() {
     searchName: string;
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
+
+  // File input refs
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   const selectedConversation = useMemo(() => 
     conversations.find((c) => c.id === selectedConversationId),
@@ -201,19 +207,13 @@ export default function Conversations() {
   }, [mappedConversations, conversationFilters, searchQuery, activeTab]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversationId || !selectedConversation) return;
+    if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
     
     const messageToSend = messageInput.trim();
     setMessageInput(""); // Clear input immediately for better UX
+    setIsSending(true);
     
     try {
-      // Send message via Evolution API
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        throw new Error("Não autenticado");
-      }
-
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
           action: "send_message",
@@ -230,8 +230,7 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mensagem");
       }
 
-      // Message will appear via realtime subscription when webhook receives it
-      // Or we can optimistically add it to local state
+      // Optimistically add message to local state
       const newMessage: Message = {
         id: response.data.messageId || crypto.randomUUID(),
         content: messageToSend,
@@ -242,11 +241,6 @@ export default function Conversations() {
       };
       
       setMessages(prev => [...prev, newMessage]);
-      
-      toast({
-        title: "Mensagem enviada",
-        description: "Mensagem enviada com sucesso!",
-      });
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
       setMessageInput(messageToSend); // Restore message on error
@@ -255,7 +249,86 @@ export default function Conversations() {
         description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
         variant: "destructive",
       });
+    } finally {
+      setIsSending(false);
     }
+  };
+
+  const handleSendMedia = async (file: File, mediaType: "image" | "audio" | "video" | "document") => {
+    if (!selectedConversationId || !selectedConversation || isSending) return;
+    
+    setIsSending(true);
+    
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Remove data URL prefix (e.g., "data:image/jpeg;base64,")
+          const base64 = result.split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(file);
+      
+      const mediaBase64 = await base64Promise;
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_media",
+          conversationId: selectedConversationId,
+          mediaType,
+          mediaBase64,
+          fileName: file.name,
+          caption: "",
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Falha ao enviar mídia");
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar mídia");
+      }
+
+      // Optimistically add message to local state
+      const newMessage: Message = {
+        id: response.data.messageId || crypto.randomUUID(),
+        content: `[${mediaType === "image" ? "Imagem" : mediaType === "audio" ? "Áudio" : mediaType === "video" ? "Vídeo" : "Documento"}: ${file.name}]`,
+        created_at: new Date().toISOString(),
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
+      
+      toast({
+        title: "Mídia enviada",
+        description: `${file.name} enviado com sucesso!`,
+      });
+    } catch (error) {
+      console.error("Erro ao enviar mídia:", error);
+      toast({
+        title: "Erro ao enviar mídia",
+        description: error instanceof Error ? error.message : "Falha ao enviar mídia",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>, mediaType: "image" | "audio" | "document") => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleSendMedia(file, mediaType);
+    }
+    // Reset input so the same file can be selected again
+    event.target.value = "";
   };
 
   const handleSelectConversation = (id: string) => {
@@ -645,24 +718,69 @@ export default function Conversations() {
 
             {/* Input Area */}
             <div className="p-4 border-t border-border bg-card">
+              {/* Hidden file inputs */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleFileSelect(e, "image")}
+              />
+              <input
+                ref={documentInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                className="hidden"
+                onChange={(e) => handleFileSelect(e, "document")}
+              />
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                onChange={(e) => handleFileSelect(e, "audio")}
+              />
+              
               <div className="max-w-3xl mx-auto flex items-end gap-2">
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="text-muted-foreground">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-muted-foreground"
+                    onClick={() => documentInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Enviar documento"
+                  >
                     <Paperclip className="h-5 w-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-muted-foreground"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Enviar imagem"
+                  >
                     <Image className="h-5 w-5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-muted-foreground"
+                    onClick={() => audioInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Enviar áudio"
+                  >
                     <FileText className="h-5 w-5" />
                   </Button>
                 </div>
                 <Textarea
-                  placeholder="Digite sua mensagem..."
+                  placeholder={isSending ? "Enviando..." : "Digite sua mensagem..."}
                   className="min-h-[44px] max-h-32 resize-none"
                   rows={1}
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
+                  disabled={isSending}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
@@ -671,11 +789,26 @@ export default function Conversations() {
                   }}
                 />
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="text-muted-foreground">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-muted-foreground"
+                    onClick={() => audioInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Gravar áudio"
+                  >
                     <Mic className="h-5 w-5" />
                   </Button>
-                  <Button size="icon" onClick={handleSendMessage}>
-                    <Send className="h-5 w-5" />
+                  <Button 
+                    size="icon" 
+                    onClick={handleSendMessage}
+                    disabled={isSending || !messageInput.trim()}
+                  >
+                    {isSending ? (
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                    ) : (
+                      <Send className="h-5 w-5" />
+                    )}
                   </Button>
                 </div>
               </div>
