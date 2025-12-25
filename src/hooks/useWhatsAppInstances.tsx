@@ -11,6 +11,15 @@ interface CreateInstanceParams {
   apiKey: string;
 }
 
+interface SetSettingsParams {
+  instanceId: string;
+  rejectCall: boolean;
+}
+
+interface EvolutionSettings {
+  rejectCall: boolean;
+}
+
 interface EvolutionResponse {
   success: boolean;
   error?: string;
@@ -19,7 +28,11 @@ interface EvolutionResponse {
   instance?: WhatsAppInstance;
   message?: string;
   evolutionState?: string;
-  webhookUrl?: string;
+  settings?: EvolutionSettings;
+}
+
+function normalizeApiUrl(url: string): string {
+  return url.replace(/\/+$/, "").replace(/\/manager$/i, "");
 }
 
 export function useWhatsAppInstances() {
@@ -53,7 +66,7 @@ export function useWhatsAppInstances() {
       const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
         body: {
           action: "test_connection",
-          apiUrl: apiUrl.replace(/\/+$/, ''), // Remove trailing slashes
+          apiUrl: normalizeApiUrl(apiUrl),
           apiKey,
         },
       });
@@ -62,7 +75,7 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Test failed");
-      
+
       return response.data;
     },
     onSuccess: () => {
@@ -91,7 +104,7 @@ export function useWhatsAppInstances() {
         body: {
           action: "create_instance",
           instanceName,
-          apiUrl: apiUrl.replace(/\/+$/, ''), // Remove trailing slashes
+          apiUrl: normalizeApiUrl(apiUrl),
           apiKey,
         },
       });
@@ -100,15 +113,14 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to create instance");
-      
+
       return response.data;
     },
     onSuccess: async (data) => {
       console.log("[useWhatsAppInstances] Instance created successfully:", data.instance?.id);
-      // Force refetch to get the new instance
       await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
       await refetch();
-      
+
       toast({
         title: "Instância criada",
         description: data.qrCode ? "Escaneie o QR Code para conectar" : "Instância criada com sucesso",
@@ -141,7 +153,7 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to get QR code");
-      
+
       return response.data;
     },
     onSuccess: () => {
@@ -171,7 +183,7 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to get status");
-      
+
       return response.data;
     },
     onSuccess: () => {
@@ -196,7 +208,7 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to delete instance");
-      
+
       return response.data;
     },
     onSuccess: async () => {
@@ -234,19 +246,65 @@ export function useWhatsAppInstances() {
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to configure webhook");
-      
+
       return response.data;
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       toast({
         title: "Webhook configurado",
-        description: `URL: ${data.webhookUrl}`,
+        description: "Pronto para receber mensagens e status em tempo real.",
       });
     },
     onError: (error: Error) => {
       console.error("[useWhatsAppInstances] Configure webhook error:", error);
       toast({
         title: "Erro ao configurar webhook",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const getSettings = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "get_settings",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to get settings");
+
+      return response.data;
+    },
+  });
+
+  const setSettings = useMutation({
+    mutationFn: async ({ instanceId, rejectCall }: SetSettingsParams): Promise<EvolutionResponse> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "set_settings",
+          instanceId,
+          rejectCall,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to set settings");
+
+      return response.data;
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar configuração",
         description: error.message,
         variant: "destructive",
       });
@@ -264,5 +322,7 @@ export function useWhatsAppInstances() {
     getStatus,
     deleteInstance,
     configureWebhook,
+    getSettings,
+    setSettings,
   };
 }
