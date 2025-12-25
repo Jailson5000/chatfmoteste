@@ -174,28 +174,22 @@ export function useAutomations() {
     },
   });
 
-  // Test n8n webhook
+  // Test n8n webhook via edge function (avoids CORS issues)
   const testWebhook = useMutation({
     mutationFn: async (webhookUrl: string) => {
-      const testPayload = {
-        test: true,
-        timestamp: new Date().toISOString(),
-        message: "Teste de conexão do sistema jurídico",
-      };
-
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(testPayload),
+      const { data, error } = await supabase.functions.invoke('test-webhook', {
+        body: { webhookUrl }
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (error) throw error;
+      
+      if (!data.success) {
+        throw new Error(data.error || "Falha ao testar webhook");
       }
 
-      return response;
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast({ 
         title: "Webhook testado com sucesso",
         description: "A conexão com o n8n está funcionando"
