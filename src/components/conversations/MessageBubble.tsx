@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2 } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { QuotedMessage } from "./ReplyPreview";
 import { Slider } from "@/components/ui/slider";
 import { supabase } from "@/integrations/supabase/client";
+import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -33,12 +34,13 @@ interface MessageBubbleProps {
   } | null;
   onReply?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
+  onRetry?: (messageId: string, content: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
 }
 
-// Simple in-memory cache for decrypted media
-const mediaCache = new Map<string, string>();
+// Simple in-memory cache for decrypted media (session-level)
+const memoryCache = new Map<string, string>();
 
 // Check if URL is encrypted WhatsApp media
 function isEncryptedMedia(url: string): boolean {
@@ -68,18 +70,27 @@ function AudioPlayer({
   // Check if needs decryption
   const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
 
-  // Decrypt audio on mount if needed
+  // Decrypt audio on mount if needed - check IndexedDB first, then memory cache, then fetch
   useEffect(() => {
     if (!needsDecryption) return;
     
-    // Check cache first
-    const cached = mediaCache.get(whatsappMessageId!);
-    if (cached) {
-      setDecryptedSrc(cached);
-      return;
-    }
+    const loadAudio = async () => {
+      // Check memory cache first (fastest)
+      const memoryCached = memoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
 
-    const decrypt = async () => {
+      // Check IndexedDB cache (persistent)
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        memoryCache.set(whatsappMessageId!, dbCached); // Also cache in memory
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      // Need to fetch from API
       setIsDecrypting(true);
       try {
         const response = await supabase.functions.invoke("evolution-api", {
@@ -99,8 +110,10 @@ function AudioPlayer({
         const actualMimeType = response.data.mimetype || mimeType || "audio/ogg";
         const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
         
-        // Cache the result
-        mediaCache.set(whatsappMessageId!, dataUrl);
+        // Cache in both memory and IndexedDB
+        memoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
         setDecryptedSrc(dataUrl);
       } catch (err) {
         console.error("Error decrypting audio:", err);
@@ -110,7 +123,10 @@ function AudioPlayer({
       }
     };
 
-    decrypt();
+    loadAudio();
+    
+    // Cleanup old cache entries periodically
+    cleanupOldCache();
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 
   // Use decrypted source or original
@@ -247,6 +263,7 @@ export function MessageBubble({
   replyTo,
   onReply,
   onScrollToMessage,
+  onRetry,
   highlightText,
   isHighlighted = false,
 }: MessageBubbleProps) {
@@ -267,7 +284,11 @@ export function MessageBubble({
 
     switch (actualStatus) {
       case "sending":
-        return <Clock className="h-3 w-3 animate-pulse" />;
+        return (
+          <div className="flex items-center">
+            <Loader2 className="h-3 w-3 animate-spin" />
+          </div>
+        );
       case "sent":
         // 1 tick - message sent to server
         return <Check className="h-3 w-3" />;
@@ -278,7 +299,16 @@ export function MessageBubble({
         // 2 blue ticks - message read by recipient
         return <CheckCheck className="h-3 w-3 text-blue-400" />;
       case "error":
-        return <span className="text-destructive text-xs font-bold">!</span>;
+        return (
+          <button
+            onClick={() => onRetry?.(id, content || "")}
+            className="flex items-center gap-1 text-destructive hover:text-destructive/80 transition-colors cursor-pointer"
+            title="Clique para reenviar"
+          >
+            <AlertCircle className="h-3 w-3" />
+            <RotateCcw className="h-2.5 w-2.5" />
+          </button>
+        );
       default:
         return <Check className="h-3 w-3" />;
     }

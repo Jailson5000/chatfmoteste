@@ -259,9 +259,9 @@ export default function Conversations() {
 
     loadMessages();
 
-    // Subscribe to new messages
-    const channel = supabase
-      .channel(`messages-${selectedConversationId}`)
+    // Subscribe to new messages (INSERT)
+    const insertChannel = supabase
+      .channel(`messages-insert-${selectedConversationId}`)
       .on(
         'postgres_changes',
         {
@@ -290,8 +290,32 @@ export default function Conversations() {
       )
       .subscribe();
 
+    // Subscribe to message updates (UPDATE) for real-time ticks
+    const updateChannel = supabase
+      .channel(`messages-update-${selectedConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${selectedConversationId}`
+        },
+        (payload) => {
+          const updatedMsg = payload.new as Message;
+          // Update the message in state to reflect new status (read_at, etc.)
+          setMessages(prev => prev.map(m => 
+            m.id === updatedMsg.id 
+              ? { ...m, read_at: updatedMsg.read_at }
+              : m
+          ));
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(insertChannel);
+      supabase.removeChannel(updateChannel);
     };
   }, [selectedConversationId, playNotification]);
 
@@ -414,6 +438,56 @@ export default function Conversations() {
       setIsSending(false);
     }
   };
+
+  // Handle retry for failed messages
+  const handleRetryMessage = useCallback(async (messageId: string, content: string) => {
+    if (!content || !selectedConversationId || !selectedConversation || isSending) return;
+
+    // Update message to "sending" status
+    setMessages(prev => prev.map(m => 
+      m.id === messageId ? { ...m, status: "sending" as MessageStatus } : m
+    ));
+    
+    setIsSending(true);
+    
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_message_async",
+          conversationId: selectedConversationId,
+          message: content,
+        },
+      });
+
+      if (response.error || !response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao reenviar mensagem");
+      }
+
+      // Update to "sent"
+      setMessages(prev => prev.map(m => 
+        m.id === messageId 
+          ? { ...m, id: response.data.messageId || messageId, status: "sent" as MessageStatus }
+          : m
+      ));
+      
+      toast({
+        title: "Mensagem reenviada",
+        description: "A mensagem foi reenviada com sucesso.",
+      });
+    } catch (error) {
+      console.error("Erro ao reenviar mensagem:", error);
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, status: "error" as MessageStatus } : m
+      ));
+      toast({
+        title: "Erro ao reenviar",
+        description: error instanceof Error ? error.message : "Falha ao reenviar mensagem",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  }, [selectedConversationId, selectedConversation, isSending, toast]);
 
   const handleSendMedia = async (file: File, mediaType: "image" | "audio" | "video" | "document") => {
     if (!selectedConversationId || !selectedConversation || isSending) return;
@@ -1047,6 +1121,7 @@ export default function Conversations() {
                         replyTo={msg.reply_to}
                         onReply={handleReply}
                         onScrollToMessage={scrollToMessage}
+                        onRetry={handleRetryMessage}
                         highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
                         isHighlighted={highlightedMessageId === msg.id}
                       />
