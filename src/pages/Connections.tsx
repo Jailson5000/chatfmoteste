@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Settings2,
   Plus,
@@ -10,6 +10,8 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,27 +35,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-
-interface WhatsAppInstance {
-  id: string;
-  name: string;
-  phone: string | null;
-  status: "connected" | "disconnected" | "connecting";
-  apiUrl: string;
-  lastSync: string | null;
-  rejectCalls: boolean;
-  isActive: boolean;
-}
-
-const mockInstances: WhatsAppInstance[] = [];
+import { useWhatsAppInstances, WhatsAppInstance } from "@/hooks/useWhatsAppInstances";
 
 export default function Connections() {
   const { toast } = useToast();
-  const [instances, setInstances] = useState<WhatsAppInstance[]>(mockInstances);
+  const { 
+    instances, 
+    isLoading, 
+    testConnection, 
+    createInstance, 
+    getQRCode, 
+    getStatus,
+    deleteInstance 
+  } = useWhatsAppInstances();
+  
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isInstanceDialogOpen, setIsInstanceDialogOpen] = useState(false);
+  const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   
   // Form states
@@ -61,6 +62,35 @@ export default function Connections() {
   const [evolutionKey, setEvolutionKey] = useState("");
   const [newInstanceName, setNewInstanceName] = useState("");
   
+  // QR Code states
+  const [currentQRCode, setCurrentQRCode] = useState<string | null>(null);
+  const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
+  
+  // Polling ref
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const pollCountRef = useRef(0);
+  const MAX_POLLS = 60; // Maximum 60 polls (2 minutes with 2s interval)
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
+
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    pollCountRef.current = 0;
+  };
+
   const handleSaveConfig = () => {
     if (!evolutionUrl.trim()) {
       toast({
@@ -73,15 +103,7 @@ export default function Connections() {
 
     // Validate URL format
     try {
-      const url = new URL(evolutionUrl);
-      if (url.protocol !== "https:") {
-        toast({
-          title: "URL inválida",
-          description: "A URL deve usar HTTPS para segurança",
-          variant: "destructive",
-        });
-        return;
-      }
+      new URL(evolutionUrl);
     } catch {
       toast({
         title: "URL inválida",
@@ -98,21 +120,20 @@ export default function Connections() {
     setIsConfigOpen(false);
   };
   
-  const handleTestConnection = () => {
-    toast({
-      title: "Testando conexão...",
-      description: "Aguarde enquanto verificamos a conexão",
-    });
-    
-    setTimeout(() => {
+  const handleTestConnection = async () => {
+    if (!evolutionUrl || !evolutionKey) {
       toast({
-        title: "Conexão estabelecida",
-        description: "A Evolution API está respondendo corretamente",
+        title: "Campos obrigatórios",
+        description: "Por favor, preencha a URL e a API Key",
+        variant: "destructive",
       });
-    }, 1500);
+      return;
+    }
+
+    await testConnection.mutateAsync({ apiUrl: evolutionUrl, apiKey: evolutionKey });
   };
   
-  const handleCreateInstance = () => {
+  const handleCreateInstance = async () => {
     if (!newInstanceName.trim()) {
       toast({
         title: "Nome obrigatório",
@@ -121,56 +142,132 @@ export default function Connections() {
       });
       return;
     }
-    
-    const newInstance: WhatsAppInstance = {
-      id: Date.now().toString(),
-      name: newInstanceName,
-      phone: null,
-      status: "disconnected",
-      apiUrl: evolutionUrl,
-      lastSync: null,
-      rejectCalls: false,
-      isActive: true,
-    };
-    
-    setInstances([...instances, newInstance]);
-    setNewInstanceName("");
-    setIsInstanceDialogOpen(false);
-    
-    toast({
-      title: "Instância criada",
-      description: `A instância "${newInstanceName}" foi criada. Escaneie o QR Code para conectar.`,
-    });
-  };
-  
-  const handleDeleteInstance = (id: string) => {
-    setInstances(instances.filter((i) => i.id !== id));
-    toast({
-      title: "Instância removida",
-      description: "A instância foi removida com sucesso",
-    });
-  };
-  
-  const handleConnectInstance = (id: string) => {
-    setInstances(instances.map((i) => 
-      i.id === id ? { ...i, status: "connecting" as const } : i
-    ));
-    
-    toast({
-      title: "Gerando QR Code",
-      description: "Aguarde enquanto preparamos o QR Code",
-    });
-    
-    // Simulate QR code generation
-    setTimeout(() => {
+
+    if (!evolutionUrl || !evolutionKey) {
       toast({
-        title: "QR Code pronto",
-        description: "Escaneie o QR Code com seu WhatsApp",
+        title: "API não configurada",
+        description: "Por favor, configure a Evolution API primeiro",
+        variant: "destructive",
       });
-    }, 1500);
+      return;
+    }
+
+    try {
+      const result = await createInstance.mutateAsync({
+        instanceName: newInstanceName,
+        apiUrl: evolutionUrl,
+        apiKey: evolutionKey,
+      });
+
+      setNewInstanceName("");
+      setIsInstanceDialogOpen(false);
+
+      // If QR code was returned, show it
+      if (result.qrCode && result.instance) {
+        setCurrentQRCode(result.qrCode);
+        setCurrentInstanceId(result.instance.id);
+        setIsQRDialogOpen(true);
+        startPolling(result.instance.id);
+      }
+    } catch (error) {
+      // Error is handled by the mutation
+    }
+  };
+  
+  const handleDeleteInstance = async (id: string) => {
+    await deleteInstance.mutateAsync(id);
+  };
+  
+  const handleConnectInstance = async (instance: WhatsAppInstance) => {
+    setCurrentInstanceId(instance.id);
+    setCurrentQRCode(null);
+    setQrError(null);
+    setQrLoading(true);
+    setConnectionStatus("Conectando...");
+    setIsQRDialogOpen(true);
+
+    try {
+      const result = await getQRCode.mutateAsync(instance.id);
+      
+      if (result.status === 'open' || result.status === 'connected') {
+        setConnectionStatus("Conectado!");
+        toast({
+          title: "WhatsApp conectado",
+          description: "A instância já está conectada",
+        });
+        setTimeout(() => {
+          setIsQRDialogOpen(false);
+          stopPolling();
+        }, 1500);
+        return;
+      }
+
+      if (result.qrCode) {
+        setCurrentQRCode(result.qrCode);
+        setConnectionStatus("Escaneie o QR Code");
+        startPolling(instance.id);
+      } else {
+        setQrError("QR Code não disponível. Tente novamente.");
+      }
+    } catch (error) {
+      setQrError(error instanceof Error ? error.message : "Erro ao obter QR Code");
+    } finally {
+      setQrLoading(false);
+    }
   };
 
-  const getStatusBadge = (status: WhatsAppInstance["status"]) => {
+  const startPolling = (instanceId: string) => {
+    stopPolling(); // Clear any existing polling
+    pollCountRef.current = 0;
+
+    pollingRef.current = setInterval(async () => {
+      pollCountRef.current++;
+      
+      // Stop polling after max attempts
+      if (pollCountRef.current >= MAX_POLLS) {
+        stopPolling();
+        setQrError("Tempo esgotado. Por favor, tente novamente.");
+        setConnectionStatus(null);
+        return;
+      }
+
+      try {
+        const result = await getStatus.mutateAsync(instanceId);
+        
+        if (result.status === 'connected') {
+          stopPolling();
+          setConnectionStatus("Conectado!");
+          setCurrentQRCode(null);
+          toast({
+            title: "WhatsApp conectado",
+            description: "A conexão foi estabelecida com sucesso",
+          });
+          setTimeout(() => {
+            setIsQRDialogOpen(false);
+          }, 1500);
+        } else if (result.evolutionState === 'qr') {
+          // Refresh QR code if needed
+          const qrResult = await getQRCode.mutateAsync(instanceId);
+          if (qrResult.qrCode && qrResult.qrCode !== currentQRCode) {
+            setCurrentQRCode(qrResult.qrCode);
+          }
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 2000); // Poll every 2 seconds
+  };
+
+  const handleCloseQRDialog = () => {
+    stopPolling();
+    setIsQRDialogOpen(false);
+    setCurrentQRCode(null);
+    setCurrentInstanceId(null);
+    setQrError(null);
+    setConnectionStatus(null);
+  };
+
+  const getStatusBadge = (status: string | null) => {
     switch (status) {
       case "connected":
         return (
@@ -187,10 +284,18 @@ export default function Connections() {
           </Badge>
         );
       case "connecting":
+      case "awaiting_qr":
         return (
           <Badge variant="outline" className="text-warning border-warning/30">
             <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
             Conectando
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline" className="text-muted-foreground">
+            <XCircle className="h-3 w-3 mr-1" />
+            Desconectado
           </Badge>
         );
     }
@@ -211,7 +316,7 @@ export default function Connections() {
             <Settings2 className="h-4 w-4 mr-2" />
             Configurar API
           </Button>
-          <Button onClick={() => setIsInstanceDialogOpen(true)} disabled={!evolutionUrl}>
+          <Button onClick={() => setIsInstanceDialogOpen(true)} disabled={!evolutionUrl || !evolutionKey}>
             <Plus className="h-4 w-4 mr-2" />
             Nova Instância
           </Button>
@@ -221,24 +326,24 @@ export default function Connections() {
       {/* API Configuration Card */}
       <Card className={cn(
         "border-dashed",
-        evolutionUrl ? "bg-success/5 border-success/30" : "bg-muted/50"
+        evolutionUrl && evolutionKey ? "bg-success/5 border-success/30" : "bg-muted/50"
       )}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className={cn(
                 "p-2 rounded-lg",
-                evolutionUrl ? "bg-success/10" : "bg-muted"
+                evolutionUrl && evolutionKey ? "bg-success/10" : "bg-muted"
               )}>
                 <Settings2 className={cn(
                   "h-6 w-6",
-                  evolutionUrl ? "text-success" : "text-muted-foreground"
+                  evolutionUrl && evolutionKey ? "text-success" : "text-muted-foreground"
                 )} />
               </div>
               <div>
                 <h3 className="font-medium">Evolution API</h3>
                 <p className="text-sm text-muted-foreground">
-                  {evolutionUrl ? (
+                  {evolutionUrl && evolutionKey ? (
                     <span className="flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3 text-success" />
                       Configurada: {evolutionUrl}
@@ -268,12 +373,16 @@ export default function Connections() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {instances.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : instances.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <QrCode className="h-16 w-16 mb-4 opacity-50" />
               <p className="font-medium mb-1">Nenhuma instância configurada</p>
               <p className="text-sm text-center max-w-md">
-                {evolutionUrl 
+                {evolutionUrl && evolutionKey
                   ? "Clique em 'Nova Instância' para adicionar um número de WhatsApp"
                   : "Configure a Evolution API primeiro para adicionar instâncias"
                 }
@@ -286,57 +395,30 @@ export default function Connections() {
                   <TableHead>Nome</TableHead>
                   <TableHead>Telefone</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Rejeitar Chamadas</TableHead>
-                  <TableHead>Ativo</TableHead>
-                  <TableHead>Última Sincronização</TableHead>
+                  <TableHead>Última Atualização</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {instances.map((instance) => (
                   <TableRow key={instance.id}>
-                    <TableCell className="font-medium">{instance.name}</TableCell>
-                    <TableCell>{instance.phone || "—"}</TableCell>
+                    <TableCell className="font-medium">{instance.instance_name}</TableCell>
+                    <TableCell>{instance.phone_number || "—"}</TableCell>
                     <TableCell>{getStatusBadge(instance.status)}</TableCell>
                     <TableCell>
-                      <Switch
-                        checked={instance.rejectCalls}
-                        onCheckedChange={(checked) => {
-                          setInstances(instances.map(i => 
-                            i.id === instance.id ? { ...i, rejectCalls: checked } : i
-                          ));
-                          toast({
-                            title: checked ? "Chamadas serão rejeitadas" : "Chamadas permitidas",
-                          });
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={instance.isActive}
-                        onCheckedChange={(checked) => {
-                          setInstances(instances.map(i => 
-                            i.id === instance.id ? { ...i, isActive: checked } : i
-                          ));
-                          toast({
-                            title: checked ? "Instância ativada" : "Instância desativada",
-                          });
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {instance.lastSync 
-                        ? new Date(instance.lastSync).toLocaleString("pt-BR")
+                      {instance.updated_at 
+                        ? new Date(instance.updated_at).toLocaleString("pt-BR")
                         : "—"
                       }
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
-                        {instance.status === "disconnected" && (
+                        {instance.status !== "connected" && (
                           <Button 
                             variant="outline" 
                             size="sm"
-                            onClick={() => handleConnectInstance(instance.id)}
+                            onClick={() => handleConnectInstance(instance)}
+                            disabled={getQRCode.isPending}
                           >
                             <QrCode className="h-4 w-4 mr-1" />
                             Conectar
@@ -347,6 +429,7 @@ export default function Connections() {
                           size="icon"
                           className="text-destructive hover:text-destructive"
                           onClick={() => handleDeleteInstance(instance.id)}
+                          disabled={deleteInstance.isPending}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -380,7 +463,7 @@ export default function Connections() {
                 placeholder="https://evolution.example.com"
               />
               <p className="text-xs text-muted-foreground">
-                A URL deve usar HTTPS por segurança
+                URL completa da sua instância Evolution API
               </p>
             </div>
             <div className="space-y-2">
@@ -404,14 +487,25 @@ export default function Connections() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                A chave será armazenada de forma segura
+                A chave será usada para autenticação com a API
               </p>
             </div>
           </div>
           
           <DialogFooter>
-            <Button variant="outline" onClick={handleTestConnection}>
-              Testar Conexão
+            <Button 
+              variant="outline" 
+              onClick={handleTestConnection}
+              disabled={testConnection.isPending || !evolutionUrl || !evolutionKey}
+            >
+              {testConnection.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Testando...
+                </>
+              ) : (
+                "Testar Conexão"
+              )}
             </Button>
             <Button onClick={handleSaveConfig}>Salvar</Button>
           </DialogFooter>
@@ -437,6 +531,9 @@ export default function Connections() {
                 onChange={(e) => setNewInstanceName(e.target.value)}
                 placeholder="Ex: WhatsApp Principal"
               />
+              <p className="text-xs text-muted-foreground">
+                Use apenas letras, números e underscores (sem espaços)
+              </p>
             </div>
           </div>
           
@@ -444,7 +541,85 @@ export default function Connections() {
             <Button variant="outline" onClick={() => setIsInstanceDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleCreateInstance}>Criar Instância</Button>
+            <Button 
+              onClick={handleCreateInstance}
+              disabled={createInstance.isPending}
+            >
+              {createInstance.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Criando...
+                </>
+              ) : (
+                "Criar Instância"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* QR Code Dialog */}
+      <Dialog open={isQRDialogOpen} onOpenChange={handleCloseQRDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Conectar WhatsApp</DialogTitle>
+            <DialogDescription>
+              Escaneie o QR Code com o WhatsApp do seu celular
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex flex-col items-center justify-center py-6 space-y-4">
+            {qrLoading ? (
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-16 w-16 animate-spin text-primary" />
+                <p className="text-muted-foreground">{connectionStatus || "Carregando..."}</p>
+              </div>
+            ) : qrError ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{qrError}</AlertDescription>
+              </Alert>
+            ) : connectionStatus === "Conectado!" ? (
+              <div className="flex flex-col items-center gap-4">
+                <CheckCircle2 className="h-16 w-16 text-success" />
+                <p className="text-lg font-medium text-success">Conectado!</p>
+              </div>
+            ) : currentQRCode ? (
+              <>
+                <div className="bg-white p-4 rounded-lg">
+                  <img 
+                    src={currentQRCode.startsWith('data:') ? currentQRCode : `data:image/png;base64,${currentQRCode}`}
+                    alt="QR Code" 
+                    className="w-64 h-64"
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground text-center">
+                  {connectionStatus || "Abra o WhatsApp > Menu > Dispositivos conectados > Conectar dispositivo"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Tentativa {pollCountRef.current}/{MAX_POLLS}
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <QrCode className="h-16 w-16 text-muted-foreground opacity-50" />
+                <p className="text-muted-foreground">QR Code não disponível</p>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseQRDialog}>
+              Fechar
+            </Button>
+            {qrError && currentInstanceId && (
+              <Button onClick={() => {
+                const instance = instances.find(i => i.id === currentInstanceId);
+                if (instance) handleConnectInstance(instance);
+              }}>
+                Tentar Novamente
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
