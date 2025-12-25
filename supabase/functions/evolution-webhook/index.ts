@@ -336,9 +336,22 @@ serve(async (req) => {
           hasMedia: !!mediaUrl
         });
 
-        // Save message
+        // Save message (avoid duplicates - webhook may retry and fromMe messages can come back after we already inserted)
         logDebug('DB', `Saving message to database`, { requestId, messageId: data.key.id });
-        
+
+        // If this whatsapp_message_id already exists for this conversation, skip
+        const { data: existingMsg } = await supabaseClient
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversation.id)
+          .eq('whatsapp_message_id', data.key.id)
+          .maybeSingle();
+
+        if (existingMsg?.id) {
+          logDebug('MESSAGE', `Duplicate message ignored (already exists)`, { requestId, messageId: data.key.id, dbMessageId: existingMsg.id });
+          break;
+        }
+
         const { data: savedMessage, error: msgError } = await supabaseClient
           .from('messages')
           .insert({
@@ -356,12 +369,7 @@ serve(async (req) => {
           .single();
 
         if (msgError) {
-          // Check if it's a duplicate message
-          if (msgError.code === '23505') {
-            logDebug('MESSAGE', `Duplicate message ignored`, { requestId, messageId: data.key.id });
-          } else {
-            logDebug('ERROR', `Failed to save message`, { requestId, error: msgError, code: msgError.code });
-          }
+          logDebug('ERROR', `Failed to save message`, { requestId, error: msgError, code: msgError.code });
         } else {
           logDebug('MESSAGE', `Message saved successfully`, { requestId, dbMessageId: savedMessage?.id, whatsappId: data.key.id });
         }
