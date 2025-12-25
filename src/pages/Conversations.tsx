@@ -24,7 +24,10 @@ import { MessageBubble, MessageStatus } from "@/components/conversations/Message
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
 import { MessageSearch, highlightText } from "@/components/conversations/MessageSearch";
 import { ReplyPreview } from "@/components/conversations/ReplyPreview";
+import { TemplatePopup } from "@/components/conversations/TemplatePopup";
+import { UnreadBadge } from "@/components/conversations/UnreadBadge";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
+import { useTemplates, Template } from "@/hooks/useTemplates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -91,6 +94,7 @@ export default function Conversations() {
   const { departments } = useDepartments();
   const { tags } = useTags();
   const { statuses } = useCustomStatuses();
+  const { templates } = useTemplates();
   const { toast } = useToast();
   const { playNotification } = useNotificationSound();
   const queryClient = useQueryClient();
@@ -124,9 +128,17 @@ export default function Conversations() {
   // Reply state
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
   
+  // Template popup state
+  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [templateSearchTerm, setTemplateSearchTerm] = useState("");
+  
+  // Unread counts state
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Media preview state
   const [mediaPreview, setMediaPreview] = useState<{
@@ -145,15 +157,30 @@ export default function Conversations() {
     [conversations, selectedConversationId]
   );
 
-  // Calculate unread counts for each conversation
-  const unreadCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    conversations.forEach(conv => {
-      // This is a placeholder - real implementation would need a separate query
-      // For now, we'll use a simple approach based on last_message_at
-      counts[conv.id] = 0;
-    });
-    return counts;
+  // Fetch unread counts for all conversations
+  useEffect(() => {
+    const fetchUnreadCounts = async () => {
+      const counts: Record<string, number> = {};
+      
+      await Promise.all(
+        conversations.map(async (conv) => {
+          const { count } = await supabase
+            .from("messages")
+            .select("*", { count: "exact", head: true })
+            .eq("conversation_id", conv.id)
+            .is("read_at", null)
+            .eq("is_from_me", false);
+          
+          counts[conv.id] = count || 0;
+        })
+      );
+      
+      setUnreadCounts(counts);
+    };
+
+    if (conversations.length > 0) {
+      fetchUnreadCounts();
+    }
   }, [conversations]);
 
   // Search matches
@@ -244,7 +271,15 @@ export default function Conversations() {
         },
         (payload) => {
           const newMsg = payload.new as Message;
-          setMessages(prev => [...prev, newMsg]);
+          // Prevent duplicate messages - check if message already exists
+          setMessages(prev => {
+            const exists = prev.some(m => m.id === newMsg.id || 
+              (m.content === newMsg.content && 
+               m.is_from_me === newMsg.is_from_me && 
+               Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000));
+            if (exists) return prev;
+            return [...prev, newMsg];
+          });
           
           // Play sound for incoming messages
           if (!newMsg.is_from_me) {
@@ -269,14 +304,14 @@ export default function Conversations() {
       time: conv.last_message_at 
         ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
         : "---",
-      unread: 0, // TODO: Implement unread count
+      unread: unreadCounts[conv.id] || 0,
       handler: conv.current_handler as 'ai' | 'human',
       status: conv.status,
       tags: conv.tags || [],
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.instance_name || null,
     }));
-  }, [conversations]);
+  }, [conversations, unreadCounts]);
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
@@ -784,11 +819,17 @@ export default function Conversations() {
                           </Badge>
                         )}
                         {conv.unread > 0 && (
-                          <Badge className="bg-primary text-primary-foreground h-5 min-w-5 flex items-center justify-center p-0 text-xs">
-                            {conv.unread}
-                          </Badge>
+                          <UnreadBadge count={conv.unread} />
                         )}
                       </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </ScrollArea>
+      </div>
                     </div>
                   </div>
                 </div>
@@ -1052,7 +1093,7 @@ export default function Conversations() {
                   />
                 </div>
               ) : (
-                <div className="max-w-3xl mx-auto flex items-end gap-2">
+                <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
                   <div className="flex gap-1">
                     <Button 
                       variant="ghost" 
@@ -1075,20 +1116,54 @@ export default function Conversations() {
                       <Image className="h-5 w-5" />
                     </Button>
                   </div>
-                  <Textarea
-                    placeholder={isSending ? "Enviando..." : "Digite sua mensagem..."}
-                    className="min-h-[44px] max-h-32 resize-none"
-                    rows={1}
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    disabled={isSending}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                  />
+                  <div className="flex-1 relative">
+                    <TemplatePopup
+                      isOpen={showTemplatePopup}
+                      templates={templates.filter(t => t.is_active)}
+                      searchTerm={templateSearchTerm}
+                      onSelect={(template: Template) => {
+                        setMessageInput(template.content);
+                        setShowTemplatePopup(false);
+                        setTemplateSearchTerm("");
+                        textareaRef.current?.focus();
+                      }}
+                      onClose={() => {
+                        setShowTemplatePopup(false);
+                        setTemplateSearchTerm("");
+                      }}
+                    />
+                    <Textarea
+                      ref={textareaRef}
+                      placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
+                      className="min-h-[44px] max-h-32 resize-none"
+                      rows={1}
+                      value={messageInput}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setMessageInput(value);
+                        
+                        // Handle template popup
+                        if (value.startsWith("/")) {
+                          setShowTemplatePopup(true);
+                          setTemplateSearchTerm(value.slice(1));
+                        } else {
+                          setShowTemplatePopup(false);
+                          setTemplateSearchTerm("");
+                        }
+                      }}
+                      disabled={isSending}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey && !showTemplatePopup) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                        if (e.key === "Escape" && showTemplatePopup) {
+                          setShowTemplatePopup(false);
+                          setTemplateSearchTerm("");
+                        }
+                      }}
+                    />
+                  </div>
                   <div className="flex gap-1">
                     <AudioRecorder
                       onSend={handleSendAudioRecording}
