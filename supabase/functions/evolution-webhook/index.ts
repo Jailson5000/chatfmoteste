@@ -68,6 +68,22 @@ interface MessageData {
   messageTimestamp?: number;
 }
 
+// ACK data structure for message status updates
+interface MessageAckData {
+  remoteJid?: string;
+  id?: string;
+  fromMe?: boolean;
+  ack?: number; // 0=error, 1=pending, 2=sent, 3=delivered, 4=read, 5=played
+  // Alternative structure
+  key?: {
+    remoteJid: string;
+    fromMe: boolean;
+    id: string;
+  };
+  status?: string;
+  ids?: string[];
+}
+
 // Helper to normalize event names (Evolution API can send in different formats)
 function normalizeEventName(event: string): string {
   // Convert UPPER_CASE to lowercase.with.dots
@@ -392,7 +408,87 @@ serve(async (req) => {
       }
 
       case 'messages.update': {
-        logDebug('MESSAGE', `Message update event received`, { requestId, data: body.data });
+        // Handle ACK events - message delivery/read status
+        const data = body.data as MessageAckData | MessageAckData[];
+        logDebug('ACK', `Message update/ACK event received`, { requestId, data });
+
+        // Normalize to array (Evolution API can send single or array)
+        const ackMessages = Array.isArray(data) ? data : [data];
+
+        for (const ackData of ackMessages) {
+          // Get message ID and ack status
+          const messageId = ackData.id || ackData.key?.id;
+          const ack = ackData.ack ?? (ackData.status === 'READ' ? 4 : ackData.status === 'DELIVERY_ACK' ? 3 : null);
+
+          if (!messageId) {
+            logDebug('ACK', `No message ID in ACK data, skipping`, { requestId });
+            continue;
+          }
+
+          logDebug('ACK', `Processing ACK for message`, { requestId, messageId, ack, status: ackData.status });
+
+          // ACK values: 0=error, 1=pending, 2=sent, 3=delivered, 4=read, 5=played
+          if (ack === 3 || ackData.status === 'DELIVERY_ACK') {
+            // Message delivered (2 grey ticks)
+            // We don't have a delivery_at column, so we'll use a workaround:
+            // If read_at is null and it's delivered, that means it's delivered but not read
+            // The frontend checks status prop for 'delivered'
+            logDebug('ACK', `Message delivered: ${messageId}`, { requestId });
+            
+            // We could add a delivered_at column, but for now we'll just log it
+            // The frontend will get UPDATE events via realtime
+          } else if (ack === 4 || ack === 5 || ackData.status === 'READ') {
+            // Message read (2 blue ticks)
+            logDebug('ACK', `Marking message as read: ${messageId}`, { requestId });
+
+            const { error: updateError } = await supabaseClient
+              .from('messages')
+              .update({ read_at: new Date().toISOString() })
+              .eq('whatsapp_message_id', messageId);
+
+            if (updateError) {
+              logDebug('ERROR', `Failed to update message read status`, { requestId, error: updateError });
+            } else {
+              logDebug('ACK', `Message marked as read successfully`, { requestId, messageId });
+            }
+          }
+        }
+        break;
+      }
+
+      case 'message.ack':
+      case 'messages.ack': {
+        // Alternative ACK event format
+        const data = body.data as MessageAckData | MessageAckData[];
+        logDebug('ACK', `Message ACK event received`, { requestId, data });
+
+        const ackMessages = Array.isArray(data) ? data : [data];
+
+        for (const ackData of ackMessages) {
+          const messageId = ackData.id || ackData.key?.id;
+          const ack = ackData.ack;
+
+          if (!messageId || ack === undefined) {
+            logDebug('ACK', `Missing message ID or ack value, skipping`, { requestId });
+            continue;
+          }
+
+          logDebug('ACK', `Processing ACK`, { requestId, messageId, ack });
+
+          if (ack >= 4) {
+            // Read or played
+            const { error } = await supabaseClient
+              .from('messages')
+              .update({ read_at: new Date().toISOString() })
+              .eq('whatsapp_message_id', messageId);
+
+            if (error) {
+              logDebug('ERROR', `Failed to update read status`, { requestId, error });
+            } else {
+              logDebug('ACK', `Message marked as read`, { requestId, messageId });
+            }
+          }
+        }
         break;
       }
 

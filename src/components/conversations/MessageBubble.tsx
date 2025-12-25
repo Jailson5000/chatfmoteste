@@ -247,6 +247,114 @@ function AudioPlayer({
   );
 }
 
+// Custom video player component with decryption support
+function VideoPlayer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+
+  // Check if needs decryption
+  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+
+  // Decrypt video on mount if needed
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadVideo = async () => {
+      // Check memory cache first
+      const memoryCached = memoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      // Check IndexedDB cache
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        memoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      // Fetch from API
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          console.error("Failed to decrypt video:", response.error || response.data?.error);
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "video/mp4";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        // Cache in both memory and IndexedDB
+        memoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        console.error("Error decrypting video:", err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadVideo();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  const videoSrc = needsDecryption ? decryptedSrc : src;
+
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center justify-center min-w-[200px] min-h-[120px] bg-muted/50 rounded-lg">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span className="text-xs opacity-70">Carregando vídeo...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || (!videoSrc && needsDecryption)) {
+    return (
+      <div className="flex items-center justify-center min-w-[200px] min-h-[120px] bg-muted/50 rounded-lg">
+        <span className="text-xs opacity-70">Vídeo não disponível</span>
+      </div>
+    );
+  }
+
+  return (
+    <video
+      controls
+      className="max-w-[280px] max-h-[200px] rounded-lg"
+      preload="metadata"
+    >
+      <source src={videoSrc || src} type={mimeType || "video/mp4"} />
+      Seu navegador não suporta vídeo.
+    </video>
+  );
+}
+
 export function MessageBubble({
   id,
   content,
@@ -357,14 +465,12 @@ export function MessageBubble({
 
     if (isVideo) {
       return (
-        <video
-          controls
-          className="max-w-[280px] max-h-[200px] rounded-lg"
-          preload="metadata"
-        >
-          <source src={mediaUrl} type={mediaMimeType || "video/mp4"} />
-          Seu navegador não suporta vídeo.
-        </video>
+        <VideoPlayer 
+          src={mediaUrl} 
+          mimeType={mediaMimeType || undefined}
+          whatsappMessageId={whatsappMessageId || undefined}
+          conversationId={conversationId}
+        />
       );
     }
 
