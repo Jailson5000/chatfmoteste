@@ -1,11 +1,10 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   Bot,
   UserCheck,
   Phone,
   Send,
   Paperclip,
-  Mic,
   MoreVertical,
   ArrowLeft,
   Image,
@@ -47,6 +46,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConversationFilters } from "@/components/conversations/ConversationFilters";
+import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
+import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { useConversations } from "@/hooks/useConversations";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
@@ -87,6 +88,7 @@ export default function Conversations() {
   const [editNameDialogOpen, setEditNameDialogOpen] = useState(false);
   const [editingName, setEditingName] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [showAudioRecorder, setShowAudioRecorder] = useState(false);
   const [conversationFilters, setConversationFilters] = useState<{
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
@@ -95,10 +97,17 @@ export default function Conversations() {
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
 
+  // Media preview state
+  const [mediaPreview, setMediaPreview] = useState<{
+    open: boolean;
+    file: File | null;
+    mediaType: "image" | "audio" | "video" | "document";
+    previewUrl: string | null;
+  }>({ open: false, file: null, mediaType: "image", previewUrl: null });
+
   // File input refs
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
-  const audioInputRef = useRef<HTMLInputElement>(null);
 
   const selectedConversation = useMemo(() => 
     conversations.find((c) => c.id === selectedConversationId),
@@ -325,10 +334,159 @@ export default function Conversations() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>, mediaType: "image" | "audio" | "document") => {
     const file = event.target.files?.[0];
     if (file) {
-      handleSendMedia(file, mediaType);
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file);
+      setMediaPreview({
+        open: true,
+        file,
+        mediaType,
+        previewUrl,
+      });
     }
     // Reset input so the same file can be selected again
     event.target.value = "";
+  };
+
+  const handleMediaPreviewClose = () => {
+    if (mediaPreview.previewUrl) {
+      URL.revokeObjectURL(mediaPreview.previewUrl);
+    }
+    setMediaPreview({ open: false, file: null, mediaType: "image", previewUrl: null });
+  };
+
+  const handleMediaPreviewSend = async (caption: string) => {
+    if (!mediaPreview.file) return;
+    
+    setIsSending(true);
+    
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64 = result.split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(mediaPreview.file);
+      
+      const mediaBase64 = await base64Promise;
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_media",
+          conversationId: selectedConversationId,
+          mediaType: mediaPreview.mediaType,
+          mediaBase64,
+          fileName: mediaPreview.file.name,
+          caption,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Falha ao enviar mídia");
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar mídia");
+      }
+
+      // Optimistically add message to local state
+      const newMessage: Message = {
+        id: response.data.messageId || crypto.randomUUID(),
+        content: caption || `[${mediaPreview.mediaType === "image" ? "Imagem" : mediaPreview.mediaType === "audio" ? "Áudio" : "Documento"}: ${mediaPreview.file.name}]`,
+        created_at: new Date().toISOString(),
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
+      handleMediaPreviewClose();
+      
+      toast({
+        title: "Mídia enviada",
+        description: `${mediaPreview.file.name} enviado com sucesso!`,
+      });
+    } catch (error) {
+      console.error("Erro ao enviar mídia:", error);
+      toast({
+        title: "Erro ao enviar mídia",
+        description: error instanceof Error ? error.message : "Falha ao enviar mídia",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSendAudioRecording = async (audioBlob: Blob) => {
+    if (!selectedConversationId || isSending) return;
+    
+    setIsSending(true);
+    
+    try {
+      // Convert blob to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64 = result.split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(audioBlob);
+      
+      const mediaBase64 = await base64Promise;
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_media",
+          conversationId: selectedConversationId,
+          mediaType: "audio",
+          mediaBase64,
+          fileName: "audio.webm",
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Falha ao enviar áudio");
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar áudio");
+      }
+
+      // Optimistically add message to local state
+      const newMessage: Message = {
+        id: response.data.messageId || crypto.randomUUID(),
+        content: "[Áudio]",
+        created_at: new Date().toISOString(),
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
+      setShowAudioRecorder(false);
+      
+      toast({
+        title: "Áudio enviado",
+        description: "Áudio enviado com sucesso!",
+      });
+    } catch (error) {
+      console.error("Erro ao enviar áudio:", error);
+      toast({
+        title: "Erro ao enviar áudio",
+        description: error instanceof Error ? error.message : "Falha ao enviar áudio",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleSelectConversation = (id: string) => {
@@ -733,85 +891,73 @@ export default function Conversations() {
                 className="hidden"
                 onChange={(e) => handleFileSelect(e, "document")}
               />
-              <input
-                ref={audioInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => handleFileSelect(e, "audio")}
-              />
               
-              <div className="max-w-3xl mx-auto flex items-end gap-2">
-                <div className="flex gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-muted-foreground"
-                    onClick={() => documentInputRef.current?.click()}
+              {showAudioRecorder ? (
+                <div className="max-w-3xl mx-auto">
+                  <AudioRecorder
+                    onSend={handleSendAudioRecording}
+                    onCancel={() => setShowAudioRecorder(false)}
                     disabled={isSending}
-                    title="Enviar documento"
-                  >
-                    <Paperclip className="h-5 w-5" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-muted-foreground"
-                    onClick={() => imageInputRef.current?.click()}
-                    disabled={isSending}
-                    title="Enviar imagem"
-                  >
-                    <Image className="h-5 w-5" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-muted-foreground"
-                    onClick={() => audioInputRef.current?.click()}
-                    disabled={isSending}
-                    title="Enviar áudio"
-                  >
-                    <FileText className="h-5 w-5" />
-                  </Button>
+                  />
                 </div>
-                <Textarea
-                  placeholder={isSending ? "Enviando..." : "Digite sua mensagem..."}
-                  className="min-h-[44px] max-h-32 resize-none"
-                  rows={1}
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  disabled={isSending}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                />
-                <div className="flex gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-muted-foreground"
-                    onClick={() => audioInputRef.current?.click()}
+              ) : (
+                <div className="max-w-3xl mx-auto flex items-end gap-2">
+                  <div className="flex gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="text-muted-foreground"
+                      onClick={() => documentInputRef.current?.click()}
+                      disabled={isSending}
+                      title="Enviar documento"
+                    >
+                      <Paperclip className="h-5 w-5" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="text-muted-foreground"
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={isSending}
+                      title="Enviar imagem"
+                    >
+                      <Image className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <Textarea
+                    placeholder={isSending ? "Enviando..." : "Digite sua mensagem..."}
+                    className="min-h-[44px] max-h-32 resize-none"
+                    rows={1}
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
                     disabled={isSending}
-                    title="Gravar áudio"
-                  >
-                    <Mic className="h-5 w-5" />
-                  </Button>
-                  <Button 
-                    size="icon" 
-                    onClick={handleSendMessage}
-                    disabled={isSending || !messageInput.trim()}
-                  >
-                    {isSending ? (
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                    ) : (
-                      <Send className="h-5 w-5" />
-                    )}
-                  </Button>
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                  />
+                  <div className="flex gap-1">
+                    <AudioRecorder
+                      onSend={handleSendAudioRecording}
+                      onCancel={() => {}}
+                      disabled={isSending}
+                    />
+                    <Button 
+                      size="icon" 
+                      onClick={handleSendMessage}
+                      disabled={isSending || !messageInput.trim()}
+                    >
+                      {isSending ? (
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                      ) : (
+                        <Send className="h-5 w-5" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </>
         ) : (
@@ -847,6 +993,17 @@ export default function Conversations() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Media Preview Dialog */}
+      <MediaPreviewDialog
+        open={mediaPreview.open}
+        onClose={handleMediaPreviewClose}
+        onSend={handleMediaPreviewSend}
+        file={mediaPreview.file}
+        mediaType={mediaPreview.mediaType}
+        previewUrl={mediaPreview.previewUrl}
+        isSending={isSending}
+      />
     </div>
   );
 }
