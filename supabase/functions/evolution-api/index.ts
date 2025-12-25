@@ -7,12 +7,15 @@ const corsHeaders = {
 };
 
 interface EvolutionRequest {
-  action: 'create_instance' | 'get_qrcode' | 'get_status' | 'delete_instance' | 'test_connection';
+  action: 'create_instance' | 'get_qrcode' | 'get_status' | 'delete_instance' | 'test_connection' | 'configure_webhook';
   instanceName?: string;
   apiUrl?: string;
   apiKey?: string;
   instanceId?: string;
 }
+
+// Get the webhook URL for this project
+const WEBHOOK_URL = `${Deno.env.get('SUPABASE_URL')}/functions/v1/evolution-webhook`;
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -94,7 +97,7 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Creating instance: ${body.instanceName}`);
 
-        // Create instance in Evolution API
+        // Create instance in Evolution API with webhook configuration
         const createResponse = await fetch(`${body.apiUrl}/instance/create`, {
           method: 'POST',
           headers: {
@@ -105,6 +108,19 @@ serve(async (req) => {
             instanceName: body.instanceName,
             qrcode: true,
             integration: 'WHATSAPP-BAILEYS',
+            webhook: {
+              url: WEBHOOK_URL,
+              byEvents: false,
+              base64: true,
+              events: [
+                'CONNECTION_UPDATE',
+                'QRCODE_UPDATED',
+                'MESSAGES_UPSERT',
+                'MESSAGES_UPDATE',
+                'MESSAGES_DELETE',
+                'SEND_MESSAGE',
+              ],
+            },
           }),
         });
 
@@ -142,11 +158,14 @@ serve(async (req) => {
           throw new Error(`Failed to save instance: ${insertError.message}`);
         }
 
+        console.log(`[Evolution API] Webhook configured at: ${WEBHOOK_URL}`);
+
         return new Response(
           JSON.stringify({ 
             success: true, 
             instance,
             qrCode,
+            webhookUrl: WEBHOOK_URL,
             message: qrCode ? 'Instance created, scan QR code' : 'Instance created' 
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -334,6 +353,69 @@ serve(async (req) => {
 
         return new Response(
           JSON.stringify({ success: true, message: 'Instance deleted' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      case 'configure_webhook': {
+        if (!body.instanceId) {
+          throw new Error('instanceId is required');
+        }
+
+        console.log(`[Evolution API] Configuring webhook for instance: ${body.instanceId}`);
+
+        // Get instance from database
+        const { data: instance, error: fetchError } = await supabaseClient
+          .from('whatsapp_instances')
+          .select('*')
+          .eq('id', body.instanceId)
+          .eq('law_firm_id', lawFirmId)
+          .single();
+
+        if (fetchError || !instance) {
+          throw new Error('Instance not found');
+        }
+
+        // Configure webhook in Evolution API
+        const webhookResponse = await fetch(`${instance.api_url}/webhook/set/${instance.instance_name}`, {
+          method: 'POST',
+          headers: {
+            'apikey': instance.api_key || '',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: WEBHOOK_URL,
+            enabled: true,
+            byEvents: false,
+            base64: true,
+            events: [
+              'CONNECTION_UPDATE',
+              'QRCODE_UPDATED',
+              'MESSAGES_UPSERT',
+              'MESSAGES_UPDATE',
+              'MESSAGES_DELETE',
+              'SEND_MESSAGE',
+            ],
+          }),
+        });
+
+        console.log(`[Evolution API] Configure webhook response: ${webhookResponse.status}`);
+
+        if (!webhookResponse.ok) {
+          const errorText = await webhookResponse.text();
+          console.error(`[Evolution API] Configure webhook failed: ${errorText}`);
+          throw new Error(`Failed to configure webhook: ${errorText}`);
+        }
+
+        const webhookData = await webhookResponse.json();
+        console.log(`[Evolution API] Webhook configured:`, JSON.stringify(webhookData));
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            webhookUrl: WEBHOOK_URL,
+            message: 'Webhook configured successfully' 
+          }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }

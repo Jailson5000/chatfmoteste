@@ -19,6 +19,7 @@ interface EvolutionResponse {
   instance?: WhatsAppInstance;
   message?: string;
   evolutionState?: string;
+  webhookUrl?: string;
 }
 
 export function useWhatsAppInstances() {
@@ -187,6 +188,38 @@ export function useWhatsAppInstances() {
     },
   });
 
+  const configureWebhook = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "configure_webhook",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to configure webhook");
+      
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Webhook configurado",
+        description: `URL: ${data.webhookUrl}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao configurar webhook",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     isLoading,
@@ -196,5 +229,6 @@ export function useWhatsAppInstances() {
     getQRCode,
     getStatus,
     deleteInstance,
+    configureWebhook,
   };
 }
