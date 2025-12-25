@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -47,17 +47,22 @@ function isEncryptedMedia(url: string): boolean {
   return url.includes(".enc") || url.includes("mmg.whatsapp.net");
 }
 
-// Custom audio player component with decryption support
+// Playback speed options
+const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+// Custom audio player component with decryption support, progress bar, and speed control
 function AudioPlayer({ 
   src, 
   mimeType,
   whatsappMessageId,
   conversationId,
+  isFromMe,
 }: { 
   src: string; 
   mimeType?: string;
   whatsappMessageId?: string;
   conversationId?: string;
+  isFromMe?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -66,6 +71,7 @@ function AudioPlayer({
   const [error, setError] = useState(false);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
   // Check if needs decryption
   const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
@@ -159,6 +165,13 @@ function AudioPlayer({
     };
   }, [isDecrypting, audioSrc]);
 
+  // Update playback rate when changed
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
+
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio || !audioSrc) return;
@@ -179,6 +192,12 @@ function AudioPlayer({
     }
   };
 
+  const cycleSpeed = () => {
+    const currentIndex = SPEED_OPTIONS.indexOf(playbackSpeed);
+    const nextIndex = (currentIndex + 1) % SPEED_OPTIONS.length;
+    setPlaybackSpeed(SPEED_OPTIONS[nextIndex]);
+  };
+
   const formatTime = (time: number) => {
     if (!isFinite(time)) return "0:00";
     const minutes = Math.floor(time / 60);
@@ -186,19 +205,20 @@ function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  // Calculate progress percentage for visual bar
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
   if (isDecrypting) {
     return (
-      <div className="flex items-center gap-3 min-w-[220px] max-w-[280px]">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-10 w-10 rounded-full flex-shrink-0"
-          disabled
-        >
-          <Loader2 className="h-5 w-5 animate-spin" />
-        </Button>
+      <div className="flex items-center gap-3 min-w-[240px] max-w-[300px] p-2 rounded-xl bg-background/20">
+        <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        </div>
         <div className="flex-1">
-          <span className="text-xs opacity-70">Carregando áudio...</span>
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-primary/50 rounded-full animate-pulse w-1/3" />
+          </div>
+          <span className="text-xs opacity-70 mt-1 block">Carregando...</span>
         </div>
       </div>
     );
@@ -206,20 +226,37 @@ function AudioPlayer({
 
   if (error || (!audioSrc && needsDecryption)) {
     return (
-      <div className="flex items-center gap-2 min-w-[200px] text-xs opacity-70">
-        <Play className="h-4 w-4" />
-        <span>Áudio não disponível</span>
+      <div className="flex items-center gap-3 min-w-[200px] p-2 rounded-xl bg-destructive/10">
+        <div className="h-10 w-10 rounded-full bg-destructive/20 flex items-center justify-center flex-shrink-0">
+          <X className="h-5 w-5 text-destructive" />
+        </div>
+        <span className="text-xs text-destructive">Áudio não disponível</span>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 min-w-[220px] max-w-[280px]">
+    <div className={cn(
+      "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
+      isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
+    )}>
       {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+      
+      {/* Mic icon indicator */}
+      <div className={cn(
+        "h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
+        isPlaying 
+          ? "bg-primary text-primary-foreground" 
+          : isFromMe ? "bg-primary/30" : "bg-muted"
+      )}>
+        <Mic className="h-5 w-5" />
+      </div>
+      
+      {/* Play button */}
       <Button
         variant="ghost"
         size="icon"
-        className="h-10 w-10 rounded-full flex-shrink-0"
+        className="h-9 w-9 rounded-full flex-shrink-0 hover:scale-110 transition-transform"
         onClick={togglePlay}
         disabled={!audioSrc}
       >
@@ -229,18 +266,46 @@ function AudioPlayer({
           <Play className="h-5 w-5 ml-0.5" />
         )}
       </Button>
-      <div className="flex-1 space-y-1">
-        <Slider
-          value={[currentTime]}
-          max={duration || 100}
-          step={0.1}
-          onValueChange={handleSeek}
-          className="cursor-pointer"
-          disabled={!audioSrc}
-        />
-        <div className="flex justify-between text-xs opacity-70">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
+      
+      {/* Progress section */}
+      <div className="flex-1 space-y-1.5">
+        {/* Visual progress bar */}
+        <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden cursor-pointer group">
+          <Slider
+            value={[currentTime]}
+            max={duration || 100}
+            step={0.1}
+            onValueChange={handleSeek}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+            disabled={!audioSrc}
+          />
+          <div 
+            className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-100 relative"
+            style={{ width: `${progressPercent}%` }}
+          >
+            {/* Animated pulse at the end */}
+            <div className={cn(
+              "absolute right-0 top-1/2 -translate-y-1/2 h-3 w-3 rounded-full bg-primary shadow-lg transition-opacity",
+              isPlaying ? "opacity-100 animate-pulse" : "opacity-0 group-hover:opacity-100"
+            )} />
+          </div>
+        </div>
+        
+        {/* Time and speed controls */}
+        <div className="flex justify-between items-center">
+          <span className="text-xs opacity-70 tabular-nums">{formatTime(currentTime)}</span>
+          <button
+            onClick={cycleSpeed}
+            className={cn(
+              "text-xs font-medium px-1.5 py-0.5 rounded transition-colors",
+              "hover:bg-primary/20 active:scale-95",
+              playbackSpeed !== 1 ? "text-primary" : "opacity-70"
+            )}
+            title="Velocidade de reprodução"
+          >
+            {playbackSpeed}x
+          </button>
+          <span className="text-xs opacity-70 tabular-nums">{formatTime(duration)}</span>
         </div>
       </div>
     </div>
@@ -394,31 +459,31 @@ export function MessageBubble({
       case "sending":
         return (
           <div className="flex items-center">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           </div>
         );
       case "sent":
         // 1 tick - message sent to server
-        return <Check className="h-3 w-3" />;
+        return <Check className="h-3.5 w-3.5 text-muted-foreground" />;
       case "delivered":
-        // 2 ticks - message delivered to recipient
-        return <CheckCheck className="h-3 w-3" />;
+        // 2 gray ticks - message delivered to recipient
+        return <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />;
       case "read":
         // 2 blue ticks - message read by recipient
-        return <CheckCheck className="h-3 w-3 text-blue-400" />;
+        return <CheckCheck className="h-3.5 w-3.5 text-blue-500" />;
       case "error":
         return (
           <button
             onClick={() => onRetry?.(id, content || "")}
-            className="flex items-center gap-1 text-destructive hover:text-destructive/80 transition-colors cursor-pointer"
-            title="Clique para reenviar"
+            className="flex items-center gap-0.5 text-destructive hover:text-destructive/80 transition-colors cursor-pointer group"
+            title="Erro ao enviar - clique para reenviar"
           >
-            <AlertCircle className="h-3 w-3" />
-            <RotateCcw className="h-2.5 w-2.5" />
+            <X className="h-3.5 w-3.5" />
+            <RotateCcw className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
         );
       default:
-        return <Check className="h-3 w-3" />;
+        return <Check className="h-3.5 w-3.5 text-muted-foreground" />;
     }
   };
 
@@ -459,6 +524,7 @@ export function MessageBubble({
           mimeType={mediaMimeType || undefined}
           whatsappMessageId={whatsappMessageId || undefined}
           conversationId={conversationId}
+          isFromMe={isFromMe}
         />
       );
     }
