@@ -19,6 +19,8 @@ import {
   FileSignature,
   MessageSquare,
 } from "lucide-react";
+import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
+import { ChatDropZone } from "@/components/conversations/ChatDropZone";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +69,10 @@ interface Message {
   is_from_me: boolean;
   sender_type: string;
   ai_generated: boolean;
+  media_url?: string | null;
+  media_mime_type?: string | null;
+  message_type?: string;
+  status?: MessageStatus;
 }
 
 export default function Conversations() {
@@ -125,7 +131,7 @@ export default function Conversations() {
       setMessagesLoading(true);
       const { data, error } = await supabase
         .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated")
+        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type")
         .eq("conversation_id", selectedConversationId)
         .order("created_at", { ascending: true });
       
@@ -222,6 +228,20 @@ export default function Conversations() {
     setMessageInput(""); // Clear input immediately for better UX
     setIsSending(true);
     
+    // Optimistically add message to local state with "sending" status
+    const tempId = crypto.randomUUID();
+    const newMessage: Message = {
+      id: tempId,
+      content: messageToSend,
+      created_at: new Date().toISOString(),
+      is_from_me: true,
+      sender_type: "human",
+      ai_generated: false,
+      status: "sending" as MessageStatus,
+    };
+    
+    setMessages(prev => [...prev, newMessage]);
+    
     try {
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
@@ -239,19 +259,20 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mensagem");
       }
 
-      // Optimistically add message to local state
-      const newMessage: Message = {
-        id: response.data.messageId || crypto.randomUUID(),
-        content: messageToSend,
-        created_at: new Date().toISOString(),
-        is_from_me: true,
-        sender_type: "human",
-        ai_generated: false,
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
+      // Update to "sent" after successful response
+      setMessages(prev => prev.map(m => 
+        m.id === tempId 
+          ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
+          : m
+      ));
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
+      // Update message to show error status
+      setMessages(prev => prev.map(m => 
+        m.id === tempId 
+          ? { ...m, status: "error" as MessageStatus }
+          : m
+      ));
       setMessageInput(messageToSend); // Restore message on error
       toast({
         title: "Erro ao enviar",
@@ -394,13 +415,18 @@ export default function Conversations() {
       }
 
       // Optimistically add message to local state
+      const previewUrlForMessage = mediaPreview.previewUrl;
       const newMessage: Message = {
         id: response.data.messageId || crypto.randomUUID(),
-        content: caption || `[${mediaPreview.mediaType === "image" ? "Imagem" : mediaPreview.mediaType === "audio" ? "Áudio" : "Documento"}: ${mediaPreview.file.name}]`,
+        content: caption || null,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
         ai_generated: false,
+        media_url: previewUrlForMessage || undefined,
+        media_mime_type: mediaPreview.file.type,
+        message_type: mediaPreview.mediaType,
+        status: "sent",
       };
       
       setMessages(prev => [...prev, newMessage]);
@@ -463,11 +489,13 @@ export default function Conversations() {
       // Optimistically add message to local state
       const newMessage: Message = {
         id: response.data.messageId || crypto.randomUUID(),
-        content: "[Áudio]",
+        content: null,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
         ai_generated: false,
+        message_type: "audio",
+        status: "sent",
       };
       
       setMessages(prev => [...prev, newMessage]);
@@ -676,13 +704,25 @@ export default function Conversations() {
         </ScrollArea>
       </div>
 
-      {/* Chat Area */}
-      <div
-        className={cn(
-          "flex-1 flex flex-col bg-background",
-          !showMobileChat && "hidden md:flex"
-        )}
+      {/* Chat Area with Drop Zone */}
+      <ChatDropZone
+        onFileDrop={(file, mediaType) => {
+          const previewUrl = URL.createObjectURL(file);
+          setMediaPreview({
+            open: true,
+            file,
+            mediaType,
+            previewUrl,
+          });
+        }}
+        disabled={isSending || !selectedConversation}
       >
+        <div
+          className={cn(
+            "flex-1 flex flex-col bg-background",
+            !showMobileChat && "hidden md:flex"
+          )}
+        >
         {selectedConversation ? (
           <>
             {/* Chat Header */}
@@ -832,43 +872,19 @@ export default function Conversations() {
                   </div>
                 ) : (
                   messages.map((msg) => (
-                    <div
+                    <MessageBubble
                       key={msg.id}
-                      className={cn(
-                        "flex",
-                        msg.is_from_me ? "justify-end" : "justify-start"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "max-w-[80%] rounded-2xl px-4 py-2.5",
-                          msg.is_from_me
-                            ? msg.ai_generated
-                              ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
-                              : "bg-primary text-primary-foreground rounded-br-md"
-                            : "bg-muted rounded-bl-md"
-                        )}
-                      >
-                        {msg.ai_generated && msg.is_from_me && (
-                          <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
-                            <Bot className="h-3 w-3" />
-                            Assistente IA
-                          </div>
-                        )}
-                        <p className="text-sm leading-relaxed">{msg.content}</p>
-                        <p
-                          className={cn(
-                            "text-xs mt-1",
-                            msg.is_from_me ? "text-primary-foreground/70" : "text-muted-foreground"
-                          )}
-                        >
-                          {new Date(msg.created_at).toLocaleTimeString('pt-BR', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </p>
-                      </div>
-                    </div>
+                      id={msg.id}
+                      content={msg.content}
+                      createdAt={msg.created_at}
+                      isFromMe={msg.is_from_me}
+                      senderType={msg.sender_type}
+                      aiGenerated={msg.ai_generated}
+                      mediaUrl={msg.media_url}
+                      mediaMimeType={msg.media_mime_type}
+                      messageType={msg.message_type}
+                      status={msg.status || "sent"}
+                    />
                   ))
                 )}
               </div>
@@ -968,8 +984,8 @@ export default function Conversations() {
             </div>
           </div>
         )}
-      </div>
-
+        </div>
+      </ChatDropZone>
       {/* Edit Name Dialog */}
       <Dialog open={editNameDialogOpen} onOpenChange={setEditNameDialogOpen}>
         <DialogContent>
