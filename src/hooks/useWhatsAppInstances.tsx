@@ -26,31 +26,39 @@ export function useWhatsAppInstances() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: instances = [], isLoading, error } = useQuery({
+  const { data: instances = [], isLoading, error, refetch } = useQuery({
     queryKey: ["whatsapp-instances"],
     queryFn: async () => {
+      console.log("[useWhatsAppInstances] Fetching instances...");
       const { data, error } = await supabase
         .from("whatsapp_instances")
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error("[useWhatsAppInstances] Fetch error:", error);
+        throw error;
+      }
+      console.log("[useWhatsAppInstances] Fetched instances:", data?.length);
       return data as WhatsAppInstance[];
     },
   });
 
   const testConnection = useMutation({
     mutationFn: async ({ apiUrl, apiKey }: { apiUrl: string; apiKey: string }): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Testing connection to:", apiUrl);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
       const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
         body: {
           action: "test_connection",
-          apiUrl,
+          apiUrl: apiUrl.replace(/\/+$/, ''), // Remove trailing slashes
           apiKey,
         },
       });
+
+      console.log("[useWhatsAppInstances] Test connection response:", response);
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Test failed");
@@ -64,6 +72,7 @@ export function useWhatsAppInstances() {
       });
     },
     onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Test connection error:", error);
       toast({
         title: "Erro na conexão",
         description: error.message,
@@ -74,6 +83,7 @@ export function useWhatsAppInstances() {
 
   const createInstance = useMutation({
     mutationFn: async ({ instanceName, apiUrl, apiKey }: CreateInstanceParams): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Creating instance:", instanceName);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -81,24 +91,31 @@ export function useWhatsAppInstances() {
         body: {
           action: "create_instance",
           instanceName,
-          apiUrl,
+          apiUrl: apiUrl.replace(/\/+$/, ''), // Remove trailing slashes
           apiKey,
         },
       });
+
+      console.log("[useWhatsAppInstances] Create instance response:", response);
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to create instance");
       
       return response.data;
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    onSuccess: async (data) => {
+      console.log("[useWhatsAppInstances] Instance created successfully:", data.instance?.id);
+      // Force refetch to get the new instance
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      await refetch();
+      
       toast({
         title: "Instância criada",
         description: data.qrCode ? "Escaneie o QR Code para conectar" : "Instância criada com sucesso",
       });
     },
     onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Create instance error:", error);
       toast({
         title: "Erro ao criar instância",
         description: error.message,
@@ -109,6 +126,7 @@ export function useWhatsAppInstances() {
 
   const getQRCode = useMutation({
     mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Getting QR code for:", instanceId);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -119,12 +137,18 @@ export function useWhatsAppInstances() {
         },
       });
 
+      console.log("[useWhatsAppInstances] Get QR code response:", response);
+
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to get QR code");
       
       return response.data;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    },
     onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Get QR code error:", error);
       toast({
         title: "Erro ao obter QR Code",
         description: error.message,
@@ -157,6 +181,7 @@ export function useWhatsAppInstances() {
 
   const deleteInstance = useMutation({
     mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Deleting instance:", instanceId);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -167,19 +192,23 @@ export function useWhatsAppInstances() {
         },
       });
 
+      console.log("[useWhatsAppInstances] Delete instance response:", response);
+
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to delete instance");
       
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      await refetch();
       toast({
         title: "Instância removida",
         description: "A instância foi removida com sucesso",
       });
     },
     onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Delete instance error:", error);
       toast({
         title: "Erro ao remover instância",
         description: error.message,
@@ -190,6 +219,7 @@ export function useWhatsAppInstances() {
 
   const configureWebhook = useMutation({
     mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Configuring webhook for:", instanceId);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -199,6 +229,8 @@ export function useWhatsAppInstances() {
           instanceId,
         },
       });
+
+      console.log("[useWhatsAppInstances] Configure webhook response:", response);
 
       if (response.error) throw new Error(response.error.message);
       if (!response.data?.success) throw new Error(response.data?.error || "Failed to configure webhook");
@@ -212,6 +244,7 @@ export function useWhatsAppInstances() {
       });
     },
     onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Configure webhook error:", error);
       toast({
         title: "Erro ao configurar webhook",
         description: error.message,
@@ -224,6 +257,7 @@ export function useWhatsAppInstances() {
     instances,
     isLoading,
     error,
+    refetch,
     testConnection,
     createInstance,
     getQRCode,

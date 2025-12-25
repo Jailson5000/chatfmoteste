@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Evolution API event types
+// Evolution API event types - support both formats
 interface EvolutionEvent {
   event: string;
   instance: string;
@@ -68,7 +68,16 @@ interface MessageData {
   messageTimestamp?: number;
 }
 
+// Helper to normalize event names (Evolution API can send in different formats)
+function normalizeEventName(event: string): string {
+  // Convert UPPER_CASE to lowercase.with.dots
+  const normalized = event.toLowerCase().replace(/_/g, '.');
+  return normalized;
+}
+
 serve(async (req) => {
+  console.log(`[Evolution Webhook] Received ${req.method} request`);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -76,6 +85,7 @@ serve(async (req) => {
 
   // Only accept POST requests
   if (req.method !== 'POST') {
+    console.log(`[Evolution Webhook] Rejected non-POST request: ${req.method}`);
     return new Response(
       JSON.stringify({ error: 'Method not allowed' }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -88,10 +98,22 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const body: EvolutionEvent = await req.json();
+    const rawBody = await req.text();
+    console.log(`[Evolution Webhook] Raw body:`, rawBody);
     
-    console.log(`[Evolution Webhook] Event: ${body.event}, Instance: ${body.instance}`);
-    console.log(`[Evolution Webhook] Full payload:`, JSON.stringify(body, null, 2));
+    let body: EvolutionEvent;
+    try {
+      body = JSON.parse(rawBody);
+    } catch (parseError) {
+      console.error(`[Evolution Webhook] Failed to parse JSON:`, parseError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Invalid JSON' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const normalizedEvent = normalizeEventName(body.event);
+    console.log(`[Evolution Webhook] Event: ${body.event} (normalized: ${normalizedEvent}), Instance: ${body.instance}`);
 
     // Find the WhatsApp instance by instance_name
     const { data: instance, error: instanceError } = await supabaseClient
@@ -101,7 +123,7 @@ serve(async (req) => {
       .single();
 
     if (instanceError || !instance) {
-      console.log(`[Evolution Webhook] Instance not found: ${body.instance}`);
+      console.log(`[Evolution Webhook] Instance not found: ${body.instance}, error:`, instanceError);
       // Return 200 to avoid Evolution API retrying
       return new Response(
         JSON.stringify({ success: true, message: 'Instance not found, event ignored' }),
@@ -109,9 +131,11 @@ serve(async (req) => {
       );
     }
 
+    console.log(`[Evolution Webhook] Found instance: ${instance.id} for law firm: ${instance.law_firm_id}`);
     const lawFirmId = instance.law_firm_id;
 
-    switch (body.event) {
+    // Handle events (support both formats: CONNECTION_UPDATE and connection.update)
+    switch (normalizedEvent) {
       case 'connection.update': {
         const data = body.data as ConnectionUpdateData;
         console.log(`[Evolution Webhook] Connection update: ${data.state}`);
@@ -143,7 +167,6 @@ serve(async (req) => {
       }
 
       case 'qrcode.updated': {
-        const data = body.data as QRCodeData;
         console.log(`[Evolution Webhook] QR code updated for instance: ${body.instance}`);
         
         // Update status to connecting/awaiting_qr
@@ -159,7 +182,7 @@ serve(async (req) => {
 
       case 'messages.upsert': {
         const data = body.data as MessageData;
-        console.log(`[Evolution Webhook] New message from: ${data.key?.remoteJid}`);
+        console.log(`[Evolution Webhook] New message - remoteJid: ${data.key?.remoteJid}, fromMe: ${data.key?.fromMe}`);
         
         if (!data.key?.remoteJid) {
           console.log(`[Evolution Webhook] No remoteJid in message, skipping`);
@@ -170,6 +193,8 @@ serve(async (req) => {
         const remoteJid = data.key.remoteJid;
         const phoneNumber = remoteJid.split('@')[0];
         const isFromMe = data.key.fromMe;
+
+        console.log(`[Evolution Webhook] Processing message from ${phoneNumber}, isFromMe: ${isFromMe}`);
 
         // Get or create conversation
         let { data: conversation, error: convError } = await supabaseClient
@@ -182,6 +207,7 @@ serve(async (req) => {
         if (convError && convError.code === 'PGRST116') {
           // Conversation doesn't exist, create it
           const contactName = data.pushName || phoneNumber;
+          console.log(`[Evolution Webhook] Creating new conversation for: ${contactName}`);
           
           const { data: newConv, error: createError } = await supabaseClient
             .from('conversations')
@@ -207,6 +233,8 @@ serve(async (req) => {
         } else if (convError) {
           console.error(`[Evolution Webhook] Error fetching conversation:`, convError);
           break;
+        } else {
+          console.log(`[Evolution Webhook] Found existing conversation: ${conversation.id}`);
         }
 
         // Extract message content
@@ -239,6 +267,8 @@ serve(async (req) => {
           mediaUrl = data.message.documentMessage.url || '';
           mediaMimeType = data.message.documentMessage.mimetype || 'application/octet-stream';
         }
+
+        console.log(`[Evolution Webhook] Message content: "${messageContent.substring(0, 50)}...", type: ${messageType}`);
 
         // Save message
         const { error: msgError } = await supabaseClient
@@ -275,13 +305,12 @@ serve(async (req) => {
           })
           .eq('id', conversation.id);
 
+        console.log(`[Evolution Webhook] Updated conversation last_message_at`);
         break;
       }
 
       case 'messages.update': {
         console.log(`[Evolution Webhook] Message update event received`);
-        // Handle message status updates (delivered, read, etc.)
-        // This can be implemented later for read receipts
         break;
       }
 
@@ -290,33 +319,13 @@ serve(async (req) => {
         break;
       }
 
-      case 'presence.update': {
-        console.log(`[Evolution Webhook] Presence update event received`);
-        break;
-      }
-
-      case 'groups.upsert': {
-        console.log(`[Evolution Webhook] Groups upsert event received`);
-        break;
-      }
-
-      case 'chats.upsert': {
-        console.log(`[Evolution Webhook] Chats upsert event received`);
-        break;
-      }
-
-      case 'chats.update': {
-        console.log(`[Evolution Webhook] Chats update event received`);
-        break;
-      }
-
-      case 'contacts.upsert': {
-        console.log(`[Evolution Webhook] Contacts upsert event received`);
+      case 'send.message': {
+        console.log(`[Evolution Webhook] Send message event received`);
         break;
       }
 
       default:
-        console.log(`[Evolution Webhook] Unhandled event: ${body.event}`);
+        console.log(`[Evolution Webhook] Unhandled event: ${body.event} (normalized: ${normalizedEvent})`);
     }
 
     // Log webhook event for auditing
