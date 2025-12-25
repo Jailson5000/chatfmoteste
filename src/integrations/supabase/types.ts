@@ -347,6 +347,7 @@ export type Database = {
       }
       conversations: {
         Row: {
+          ai_summary: string | null
           assigned_to: string | null
           client_id: string | null
           contact_name: string | null
@@ -358,6 +359,8 @@ export type Database = {
           internal_notes: string | null
           last_message_at: string | null
           law_firm_id: string
+          n8n_last_response_at: string | null
+          needs_human_handoff: boolean | null
           priority: number
           remote_jid: string
           status: Database["public"]["Enums"]["case_status"]
@@ -366,6 +369,7 @@ export type Database = {
           whatsapp_instance_id: string | null
         }
         Insert: {
+          ai_summary?: string | null
           assigned_to?: string | null
           client_id?: string | null
           contact_name?: string | null
@@ -377,6 +381,8 @@ export type Database = {
           internal_notes?: string | null
           last_message_at?: string | null
           law_firm_id: string
+          n8n_last_response_at?: string | null
+          needs_human_handoff?: boolean | null
           priority?: number
           remote_jid: string
           status?: Database["public"]["Enums"]["case_status"]
@@ -385,6 +391,7 @@ export type Database = {
           whatsapp_instance_id?: string | null
         }
         Update: {
+          ai_summary?: string | null
           assigned_to?: string | null
           client_id?: string | null
           contact_name?: string | null
@@ -396,6 +403,8 @@ export type Database = {
           internal_notes?: string | null
           last_message_at?: string | null
           law_firm_id?: string
+          n8n_last_response_at?: string | null
+          needs_human_handoff?: boolean | null
           priority?: number
           remote_jid?: string
           status?: Database["public"]["Enums"]["case_status"]
@@ -699,6 +708,7 @@ export type Database = {
           content: string | null
           conversation_id: string
           created_at: string
+          delivered_at: string | null
           id: string
           is_from_me: boolean
           media_mime_type: string | null
@@ -708,6 +718,7 @@ export type Database = {
           reply_to_message_id: string | null
           sender_id: string | null
           sender_type: string
+          status: string | null
           whatsapp_message_id: string | null
         }
         Insert: {
@@ -715,6 +726,7 @@ export type Database = {
           content?: string | null
           conversation_id: string
           created_at?: string
+          delivered_at?: string | null
           id?: string
           is_from_me?: boolean
           media_mime_type?: string | null
@@ -724,6 +736,7 @@ export type Database = {
           reply_to_message_id?: string | null
           sender_id?: string | null
           sender_type: string
+          status?: string | null
           whatsapp_message_id?: string | null
         }
         Update: {
@@ -731,6 +744,7 @@ export type Database = {
           content?: string | null
           conversation_id?: string
           created_at?: string
+          delivered_at?: string | null
           id?: string
           is_from_me?: boolean
           media_mime_type?: string | null
@@ -740,6 +754,7 @@ export type Database = {
           reply_to_message_id?: string | null
           sender_id?: string | null
           sender_type?: string
+          status?: string | null
           whatsapp_message_id?: string | null
         }
         Relationships: [

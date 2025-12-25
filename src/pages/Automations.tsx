@@ -16,8 +16,10 @@ import {
   ArrowRight,
   Wand2,
   Folder,
+  Loader2,
+  TestTube,
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -48,56 +50,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
+import { useAutomations, type Automation, type CreateAutomationParams } from "@/hooks/useAutomations";
 import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
 
-interface Automation {
-  id: string;
-  name: string;
-  description: string;
-  webhookUrl: string;
-  triggerType: "new_conversation" | "keyword" | "scheduled" | "status_change" | "department_entry";
-  triggerDepartmentId?: string;
-  aiPrompt: string;
-  isActive: boolean;
-  lastTriggered: string | null;
-  successCount: number;
-  errorCount: number;
-  canChangeStatus: boolean;
-  canMoveDepartment: boolean;
-}
+type TriggerType = "new_conversation" | "keyword" | "scheduled" | "status_change" | "department_entry";
 
-const mockAutomations: Automation[] = [
-  {
-    id: "1",
-    name: "Triagem Inicial",
-    description: "Coleta informações básicas do cliente e classifica a área jurídica",
-    webhookUrl: "https://n8n.example.com/webhook/triagem",
-    triggerType: "new_conversation",
-    aiPrompt: "Você é uma assistente jurídica. Colete nome, telefone e descreva brevemente o problema jurídico do cliente. Classifique em: Civil, Trabalhista, Família, Penal, Consumidor ou Empresarial.",
-    isActive: true,
-    lastTriggered: "2024-01-15T14:30:00",
-    successCount: 156,
-    errorCount: 3,
-    canChangeStatus: true,
-    canMoveDepartment: true,
-  },
-  {
-    id: "2",
-    name: "Qualificação de Leads",
-    description: "Identifica potenciais clientes qualificados para atendimento prioritário",
-    webhookUrl: "https://n8n.example.com/webhook/qualificacao",
-    triggerType: "keyword",
-    aiPrompt: "Analise a conversa e determine se o cliente tem um caso viável e urgente. Atribua uma pontuação de 1-10.",
-    isActive: true,
-    lastTriggered: "2024-01-15T12:00:00",
-    successCount: 89,
-    errorCount: 1,
-    canChangeStatus: true,
-    canMoveDepartment: false,
-  },
-];
-
-const triggerTypeLabels = {
+const triggerTypeLabels: Record<TriggerType, string> = {
   new_conversation: "Nova conversa",
   keyword: "Palavra-chave",
   scheduled: "Agendado",
@@ -106,7 +65,15 @@ const triggerTypeLabels = {
 };
 
 export default function Automations() {
-  const [automations, setAutomations] = useState<Automation[]>(mockAutomations);
+  const { 
+    automations, 
+    isLoading, 
+    createAutomation, 
+    updateAutomation, 
+    deleteAutomation, 
+    toggleAutomation,
+    testWebhook 
+  } = useAutomations();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false);
   const [editingAutomation, setEditingAutomation] = useState<Automation | null>(null);
@@ -114,35 +81,34 @@ export default function Automations() {
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
 
-  const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
 
   // Form states
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formWebhookUrl, setFormWebhookUrl] = useState("");
-  const [formTriggerType, setFormTriggerType] = useState<Automation["triggerType"]>("new_conversation");
+  const [formTriggerType, setFormTriggerType] = useState<TriggerType>("new_conversation");
   const [formTriggerDepartmentId, setFormTriggerDepartmentId] = useState("");
+  const [formKeywords, setFormKeywords] = useState("");
   const [formAiPrompt, setFormAiPrompt] = useState("");
   const [formCanChangeStatus, setFormCanChangeStatus] = useState(true);
   const [formCanMoveDepartment, setFormCanMoveDepartment] = useState(true);
 
-  const toggleAutomation = (id: string) => {
-    setAutomations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, isActive: !a.isActive } : a))
-    );
+  const handleToggleAutomation = (id: string, currentState: boolean) => {
+    toggleAutomation.mutate({ id, is_active: !currentState });
   };
 
   const handleEdit = (automation: Automation) => {
     setEditingAutomation(automation);
     setFormName(automation.name);
-    setFormDescription(automation.description);
-    setFormWebhookUrl(automation.webhookUrl);
-    setFormTriggerType(automation.triggerType);
-    setFormTriggerDepartmentId(automation.triggerDepartmentId || "");
-    setFormAiPrompt(automation.aiPrompt);
-    setFormCanChangeStatus(automation.canChangeStatus);
-    setFormCanMoveDepartment(automation.canMoveDepartment);
+    setFormDescription(automation.description || "");
+    setFormWebhookUrl(automation.webhook_url);
+    setFormTriggerType(automation.trigger_type as TriggerType);
+    setFormTriggerDepartmentId(automation.trigger_config?.departmentId || "");
+    setFormKeywords(automation.trigger_config?.keywords?.join(", ") || "");
+    setFormAiPrompt(automation.ai_prompt || "");
+    setFormCanChangeStatus(automation.trigger_config?.canChangeStatus ?? true);
+    setFormCanMoveDepartment(automation.trigger_config?.canMoveDepartment ?? true);
     setIsDialogOpen(true);
   };
 
@@ -153,13 +119,57 @@ export default function Automations() {
     setFormWebhookUrl("");
     setFormTriggerType("new_conversation");
     setFormTriggerDepartmentId("");
+    setFormKeywords("");
     setFormAiPrompt("");
     setFormCanChangeStatus(true);
     setFormCanMoveDepartment(true);
     setIsDialogOpen(true);
   };
 
-  const handleSaveAutomation = () => {
+  const validateWebhookUrl = (url: string): boolean => {
+    if (!url.trim()) return true; // Allow empty for now
+
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:") {
+        toast({
+          title: "URL inválida",
+          description: "A URL do webhook deve usar HTTPS",
+          variant: "destructive",
+        });
+        return false;
+      }
+      
+      const hostname = parsed.hostname.toLowerCase();
+      if (
+        hostname === "localhost" ||
+        hostname.startsWith("127.") ||
+        hostname.startsWith("10.") ||
+        hostname.startsWith("172.16.") ||
+        hostname.startsWith("172.17.") ||
+        hostname.startsWith("172.18.") ||
+        hostname.startsWith("192.168.") ||
+        hostname === "0.0.0.0"
+      ) {
+        toast({
+          title: "URL inválida",
+          description: "URLs de rede interna não são permitidas",
+          variant: "destructive",
+        });
+        return false;
+      }
+      return true;
+    } catch {
+      toast({
+        title: "URL inválida",
+        description: "Por favor, informe uma URL válida",
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
+
+  const handleSaveAutomation = async () => {
     if (!formName.trim()) {
       toast({
         title: "Nome obrigatório",
@@ -169,46 +179,16 @@ export default function Automations() {
       return;
     }
 
-    // Validate webhook URL if provided
-    if (formWebhookUrl.trim()) {
-      try {
-        const url = new URL(formWebhookUrl);
-        if (url.protocol !== "https:") {
-          toast({
-            title: "URL inválida",
-            description: "A URL do webhook deve usar HTTPS",
-            variant: "destructive",
-          });
-          return;
-        }
-        // Check for internal IPs
-        const hostname = url.hostname.toLowerCase();
-        if (
-          hostname === "localhost" ||
-          hostname.startsWith("127.") ||
-          hostname.startsWith("10.") ||
-          hostname.startsWith("172.16.") ||
-          hostname.startsWith("172.17.") ||
-          hostname.startsWith("172.18.") ||
-          hostname.startsWith("192.168.") ||
-          hostname === "0.0.0.0"
-        ) {
-          toast({
-            title: "URL inválida",
-            description: "URLs de rede interna não são permitidas",
-            variant: "destructive",
-          });
-          return;
-        }
-      } catch {
-        toast({
-          title: "URL inválida",
-          description: "Por favor, informe uma URL válida",
-          variant: "destructive",
-        });
-        return;
-      }
+    if (!formWebhookUrl.trim()) {
+      toast({
+        title: "Webhook obrigatório",
+        description: "Por favor, informe a URL do webhook do n8n",
+        variant: "destructive",
+      });
+      return;
     }
+
+    if (!validateWebhookUrl(formWebhookUrl)) return;
 
     if (formTriggerType === "department_entry" && !formTriggerDepartmentId) {
       toast({
@@ -219,38 +199,43 @@ export default function Automations() {
       return;
     }
 
-    const automation: Automation = {
-      id: editingAutomation?.id || Date.now().toString(),
-      name: formName,
-      description: formDescription,
-      webhookUrl: formWebhookUrl,
-      triggerType: formTriggerType,
-      triggerDepartmentId: formTriggerDepartmentId || undefined,
-      aiPrompt: formAiPrompt,
-      isActive: editingAutomation?.isActive ?? false,
-      lastTriggered: editingAutomation?.lastTriggered ?? null,
-      successCount: editingAutomation?.successCount ?? 0,
-      errorCount: editingAutomation?.errorCount ?? 0,
+    const triggerConfig: Record<string, unknown> = {
       canChangeStatus: formCanChangeStatus,
       canMoveDepartment: formCanMoveDepartment,
     };
 
+    if (formTriggerType === "department_entry" && formTriggerDepartmentId) {
+      triggerConfig.departmentId = formTriggerDepartmentId;
+    }
+
+    if (formTriggerType === "keyword" && formKeywords.trim()) {
+      triggerConfig.keywords = formKeywords.split(",").map(k => k.trim()).filter(Boolean);
+    }
+
+    const params: CreateAutomationParams = {
+      name: formName,
+      description: formDescription || undefined,
+      webhook_url: formWebhookUrl,
+      trigger_type: formTriggerType,
+      trigger_config: triggerConfig,
+      ai_prompt: formAiPrompt || undefined,
+    };
+
     if (editingAutomation) {
-      setAutomations((prev) =>
-        prev.map((a) => (a.id === editingAutomation.id ? automation : a))
-      );
-      toast({ title: "Automação atualizada" });
+      updateAutomation.mutate({ id: editingAutomation.id, ...params });
     } else {
-      setAutomations((prev) => [...prev, automation]);
-      toast({ title: "Automação criada" });
+      createAutomation.mutate(params);
     }
 
     setIsDialogOpen(false);
   };
 
   const handleDeleteAutomation = (id: string) => {
-    setAutomations((prev) => prev.filter((a) => a.id !== id));
-    toast({ title: "Automação excluída" });
+    deleteAutomation.mutate(id);
+  };
+
+  const handleTestWebhook = (webhookUrl: string) => {
+    testWebhook.mutate(webhookUrl);
   };
 
   const handleCreateAgent = () => {
@@ -269,31 +254,45 @@ export default function Automations() {
     }
 
     setIsGenerating(true);
-    
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    const newAutomation: Automation = {
-      id: Date.now().toString(),
-      name: `Agente: ${agentDescription.slice(0, 30)}...`,
+
+    // Generate agent configuration
+    const params: CreateAutomationParams = {
+      name: `Agente: ${agentDescription.slice(0, 30)}${agentDescription.length > 30 ? '...' : ''}`,
       description: agentDescription,
-      webhookUrl: "",
-      triggerType: "new_conversation",
-      aiPrompt: `Você é um assistente jurídico inteligente. Sua função é: ${agentDescription}\n\nVocê pode:\n- Acessar e modificar o status dos clientes\n- Mover clientes entre departamentos\n- Coletar informações importantes\n\nSempre seja educado e profissional. Não forneça aconselhamento jurídico, apenas triagem e coleta de informações.`,
-      isActive: false,
-      lastTriggered: null,
-      successCount: 0,
-      errorCount: 0,
-      canChangeStatus: true,
-      canMoveDepartment: true,
+      webhook_url: "",
+      trigger_type: "new_conversation",
+      trigger_config: {
+        canChangeStatus: true,
+        canMoveDepartment: true,
+      },
+      ai_prompt: `Você é um assistente jurídico inteligente. Sua função é: ${agentDescription}
+
+Você pode:
+- Acessar e modificar o status dos clientes
+- Mover clientes entre departamentos
+- Coletar informações importantes
+
+REGRAS IMPORTANTES:
+- Sempre seja educado e profissional
+- NÃO forneça aconselhamento jurídico, apenas triagem e coleta de informações
+- Quando identificar um caso complexo ou urgente, sinalize para atendimento humano
+- Sempre colete: nome completo, telefone, descrição do problema
+- Classifique o tipo de caso: Civil, Trabalhista, Família, Penal, Consumidor, Empresarial ou Outros`,
+      is_active: false,
     };
 
-    setAutomations((prev) => [...prev, newAutomation]);
-    setIsGenerating(false);
-    setIsAgentDialogOpen(false);
-    
-    toast({
-      title: "Agente criado com sucesso!",
-      description: "Seu agente foi configurado. Ative-o quando estiver pronto.",
+    createAutomation.mutate(params, {
+      onSuccess: () => {
+        setIsGenerating(false);
+        setIsAgentDialogOpen(false);
+        toast({
+          title: "Agente criado com sucesso!",
+          description: "Configure o webhook do n8n e ative o agente quando estiver pronto.",
+        });
+      },
+      onError: () => {
+        setIsGenerating(false);
+      },
     });
   };
 
@@ -301,6 +300,22 @@ export default function Automations() {
     const dept = departments.find((d) => d.id === id);
     return dept?.name || "Departamento";
   };
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex justify-between">
+          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-40 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
@@ -360,7 +375,30 @@ export default function Automations() {
         </CardContent>
       </Card>
 
-      {/* Info Card */}
+      {/* Info Card - n8n Integration */}
+      <Card className="bg-muted/50 border-dashed">
+        <CardContent className="p-4">
+          <div className="flex items-start gap-4">
+            <div className="p-2 rounded-lg bg-orange-500/10">
+              <Webhook className="h-6 w-6 text-orange-500" />
+            </div>
+            <div className="space-y-1 flex-1">
+              <h3 className="font-medium">Integração com n8n</h3>
+              <p className="text-sm text-muted-foreground">
+                As automações funcionam através do n8n. Configure seu workflow no n8n e cole a URL do webhook aqui.
+                O sistema envia as mensagens para o n8n, que processa com IA e retorna a resposta.
+              </p>
+              <div className="flex gap-2 mt-2">
+                <Badge variant="outline" className="text-xs">
+                  WhatsApp → Backend → n8n → IA → Backend → WhatsApp
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Limitações */}
       <Card className="bg-muted/50 border-dashed">
         <CardContent className="p-4">
           <div className="flex items-start gap-4">
@@ -382,9 +420,9 @@ export default function Automations() {
       <div className="space-y-4">
         <h2 className="font-semibold text-lg flex items-center gap-2">
           <Zap className="h-5 w-5" />
-          Automações Ativas
+          Automações ({automations.length})
         </h2>
-        
+
         {automations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -404,54 +442,63 @@ export default function Automations() {
                     <div
                       className={cn(
                         "p-3 rounded-xl",
-                        automation.isActive
-                          ? "bg-success/10"
-                          : "bg-muted"
+                        automation.is_active ? "bg-success/10" : "bg-muted"
                       )}
                     >
                       <Zap
                         className={cn(
                           "h-6 w-6",
-                          automation.isActive
-                            ? "text-success"
-                            : "text-muted-foreground"
+                          automation.is_active ? "text-success" : "text-muted-foreground"
                         )}
                       />
                     </div>
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-lg">{automation.name}</h3>
                         <Badge variant="outline" className="text-xs">
-                          {triggerTypeLabels[automation.triggerType]}
+                          {triggerTypeLabels[automation.trigger_type as TriggerType] || automation.trigger_type}
                         </Badge>
-                        {automation.triggerType === "department_entry" && automation.triggerDepartmentId && (
+                        {automation.trigger_type === "department_entry" && automation.trigger_config?.departmentId && (
                           <Badge variant="secondary" className="text-xs">
                             <Folder className="h-3 w-3 mr-1" />
-                            {getDepartmentName(automation.triggerDepartmentId)}
+                            {getDepartmentName(automation.trigger_config.departmentId)}
+                          </Badge>
+                        )}
+                        {!automation.webhook_url && (
+                          <Badge variant="destructive" className="text-xs">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Webhook não configurado
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {automation.description}
-                      </p>
+                      {automation.description && (
+                        <p className="text-sm text-muted-foreground">
+                          {automation.description}
+                        </p>
+                      )}
                       <div className="flex items-center gap-4 mt-3">
-                        {automation.webhookUrl && (
+                        {automation.webhook_url && (
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Webhook className="h-3 w-3" />
-                            <span className="truncate max-w-48">{automation.webhookUrl}</span>
+                            <span className="truncate max-w-48">{automation.webhook_url}</span>
                           </div>
                         )}
                       </div>
                       {/* Capabilities badges */}
                       <div className="flex gap-2 mt-2">
-                        {automation.canChangeStatus && (
+                        {automation.trigger_config?.canChangeStatus && (
                           <Badge variant="secondary" className="text-xs">
                             Altera status
                           </Badge>
                         )}
-                        {automation.canMoveDepartment && (
+                        {automation.trigger_config?.canMoveDepartment && (
                           <Badge variant="secondary" className="text-xs">
                             Move departamento
+                          </Badge>
+                        )}
+                        {automation.trigger_config?.keywords && automation.trigger_config.keywords.length > 0 && (
+                          <Badge variant="secondary" className="text-xs">
+                            Palavras-chave: {automation.trigger_config.keywords.join(", ")}
                           </Badge>
                         )}
                       </div>
@@ -459,29 +506,10 @@ export default function Automations() {
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <div className="text-right space-y-1">
-                      <div className="flex items-center gap-2 justify-end">
-                        <CheckCircle2 className="h-4 w-4 text-success" />
-                        <span className="text-sm font-medium">{automation.successCount}</span>
-                        {automation.errorCount > 0 && (
-                          <>
-                            <AlertCircle className="h-4 w-4 text-destructive ml-2" />
-                            <span className="text-sm font-medium text-destructive">
-                              {automation.errorCount}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      {automation.lastTriggered && (
-                        <p className="text-xs text-muted-foreground">
-                          Último: {new Date(automation.lastTriggered).toLocaleString("pt-BR")}
-                        </p>
-                      )}
-                    </div>
-
                     <Switch
-                      checked={automation.isActive}
-                      onCheckedChange={() => toggleAutomation(automation.id)}
+                      checked={automation.is_active}
+                      onCheckedChange={() => handleToggleAutomation(automation.id, automation.is_active)}
+                      disabled={toggleAutomation.isPending}
                     />
 
                     <DropdownMenu>
@@ -495,15 +523,13 @@ export default function Automations() {
                           <Pencil className="h-4 w-4 mr-2" />
                           Editar
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Play className="h-4 w-4 mr-2" />
-                          Testar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <ExternalLink className="h-4 w-4 mr-2" />
-                          Abrir n8n
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
+                        {automation.webhook_url && (
+                          <DropdownMenuItem onClick={() => handleTestWebhook(automation.webhook_url)}>
+                            <TestTube className="h-4 w-4 mr-2" />
+                            Testar Webhook
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
                           className="text-destructive"
                           onClick={() => handleDeleteAutomation(automation.id)}
                         >
@@ -516,14 +542,14 @@ export default function Automations() {
                 </div>
 
                 {/* AI Prompt Preview */}
-                {automation.aiPrompt && (
+                {automation.ai_prompt && (
                   <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-dashed">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
                       <Bot className="h-3 w-3" />
                       Prompt da IA
                     </div>
                     <p className="text-sm text-muted-foreground line-clamp-2">
-                      {automation.aiPrompt}
+                      {automation.ai_prompt}
                     </p>
                   </div>
                 )}
@@ -535,7 +561,7 @@ export default function Automations() {
 
       {/* Create/Edit Automation Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingAutomation ? "Editar Automação" : "Nova Automação"}
@@ -548,7 +574,7 @@ export default function Automations() {
           <div className="space-y-4 py-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="name">Nome da automação</Label>
+                <Label htmlFor="name">Nome da automação *</Label>
                 <Input
                   id="name"
                   value={formName}
@@ -558,15 +584,13 @@ export default function Automations() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="trigger">Gatilho</Label>
-                <Select value={formTriggerType} onValueChange={(v) => setFormTriggerType(v as Automation["triggerType"])}>
+                <Select value={formTriggerType} onValueChange={(v) => setFormTriggerType(v as TriggerType)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="new_conversation">Nova conversa</SelectItem>
                     <SelectItem value="keyword">Palavra-chave</SelectItem>
-                    <SelectItem value="scheduled">Agendado</SelectItem>
-                    <SelectItem value="status_change">Mudança de status</SelectItem>
                     <SelectItem value="department_entry">Entrada em departamento</SelectItem>
                   </SelectContent>
                 </Select>
@@ -575,7 +599,7 @@ export default function Automations() {
 
             {formTriggerType === "department_entry" && (
               <div className="space-y-2">
-                <Label htmlFor="department">Departamento</Label>
+                <Label htmlFor="department">Departamento *</Label>
                 <Select value={formTriggerDepartmentId} onValueChange={setFormTriggerDepartmentId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um departamento" />
@@ -584,8 +608,8 @@ export default function Automations() {
                     {departments.map((dept) => (
                       <SelectItem key={dept.id} value={dept.id}>
                         <div className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-full" 
+                          <div
+                            className="w-3 h-3 rounded-full"
                             style={{ backgroundColor: dept.color }}
                           />
                           {dept.name}
@@ -596,6 +620,21 @@ export default function Automations() {
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   A automação será disparada quando um cliente entrar neste departamento
+                </p>
+              </div>
+            )}
+
+            {formTriggerType === "keyword" && (
+              <div className="space-y-2">
+                <Label htmlFor="keywords">Palavras-chave</Label>
+                <Input
+                  id="keywords"
+                  value={formKeywords}
+                  onChange={(e) => setFormKeywords(e.target.value)}
+                  placeholder="Ex: urgente, ajuda, preciso"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Separe as palavras-chave por vírgula
                 </p>
               </div>
             )}
@@ -611,20 +650,20 @@ export default function Automations() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="webhook">URL do Webhook (n8n)</Label>
+              <Label htmlFor="webhook">URL do Webhook (n8n) *</Label>
               <Input
                 id="webhook"
                 value={formWebhookUrl}
                 onChange={(e) => setFormWebhookUrl(e.target.value)}
-                placeholder="https://n8n.example.com/webhook/..."
+                placeholder="https://seu-n8n.com/webhook/..."
               />
               <p className="text-xs text-muted-foreground">
-                Apenas URLs HTTPS são permitidas por segurança
+                Cole aqui a URL do webhook do seu workflow n8n. Apenas URLs HTTPS são permitidas.
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="prompt">Prompt da IA</Label>
+              <Label htmlFor="prompt">Prompt da IA (enviado ao n8n)</Label>
               <Textarea
                 id="prompt"
                 value={formAiPrompt}
@@ -632,6 +671,9 @@ export default function Automations() {
                 placeholder="Descreva como a IA deve se comportar..."
                 rows={4}
               />
+              <p className="text-xs text-muted-foreground">
+                Este prompt será enviado ao n8n junto com as mensagens para contexto da IA
+              </p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -666,7 +708,13 @@ export default function Automations() {
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSaveAutomation}>
+            <Button 
+              onClick={handleSaveAutomation}
+              disabled={createAutomation.isPending || updateAutomation.isPending}
+            >
+              {(createAutomation.isPending || updateAutomation.isPending) && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
               {editingAutomation ? "Salvar" : "Criar"}
             </Button>
           </DialogFooter>
@@ -697,7 +745,7 @@ export default function Automations() {
                 rows={5}
               />
             </div>
-            
+
             <div className="rounded-lg bg-muted/50 p-4 space-y-2">
               <h4 className="font-medium text-sm">O agente poderá:</h4>
               <ul className="text-sm text-muted-foreground space-y-1">
@@ -719,6 +767,13 @@ export default function Automations() {
                 </li>
               </ul>
             </div>
+
+            <div className="rounded-lg bg-orange-500/10 p-4 space-y-2">
+              <h4 className="font-medium text-sm text-orange-500">Próximo passo:</h4>
+              <p className="text-sm text-muted-foreground">
+                Após criar o agente, você precisará configurar o webhook do n8n e criar o workflow de IA.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>
@@ -728,7 +783,7 @@ export default function Automations() {
             <Button onClick={generateAgentFromDescription} disabled={isGenerating}>
               {isGenerating ? (
                 <>
-                  <Sparkles className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   Gerando...
                 </>
               ) : (
