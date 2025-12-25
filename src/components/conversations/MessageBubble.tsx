@@ -1,12 +1,13 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, ReactNode } from "react";
+import { useState, useRef, ReactNode, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { QuotedMessage } from "./ReplyPreview";
+import { Slider } from "@/components/ui/slider";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -21,6 +22,7 @@ interface MessageBubbleProps {
   mediaMimeType?: string | null;
   messageType?: string;
   status?: MessageStatus;
+  readAt?: string | null;
   replyTo?: {
     id: string;
     content: string | null;
@@ -30,6 +32,104 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
+}
+
+// Custom audio player component for better control
+function AudioPlayer({ src, mimeType }: { src: string; mimeType?: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleDurationChange = () => setDuration(audio.duration);
+    const handleEnded = () => setIsPlaying(false);
+    const handleError = () => setError(true);
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => setError(true));
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSeek = (value: number[]) => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = value[0];
+      setCurrentTime(value[0]);
+    }
+  };
+
+  const formatTime = (time: number) => {
+    if (!isFinite(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 min-w-[200px] text-xs opacity-70">
+        <Play className="h-4 w-4" />
+        <span>Áudio não disponível</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 min-w-[220px] max-w-[280px]">
+      <audio ref={audioRef} src={src} preload="metadata" />
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-10 w-10 rounded-full flex-shrink-0"
+        onClick={togglePlay}
+      >
+        {isPlaying ? (
+          <Pause className="h-5 w-5" />
+        ) : (
+          <Play className="h-5 w-5 ml-0.5" />
+        )}
+      </Button>
+      <div className="flex-1 space-y-1">
+        <Slider
+          value={[currentTime]}
+          max={duration || 100}
+          step={0.1}
+          onValueChange={handleSeek}
+          className="cursor-pointer"
+        />
+        <div className="flex justify-between text-xs opacity-70">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function MessageBubble({
@@ -42,6 +142,7 @@ export function MessageBubble({
   mediaMimeType,
   messageType,
   status = "sent",
+  readAt,
   replyTo,
   onReply,
   onScrollToMessage,
@@ -51,20 +152,32 @@ export function MessageBubble({
   const [imageOpen, setImageOpen] = useState(false);
   const [showActions, setShowActions] = useState(false);
 
+  // Determine actual status based on read_at if available
+  const actualStatus: MessageStatus = (() => {
+    if (!isFromMe) return status;
+    if (readAt) return "read";
+    if (status === "sending" || status === "error") return status;
+    // For sent messages, use "sent" (1 tick), "delivered" will be set when we have delivery confirmation
+    return status === "delivered" ? "delivered" : "sent";
+  })();
+
   const renderStatusIcon = () => {
     if (!isFromMe) return null;
 
-    switch (status) {
+    switch (actualStatus) {
       case "sending":
         return <Clock className="h-3 w-3 animate-pulse" />;
       case "sent":
+        // 1 tick - message sent to server
         return <Check className="h-3 w-3" />;
       case "delivered":
+        // 2 ticks - message delivered to recipient
         return <CheckCheck className="h-3 w-3" />;
       case "read":
+        // 2 blue ticks - message read by recipient
         return <CheckCheck className="h-3 w-3 text-blue-400" />;
       case "error":
-        return <span className="text-destructive text-xs">!</span>;
+        return <span className="text-destructive text-xs font-bold">!</span>;
       default:
         return <Check className="h-3 w-3" />;
     }
@@ -101,14 +214,7 @@ export function MessageBubble({
     }
 
     if (isAudio) {
-      return (
-        <div className="flex items-center gap-2 min-w-[200px]">
-          <audio controls className="w-full h-8" preload="metadata">
-            <source src={mediaUrl} type={mediaMimeType || "audio/ogg"} />
-            Seu navegador não suporta áudio.
-          </audio>
-        </div>
-      );
+      return <AudioPlayer src={mediaUrl} mimeType={mediaMimeType || undefined} />;
     }
 
     if (isVideo) {
