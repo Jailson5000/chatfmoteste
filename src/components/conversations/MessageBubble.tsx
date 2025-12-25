@@ -1,10 +1,12 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Play, Download } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, ReactNode } from "react";
 import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { QuotedMessage } from "./ReplyPreview";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -19,9 +21,19 @@ interface MessageBubbleProps {
   mediaMimeType?: string | null;
   messageType?: string;
   status?: MessageStatus;
+  replyTo?: {
+    id: string;
+    content: string | null;
+    is_from_me: boolean;
+  } | null;
+  onReply?: (messageId: string) => void;
+  onScrollToMessage?: (messageId: string) => void;
+  highlightText?: (text: string) => ReactNode;
+  isHighlighted?: boolean;
 }
 
 export function MessageBubble({
+  id,
   content,
   createdAt,
   isFromMe,
@@ -30,8 +42,14 @@ export function MessageBubble({
   mediaMimeType,
   messageType,
   status = "sent",
+  replyTo,
+  onReply,
+  onScrollToMessage,
+  highlightText,
+  isHighlighted = false,
 }: MessageBubbleProps) {
   const [imageOpen, setImageOpen] = useState(false);
+  const [showActions, setShowActions] = useState(false);
 
   const renderStatusIcon = () => {
     if (!isFromMe) return null;
@@ -147,20 +165,44 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex",
+        "flex group",
         isFromMe ? "justify-end" : "justify-start"
       )}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
     >
+      {/* Reply button for outgoing messages */}
+      {isFromMe && showActions && onReply && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 mr-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+          onClick={() => onReply(id)}
+        >
+          <Reply className="h-4 w-4" />
+        </Button>
+      )}
+      
       <div
         className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-2.5",
+          "max-w-[80%] rounded-2xl px-4 py-2.5 transition-all",
           isFromMe
             ? aiGenerated
               ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
               : "bg-primary text-primary-foreground rounded-br-md"
-            : "bg-muted rounded-bl-md"
+            : "bg-muted rounded-bl-md",
+          isHighlighted && "ring-2 ring-yellow-400 ring-offset-2"
         )}
       >
+        {/* Quoted message if replying */}
+        {replyTo && (
+          <QuotedMessage
+            content={replyTo.content}
+            isFromMe={replyTo.is_from_me}
+            onClick={() => onScrollToMessage?.(replyTo.id)}
+          />
+        )}
+        
         {aiGenerated && isFromMe && (
           <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
             <Bot className="h-3 w-3" />
@@ -177,7 +219,9 @@ export function MessageBubble({
         
         {/* Render text content */}
         {content && !content.startsWith("[") && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+            {highlightText ? highlightText(content) : content}
+          </p>
         )}
 
         {/* Show placeholder for media without preview */}
@@ -200,6 +244,18 @@ export function MessageBubble({
           {renderStatusIcon()}
         </div>
       </div>
+      
+      {/* Reply button for incoming messages */}
+      {!isFromMe && showActions && onReply && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 ml-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+          onClick={() => onReply(id)}
+        >
+          <Reply className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }

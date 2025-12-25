@@ -704,6 +704,8 @@ export type Database = {
           media_mime_type: string | null
           media_url: string | null
           message_type: string
+          read_at: string | null
+          reply_to_message_id: string | null
           sender_id: string | null
           sender_type: string
           whatsapp_message_id: string | null
@@ -718,6 +720,8 @@ export type Database = {
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
+          read_at?: string | null
+          reply_to_message_id?: string | null
           sender_id?: string | null
           sender_type: string
           whatsapp_message_id?: string | null
@@ -732,6 +736,8 @@ export type Database = {
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
+          read_at?: string | null
+          reply_to_message_id?: string | null
           sender_id?: string | null
           sender_type?: string
           whatsapp_message_id?: string | null
@@ -742,6 +748,13 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_reply_to_message_id_fkey"
+            columns: ["reply_to_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
@@ -1005,6 +1018,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      mark_messages_as_read: {
+        Args: { _conversation_id: string; _user_id: string }
+        Returns: number
       }
       user_belongs_to_law_firm: {
         Args: { _law_firm_id: string; _user_id: string }
