@@ -14,9 +14,12 @@ interface EvolutionRequest {
   instanceId?: string;
 }
 
-// Helper to normalize URL (remove trailing slashes)
+// Helper to normalize URL (remove trailing slashes and /manager suffix)
 function normalizeUrl(url: string): string {
-  return url.replace(/\/+$/, '');
+  let normalized = url.replace(/\/+$/, '');
+  // Remove /manager suffix if present (common in Evolution API dashboard URLs)
+  normalized = normalized.replace(/\/manager$/i, '');
+  return normalized;
 }
 
 // Get the webhook URL for this project
