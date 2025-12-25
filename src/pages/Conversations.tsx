@@ -830,14 +830,6 @@ export default function Conversations() {
           </div>
         </ScrollArea>
       </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </ScrollArea>
-      </div>
 
       {/* Chat Area with Drop Zone */}
       <ChatDropZone
