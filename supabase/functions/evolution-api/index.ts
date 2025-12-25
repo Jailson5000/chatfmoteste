@@ -580,16 +580,24 @@ serve(async (req) => {
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
         const apiUrl = normalizeUrl(instance.api_url);
 
+        // Evolution API v2 requires all these fields
+        const settingsPayload = {
+          rejectCall: body.rejectCall,
+          msgCall: body.msgCall || "",
+          groupsIgnore: true,
+          alwaysOnline: false,
+          readMessages: false,
+          readStatus: false,
+          syncFullHistory: false,
+        };
+
         const setResponse = await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
           method: "POST",
           headers: {
             apikey: instance.api_key || "",
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            rejectCall: body.rejectCall,
-            ...(body.msgCall ? { msgCall: body.msgCall } : {}),
-          }),
+          body: JSON.stringify(settingsPayload),
         });
 
         if (!setResponse.ok) {
