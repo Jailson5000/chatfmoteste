@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   MessageSquare,
   Kanban,
-  Zap,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -49,7 +48,6 @@ const atendimentoItems = [
 
 // Items that require admin/non-attendant access
 const adminOnlyItems = [
-  { icon: Zap, label: "Automações", path: "/automations" },
   { icon: Link2, label: "Conexões", path: "/connections" },
 ];
 

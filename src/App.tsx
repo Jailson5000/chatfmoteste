@@ -10,7 +10,6 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Conversations from "./pages/Conversations";
 import Kanban from "./pages/Kanban";
-import Automations from "./pages/Automations";
 import Settings from "./pages/Settings";
 import Contacts from "./pages/Contacts";
 import Connections from "./pages/Connections";
@@ -64,17 +63,6 @@ const App = () => (
           </Route>
           
           <Route
-            path="/automations"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Automations />} />
-          </Route>
-          
-          <Route
             path="/settings"
             element={
               <ProtectedRoute>
@@ -106,6 +94,9 @@ const App = () => (
           >
             <Route index element={<Connections />} />
           </Route>
+          
+          {/* Redirect old automations route */}
+          <Route path="/automations" element={<Navigate to="/dashboard" replace />} />
           
           {/* Catch-all route */}
           <Route path="*" element={<NotFound />} />
