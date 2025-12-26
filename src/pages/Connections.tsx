@@ -513,7 +513,7 @@ export default function Connections() {
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription className="text-xs">
-                <strong>Fluxo:</strong> Evolution API → Backend (webhook) → n8n (automação) → Backend (callback) → Evolution API → WhatsApp
+                <strong>Fluxo:</strong> Evolution API → Backend → Sistema de Atendimento
               </AlertDescription>
             </Alert>
           </CardContent>
