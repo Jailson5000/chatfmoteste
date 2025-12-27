@@ -62,11 +62,19 @@ import { useConversations } from "@/hooks/useConversations";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type ConversationTab = "chat" | "ai" | "queue";
 
@@ -97,9 +105,16 @@ export default function Conversations() {
   const { tags } = useTags();
   const { statuses } = useCustomStatuses();
   const { templates } = useTemplates();
+  const { instances: whatsappInstances } = useWhatsAppInstances();
   const { toast } = useToast();
   const { playNotification } = useNotificationSound();
   const queryClient = useQueryClient();
+
+  // Filter connected instances for the selector
+  const connectedInstances = useMemo(() => 
+    whatsappInstances.filter(inst => inst.status === "connected"),
+    [whatsappInstances]
+  );
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1031,10 +1046,37 @@ export default function Conversations() {
                     <Phone className="h-3 w-3" />
                     {selectedConversation.contact_phone || "---"}
                   </p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                    <Inbox className="h-3 w-3" />
-                    Canal: {selectedConversation.whatsapp_instance?.instance_name || "Não vinculado"}
-                  </p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Inbox className="h-3 w-3 text-muted-foreground" />
+                    {connectedInstances.length > 1 ? (
+                      <Select
+                        value={selectedConversation.whatsapp_instance_id || ""}
+                        onValueChange={(value) => {
+                          if (value && selectedConversation?.id) {
+                            updateConversation.mutate({
+                              id: selectedConversation.id,
+                              whatsapp_instance_id: value,
+                            });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-[120px]">
+                          <SelectValue placeholder="Selecione um canal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {connectedInstances.map((inst) => (
+                            <SelectItem key={inst.id} value={inst.id} className="text-xs">
+                              {inst.instance_name} {inst.phone_number ? `(${inst.phone_number})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Canal: {selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.instance_name || "Não vinculado"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
