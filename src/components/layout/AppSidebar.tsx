@@ -52,6 +52,7 @@ const adminOnlyItems = [
 ];
 
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
+const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -64,8 +65,8 @@ export function AppSidebar() {
 
   // Build bottom menu items based on user role
   const bottomMenuItems = isAttendant 
-    ? [settingsItem] 
-    : [...adminOnlyItems, settingsItem];
+    ? [profileItem, settingsItem] 
+    : [...adminOnlyItems, profileItem, settingsItem];
 
   // Open atendimento section if on one of its pages
   useEffect(() => {

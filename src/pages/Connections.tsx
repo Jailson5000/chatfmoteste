@@ -7,22 +7,25 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useWhatsAppInstances, WhatsAppInstance } from "@/hooks/useWhatsAppInstances";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { IntegrationCard } from "@/components/connections/IntegrationCard";
 import { EvolutionAdminConfig } from "@/components/connections/EvolutionAdminConfig";
 import { WhatsAppInstanceList } from "@/components/connections/WhatsAppInstanceList";
 import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
 
-type ApiConfig = {
-  url: string;
-  key: string;
-};
-
-const API_CONFIG_STORAGE_KEY = "evolution_api_config_v1";
-
 export default function Connections() {
   const { toast } = useToast();
   const { isAdmin } = useUserRole();
+  const {
+    settings,
+    isLoading: isLoadingSettings,
+    evolutionApiUrl,
+    evolutionApiKey,
+    isConfigured: isApiConfigured,
+    updateSettings,
+  } = useLawFirmSettings();
+  
   const {
     instances,
     isLoading,
@@ -39,10 +42,9 @@ export default function Connections() {
     refetch,
   } = useWhatsAppInstances();
 
-  // API Config state
-  const [evolutionUrl, setEvolutionUrl] = useState("");
-  const [evolutionKey, setEvolutionKey] = useState("");
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  // Local form state for editing
+  const [localApiUrl, setLocalApiUrl] = useState("");
+  const [localApiKey, setLocalApiKey] = useState("");
 
   // Instance settings (UI state)
   const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
@@ -69,25 +71,17 @@ export default function Connections() {
   const MAX_POLLS = 60;
 
   // Check if API is configured
-  const isApiConfigured = Boolean(evolutionUrl.trim() && evolutionKey.trim());
   const hasConnectedInstance = instances.some((i) => i.status === "connected");
 
   useEffect(() => {
     currentQRCodeRef.current = currentQRCode;
   }, [currentQRCode]);
 
-  // Load API config from localStorage (for admin)
+  // Sync local form state with settings from DB
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(API_CONFIG_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as ApiConfig;
-      if (parsed?.url) setEvolutionUrl(parsed.url);
-      if (parsed?.key) setEvolutionKey(parsed.key);
-    } catch {
-      // ignore
-    }
-  }, []);
+    if (evolutionApiUrl) setLocalApiUrl(evolutionApiUrl);
+    if (evolutionApiKey) setLocalApiKey(evolutionApiKey);
+  }, [evolutionApiUrl, evolutionApiKey]);
 
   // Load instance settings (reject calls) for connected instances
   useEffect(() => {
@@ -132,7 +126,7 @@ export default function Connections() {
   };
 
   const handleSaveConfig = async () => {
-    if (!evolutionUrl.trim()) {
+    if (!localApiUrl.trim()) {
       toast({
         title: "URL obrigatória",
         description: "Por favor, informe a URL da Evolution API",
@@ -142,7 +136,7 @@ export default function Connections() {
     }
 
     try {
-      new URL(evolutionUrl);
+      new URL(localApiUrl);
     } catch {
       toast({
         title: "URL inválida",
@@ -152,26 +146,18 @@ export default function Connections() {
       return;
     }
 
-    setIsSavingConfig(true);
-    try {
-      const config: ApiConfig = { url: evolutionUrl.trim(), key: evolutionKey.trim() };
-      localStorage.setItem(API_CONFIG_STORAGE_KEY, JSON.stringify(config));
-
-      toast({
-        title: "Configuração salva",
-        description: "A Evolution API foi configurada com sucesso",
-      });
-    } finally {
-      setIsSavingConfig(false);
-    }
+    await updateSettings.mutateAsync({
+      evolution_api_url: localApiUrl.trim(),
+      evolution_api_key: localApiKey.trim(),
+    });
   };
 
   const handleTestConnection = async () => {
-    await testConnection.mutateAsync({ apiUrl: evolutionUrl, apiKey: evolutionKey });
+    await testConnection.mutateAsync({ apiUrl: localApiUrl, apiKey: localApiKey });
   };
 
   const handleCreateInstance = async (instanceName: string) => {
-    if (!evolutionUrl || !evolutionKey) {
+    if (!isApiConfigured) {
       toast({
         title: "API não configurada",
         description: "Por favor, configure a Evolution API primeiro",
@@ -183,8 +169,8 @@ export default function Connections() {
     try {
       const result = await createInstance.mutateAsync({
         instanceName,
-        apiUrl: evolutionUrl,
-        apiKey: evolutionKey,
+        apiUrl: evolutionApiUrl,
+        apiKey: evolutionApiKey,
       });
 
       setIsNewInstanceOpen(false);
@@ -343,6 +329,14 @@ export default function Connections() {
     });
   };
 
+  if (isLoadingSettings) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
@@ -367,14 +361,14 @@ export default function Connections() {
           {isAdmin && (
             <>
               <EvolutionAdminConfig
-                apiUrl={evolutionUrl}
-                apiKey={evolutionKey}
-                onApiUrlChange={setEvolutionUrl}
-                onApiKeyChange={setEvolutionKey}
+                apiUrl={localApiUrl}
+                apiKey={localApiKey}
+                onApiUrlChange={setLocalApiUrl}
+                onApiKeyChange={setLocalApiKey}
                 onSave={handleSaveConfig}
                 onTest={handleTestConnection}
                 isTesting={testConnection.isPending}
-                isSaving={isSavingConfig}
+                isSaving={updateSettings.isPending}
                 isConfigured={isApiConfigured}
               />
 
