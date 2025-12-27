@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Search,
   ChevronDown,
+  Zap,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -155,6 +156,9 @@ export default function Conversations() {
   // New messages indicator state (when user scrolls up)
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unseenMessages, setUnseenMessages] = useState(0);
+  
+  // Pontual intervention mode (send message without changing handler)
+  const [isPontualMode, setIsPontualMode] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -461,8 +465,10 @@ export default function Conversations() {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
     
     const messageToSend = messageInput.trim();
+    const wasPontualMode = isPontualMode;
     setMessageInput(""); // Clear input immediately for better UX
     setIsSending(true);
+    setIsPontualMode(false); // Reset pontual mode after sending
     
     // Optimistically add message to local state with "sending" status
     const tempId = crypto.randomUUID();
@@ -479,6 +485,14 @@ export default function Conversations() {
     setMessages(prev => [...prev, newMessage]);
     
     try {
+      // If NOT in pontual mode and handler is AI, switch to human
+      if (!wasPontualMode && selectedConversation.current_handler === "ai") {
+        transferHandler.mutate({
+          conversationId: selectedConversationId,
+          handlerType: "human",
+        });
+      }
+      
       // Use async send for <1s response
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
@@ -1281,7 +1295,28 @@ export default function Conversations() {
             />
 
             {/* Input Area */}
-            <div className="flex-shrink-0 p-4 border-t border-border bg-card">
+            <div className={cn(
+              "flex-shrink-0 p-4 border-t border-border bg-card",
+              isPontualMode && "border-t-2 border-t-amber-500"
+            )}>
+              {/* Pontual Mode Indicator */}
+              {isPontualMode && (
+                <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm">
+                  <span className="flex items-center gap-2">
+                    <Zap className="h-4 w-4" />
+                    Modo intervenção pontual - a IA continuará respondendo após esta mensagem
+                  </span>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-6 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                    onClick={() => setIsPontualMode(false)}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              )}
+              
               {/* Hidden file inputs */}
               <input
                 ref={imageInputRef}
@@ -1308,6 +1343,22 @@ export default function Conversations() {
                 </div>
               ) : (
                 <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
+                  {/* Pontual Intervention Button - Show when handler is AI */}
+                  {selectedConversation?.current_handler === "ai" && (
+                    <Button
+                      variant={isPontualMode ? "default" : "ghost"}
+                      size="icon"
+                      className={cn(
+                        isPontualMode 
+                          ? "bg-amber-500 hover:bg-amber-600 text-white" 
+                          : "text-muted-foreground hover:text-amber-500"
+                      )}
+                      onClick={() => setIsPontualMode(!isPontualMode)}
+                      title="Intervenção pontual - enviar mensagem sem tirar da IA"
+                    >
+                      <Zap className="h-5 w-5" />
+                    </Button>
+                  )}
                   <div className="flex gap-1">
                     <Button 
                       variant="ghost" 
