@@ -13,6 +13,7 @@ import Kanban from "./pages/Kanban";
 import Settings from "./pages/Settings";
 import Contacts from "./pages/Contacts";
 import Connections from "./pages/Connections";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -93,6 +94,17 @@ const App = () => (
             }
           >
             <Route index element={<Connections />} />
+          </Route>
+          
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Profile />} />
           </Route>
           
           {/* Redirect old automations route */}
