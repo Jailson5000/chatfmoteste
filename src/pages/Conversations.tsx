@@ -319,6 +319,26 @@ export default function Conversations() {
     };
   }, [selectedConversationId, playNotification]);
 
+  // Auto-scroll to bottom when opening a conversation (after messages load)
+  useEffect(() => {
+    if (!selectedConversationId) return;
+    if (messagesLoading) return;
+
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    });
+  }, [selectedConversationId, messagesLoading]);
+
+  // Auto-scroll when YOU send a new message (do not force-scroll on incoming messages)
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last?.is_from_me) return;
+
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+  }, [messages]);
+
   // Map conversations for display
   const mappedConversations = useMemo(() => {
     return conversations.map(conv => ({
@@ -785,11 +805,11 @@ export default function Conversations() {
   }
 
   return (
-    <div className="h-[calc(100vh-64px)] flex overflow-hidden">
+    <div className="h-[calc(100vh-64px)] flex overflow-hidden min-h-0">
       {/* Conversations List */}
       <div
         className={cn(
-          "w-full md:w-96 border-r border-border bg-card flex flex-col",
+          "w-full md:w-96 border-r border-border bg-card flex flex-col min-h-0",
           showMobileChat && "hidden md:flex"
         )}
       >
@@ -924,7 +944,7 @@ export default function Conversations() {
       >
         <div
           className={cn(
-            "flex-1 flex flex-col bg-background",
+            "flex-1 flex flex-col bg-background min-h-0 overflow-hidden",
             !showMobileChat && "hidden md:flex"
           )}
         >
@@ -1092,7 +1112,7 @@ export default function Conversations() {
             />
 
             {/* Messages */}
-            <ScrollArea className="flex-1">
+            <ScrollArea className="flex-1 min-h-0">
               <div className="p-4 space-y-4 max-w-3xl mx-auto">
                 {messagesLoading ? (
                   <div className="flex items-center justify-center py-8">
@@ -1141,7 +1161,7 @@ export default function Conversations() {
             />
 
             {/* Input Area */}
-            <div className="p-4 border-t border-border bg-card">
+            <div className="flex-shrink-0 p-4 border-t border-border bg-card">
               {/* Hidden file inputs */}
               <input
                 ref={imageInputRef}
@@ -1209,7 +1229,7 @@ export default function Conversations() {
                     <Textarea
                       ref={textareaRef}
                       placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
-                      className="min-h-[44px] max-h-32 resize-none"
+                      className="min-h-[44px] max-h-[160px] resize-none overflow-y-auto"
                       rows={1}
                       value={messageInput}
                       onChange={(e) => {

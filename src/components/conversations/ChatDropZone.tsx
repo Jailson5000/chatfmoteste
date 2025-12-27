@@ -61,7 +61,7 @@ export function ChatDropZone({ children, onFileDrop, disabled }: ChatDropZonePro
 
   return (
     <div
-      className="relative flex-1 flex flex-col"
+      className="relative flex-1 min-h-0 flex flex-col"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
