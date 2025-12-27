@@ -20,7 +20,19 @@ type EvolutionAction =
   | "send_message"
   | "send_message_async"
   | "send_media"
-  | "get_media";
+  | "get_media"
+  // New centralized management endpoints
+  | "global_create_instance"
+  | "global_delete_instance"
+  | "global_get_qrcode"
+  | "global_get_status"
+  | "global_configure_webhook"
+  | "global_restart_instance"
+  | "global_logout_instance"
+  // N8N integration endpoints
+  | "n8n_forward_message"
+  | "n8n_get_conversation"
+  | "n8n_send_reply";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -1210,6 +1222,589 @@ serve(async (req) => {
             success: true,
             messageId: whatsappMessageId,
             message: "Media sent successfully",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // =========================
+      // GLOBAL MANAGEMENT ENDPOINTS (using centralized API keys)
+      // =========================
+      case "global_create_instance": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Creating instance: ${body.instanceName} at ${apiUrl}`);
+
+        const createResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+          method: "POST",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            instanceName: body.instanceName,
+            qrcode: true,
+            integration: "WHATSAPP-BAILEYS",
+            webhook: buildWebhookConfig(WEBHOOK_URL),
+          }),
+        });
+
+        console.log(`[Evolution API] GLOBAL Create instance response status: ${createResponse.status}`);
+
+        if (!createResponse.ok) {
+          const errorText = await safeReadResponseText(createResponse);
+          console.error(`[Evolution API] GLOBAL Create instance failed:`, errorText);
+          throw new Error(simplifyEvolutionError(createResponse.status, errorText));
+        }
+
+        const createData = await createResponse.json();
+        console.log(`[Evolution API] GLOBAL Create instance response:`, JSON.stringify(createData));
+
+        let qrCode: string | null = null;
+        if (createData.qrcode?.base64) {
+          qrCode = createData.qrcode.base64;
+        } else if (createData.qrcode && typeof createData.qrcode === "string") {
+          qrCode = createData.qrcode;
+        } else if (createData.base64) {
+          qrCode = createData.base64;
+        }
+
+        const instanceId = createData.instance?.instanceId || createData.instanceId || body.instanceName;
+
+        // Save instance to database using global credentials
+        const { data: instance, error: insertError } = await supabaseClient
+          .from("whatsapp_instances")
+          .insert({
+            law_firm_id: lawFirmId,
+            instance_name: body.instanceName,
+            instance_id: instanceId,
+            api_url: apiUrl,
+            api_key: globalApiKey,
+            status: qrCode ? "awaiting_qr" : "disconnected",
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error(`[Evolution API] GLOBAL Database insert error:`, insertError);
+          throw new Error(`Falha ao salvar a instância no sistema: ${insertError.message}`);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            instance,
+            qrCode,
+            message: qrCode ? "Instance created, scan QR code" : "Instance created",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "global_delete_instance": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceId && !body.instanceName) {
+          throw new Error("instanceId or instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        let instanceName = body.instanceName;
+
+        // If instanceId is provided, get the instance name from database
+        if (body.instanceId) {
+          const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+          instanceName = instance.instance_name;
+        }
+
+        console.log(`[Evolution API] GLOBAL Deleting instance: ${instanceName}`);
+
+        // Delete from Evolution API
+        try {
+          const deleteResponse = await fetchWithTimeout(`${apiUrl}/instance/delete/${instanceName}`, {
+            method: "DELETE",
+            headers: {
+              apikey: globalApiKey,
+              "Content-Type": "application/json",
+            },
+          });
+          console.log(`[Evolution API] GLOBAL Evolution delete response: ${deleteResponse.status}`);
+        } catch (e) {
+          console.log(`[Evolution API] GLOBAL Evolution delete failed (non-fatal):`, e);
+        }
+
+        // Delete from database if instanceId was provided
+        if (body.instanceId) {
+          const { error: deleteError } = await supabaseClient
+            .from("whatsapp_instances")
+            .delete()
+            .eq("id", body.instanceId)
+            .eq("law_firm_id", lawFirmId);
+
+          if (deleteError) {
+            throw new Error(`Failed to delete instance: ${deleteError.message}`);
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true, message: "Instance deleted" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "global_get_qrcode": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceId && !body.instanceName) {
+          throw new Error("instanceId or instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        let instanceName = body.instanceName;
+        let dbInstanceId = body.instanceId;
+
+        if (body.instanceId) {
+          const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+          instanceName = instance.instance_name;
+        }
+
+        console.log(`[Evolution API] GLOBAL Getting QR for: ${instanceName}`);
+
+        const qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instanceName}`, {
+          method: "GET",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!qrResponse.ok) {
+          const errorText = await safeReadResponseText(qrResponse);
+          throw new Error(simplifyEvolutionError(qrResponse.status, errorText));
+        }
+
+        const qrData = await qrResponse.json();
+        let qrCode: string | null = null;
+        if (qrData.base64) {
+          qrCode = qrData.base64;
+        } else if (qrData.qrcode?.base64) {
+          qrCode = qrData.qrcode.base64;
+        } else if (qrData.qrcode && typeof qrData.qrcode === "string") {
+          qrCode = qrData.qrcode;
+        }
+
+        const status = qrData.state || qrData.status || "unknown";
+
+        // Update instance status if connected
+        if (dbInstanceId && (status === "open" || status === "connected")) {
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({ status: "connected", updated_at: new Date().toISOString() })
+            .eq("id", dbInstanceId);
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, qrCode, status }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "global_get_status": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Getting status for: ${body.instanceName}`);
+
+        const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${body.instanceName}`, {
+          method: "GET",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!statusResponse.ok) {
+          const errorText = await safeReadResponseText(statusResponse);
+          return new Response(JSON.stringify({ success: true, status: "disconnected", evolutionState: "not_found" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const statusData = await statusResponse.json();
+        const state = statusData.state || statusData.instance?.state || "unknown";
+        let dbStatus = "disconnected";
+
+        if (state === "open" || state === "connected") {
+          dbStatus = "connected";
+        } else if (state === "connecting" || state === "qr") {
+          dbStatus = "connecting";
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, status: dbStatus, evolutionState: state }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "global_configure_webhook": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Configuring webhook for: ${body.instanceName}`);
+
+        const webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${body.instanceName}`, {
+          method: "POST",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+        });
+
+        if (!webhookResponse.ok) {
+          const errorText = await safeReadResponseText(webhookResponse);
+          throw new Error(simplifyEvolutionError(webhookResponse.status, errorText));
+        }
+
+        return new Response(JSON.stringify({ success: true, message: "Webhook configured successfully" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "global_restart_instance": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Restarting instance: ${body.instanceName}`);
+
+        const restartResponse = await fetchWithTimeout(`${apiUrl}/instance/restart/${body.instanceName}`, {
+          method: "PUT",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!restartResponse.ok) {
+          const errorText = await safeReadResponseText(restartResponse);
+          throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
+        }
+
+        return new Response(JSON.stringify({ success: true, message: "Instance restarted" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "global_logout_instance": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Logging out instance: ${body.instanceName}`);
+
+        const logoutResponse = await fetchWithTimeout(`${apiUrl}/instance/logout/${body.instanceName}`, {
+          method: "DELETE",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!logoutResponse.ok) {
+          const errorText = await safeReadResponseText(logoutResponse);
+          throw new Error(simplifyEvolutionError(logoutResponse.status, errorText));
+        }
+
+        // Update database status
+        if (body.instanceId) {
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({ status: "disconnected", updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId);
+        }
+
+        return new Response(JSON.stringify({ success: true, message: "Instance logged out" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // =========================
+      // N8N INTEGRATION ENDPOINTS
+      // =========================
+      case "n8n_forward_message": {
+        const n8nWebhookUrl = Deno.env.get("N8N_WEBHOOK_URL");
+        const n8nToken = Deno.env.get("N8N_INTERNAL_TOKEN");
+        
+        if (!n8nWebhookUrl) {
+          throw new Error("N8N_WEBHOOK_URL must be configured");
+        }
+        
+        if (!body.conversationId) {
+          throw new Error("conversationId is required");
+        }
+        if (!body.message) {
+          throw new Error("message is required");
+        }
+
+        console.log(`[Evolution API] Forwarding message to N8N for conversation: ${body.conversationId}`);
+
+        // Get conversation details
+        const { data: conversation, error: convError } = await supabaseClient
+          .from("conversations")
+          .select(`
+            *,
+            client:clients(id, name, phone, email, document),
+            whatsapp_instance:whatsapp_instances(instance_name, phone_number)
+          `)
+          .eq("id", body.conversationId)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (convError || !conversation) {
+          throw new Error("Conversation not found");
+        }
+
+        // Get recent messages for context
+        const { data: recentMessages } = await supabaseClient
+          .from("messages")
+          .select("content, is_from_me, message_type, created_at")
+          .eq("conversation_id", body.conversationId)
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        const payload = {
+          event: "new_message",
+          timestamp: new Date().toISOString(),
+          law_firm_id: lawFirmId,
+          conversation: {
+            id: conversation.id,
+            remote_jid: conversation.remote_jid,
+            contact_name: conversation.contact_name,
+            contact_phone: conversation.contact_phone,
+            status: conversation.status,
+            current_handler: conversation.current_handler,
+            ai_summary: conversation.ai_summary,
+          },
+          client: conversation.client,
+          whatsapp_instance: conversation.whatsapp_instance,
+          message: {
+            content: body.message,
+            type: "text",
+          },
+          context: {
+            recent_messages: recentMessages?.reverse() || [],
+          },
+        };
+
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (n8nToken) {
+          headers["Authorization"] = `Bearer ${n8nToken}`;
+        }
+
+        const n8nResponse = await fetchWithTimeout(n8nWebhookUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        }, 30000);
+
+        console.log(`[Evolution API] N8N response status: ${n8nResponse.status}`);
+
+        let n8nData = null;
+        try {
+          n8nData = await n8nResponse.json();
+        } catch {
+          n8nData = await n8nResponse.text();
+        }
+
+        // Update conversation with n8n response timestamp
+        await supabaseClient
+          .from("conversations")
+          .update({ n8n_last_response_at: new Date().toISOString() })
+          .eq("id", body.conversationId);
+
+        return new Response(
+          JSON.stringify({
+            success: n8nResponse.ok,
+            statusCode: n8nResponse.status,
+            response: n8nData,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "n8n_get_conversation": {
+        if (!body.conversationId) {
+          throw new Error("conversationId is required");
+        }
+
+        console.log(`[Evolution API] Getting conversation for N8N: ${body.conversationId}`);
+
+        const { data: conversation, error: convError } = await supabaseClient
+          .from("conversations")
+          .select(`
+            *,
+            client:clients(*),
+            whatsapp_instance:whatsapp_instances(instance_name, phone_number, status)
+          `)
+          .eq("id", body.conversationId)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (convError || !conversation) {
+          throw new Error("Conversation not found");
+        }
+
+        // Get all messages
+        const { data: messages } = await supabaseClient
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", body.conversationId)
+          .order("created_at", { ascending: true });
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            conversation,
+            messages: messages || [],
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "n8n_send_reply": {
+        if (!body.conversationId) {
+          throw new Error("conversationId is required");
+        }
+        if (!body.message) {
+          throw new Error("message is required");
+        }
+
+        console.log(`[Evolution API] N8N sending reply to conversation: ${body.conversationId}`);
+
+        // Get conversation and instance
+        const { data: conversation, error: convError } = await supabaseClient
+          .from("conversations")
+          .select("remote_jid, whatsapp_instance_id")
+          .eq("id", body.conversationId)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (convError || !conversation) {
+          throw new Error("Conversation not found");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, conversation.whatsapp_instance_id);
+        const apiUrl = normalizeUrl(instance.api_url);
+        const targetNumber = (conversation.remote_jid || "").split("@")[0];
+
+        if (!targetNumber) {
+          throw new Error("Invalid remote_jid");
+        }
+
+        // Send message via Evolution API
+        const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+          method: "POST",
+          headers: {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            number: targetNumber,
+            text: body.message,
+          }),
+        }, SEND_MESSAGE_TIMEOUT_MS);
+
+        if (!sendResponse.ok) {
+          const errorText = await safeReadResponseText(sendResponse);
+          throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
+        }
+
+        const sendData = await sendResponse.json();
+        const whatsappMessageId = sendData.key?.id || sendData.messageId || crypto.randomUUID();
+
+        // Save message to database as AI-generated
+        await supabaseClient
+          .from("messages")
+          .insert({
+            conversation_id: body.conversationId,
+            whatsapp_message_id: whatsappMessageId,
+            content: body.message,
+            message_type: "text",
+            is_from_me: true,
+            sender_type: "ai",
+            ai_generated: true,
+          });
+
+        // Update conversation
+        await supabaseClient
+          .from("conversations")
+          .update({ 
+            last_message_at: new Date().toISOString(),
+            n8n_last_response_at: new Date().toISOString(),
+          })
+          .eq("id", body.conversationId);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageId: whatsappMessageId,
+            message: "Reply sent via N8N",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
