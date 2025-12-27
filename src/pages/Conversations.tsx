@@ -319,6 +319,29 @@ export default function Conversations() {
     };
   }, [selectedConversationId, playNotification]);
 
+  // Auto-scroll to bottom when messages change (new message or conversation load)
+  const prevMessagesLengthRef = useRef(0);
+  useEffect(() => {
+    // Only auto-scroll if:
+    // 1. Messages loaded (switching conversation) 
+    // 2. User sent a message (is_from_me on last message)
+    // 3. New message arrived and user was already at bottom
+    if (messages.length > 0 && !messagesLoading) {
+      const shouldScroll = 
+        prevMessagesLengthRef.current === 0 || // First load
+        (messages.length > prevMessagesLengthRef.current && messages[messages.length - 1]?.is_from_me); // User sent
+      
+      if (shouldScroll && messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+      prevMessagesLengthRef.current = messages.length;
+    }
+    
+    if (messages.length === 0) {
+      prevMessagesLengthRef.current = 0;
+    }
+  }, [messages, messagesLoading]);
+
   // Map conversations for display
   const mappedConversations = useMemo(() => {
     return conversations.map(conv => ({
@@ -785,11 +808,12 @@ export default function Conversations() {
   }
 
   return (
-    <div className="h-screen flex animate-fade-in">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex-1 flex min-h-0">
       {/* Conversations List */}
       <div
         className={cn(
-          "w-full md:w-96 border-r border-border bg-card flex flex-col",
+          "w-full md:w-96 border-r border-border bg-card flex flex-col min-h-0",
           showMobileChat && "hidden md:flex"
         )}
       >
@@ -835,7 +859,7 @@ export default function Conversations() {
         </div>
 
         {/* Conversation List */}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-2 space-y-1">
             {filteredConversations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
@@ -924,14 +948,14 @@ export default function Conversations() {
       >
         <div
           className={cn(
-            "flex-1 flex flex-col bg-background",
+            "flex-1 flex flex-col bg-background min-h-0 overflow-hidden",
             !showMobileChat && "hidden md:flex"
           )}
         >
         {selectedConversation ? (
-          <>
+          <div className="flex flex-col h-full min-h-0">
             {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between">
+            <div className="flex-shrink-0 p-4 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"
@@ -1092,8 +1116,8 @@ export default function Conversations() {
             />
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-4 max-w-3xl mx-auto">
+            <ScrollArea className="flex-1 min-h-0">
+              <div className="p-4 space-y-4 max-w-3xl mx-auto">
                 {messagesLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -1141,7 +1165,7 @@ export default function Conversations() {
             />
 
             {/* Input Area */}
-            <div className="p-4 border-t border-border bg-card">
+            <div className="flex-shrink-0 p-4 border-t border-border bg-card">
               {/* Hidden file inputs */}
               <input
                 ref={imageInputRef}
@@ -1209,7 +1233,7 @@ export default function Conversations() {
                     <Textarea
                       ref={textareaRef}
                       placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
-                      className="min-h-[44px] max-h-32 resize-none"
+                      className="min-h-[44px] max-h-[160px] resize-none overflow-y-auto"
                       rows={1}
                       value={messageInput}
                       onChange={(e) => {
@@ -1259,7 +1283,7 @@ export default function Conversations() {
                 </div>
               )}
             </div>
-          </>
+          </div>
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-muted-foreground">
@@ -1304,6 +1328,7 @@ export default function Conversations() {
         previewUrl={mediaPreview.previewUrl}
         isSending={isSending}
       />
+      </div>
     </div>
   );
 }
