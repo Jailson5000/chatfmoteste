@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "./useLawFirm";
 import { useNotificationSound } from "./useNotificationSound";
+import { useNotificationPreferences } from "./useNotificationPreferences";
 
 interface Message {
   id: string;
@@ -23,6 +24,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
   const { toast } = useToast();
   const { lawFirm } = useLawFirm();
   const { playNotification } = useNotificationSound();
+  const { soundEnabled, browserEnabled } = useNotificationPreferences();
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const handleNewMessage = useCallback(
@@ -32,10 +34,12 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       // Only notify for incoming messages (not from me)
       if (message.is_from_me) return;
 
-      // Play notification sound
-      playNotification();
+      // Play notification sound if enabled
+      if (soundEnabled) {
+        playNotification();
+      }
 
-      // Show toast notification
+      // Show toast notification (always shown for UX)
       toast({
         title: "Nova mensagem",
         description: message.content
@@ -45,8 +49,8 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
           : "Nova mensagem recebida",
       });
 
-      // Request browser notification permission and show notification
-      if ("Notification" in window && Notification.permission === "granted") {
+      // Show browser notification if enabled and permission granted
+      if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
         new Notification("Nova mensagem do WhatsApp", {
           body: message.content || "Nova mensagem recebida",
           icon: "/fmo-favicon.png",
@@ -57,14 +61,14 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       // Call custom handler if provided
       onNewMessage?.(message);
     },
-    [toast, playNotification, onNewMessage]
+    [toast, playNotification, onNewMessage, soundEnabled, browserEnabled]
   );
 
   useEffect(() => {
     if (!enabled || !lawFirm?.id) return;
 
-    // Request notification permission
-    if ("Notification" in window && Notification.permission === "default") {
+    // Request notification permission if browser notifications are enabled
+    if (browserEnabled && "Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
 
@@ -90,7 +94,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
         channelRef.current = null;
       }
     };
-  }, [enabled, lawFirm?.id, handleNewMessage]);
+  }, [enabled, lawFirm?.id, handleNewMessage, browserEnabled]);
 
   return {
     requestNotificationPermission: () => {

@@ -9,6 +9,9 @@ import {
   Mail,
   Phone,
   Building2,
+  Bell,
+  Volume2,
+  Globe,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -27,12 +30,21 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotificationPreferences } from "@/hooks/useNotificationPreferences";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function Profile() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
+  const {
+    soundEnabled,
+    browserEnabled,
+    toggleSound,
+    toggleBrowser,
+    updatePreferences,
+    isLoading: isLoadingPreferences,
+  } = useNotificationPreferences();
 
   // Profile state
   const [fullName, setFullName] = useState("");
@@ -398,6 +410,62 @@ export default function Profile() {
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Notifications */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Notificações
+          </CardTitle>
+          <CardDescription>
+            Configure como deseja receber notificações de novas mensagens
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Volume2 className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Som de Notificação</p>
+                <p className="text-sm text-muted-foreground">
+                  Tocar som quando receber novas mensagens
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={soundEnabled}
+              onCheckedChange={() => toggleSound()}
+              disabled={isLoadingPreferences || updatePreferences.isPending}
+            />
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Globe className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Notificações do Navegador</p>
+                <p className="text-sm text-muted-foreground">
+                  Mostrar notificações do sistema quando receber mensagens
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={browserEnabled}
+              onCheckedChange={() => toggleBrowser()}
+              disabled={isLoadingPreferences || updatePreferences.isPending}
+            />
+          </div>
+
+          {"Notification" in window && Notification.permission === "denied" && browserEnabled && (
+            <p className="text-xs text-destructive">
+              As notificações do navegador estão bloqueadas. Permita nas configurações do navegador.
+            </p>
+          )}
         </CardContent>
       </Card>
 
