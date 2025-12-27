@@ -1060,15 +1060,23 @@ export default function Conversations() {
                           }
                         }}
                       >
-                        <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-[120px]">
+                        <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-[140px]">
                           <SelectValue placeholder="Selecione um canal" />
                         </SelectTrigger>
                         <SelectContent>
-                          {connectedInstances.map((inst) => (
-                            <SelectItem key={inst.id} value={inst.id} className="text-xs">
-                              {inst.instance_name} {inst.phone_number ? `(${inst.phone_number})` : ""}
-                            </SelectItem>
-                          ))}
+                          {whatsappInstances.map((inst) => {
+                            const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
+                            const isConnected = inst.status === "connected";
+                            return (
+                              <SelectItem key={inst.id} value={inst.id} className="text-xs">
+                                <span className="flex items-center gap-2">
+                                  <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                                  {inst.instance_name}
+                                  {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
+                                </span>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     ) : (
