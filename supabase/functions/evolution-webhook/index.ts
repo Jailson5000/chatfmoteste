@@ -491,7 +491,8 @@ serve(async (req) => {
 
         if (convError && convError.code === 'PGRST116') {
           // Conversation doesn't exist, create it
-          const contactName = data.pushName || phoneNumber;
+          // IMPORTANT: Only trust pushName for inbound messages. For outbound (fromMe), pushName is usually our own name.
+          const contactName = (!isFromMe && data.pushName) ? data.pushName : phoneNumber;
           logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
           const { data: newConv, error: createError } = await supabaseClient
@@ -600,11 +601,12 @@ serve(async (req) => {
         }
 
         // Update conversation last_message_at
+        // IMPORTANT: Do NOT overwrite contact_name on outbound messages (fromMe), because pushName is our own display name.
         const { error: updateConvError } = await supabaseClient
           .from('conversations')
           .update({ 
             last_message_at: new Date().toISOString(),
-            contact_name: data.pushName || conversation.contact_name,
+            contact_name: !isFromMe ? (data.pushName || conversation.contact_name) : conversation.contact_name,
           })
           .eq('id', conversation.id);
 
