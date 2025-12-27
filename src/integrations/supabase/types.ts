@@ -783,6 +783,8 @@ export type Database = {
           id: string
           is_active: boolean
           law_firm_id: string | null
+          notification_browser_enabled: boolean
+          notification_sound_enabled: boolean
           oab_number: string | null
           phone: string | null
           updated_at: string
@@ -795,6 +797,8 @@ export type Database = {
           id: string
           is_active?: boolean
           law_firm_id?: string | null
+          notification_browser_enabled?: boolean
+          notification_sound_enabled?: boolean
           oab_number?: string | null
           phone?: string | null
           updated_at?: string
@@ -807,6 +811,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           law_firm_id?: string | null
+          notification_browser_enabled?: boolean
+          notification_sound_enabled?: boolean
           oab_number?: string | null
           phone?: string | null
           updated_at?: string
