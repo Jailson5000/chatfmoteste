@@ -19,6 +19,7 @@ import {
   FileSignature,
   MessageSquare,
   Search,
+  ChevronDown,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -135,11 +136,17 @@ export default function Conversations() {
   
   // Unread counts state
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  
+
+  // New messages indicator state (when user scrolls up)
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [unseenMessages, setUnseenMessages] = useState(0);
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesScrollAreaRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
 
   // Media preview state
   const [mediaPreview, setMediaPreview] = useState<{
@@ -203,6 +210,40 @@ export default function Conversations() {
       setTimeout(() => setHighlightedMessageId(null), 2000);
     }
   }, []);
+
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const root = messagesScrollAreaRef.current;
+    const viewport = root?.querySelector(
+      '[data-radix-scroll-area-viewport]'
+    ) as HTMLDivElement | null;
+    if (!viewport) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+  }, []);
+
+  // Track whether user is at bottom; clear unseen counter when they return to bottom
+  useEffect(() => {
+    setUnseenMessages(0);
+    setIsAtBottom(true);
+    isAtBottomRef.current = true;
+
+    const root = messagesScrollAreaRef.current;
+    const viewport = root?.querySelector(
+      '[data-radix-scroll-area-viewport]'
+    ) as HTMLDivElement | null;
+    if (!viewport) return;
+
+    const onScroll = () => {
+      const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 40;
+      isAtBottomRef.current = atBottom;
+      setIsAtBottom(atBottom);
+      if (atBottom) setUnseenMessages(0);
+    };
+
+    viewport.addEventListener("scroll", onScroll, { passive: true } as any);
+    onScroll();
+
+    return () => viewport.removeEventListener("scroll", onScroll as any);
+  }, [selectedConversationId]);
 
   // Handle reply
   const handleReply = useCallback((messageId: string) => {
@@ -281,10 +322,16 @@ export default function Conversations() {
             if (exists) return prev;
             return [...prev, newMsg];
           });
-          
-          // Play sound for incoming messages
+
           if (!newMsg.is_from_me) {
             playNotification();
+
+            // If user is reading older messages, don't auto-pull; show indicator instead.
+            if (isAtBottomRef.current) {
+              requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+            } else {
+              setUnseenMessages((c) => c + 1);
+            }
           }
         }
       )
@@ -325,9 +372,9 @@ export default function Conversations() {
     if (messagesLoading) return;
 
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      scrollMessagesToBottom("auto");
     });
-  }, [selectedConversationId, messagesLoading]);
+  }, [selectedConversationId, messagesLoading, scrollMessagesToBottom]);
 
   // Auto-scroll when YOU send a new message (do not force-scroll on incoming messages)
   useEffect(() => {
@@ -335,9 +382,9 @@ export default function Conversations() {
     if (!last?.is_from_me) return;
 
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      scrollMessagesToBottom("smooth");
     });
-  }, [messages]);
+  }, [messages, scrollMessagesToBottom]);
 
   // Map conversations for display
   const mappedConversations = useMemo(() => {
@@ -984,6 +1031,10 @@ export default function Conversations() {
                     <Phone className="h-3 w-3" />
                     {selectedConversation.contact_phone || "---"}
                   </p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                    <Inbox className="h-3 w-3" />
+                    Canal: {selectedConversation.whatsapp_instance?.instance_name || "Não vinculado"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1112,47 +1163,66 @@ export default function Conversations() {
             />
 
             {/* Messages */}
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="p-4 space-y-4 max-w-3xl mx-auto">
-                {messagesLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  </div>
-                ) : messages.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">Nenhuma mensagem ainda</p>
-                  </div>
-                ) : (
-                  messages.map((msg) => (
-                    <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
-                      <MessageBubble
-                        id={msg.id}
-                        content={msg.content}
-                        createdAt={msg.created_at}
-                        isFromMe={msg.is_from_me}
-                        senderType={msg.sender_type}
-                        aiGenerated={msg.ai_generated}
-                        mediaUrl={msg.media_url}
-                        mediaMimeType={msg.media_mime_type}
-                        messageType={msg.message_type}
-                        status={msg.status || "sent"}
-                        readAt={msg.read_at}
-                        whatsappMessageId={msg.whatsapp_message_id}
-                        conversationId={selectedConversationId || undefined}
-                        replyTo={msg.reply_to}
-                        onReply={handleReply}
-                        onScrollToMessage={scrollToMessage}
-                        onRetry={handleRetryMessage}
-                        highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
-                        isHighlighted={highlightedMessageId === msg.id}
-                      />
+            <div className="relative flex-1 min-h-0">
+              <ScrollArea ref={messagesScrollAreaRef} className="h-full">
+                <div className="p-4 space-y-4 max-w-3xl mx-auto">
+                  {messagesLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                     </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            </ScrollArea>
+                  ) : messages.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Nenhuma mensagem ainda</p>
+                    </div>
+                  ) : (
+                    messages.map((msg) => (
+                      <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
+                        <MessageBubble
+                          id={msg.id}
+                          content={msg.content}
+                          createdAt={msg.created_at}
+                          isFromMe={msg.is_from_me}
+                          senderType={msg.sender_type}
+                          aiGenerated={msg.ai_generated}
+                          mediaUrl={msg.media_url}
+                          mediaMimeType={msg.media_mime_type}
+                          messageType={msg.message_type}
+                          status={msg.status || "sent"}
+                          readAt={msg.read_at}
+                          whatsappMessageId={msg.whatsapp_message_id}
+                          conversationId={selectedConversationId || undefined}
+                          replyTo={msg.reply_to}
+                          onReply={handleReply}
+                          onScrollToMessage={scrollToMessage}
+                          onRetry={handleRetryMessage}
+                          highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
+                          isHighlighted={highlightedMessageId === msg.id}
+                        />
+                      </div>
+                    ))
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
+
+              {!isAtBottom && unseenMessages > 0 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="shadow-sm"
+                    onClick={() => {
+                      setUnseenMessages(0);
+                      scrollMessagesToBottom("smooth");
+                    }}
+                  >
+                    <ChevronDown className="h-4 w-4 mr-2" />
+                    {unseenMessages} nova{unseenMessages > 1 ? "s" : ""} mensagem{unseenMessages > 1 ? "s" : ""} · Voltar ao fim
+                  </Button>
+                </div>
+              )}
+            </div>
 
             {/* Reply Preview */}
             <ReplyPreview
