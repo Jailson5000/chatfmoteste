@@ -627,6 +627,41 @@ export type Database = {
           },
         ]
       }
+      law_firm_settings: {
+        Row: {
+          created_at: string
+          evolution_api_key: string | null
+          evolution_api_url: string | null
+          id: string
+          law_firm_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          evolution_api_key?: string | null
+          evolution_api_url?: string | null
+          id?: string
+          law_firm_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          evolution_api_key?: string | null
+          evolution_api_url?: string | null
+          id?: string
+          law_firm_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "law_firm_settings_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       law_firms: {
         Row: {
           address: string | null

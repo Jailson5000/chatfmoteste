@@ -32,8 +32,7 @@ export function useLawFirmSettings() {
     queryFn: async () => {
       if (!lawFirm?.id) return null;
 
-      // Using any to bypass type checking for new table
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("law_firm_settings")
         .select("*")
         .eq("law_firm_id", lawFirm.id)
@@ -54,7 +53,7 @@ export function useLawFirmSettings() {
       if (!lawFirm?.id) throw new Error("Law firm not found");
 
       // Check if settings exist
-      const { data: existing } = await (supabase as any)
+      const { data: existing } = await supabase
         .from("law_firm_settings")
         .select("id")
         .eq("law_firm_id", lawFirm.id)
@@ -62,7 +61,7 @@ export function useLawFirmSettings() {
 
       if (existing) {
         // Update existing
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from("law_firm_settings")
           .update({
             ...params,
@@ -76,7 +75,7 @@ export function useLawFirmSettings() {
         return data as LawFirmSettings;
       } else {
         // Insert new
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from("law_firm_settings")
           .insert({
             law_firm_id: lawFirm.id,
