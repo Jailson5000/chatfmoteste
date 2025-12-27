@@ -617,7 +617,13 @@ serve(async (req) => {
         }
 
         // ==== AUTOMATION: Check and forward to N8N if rules match ====
-        if (!isFromMe && savedMessage) {
+        // IMPORTANT: Only trigger automations if:
+        // 1. Message is NOT from us (external message from client)
+        // 2. The conversation handler is set to 'ai' (not 'human')
+        const shouldTriggerAutomation = !isFromMe && savedMessage && conversation.current_handler === 'ai';
+        
+        if (shouldTriggerAutomation) {
+          logDebug('AUTOMATION', `Triggering automation - handler is AI`, { requestId, handler: conversation.current_handler });
           await processAutomations(supabaseClient, {
             lawFirmId,
             conversationId: conversation.id,
@@ -629,6 +635,8 @@ serve(async (req) => {
             instanceId: instance.id,
             instanceName: instance.instance_name,
           });
+        } else if (!isFromMe && savedMessage) {
+          logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: conversation.current_handler });
         }
 
         break;
