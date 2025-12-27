@@ -98,6 +98,215 @@ function logDebug(section: string, message: string, data?: unknown) {
   console.log(`[${timestamp}] [Evolution Webhook] [${section}] ${message}${dataStr}`);
 }
 
+// Interface for automation context
+interface AutomationContext {
+  lawFirmId: string;
+  conversationId: string;
+  messageContent: string;
+  messageType: string;
+  contactName: string;
+  contactPhone: string;
+  remoteJid: string;
+  instanceId: string;
+  instanceName: string;
+}
+
+// Process automations and forward to N8N if rules match
+async function processAutomations(supabaseClient: any, context: AutomationContext) {
+  const n8nWebhookUrl = Deno.env.get("N8N_WEBHOOK_URL");
+  const n8nToken = Deno.env.get("N8N_INTERNAL_TOKEN");
+
+  if (!n8nWebhookUrl) {
+    logDebug('AUTOMATION', 'N8N_WEBHOOK_URL not configured, skipping automation');
+    return;
+  }
+
+  try {
+    // Get active automations for this law firm
+    const { data: automations, error: autoError } = await supabaseClient
+      .from('automations')
+      .select('*')
+      .eq('law_firm_id', context.lawFirmId)
+      .eq('is_active', true);
+
+    if (autoError || !automations || automations.length === 0) {
+      logDebug('AUTOMATION', 'No active automations found', { error: autoError });
+      return;
+    }
+
+    logDebug('AUTOMATION', `Found ${automations.length} active automations`);
+
+    for (const automation of automations) {
+      const shouldTrigger = evaluateAutomationRules(automation, context);
+      
+      if (shouldTrigger) {
+        logDebug('AUTOMATION', `Triggering automation: ${automation.name}`, { automationId: automation.id });
+        
+        // Get conversation details for context
+        const { data: conversation } = await supabaseClient
+          .from('conversations')
+          .select(`
+            *,
+            client:clients(id, name, phone, email, document)
+          `)
+          .eq('id', context.conversationId)
+          .single();
+
+        // Get recent messages for context
+        const { data: recentMessages } = await supabaseClient
+          .from('messages')
+          .select('content, is_from_me, message_type, created_at, sender_type')
+          .eq('conversation_id', context.conversationId)
+          .order('created_at', { ascending: false })
+          .limit(15);
+
+        // Build payload
+        const payload = {
+          event: automation.trigger_type || 'new_message',
+          automation: {
+            id: automation.id,
+            name: automation.name,
+            ai_prompt: automation.ai_prompt,
+            ai_temperature: automation.ai_temperature,
+          },
+          timestamp: new Date().toISOString(),
+          law_firm_id: context.lawFirmId,
+          conversation: {
+            id: context.conversationId,
+            remote_jid: context.remoteJid,
+            contact_name: context.contactName,
+            contact_phone: context.contactPhone,
+            status: conversation?.status || 'novo_contato',
+            current_handler: conversation?.current_handler || 'ai',
+            ai_summary: conversation?.ai_summary,
+            needs_human_handoff: conversation?.needs_human_handoff,
+          },
+          client: conversation?.client || null,
+          whatsapp_instance: {
+            id: context.instanceId,
+            instance_name: context.instanceName,
+          },
+          message: {
+            content: context.messageContent,
+            type: context.messageType,
+          },
+          context: {
+            recent_messages: recentMessages?.reverse() || [],
+          },
+        };
+
+        // Send to N8N
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (n8nToken) {
+          headers["Authorization"] = `Bearer ${n8nToken}`;
+        }
+
+        // Use webhook_url from automation if set, otherwise use global N8N_WEBHOOK_URL
+        const targetUrl = automation.webhook_url || n8nWebhookUrl;
+
+        try {
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+          });
+
+          logDebug('AUTOMATION', `N8N response: ${response.status}`, { automationId: automation.id });
+
+          // Log the webhook call
+          await supabaseClient
+            .from('webhook_logs')
+            .insert({
+              automation_id: automation.id,
+              direction: 'outgoing',
+              payload: payload,
+              response: response.ok ? { status: response.status } : null,
+              status_code: response.status,
+              error_message: response.ok ? null : `HTTP ${response.status}`,
+            });
+
+          // Update conversation n8n_last_response_at
+          await supabaseClient
+            .from('conversations')
+            .update({ n8n_last_response_at: new Date().toISOString() })
+            .eq('id', context.conversationId);
+
+        } catch (fetchError) {
+          logDebug('AUTOMATION', `Failed to call N8N webhook`, { error: fetchError });
+          
+          await supabaseClient
+            .from('webhook_logs')
+            .insert({
+              automation_id: automation.id,
+              direction: 'outgoing',
+              payload: payload,
+              status_code: 0,
+              error_message: fetchError instanceof Error ? fetchError.message : 'Unknown error',
+            });
+        }
+      }
+    }
+  } catch (error) {
+    logDebug('AUTOMATION', `Error processing automations`, { error: error instanceof Error ? error.message : error });
+  }
+}
+
+// Evaluate if automation rules match the message context
+function evaluateAutomationRules(automation: any, context: AutomationContext): boolean {
+  const config = automation.trigger_config || {};
+  const triggerType = automation.trigger_type;
+
+  // Default: trigger on all new messages if no specific config
+  if (!triggerType || triggerType === 'new_message') {
+    // Check keyword filters if configured
+    if (config.keywords && Array.isArray(config.keywords) && config.keywords.length > 0) {
+      const messageText = context.messageContent.toLowerCase();
+      const hasKeyword = config.keywords.some((keyword: string) => 
+        messageText.includes(keyword.toLowerCase())
+      );
+      if (!hasKeyword) return false;
+    }
+
+    // Check message type filter
+    if (config.message_types && Array.isArray(config.message_types) && config.message_types.length > 0) {
+      if (!config.message_types.includes(context.messageType)) return false;
+    }
+
+    // Check first message only filter
+    if (config.first_message_only) {
+      // This would require additional DB query to check if this is the first message
+      // For now, we skip this check and let N8N handle it
+    }
+
+    return true;
+  }
+
+  // Trigger type: keyword match
+  if (triggerType === 'keyword_match') {
+    if (!config.keywords || !Array.isArray(config.keywords)) return false;
+    const messageText = context.messageContent.toLowerCase();
+    return config.keywords.some((keyword: string) => 
+      messageText.includes(keyword.toLowerCase())
+    );
+  }
+
+  // Trigger type: media received
+  if (triggerType === 'media_received') {
+    const mediaTypes = ['image', 'audio', 'video', 'document'];
+    return mediaTypes.includes(context.messageType);
+  }
+
+  // Trigger type: first contact
+  if (triggerType === 'first_contact') {
+    // Always trigger for new contacts - N8N can verify if it's actually first
+    return true;
+  }
+
+  return true;
+}
+
 // Update instance with last webhook event info
 async function updateInstanceWebhookEvent(
   supabaseClient: any,
@@ -403,6 +612,21 @@ serve(async (req) => {
           logDebug('ERROR', `Failed to update conversation last_message_at`, { requestId, error: updateConvError });
         } else {
           logDebug('DB', `Updated conversation last_message_at`, { requestId, conversationId: conversation.id });
+        }
+
+        // ==== AUTOMATION: Check and forward to N8N if rules match ====
+        if (!isFromMe && savedMessage) {
+          await processAutomations(supabaseClient, {
+            lawFirmId,
+            conversationId: conversation.id,
+            messageContent,
+            messageType,
+            contactName: data.pushName || phoneNumber,
+            contactPhone: phoneNumber,
+            remoteJid,
+            instanceId: instance.id,
+            instanceName: instance.instance_name,
+          });
         }
 
         break;
