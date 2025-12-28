@@ -1658,37 +1658,41 @@ export default function Conversations() {
                   />
                 </div>
 
-                {/* Handler Toggle Button */}
+                {/* Handler Toggle (IA ↔ Humano) */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleTransferHandler(
-                        selectedConversation.current_handler === "ai" ? "human" : "ai"
-                      )}
-                      className={cn(
-                        "transition-all duration-200",
-                        selectedConversation.current_handler === "ai"
-                          ? "border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
-                          : "border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-                      )}
+                    <div
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/50"
+                      role="group"
+                      tabIndex={0}
+                      aria-label="Alternar atendimento entre IA e Humano"
                     >
                       {selectedConversation.current_handler === "ai" ? (
-                        <>
-                          <Bot className="h-4 w-4 mr-1.5" />
-                          IA
-                        </>
+                        <Bot className="h-4 w-4 text-muted-foreground" />
                       ) : (
-                        <>
-                          <UserCheck className="h-4 w-4 mr-1.5" />
-                          Humano
-                        </>
+                        <UserCheck className="h-4 w-4 text-muted-foreground" />
                       )}
-                    </Button>
+                      <Label htmlFor="handler-toggle" className="text-xs cursor-pointer">
+                        Atendimento
+                      </Label>
+                      <Switch
+                        id="handler-toggle"
+                        checked={selectedConversation.current_handler === "human"}
+                        onCheckedChange={(checked) =>
+                          handleTransferHandler(checked ? "human" : "ai")
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {selectedConversation.current_handler === "ai" ? "IA" : "Humano"}
+                      </span>
+                    </div>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Clique para alternar para {selectedConversation.current_handler === "ai" ? "Humano" : "IA"}</p>
+                    <p>
+                      {selectedConversation.current_handler === "ai"
+                        ? "Ativo: IA (automação pode responder)"
+                        : "Ativo: Humano (automação não responde)"}
+                    </p>
                   </TooltipContent>
                 </Tooltip>
                 <DropdownMenu>
