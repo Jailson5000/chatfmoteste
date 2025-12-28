@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -28,6 +28,7 @@ interface MessageBubbleProps {
   whatsappMessageId?: string | null;
   conversationId?: string;
   isInternal?: boolean;
+  isPontual?: boolean;
   replyTo?: {
     id: string;
     content: string | null;
@@ -604,6 +605,7 @@ export function MessageBubble({
   conversationId,
   replyTo,
   isInternal = false,
+  isPontual = false,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -783,6 +785,13 @@ export function MessageBubble({
           <div className="flex items-center gap-1 text-xs text-yellow-700 mb-1 dark:text-yellow-300">
             <Lock className="h-3 w-3" />
             Interno
+          </div>
+        )}
+        
+        {isPontual && isFromMe && !isInternal && !aiGenerated && (
+          <div className="flex items-center gap-1 text-xs text-amber-600 mb-1 dark:text-amber-400">
+            <Zap className="h-3 w-3" />
+            Intervenção pontual
           </div>
         )}
         
