@@ -12,8 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Slider } from "@/components/ui/slider";
-import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const TRIGGER_TYPES = [
   { value: "new_message", label: "Nova mensagem", description: "Dispara para toda nova mensagem recebida" },
@@ -144,22 +145,59 @@ export default function Automations() {
     
     setIsSavingPrompt(true);
     try {
+      // First update in database
       await updateAutomation.mutateAsync({
         id: selectedAutomation.id,
         ai_prompt: editedPrompt,
         ai_temperature: editedTemperature,
       });
       
+      // Then sync with N8N via edge function
+      const { data, error } = await supabase.functions.invoke('sync-n8n-prompt', {
+        body: {
+          automation_id: selectedAutomation.id,
+          ai_prompt: editedPrompt,
+          ai_temperature: editedTemperature,
+          webhook_url: selectedAutomation.webhook_url,
+        }
+      });
+
       // Update local state
       setSelectedAutomation({
         ...selectedAutomation,
         ai_prompt: editedPrompt,
         ai_temperature: editedTemperature,
       });
-      
+
+      if (error) {
+        console.error('N8N sync error:', error);
+        toast({
+          title: "Prompt salvo",
+          description: "Prompt atualizado no banco, mas a sincronização com N8N falhou. Tente novamente.",
+          variant: "destructive",
+        });
+      } else if (data?.sync_status === 'synced') {
+        toast({
+          title: "Sincronizado com N8N",
+          description: "O prompt foi atualizado e sincronizado com o N8N com sucesso.",
+        });
+      } else if (data?.sync_status === 'failed') {
+        toast({
+          title: "Prompt salvo",
+          description: data.message || "Prompt atualizado, mas houve um problema na sincronização com N8N.",
+        });
+      } else {
+        toast({
+          title: "Prompt atualizado",
+          description: "As alterações foram salvas.",
+        });
+      }
+    } catch (err) {
+      console.error('Save error:', err);
       toast({
-        title: "Prompt atualizado",
-        description: "O prompt da IA foi sincronizado. As alterações serão enviadas ao N8N na próxima execução.",
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar o prompt. Tente novamente.",
+        variant: "destructive",
       });
     } finally {
       setIsSavingPrompt(false);
