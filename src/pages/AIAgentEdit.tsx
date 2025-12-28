@@ -32,6 +32,7 @@ import {
   AtSign,
   BookOpen,
 } from "lucide-react";
+import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -580,18 +581,8 @@ Você é uma atendente do escritório @Nome do escritório , especializada em id
 
             <Separator className="my-4" />
 
-            {/* Knowledge Base placeholder */}
-            <div className="space-y-2 mb-4">
-              <Label className="text-sm flex items-center gap-2">
-                <BookOpen className="h-4 w-4" />
-                Base de Conhecimento
-              </Label>
-              <div className="p-3 rounded-lg border border-dashed border-muted-foreground/25 text-center">
-                <p className="text-xs text-muted-foreground">
-                  Vincule documentos e itens de conhecimento ao agente (em breve)
-                </p>
-              </div>
-            </div>
+            {/* Knowledge Base Section */}
+            <AgentKnowledgeSection automationId={automation.id} />
 
             <Separator className="my-4" />
 

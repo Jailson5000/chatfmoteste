@@ -48,6 +48,7 @@ import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours 
 import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { DateRange } from "react-day-picker";
+import { BrazilMap } from "@/components/dashboard/BrazilMap";
 
 type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
@@ -226,14 +227,19 @@ export default function Dashboard() {
     }));
   }, [teamMembers]);
 
-  // Brazil states data (mock)
-  const statesData = [
-    { name: 'Minas Gerais', value: 2 },
-    { name: 'São Paulo', value: 2 },
-    { name: 'Pará', value: 1 },
-    { name: 'Paraná', value: 1 },
-    { name: 'Rio de Janeiro', value: 1 },
-  ];
+  // Brazil states data from clients
+  const clientsByState = useMemo(() => {
+    const stateMap: Record<string, number> = {};
+    filteredClients.forEach((client) => {
+      // Try to extract state from address or use the state field
+      const state = (client as any).state;
+      if (state) {
+        const abbr = state.toUpperCase().trim();
+        stateMap[abbr] = (stateMap[abbr] || 0) + 1;
+      }
+    });
+    return stateMap;
+  }, [filteredClients]);
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
@@ -384,29 +390,8 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Conversas por Estado */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Map className="h-4 w-4" />
-              Conversas por estado
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-center h-48">
-            <div className="text-center">
-              <div className="w-32 h-32 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Map className="h-16 w-16 text-primary/50" />
-              </div>
-              <div className="flex flex-wrap gap-2 justify-center">
-                {statesData.map((state) => (
-                  <Badge key={state.name} variant="secondary" className="text-xs">
-                    {state.name} - {state.value}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Brazil Map - Clients by State */}
+        <BrazilMap clientsByState={clientsByState} totalClients={filteredClients.length} />
       </div>
 
       {/* Real-time indicator */}
