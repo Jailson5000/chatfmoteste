@@ -48,6 +48,7 @@ import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours,
 import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { DateRange } from "react-day-picker";
+import { getStateFromPhone } from "@/lib/dddToState";
 
 type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
@@ -305,6 +306,27 @@ export default function Dashboard() {
     }));
   }, [teamMembers]);
 
+  // Clients by state (from phone DDD)
+  const clientsByState = useMemo(() => {
+    const stateMap: Record<string, number> = {};
+    filteredClients.forEach((client) => {
+      const stateFromPhone = getStateFromPhone(client.phone);
+      if (stateFromPhone) {
+        stateMap[stateFromPhone] = (stateMap[stateFromPhone] || 0) + 1;
+      }
+    });
+    
+    // Convert to array and sort by count
+    return Object.entries(stateMap)
+      .map(([state, count], index) => ({
+        name: state,
+        value: count,
+        color: CHART_COLORS[index % CHART_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10); // Top 10 states
+  }, [filteredClients]);
+
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
@@ -505,6 +527,66 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
+        {/* Distribution by State */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Map className="h-4 w-4" />
+              Clientes por Estado (DDD)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {clientsByState.length > 0 ? (
+              <>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={clientsByState} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" horizontal={false} />
+                      <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} />
+                      <YAxis 
+                        type="category" 
+                        dataKey="name" 
+                        fontSize={11} 
+                        tickLine={false} 
+                        axisLine={false}
+                        width={30}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'hsl(var(--popover))', 
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px',
+                        }}
+                        formatter={(value: number) => [`${value} clientes`, 'Total']}
+                      />
+                      <Bar 
+                        dataKey="value" 
+                        radius={[0, 4, 4, 0]}
+                        fill="#3b82f6"
+                      >
+                        {clientsByState.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3 justify-center">
+                  {clientsByState.slice(0, 6).map((item) => (
+                    <div key={item.name} className="flex items-center gap-1 text-xs">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-muted-foreground">{item.name}: {item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-muted-foreground">
+                Nenhum dado disponível
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Real-time indicator */}
