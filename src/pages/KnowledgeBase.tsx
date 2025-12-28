@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useKnowledgeItems, KnowledgeItem } from "@/hooks/useKnowledgeItems";
+import { useAutomations } from "@/hooks/useAutomations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,11 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Trash2, Edit, BookOpen, FileText, Search, Database, Upload } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, Plus, Trash2, Edit, BookOpen, FileText, Search, Database, Upload, Bot, Link2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
-
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 const CATEGORIES = [
   { value: 'legal', label: 'Informações Legais' },
   { value: 'procedures', label: 'Procedimentos' },
@@ -26,11 +29,14 @@ const CATEGORIES = [
 export default function KnowledgeBase() {
   const { isAdmin, loading: roleLoading } = useUserRole();
   const { knowledgeItems, isLoading, createItem, updateItem, deleteItem } = useKnowledgeItems();
+  const { automations } = useAutomations();
   const { lawFirm } = useLawFirm();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -47,6 +53,66 @@ export default function KnowledgeBase() {
     content: '',
     category: 'other',
   });
+
+  // Fetch which agents this item is linked to
+  const { data: itemAgentLinks = [] } = useQuery({
+    queryKey: ['item-agent-links', selectedItem?.id],
+    queryFn: async () => {
+      if (!selectedItem?.id) return [];
+      const { data, error } = await supabase
+        .from('agent_knowledge')
+        .select('automation_id')
+        .eq('knowledge_item_id', selectedItem.id);
+      if (error) throw error;
+      return data.map(d => d.automation_id);
+    },
+    enabled: !!selectedItem?.id,
+  });
+
+  const linkToAgent = useMutation({
+    mutationFn: async ({ automationId, knowledgeItemId }: { automationId: string; knowledgeItemId: string }) => {
+      const { error } = await supabase
+        .from('agent_knowledge')
+        .insert({ automation_id: automationId, knowledge_item_id: knowledgeItemId });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['item-agent-links'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-knowledge'] });
+      toast({ title: 'Vinculado', description: 'Conhecimento vinculado ao agente.' });
+    },
+    onError: () => {
+      toast({ title: 'Erro', description: 'Não foi possível vincular.', variant: 'destructive' });
+    },
+  });
+
+  const unlinkFromAgent = useMutation({
+    mutationFn: async ({ automationId, knowledgeItemId }: { automationId: string; knowledgeItemId: string }) => {
+      const { error } = await supabase
+        .from('agent_knowledge')
+        .delete()
+        .eq('automation_id', automationId)
+        .eq('knowledge_item_id', knowledgeItemId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['item-agent-links'] });
+      queryClient.invalidateQueries({ queryKey: ['agent-knowledge'] });
+      toast({ title: 'Desvinculado', description: 'Conhecimento removido do agente.' });
+    },
+    onError: () => {
+      toast({ title: 'Erro', description: 'Não foi possível desvincular.', variant: 'destructive' });
+    },
+  });
+
+  const handleToggleAgentLink = (automationId: string) => {
+    if (!selectedItem) return;
+    if (itemAgentLinks.includes(automationId)) {
+      unlinkFromAgent.mutate({ automationId, knowledgeItemId: selectedItem.id });
+    } else {
+      linkToAgent.mutate({ automationId, knowledgeItemId: selectedItem.id });
+    }
+  };
 
   if (!isAdmin) {
     return (
@@ -400,14 +466,79 @@ export default function KnowledgeBase() {
                       )}
                     </CardDescription>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openEditDialog(selectedItem)}
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Editar
-                  </Button>
+                  <div className="flex gap-2">
+                    <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <Bot className="h-4 w-4 mr-2" />
+                          Vincular IA
+                          {itemAgentLinks.length > 0 && (
+                            <Badge variant="secondary" className="ml-2">
+                              {itemAgentLinks.length}
+                            </Badge>
+                          )}
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Vincular a Agentes de IA</DialogTitle>
+                          <DialogDescription>
+                            Selecione os agentes que terão acesso a este conhecimento.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <ScrollArea className="h-64">
+                          {automations && automations.length > 0 ? (
+                            <div className="space-y-2 pr-2">
+                              {automations.map((automation) => (
+                                <div
+                                  key={automation.id}
+                                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                    itemAgentLinks.includes(automation.id)
+                                      ? 'border-primary bg-primary/5'
+                                      : 'hover:bg-muted/50'
+                                  }`}
+                                  onClick={() => handleToggleAgentLink(automation.id)}
+                                >
+                                  <Checkbox
+                                    checked={itemAgentLinks.includes(automation.id)}
+                                    onCheckedChange={() => handleToggleAgentLink(automation.id)}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <Bot className="h-4 w-4 text-muted-foreground" />
+                                      <span className="font-medium text-sm truncate">
+                                        {automation.name}
+                                      </span>
+                                      {automation.is_active && (
+                                        <Badge variant="outline" className="text-xs">Ativo</Badge>
+                                      )}
+                                    </div>
+                                    {automation.description && (
+                                      <span className="text-xs text-muted-foreground line-clamp-1">
+                                        {automation.description}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground text-center py-4">
+                              Nenhum agente de IA configurado
+                            </p>
+                          )}
+                        </ScrollArea>
+                      </DialogContent>
+                    </Dialog>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEditDialog(selectedItem)}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Editar
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
