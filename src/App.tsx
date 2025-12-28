@@ -13,7 +13,8 @@ import Kanban from "./pages/Kanban";
 import Settings from "./pages/Settings";
 import Contacts from "./pages/Contacts";
 import Connections from "./pages/Connections";
-import Automations from "./pages/Automations";
+import AIAgents from "./pages/AIAgents";
+import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
@@ -98,14 +99,25 @@ const App = () => (
           </Route>
           
           <Route
-            path="/automations"
+            path="/ai-agents"
             element={
               <ProtectedRoute>
                 <AppLayout />
               </ProtectedRoute>
             }
           >
-            <Route index element={<Automations />} />
+            <Route index element={<AIAgents />} />
+          </Route>
+          
+          <Route
+            path="/knowledge-base"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<KnowledgeBase />} />
           </Route>
           
           <Route

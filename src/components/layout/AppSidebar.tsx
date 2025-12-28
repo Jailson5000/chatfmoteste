@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Link2,
-  Brain,
+  Bot,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -49,8 +50,13 @@ const atendimentoItems = [
 
 // Items that require admin/non-attendant access
 const adminOnlyItems = [
-  { icon: Brain, label: "Automações", path: "/automations" },
   { icon: Link2, label: "Conexões", path: "/connections" },
+];
+
+// AI submenu items (admin only)
+const aiItems = [
+  { icon: Bot, label: "Agentes de IA", path: "/ai-agents" },
+  { icon: BookOpen, label: "Base de Conhecimento", path: "/knowledge-base" },
 ];
 
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
@@ -59,6 +65,7 @@ const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [atendimentoOpen, setAtendimentoOpen] = useState(true);
+  const [aiOpen, setAiOpen] = useState(false);
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
@@ -70,11 +77,15 @@ export function AppSidebar() {
     ? [profileItem, settingsItem] 
     : [...adminOnlyItems, profileItem, settingsItem];
 
-  // Open atendimento section if on one of its pages
+  // Open sections if on one of their pages
   useEffect(() => {
     const isAtendimentoPage = atendimentoItems.some(item => location.pathname === item.path);
     if (isAtendimentoPage) {
       setAtendimentoOpen(true);
+    }
+    const isAiPage = aiItems.some(item => location.pathname === item.path);
+    if (isAiPage) {
+      setAiOpen(true);
     }
   }, [location.pathname]);
 
@@ -187,6 +198,37 @@ export function AppSidebar() {
                 {atendimentoItems.map((item) => renderMenuItem(item, true))}
               </CollapsibleContent>
             </Collapsible>
+          )}
+
+          {/* AI Section (admin only) */}
+          {!isAttendant && (
+            collapsed ? (
+              aiItems.map((item) => renderMenuItem(item))
+            ) : (
+              <Collapsible open={aiOpen} onOpenChange={setAiOpen}>
+                <CollapsibleTrigger asChild>
+                  <button
+                    className={cn(
+                      "flex items-center justify-between w-full px-3 py-2.5 rounded-lg transition-all duration-200",
+                      "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Bot className="h-5 w-5 flex-shrink-0" />
+                      <span className="font-medium">IA</span>
+                    </div>
+                    {aiOpen ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-1 mt-1">
+                  {aiItems.map((item) => renderMenuItem(item, true))}
+                </CollapsibleContent>
+              </Collapsible>
+            )
           )}
 
           {/* Bottom menu items */}
