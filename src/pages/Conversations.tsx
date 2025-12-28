@@ -1658,16 +1658,39 @@ export default function Conversations() {
                   />
                 </div>
 
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    selectedConversation.current_handler === "ai"
-                      ? "border-purple-500 text-purple-600"
-                      : "border-green-500 text-green-600"
-                  )}
-                >
-                  {selectedConversation.current_handler === "ai" ? "🤖 IA" : "⚖️ Advogado"}
-                </Badge>
+                {/* Handler Toggle Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleTransferHandler(
+                        selectedConversation.current_handler === "ai" ? "human" : "ai"
+                      )}
+                      className={cn(
+                        "transition-all duration-200",
+                        selectedConversation.current_handler === "ai"
+                          ? "border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                          : "border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+                      )}
+                    >
+                      {selectedConversation.current_handler === "ai" ? (
+                        <>
+                          <Bot className="h-4 w-4 mr-1.5" />
+                          IA
+                        </>
+                      ) : (
+                        <>
+                          <UserCheck className="h-4 w-4 mr-1.5" />
+                          Humano
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Clique para alternar para {selectedConversation.current_handler === "ai" ? "Humano" : "IA"}</p>
+                  </TooltipContent>
+                </Tooltip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon">
