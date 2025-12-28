@@ -1,35 +1,46 @@
-import { useState, useEffect, useRef } from "react";
-import { MessageSquare, Plus, Loader2, Copy, Settings2, AlertCircle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useMemo } from "react";
+import {
+  Search,
+  Plus,
+  MoreVertical,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
-import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useWhatsAppInstances, WhatsAppInstance } from "@/hooks/useWhatsAppInstances";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
-import { IntegrationCard } from "@/components/connections/IntegrationCard";
-import { EvolutionAdminConfig } from "@/components/connections/EvolutionAdminConfig";
-import { WhatsAppInstanceList } from "@/components/connections/WhatsAppInstanceList";
-import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
+import { useDepartments } from "@/hooks/useDepartments";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
+import { useToast } from "@/hooks/use-toast";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
+import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
+import { ConnectionDetailPanel } from "@/components/connections/ConnectionDetailPanel";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export default function Connections() {
   const { toast } = useToast();
   const { isAdmin } = useUserRole();
-  const {
-    settings,
-    isLoading: isLoadingSettings,
-    evolutionApiUrl,
-    evolutionApiKey,
-    isConfigured: isApiConfigured,
-    updateSettings,
-  } = useLawFirmSettings();
+  const { evolutionApiUrl, evolutionApiKey, isConfigured: isApiConfigured } = useLawFirmSettings();
+  const { departments } = useDepartments();
+  const { members: teamMembers } = useTeamMembers();
   
   const {
     instances,
     isLoading,
-    testConnection,
     createInstance,
     getQRCode,
     getStatus,
@@ -42,125 +53,36 @@ export default function Connections() {
     refetch,
   } = useWhatsAppInstances();
 
-  // Local form state for editing
-  const [localApiUrl, setLocalApiUrl] = useState("");
-  const [localApiKey, setLocalApiKey] = useState("");
-
-  // Instance settings (UI state)
-  const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
-  const [rejectBusyId, setRejectBusyId] = useState<string | null>(null);
-
-  // Dialog states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedInstance, setSelectedInstance] = useState<WhatsAppInstance | null>(null);
   const [isNewInstanceOpen, setIsNewInstanceOpen] = useState(false);
   const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
-
-  // QR Code states
   const [currentQRCode, setCurrentQRCode] = useState<string | null>(null);
   const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
-
-  // Polling refs
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollInFlightRef = useRef(false);
-  const pollErrorCountRef = useRef(0);
-  const currentQRCodeRef = useRef<string | null>(null);
+  const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
 
   const MAX_POLLS = 60;
 
-  // Check if API is configured
-  const hasConnectedInstance = instances.some((i) => i.status === "connected");
-
-  useEffect(() => {
-    currentQRCodeRef.current = currentQRCode;
-  }, [currentQRCode]);
-
-  // Sync local form state with settings from DB
-  useEffect(() => {
-    if (evolutionApiUrl) setLocalApiUrl(evolutionApiUrl);
-    if (evolutionApiKey) setLocalApiKey(evolutionApiKey);
-  }, [evolutionApiUrl, evolutionApiKey]);
-
-  // Load instance settings (reject calls) for connected instances
-  useEffect(() => {
-    const load = async () => {
-      for (const instance of instances) {
-        if (instance.status !== "connected") continue;
-        if (rejectCalls[instance.id] !== undefined) continue;
-
-        try {
-          const res = await getSettings.mutateAsync(instance.id);
-          setRejectCalls((prev) => ({
-            ...prev,
-            [instance.id]: Boolean(res.settings?.rejectCall),
-          }));
-        } catch {
-          // keep as undefined
-        }
-      }
-    };
-
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instances]);
-
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-  }, []);
-
-  const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    pollInFlightRef.current = false;
-    pollErrorCountRef.current = 0;
-    setPollCount(0);
-  };
-
-  const handleSaveConfig = async () => {
-    if (!localApiUrl.trim()) {
-      toast({
-        title: "URL obrigatória",
-        description: "Por favor, informe a URL da Evolution API",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      new URL(localApiUrl);
-    } catch {
-      toast({
-        title: "URL inválida",
-        description: "Por favor, informe uma URL válida",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    await updateSettings.mutateAsync({
-      evolution_api_url: localApiUrl.trim(),
-      evolution_api_key: localApiKey.trim(),
-    });
-  };
-
-  const handleTestConnection = async () => {
-    await testConnection.mutateAsync({ apiUrl: localApiUrl, apiKey: localApiKey });
-  };
+  const filteredInstances = useMemo(() => {
+    if (!searchQuery.trim()) return instances;
+    const q = searchQuery.toLowerCase();
+    return instances.filter(
+      (i) =>
+        i.instance_name.toLowerCase().includes(q) ||
+        i.phone_number?.toLowerCase().includes(q) ||
+        i.instance_id?.toLowerCase().includes(q)
+    );
+  }, [instances, searchQuery]);
 
   const handleCreateInstance = async (instanceName: string) => {
     if (!isApiConfigured) {
       toast({
         title: "API não configurada",
-        description: "Por favor, configure a Evolution API primeiro",
+        description: "Configure a Evolution API nas configurações primeiro.",
         variant: "destructive",
       });
       return;
@@ -180,34 +102,9 @@ export default function Connections() {
         setCurrentQRCode(result.qrCode);
         setCurrentInstanceId(result.instance.id);
         setIsQRDialogOpen(true);
-        startPolling(result.instance.id);
-      } else if (result.instance) {
-        handleConnectInstance(result.instance);
       }
     } catch (error) {
       console.error("Create instance error:", error);
-    }
-  };
-
-  const handleDeleteInstance = async (id: string) => {
-    await deleteInstance.mutateAsync(id);
-  };
-
-  const handleToggleRejectCalls = async (instance: WhatsAppInstance, enabled: boolean) => {
-    setRejectBusyId(instance.id);
-    const previous = rejectCalls[instance.id];
-    setRejectCalls((prev) => ({ ...prev, [instance.id]: enabled }));
-
-    try {
-      await setSettings.mutateAsync({ instanceId: instance.id, rejectCall: enabled });
-      toast({
-        title: "Configuração atualizada",
-        description: enabled ? "Ligações serão rejeitadas." : "Ligações serão aceitas.",
-      });
-    } catch {
-      setRejectCalls((prev) => ({ ...prev, [instance.id]: Boolean(previous) }));
-    } finally {
-      setRejectBusyId(null);
     }
   };
 
@@ -224,22 +121,14 @@ export default function Connections() {
 
       if (result.status === "open" || result.status === "connected") {
         setConnectionStatus("Conectado!");
-        toast({
-          title: "WhatsApp conectado",
-          description: "A instância já está conectada",
-        });
         await refetch();
-        setTimeout(() => {
-          setIsQRDialogOpen(false);
-          stopPolling();
-        }, 1500);
+        setTimeout(() => setIsQRDialogOpen(false), 1500);
         return;
       }
 
       if (result.qrCode) {
         setCurrentQRCode(result.qrCode);
         setConnectionStatus("Escaneie o QR Code");
-        startPolling(instance.id);
       } else {
         setQrError("QR Code não disponível. Tente novamente.");
       }
@@ -250,62 +139,7 @@ export default function Connections() {
     }
   };
 
-  const startPolling = (instanceId: string) => {
-    stopPolling();
-    setPollCount(0);
-
-    pollingRef.current = setInterval(async () => {
-      if (pollInFlightRef.current) return;
-      pollInFlightRef.current = true;
-
-      setPollCount((c) => c + 1);
-
-      if (pollCount + 1 >= MAX_POLLS) {
-        stopPolling();
-        setQrError("Tempo esgotado. Por favor, tente novamente.");
-        setConnectionStatus(null);
-        pollInFlightRef.current = false;
-        return;
-      }
-
-      try {
-        const result = await getStatus.mutateAsync(instanceId);
-        pollErrorCountRef.current = 0;
-
-        if (result.status === "connected") {
-          stopPolling();
-          setConnectionStatus("Conectado!");
-          setCurrentQRCode(null);
-          toast({
-            title: "WhatsApp conectado",
-            description: "A conexão foi estabelecida com sucesso",
-          });
-          await refetch();
-          setTimeout(() => {
-            setIsQRDialogOpen(false);
-          }, 1500);
-        } else if (result.evolutionState === "qr") {
-          const qrResult = await getQRCode.mutateAsync(instanceId);
-          if (qrResult.qrCode && qrResult.qrCode !== currentQRCodeRef.current) {
-            setCurrentQRCode(qrResult.qrCode);
-          }
-        }
-      } catch (error) {
-        pollErrorCountRef.current += 1;
-        console.error("Polling error:", error);
-        if (pollErrorCountRef.current >= 3) {
-          stopPolling();
-          setQrError(error instanceof Error ? error.message : "Erro ao verificar status");
-          setConnectionStatus(null);
-        }
-      } finally {
-        pollInFlightRef.current = false;
-      }
-    }, 2000);
-  };
-
   const handleCloseQRDialog = () => {
-    stopPolling();
     setIsQRDialogOpen(false);
     setCurrentQRCode(null);
     setCurrentInstanceId(null);
@@ -313,23 +147,58 @@ export default function Connections() {
     setConnectionStatus(null);
   };
 
-  const handleRetryQR = () => {
-    if (currentInstanceId) {
-      const instance = instances.find((i) => i.id === currentInstanceId);
-      if (instance) handleConnectInstance(instance);
+  const getStatusBadge = (status: string | null) => {
+    if (status === "connected") {
+      return (
+        <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
+          Conectado
+        </Badge>
+      );
     }
+    if (status === "connecting" || status === "awaiting_qr") {
+      return (
+        <Badge variant="outline" className="text-amber-400 border-amber-400/30">
+          <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+          Conectando
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        <XCircle className="h-3 w-3 mr-1" />
+        Desconectado
+      </Badge>
+    );
   };
 
-  const copyWebhookUrl = () => {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/evolution-webhook`;
-    navigator.clipboard.writeText(url);
-    toast({
-      title: "URL copiada",
-      description: "Cole na configuração do webhook da Evolution API",
-    });
+  const getLastVerification = (instance: WhatsAppInstance) => {
+    if (instance.last_webhook_at) {
+      return formatDistanceToNow(new Date(instance.last_webhook_at), {
+        addSuffix: true,
+        locale: ptBR,
+      });
+    }
+    return "—";
   };
 
-  if (isLoadingSettings) {
+  // Get a random department for display (in a real app, this would be stored per instance)
+  const getDefaultDepartment = () => {
+    if (departments.length > 0) {
+      return departments[0];
+    }
+    return null;
+  };
+
+  // Get a random team member for display (in a real app, this would be stored per instance)
+  const getDefaultResponsible = () => {
+    if (teamMembers.length > 0) {
+      return teamMembers[0];
+    }
+    return null;
+  };
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -338,139 +207,211 @@ export default function Connections() {
   }
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Conexões</h1>
-          <p className="text-muted-foreground mt-1">
-            Gerencie suas integrações com WhatsApp e outros serviços
-          </p>
+    <div className="flex h-full">
+      {/* Main Content */}
+      <div className={`flex-1 p-6 space-y-6 transition-all ${selectedInstance ? "pr-0" : ""}`}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Conexões</h1>
+            <p className="text-muted-foreground">
+              Gerencie suas conexões com canais de comunicação.
+            </p>
+          </div>
+
+          <Button onClick={() => setIsNewInstanceOpen(true)} disabled={!isApiConfigured}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Conexão
+          </Button>
+        </div>
+
+        {/* Search */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar conexões..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 bg-card border-border"
+          />
+        </div>
+
+        {/* Table */}
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-muted/30">
+              <tr className="text-left text-sm text-muted-foreground">
+                <th className="px-4 py-3 font-medium">Nome</th>
+                <th className="px-4 py-3 font-medium">Status Padrão</th>
+                <th className="px-4 py-3 font-medium">Departamento padrão</th>
+                <th className="px-4 py-3 font-medium">Responsável padrão</th>
+                <th className="px-4 py-3 font-medium">Última Verificação</th>
+                <th className="px-4 py-3 font-medium">Status da Conexão</th>
+                <th className="px-4 py-3 font-medium w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {filteredInstances.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                    {searchQuery ? "Nenhuma conexão encontrada" : "Nenhuma conexão configurada"}
+                  </td>
+                </tr>
+              ) : (
+                filteredInstances.map((instance) => {
+                  const dept = getDefaultDepartment();
+                  const responsible = getDefaultResponsible();
+
+                  return (
+                    <tr
+                      key={instance.id}
+                      className={`hover:bg-muted/20 cursor-pointer transition-colors ${
+                        selectedInstance?.id === instance.id ? "bg-muted/30" : ""
+                      }`}
+                      onClick={() => setSelectedInstance(instance)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-primary/10 text-primary">
+                              {instance.instance_name.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-medium text-primary">
+                              {instance.instance_name}
+                            </p>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <span>{instance.phone_number || "Sem número"}</span>
+                              {instance.instance_id && (
+                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                  {instance.instance_id.slice(0, 4).toUpperCase()}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">—</td>
+                      <td className="px-4 py-3">
+                        {dept ? (
+                          <Badge variant="outline">{dept.name}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {responsible ? (
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-6 w-6">
+                              <AvatarImage src={responsible.avatar_url || undefined} />
+                              <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                                {responsible.full_name.charAt(0)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm">{responsible.full_name}</span>
+                            <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">
+                              IA
+                            </Badge>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
+                        {getLastVerification(instance)}
+                      </td>
+                      <td className="px-4 py-3">{getStatusBadge(instance.status)}</td>
+                      <td className="px-4 py-3">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setSelectedInstance(instance)}>
+                              Ver detalhes
+                            </DropdownMenuItem>
+                            {instance.status !== "connected" && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleConnectInstance(instance);
+                                }}
+                              >
+                                Conectar
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                refreshStatus.mutate(instance.id);
+                              }}
+                            >
+                              Atualizar status
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteInstance.mutate(instance.id);
+                              }}
+                            >
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Evolution WhatsApp Integration */}
-      <IntegrationCard
-        icon={<MessageSquare className="h-6 w-6" />}
-        title="WhatsApp (Evolution API)"
-        description="Integre o WhatsApp para comunicação com clientes"
-        isConnected={hasConnectedInstance}
-      >
-        <div className="space-y-6">
-          {/* Admin Configuration Section */}
-          {isAdmin && (
-            <>
-              <EvolutionAdminConfig
-                apiUrl={localApiUrl}
-                apiKey={localApiKey}
-                onApiUrlChange={setLocalApiUrl}
-                onApiKeyChange={setLocalApiKey}
-                onSave={handleSaveConfig}
-                onTest={handleTestConnection}
-                isTesting={testConnection.isPending}
-                isSaving={updateSettings.isPending}
-                isConfigured={isApiConfigured}
-              />
-
-              {isApiConfigured && (
-                <Card className="bg-muted/30 border-dashed">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Settings2 className="h-4 w-4" />
-                      Configuração do Webhook
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      Configure o webhook na sua Evolution API para receber mensagens:
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 px-3 py-2 bg-background rounded-md text-xs font-mono border overflow-x-auto">
-                        {import.meta.env.VITE_SUPABASE_URL}/functions/v1/evolution-webhook
-                      </code>
-                      <Button variant="outline" size="sm" onClick={copyWebhookUrl}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <Alert>
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription className="text-xs">
-                        <strong>Fluxo:</strong> Evolution API → Backend → Sistema de Atendimento
-                      </AlertDescription>
-                    </Alert>
-                  </CardContent>
-                </Card>
-              )}
-
-              <Separator />
-            </>
+      {/* Detail Panel */}
+      <Sheet open={!!selectedInstance} onOpenChange={(open) => !open && setSelectedInstance(null)}>
+        <SheetContent className="w-[500px] sm:max-w-[500px] p-0 overflow-hidden">
+          {selectedInstance && (
+            <ConnectionDetailPanel
+              instance={selectedInstance}
+              onClose={() => setSelectedInstance(null)}
+              onConnect={handleConnectInstance}
+              onDelete={(id) => {
+                deleteInstance.mutate(id);
+                setSelectedInstance(null);
+              }}
+              onRefreshStatus={() => refreshStatus.mutate(selectedInstance.id)}
+              onRefreshPhone={() => refreshPhone.mutate(selectedInstance.id)}
+              onConfigureWebhook={() => configureWebhook.mutate(selectedInstance.id)}
+              rejectCalls={rejectCalls[selectedInstance.id] ?? false}
+              onToggleRejectCalls={async (enabled) => {
+                setRejectCalls((prev) => ({ ...prev, [selectedInstance.id]: enabled }));
+                try {
+                  await setSettings.mutateAsync({ instanceId: selectedInstance.id, rejectCall: enabled });
+                } catch {
+                  setRejectCalls((prev) => ({ ...prev, [selectedInstance.id]: !enabled }));
+                }
+              }}
+              isLoading={{
+                status: refreshStatus.isPending,
+                phone: refreshPhone.isPending,
+                delete: deleteInstance.isPending,
+                webhook: configureWebhook.isPending,
+                settings: setSettings.isPending,
+              }}
+            />
           )}
-
-          {/* Instances Section */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-medium">Conexões WhatsApp</h3>
-                <p className="text-sm text-muted-foreground">
-                  {instances.length === 0
-                    ? "Nenhuma conexão configurada"
-                    : `${instances.length} conexão(ões) configurada(s)`}
-                </p>
-              </div>
-              <Button
-                onClick={() => setIsNewInstanceOpen(true)}
-                disabled={!isApiConfigured}
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Nova Conexão WhatsApp
-              </Button>
-            </div>
-
-            {!isApiConfigured && !isAdmin && (
-              <Alert className="mb-4">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  A Evolution API ainda não foi configurada. 
-                  Entre em contato com o administrador do sistema.
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
-              <WhatsAppInstanceList
-                instances={instances}
-                rejectCalls={rejectCalls}
-                rejectBusyId={rejectBusyId}
-                onConnect={handleConnectInstance}
-                onDelete={handleDeleteInstance}
-                onRefreshStatus={(id) => refreshStatus.mutate(id)}
-                onRefreshPhone={(id) => refreshPhone.mutate(id)}
-                onConfigureWebhook={(id) => configureWebhook.mutate(id)}
-                onToggleRejectCalls={handleToggleRejectCalls}
-                isRefreshingStatus={refreshStatus.isPending}
-                isRefreshingPhone={refreshPhone.isPending}
-                isDeleting={deleteInstance.isPending}
-                isGettingQR={getQRCode.isPending}
-                isConfiguringWebhook={configureWebhook.isPending}
-              />
-            )}
-          </div>
-        </div>
-      </IntegrationCard>
-
-      {/* Future Integrations Placeholder */}
-      <Card className="border-dashed bg-muted/20">
-        <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">
-            Novas integrações em breve...
-          </p>
-        </CardContent>
-      </Card>
+        </SheetContent>
+      </Sheet>
 
       {/* New Instance Dialog */}
       <NewInstanceDialog
@@ -484,7 +425,12 @@ export default function Connections() {
       <QRCodeDialog
         open={isQRDialogOpen}
         onClose={handleCloseQRDialog}
-        onRetry={handleRetryQR}
+        onRetry={() => {
+          if (currentInstanceId) {
+            const instance = instances.find((i) => i.id === currentInstanceId);
+            if (instance) handleConnectInstance(instance);
+          }
+        }}
         qrCode={currentQRCode}
         isLoading={qrLoading}
         error={qrError}
