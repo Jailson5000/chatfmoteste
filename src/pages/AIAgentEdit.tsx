@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   ArrowLeft, 
   Save, 
@@ -26,7 +28,9 @@ import {
   Thermometer,
   Link2,
   Zap,
-  ExternalLink
+  History,
+  AtSign,
+  BookOpen,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,11 +46,24 @@ const TRIGGER_TYPES = [
 
 const MAX_PROMPT_CHARS = 5000;
 
+// Available mention variables
+const MENTION_VARIABLES = [
+  { key: '@Nome do escritório', description: 'Nome do escritório de advocacia' },
+  { key: '@Nome do cliente', description: 'Nome do cliente na conversa' },
+  { key: '@Atendimento', description: 'Departamento de atendimento' },
+  { key: '@Advogado responsável', description: 'Nome do advogado responsável' },
+  { key: '@Data atual', description: 'Data atual formatada' },
+  { key: '@Hora atual', description: 'Hora atual formatada' },
+  { key: '@Ativar áudio', description: 'Comando para ativar resposta por áudio' },
+  { key: '@Desativar áudio', description: 'Comando para desativar resposta por áudio' },
+  { key: '@bemvindo', description: 'Template de boas-vindas' },
+];
+
 export default function AIAgentEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { isAdmin, loading: roleLoading } = useUserRole();
-  const { automations, isLoading, updateAutomation } = useAutomations();
+  const { automations, isLoading, updateAutomation, refetch } = useAutomations();
   const { toast } = useToast();
 
   const [automation, setAutomation] = useState<Automation | null>(null);
@@ -63,6 +80,8 @@ export default function AIAgentEdit() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showMentions, setShowMentions] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState(0);
 
   useEffect(() => {
     if (automations && id) {
@@ -80,6 +99,38 @@ export default function AIAgentEdit() {
       }
     }
   }, [automations, id]);
+
+  const insertMention = useCallback((mention: string) => {
+    const before = editedPrompt.slice(0, cursorPosition);
+    const after = editedPrompt.slice(cursorPosition);
+    const newPrompt = before + mention + ' ' + after;
+    setEditedPrompt(newPrompt);
+    setShowMentions(false);
+  }, [editedPrompt, cursorPosition]);
+
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const pos = e.target.selectionStart || 0;
+    setEditedPrompt(value);
+    setCursorPosition(pos);
+    
+    // Check if @ was typed
+    if (value[pos - 1] === '@') {
+      setShowMentions(true);
+    } else {
+      setShowMentions(false);
+    }
+  }, []);
+
+  const handleRestoreLastVersion = useCallback(() => {
+    if (automation?.last_prompt) {
+      setEditedPrompt(automation.last_prompt);
+      toast({
+        title: "Versão restaurada",
+        description: "A última versão do prompt foi restaurada. Clique em Salvar para confirmar.",
+      });
+    }
+  }, [automation, toast]);
 
   if (!isAdmin) {
     return (
@@ -184,6 +235,10 @@ export default function AIAgentEdit() {
       }
 
       setLastSaved(new Date());
+      
+      // Refresh to get updated last_prompt
+      await refetch();
+      
       setAutomation({
         ...automation,
         name: editedName,
@@ -194,6 +249,7 @@ export default function AIAgentEdit() {
         ai_temperature: editedTemperature,
         is_active: isActive,
         updated_at: new Date().toISOString(),
+        last_prompt: automation.ai_prompt, // Previous prompt is now last_prompt
       });
     } catch (error) {
       console.error('Error saving:', error);
@@ -259,10 +315,6 @@ export default function AIAgentEdit() {
     }
   };
 
-  const getTriggerLabel = (type: string) => {
-    return TRIGGER_TYPES.find(t => t.value === type)?.label || type;
-  };
-
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
@@ -316,22 +368,42 @@ export default function AIAgentEdit() {
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Prompt Editor Area */}
-        <div className="flex-1 p-6 overflow-auto">
+        <div className="flex-1 p-6 overflow-auto relative">
           <div className="max-w-4xl">
+            {/* Mentions Popup */}
+            {showMentions && (
+              <div className="absolute z-50 bg-popover border rounded-lg shadow-lg p-2 w-64">
+                <ScrollArea className="h-48">
+                  <div className="space-y-1">
+                    {MENTION_VARIABLES.map((mention) => (
+                      <button
+                        key={mention.key}
+                        onClick={() => insertMention(mention.key)}
+                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors"
+                      >
+                        <div className="font-medium text-sm">{mention.key}</div>
+                        <div className="text-xs text-muted-foreground">{mention.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+            
             <Textarea
               value={editedPrompt}
-              onChange={(e) => setEditedPrompt(e.target.value)}
+              onChange={handlePromptChange}
+              onSelect={(e) => setCursorPosition((e.target as HTMLTextAreaElement).selectionStart || 0)}
               placeholder="Digite o prompt que define o comportamento da IA...
+
+Use @ para inserir variáveis dinâmicas como @Nome do cliente, @Atendimento, etc.
 
 Exemplo:
 REGRAS DE COMUNICAÇÃO
 • Linguagem clara, educada, profissional e acolhedora
 • Nunca dê parecer jurídico definitivo — apenas orientação e triagem
-• O foco é identificar se existe possibilidade de revisão e solicitar documentos para análise
 
-Você é uma atendente do escritório, especializada em identificar se o cliente tem direito à revisão de aposentadoria.
-
-Objetivo: Solicitar informações e documentos necessários para análise do direito do cliente."
+Você é uma atendente do escritório @Nome do escritório , especializada em identificar se o cliente tem direito à revisão de aposentadoria."
               className={cn(
                 "min-h-[calc(100vh-280px)] font-mono text-sm leading-relaxed resize-none border-0 focus-visible:ring-0 p-0 bg-transparent",
                 isOverLimit && "text-destructive"
@@ -374,6 +446,47 @@ Objetivo: Solicitar informações e documentos necessários para análise do dir
                 </p>
               )}
             </div>
+
+            {/* Restore Last Version */}
+            {automation.last_prompt && (
+              <div className="mb-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRestoreLastVersion}
+                  className="w-full gap-2"
+                >
+                  <History className="h-4 w-4" />
+                  Restaurar última versão
+                </Button>
+              </div>
+            )}
+
+            {/* Insert Mention */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="w-full gap-2 mb-4">
+                  <AtSign className="h-4 w-4" />
+                  Inserir menção
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <ScrollArea className="h-48">
+                  <div className="space-y-1">
+                    {MENTION_VARIABLES.map((mention) => (
+                      <button
+                        key={mention.key}
+                        onClick={() => insertMention(mention.key)}
+                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors"
+                      >
+                        <div className="font-medium text-sm">{mention.key}</div>
+                        <div className="text-xs text-muted-foreground">{mention.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
 
             <Separator className="my-4" />
 
@@ -463,6 +576,21 @@ Objetivo: Solicitar informações e documentos necessários para análise do dir
               <p className="text-xs text-muted-foreground">
                 Baixo = Focado | Alto = Criativo
               </p>
+            </div>
+
+            <Separator className="my-4" />
+
+            {/* Knowledge Base placeholder */}
+            <div className="space-y-2 mb-4">
+              <Label className="text-sm flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                Base de Conhecimento
+              </Label>
+              <div className="p-3 rounded-lg border border-dashed border-muted-foreground/25 text-center">
+                <p className="text-xs text-muted-foreground">
+                  Vincule documentos e itens de conhecimento ao agente (em breve)
+                </p>
+              </div>
             </div>
 
             <Separator className="my-4" />

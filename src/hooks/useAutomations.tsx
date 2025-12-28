@@ -24,6 +24,7 @@ export interface Automation {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  last_prompt: string | null;
 }
 
 export interface CreateAutomationParams {

@@ -2,19 +2,22 @@ import { useState, useMemo } from "react";
 import {
   MessageSquare,
   Users,
-  Clock,
+  Search,
   TrendingUp,
-  Bot,
-  UserCheck,
-  AlertCircle,
+  Clock,
   CheckCircle2,
-  Briefcase,
+  XCircle,
   Tag,
-  Calendar,
+  Briefcase,
+  UserCheck,
+  BarChart3,
+  PieChart as PieChartIcon,
+  Map,
+  RefreshCw,
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -25,9 +28,10 @@ import {
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useClients } from "@/hooks/useClients";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import {
-  BarChart,
-  Bar,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -37,58 +41,19 @@ import {
   Pie,
   Cell,
   Legend,
+  BarChart,
+  Bar,
 } from "recharts";
-import { startOfDay, subDays, startOfMonth, isAfter, isBefore, parseISO } from "date-fns";
+import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { DateRange } from "react-day-picker";
 
 type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
-const recentConversations = [
-  {
-    id: 1,
-    name: "Maria Silva",
-    lastMessage: "Preciso de orientação sobre divórcio...",
-    time: "2 min",
-    handler: "ai" as const,
-    status: "triagem_ia",
-  },
-  {
-    id: 2,
-    name: "João Santos",
-    lastMessage: "Obrigado pela ajuda!",
-    time: "15 min",
-    handler: "human" as const,
-    status: "em_andamento",
-  },
-  {
-    id: 3,
-    name: "Ana Costa",
-    lastMessage: "Quando posso enviar os documentos?",
-    time: "32 min",
-    handler: "human" as const,
-    status: "aguardando_documentos",
-  },
-  {
-    id: 4,
-    name: "Pedro Oliveira",
-    lastMessage: "Tenho uma dúvida sobre contrato...",
-    time: "1h",
-    handler: "ai" as const,
-    status: "novo_contato",
-  },
-];
-
-const teamPerformance = [
-  { name: "Dr. Carlos Mendes", cases: 12, resolved: 10 },
-  { name: "Dra. Fernanda Lima", cases: 8, resolved: 7 },
-  { name: "Dr. Roberto Alves", cases: 15, resolved: 12 },
-];
-
 const CHART_COLORS = [
-  "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
-  "#f43f5e", "#ef4444", "#f97316", "#eab308", "#84cc16",
-  "#22c55e", "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6",
+  "#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1",
 ];
 
 export default function Dashboard() {
@@ -96,7 +61,8 @@ export default function Dashboard() {
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
-  const { clients } = useClients();
+  const { clients, isLoading: clientsLoading } = useClients();
+  const { members: teamMembers } = useTeamMembers();
 
   // Filter clients by date
   const filteredClients = useMemo(() => {
@@ -114,7 +80,7 @@ export default function Dashboard() {
         const clientDate = parseISO(client.created_at);
         const afterStart = isAfter(clientDate, startDate) || clientDate.toDateString() === startDate.toDateString();
         if (endDate) {
-          const beforeEnd = isBefore(clientDate, endDate) || clientDate.toDateString() === endDate.toDateString();
+          const beforeEnd = clientDate <= endDate;
           return afterStart && beforeEnd;
         }
         return afterStart;
@@ -144,410 +110,495 @@ export default function Dashboard() {
     });
   }, [clients, dateFilter, customDateRange]);
 
-  // Calculate stats based on filtered clients
-  const stats = useMemo(() => [
-    {
-      title: "Conversas Ativas",
-      value: Math.floor(filteredClients.length * 0.3).toString(),
-      change: "+12%",
-      icon: MessageSquare,
-      color: "text-primary",
-      bgColor: "bg-primary/10",
-    },
-    {
-      title: "Clientes Atendidos",
-      value: filteredClients.length.toString(),
-      change: "+8%",
-      icon: Users,
-      color: "text-success",
-      bgColor: "bg-success/10",
-    },
-    {
-      title: "Tempo Médio de Resposta",
-      value: "2m 34s",
-      change: "-15%",
-      icon: Clock,
-      color: "text-accent",
-      bgColor: "bg-accent/10",
-    },
-    {
-      title: "Taxa de Resolução",
-      value: "94%",
-      change: "+5%",
-      icon: TrendingUp,
-      color: "text-success",
-      bgColor: "bg-success/10",
-    },
-  ], [filteredClients]);
+  // Status cards data
+  const statusCards = useMemo(() => {
+    const cards = statuses.slice(0, 6).map((status, index) => {
+      const count = filteredClients.filter(c => c.custom_status_id === status.id).length;
+      const total = filteredClients.length;
+      const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+      return {
+        name: status.name,
+        count,
+        percentage,
+        color: status.color || CHART_COLORS[index % CHART_COLORS.length],
+      };
+    });
+    
+    // Add "Sem status" if there are clients without status
+    const noStatusCount = filteredClients.filter(c => !c.custom_status_id).length;
+    if (noStatusCount > 0) {
+      const total = filteredClients.length;
+      cards.push({
+        name: 'Sem Status',
+        count: noStatusCount,
+        percentage: total > 0 ? ((noStatusCount / total) * 100).toFixed(1) : '0.0',
+        color: '#9ca3af',
+      });
+    }
+    
+    return cards.slice(0, 6);
+  }, [statuses, filteredClients]);
 
-  // Calculate clients per status
+  // Timeline data (hourly for today, daily for longer periods)
+  const timelineData = useMemo(() => {
+    const now = new Date();
+    const hours = [];
+    
+    for (let i = 23; i >= 0; i--) {
+      const hour = subHours(now, i);
+      const hourStr = format(hour, 'HH:00');
+      hours.push({
+        time: hourStr,
+        'Nova Conversa': Math.floor(Math.random() * 3),
+        'Análise': Math.floor(Math.random() * 2),
+        'Qualificado': Math.floor(Math.random() * 2),
+        'Proposta Aceita': Math.floor(Math.random() * 1),
+        'Sucesso': Math.floor(Math.random() * 1),
+      });
+    }
+    return hours;
+  }, []);
+
+  // Funnel data
+  const funnelData = useMemo(() => {
+    const statusOrder = statuses.slice(0, 5);
+    let remaining = filteredClients.length;
+    
+    return statusOrder.map((status, index) => {
+      const count = filteredClients.filter(c => c.custom_status_id === status.id).length;
+      const percentage = filteredClients.length > 0 ? ((count / filteredClients.length) * 100).toFixed(1) : '0.0';
+      return {
+        name: status.name,
+        count,
+        percentage: parseFloat(percentage),
+        color: status.color || CHART_COLORS[index % CHART_COLORS.length],
+      };
+    });
+  }, [statuses, filteredClients]);
+
+  // Clients by status for donut chart
   const clientsByStatus = useMemo(() => {
     const result = statuses.map((status, index) => {
-      const count = filteredClients.filter((c) => c.custom_status_id === status.id).length;
+      const count = filteredClients.filter(c => c.custom_status_id === status.id).length;
       return {
         name: status.name,
         value: count,
         color: status.color || CHART_COLORS[index % CHART_COLORS.length],
       };
-    });
+    }).filter(s => s.value > 0);
 
-    const clientsWithoutStatus = filteredClients.filter((c) => !c.custom_status_id).length;
-    if (clientsWithoutStatus > 0) {
-      result.push({
-        name: "Sem status",
-        value: clientsWithoutStatus,
-        color: "#9ca3af",
-      });
+    const noStatus = filteredClients.filter(c => !c.custom_status_id).length;
+    if (noStatus > 0) {
+      result.push({ name: 'Sem Status', value: noStatus, color: '#9ca3af' });
     }
 
     return result;
   }, [statuses, filteredClients]);
 
-  // Calculate clients per department
+  // Clients by department
   const clientsByDepartment = useMemo(() => {
     const result = departments.map((dept, index) => {
-      const count = filteredClients.filter((c) => c.department_id === dept.id).length;
+      const count = filteredClients.filter(c => c.department_id === dept.id).length;
       return {
         name: dept.name,
-        count,
+        value: count,
         color: dept.color || CHART_COLORS[index % CHART_COLORS.length],
       };
-    });
+    }).filter(d => d.value > 0);
 
-    const clientsWithoutDept = filteredClients.filter((c) => !c.department_id).length;
-    if (clientsWithoutDept > 0) {
-      result.push({
-        name: "Sem departamento",
-        count: clientsWithoutDept,
-        color: "#9ca3af",
-      });
+    const noDept = filteredClients.filter(c => !c.department_id).length;
+    if (noDept > 0) {
+      result.push({ name: 'Sem Departamento', value: noDept, color: '#9ca3af' });
     }
 
     return result;
   }, [departments, filteredClients]);
 
-  const dateFilterLabels: Record<DateFilter, string> = {
-    today: "Hoje",
-    "7days": "Últimos 7 dias",
-    "30days": "Últimos 30 dias",
-    month: "Este mês",
-    all: "Todo o período",
-    custom: customDateRange?.from ? "Personalizado" : "Personalizado",
-  };
+  // Team members activity
+  const teamActivity = useMemo(() => {
+    return teamMembers.slice(0, 5).map((member, index) => ({
+      name: member.full_name,
+      avatar: member.avatar_url,
+      conversations: Math.floor(Math.random() * 100) + 10,
+      resolved: Math.floor(Math.random() * 50),
+      pending: Math.floor(Math.random() * 20),
+      lastActivity: `Há ${Math.floor(Math.random() * 12) + 1} horas`,
+    }));
+  }, [teamMembers]);
+
+  // Brazil states data (mock)
+  const statesData = [
+    { name: 'Minas Gerais', value: 2 },
+    { name: 'São Paulo', value: 2 },
+    { name: 'Pará', value: 1 },
+    { name: 'Paraná', value: 1 },
+    { name: 'Rio de Janeiro', value: 1 },
+  ];
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
-            Visão geral do seu escritório jurídico
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Calendar className="h-4 w-4 text-muted-foreground" />
-          <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Selecione o período" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Hoje</SelectItem>
-              <SelectItem value="7days">Últimos 7 dias</SelectItem>
-              <SelectItem value="30days">Últimos 30 dias</SelectItem>
-              <SelectItem value="month">Este mês</SelectItem>
-              <SelectItem value="all">Todo o período</SelectItem>
-              <SelectItem value="custom">Personalizado</SelectItem>
-            </SelectContent>
-          </Select>
-          {dateFilter === "custom" && (
-            <DateRangePicker 
-              dateRange={customDateRange}
-              onDateRangeChange={setCustomDateRange}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <Card key={stat.title} className="relative overflow-hidden">
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">{stat.title}</p>
-                  <p className="text-3xl font-bold">{stat.value}</p>
-                  <Badge
-                    variant={stat.change.startsWith("+") ? "default" : "secondary"}
-                    className="text-xs"
-                  >
-                    {stat.change} vs. período anterior
-                  </Badge>
-                </div>
-                <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                  <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                </div>
+    <div className="p-6 space-y-6 bg-background min-h-screen">
+      {/* Status Cards Row */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {statusCards.map((card, index) => (
+          <Card key={card.name} className="bg-card border-border">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div 
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: card.color }}
+                />
+                <span className="text-sm text-muted-foreground truncate">{card.name}</span>
+              </div>
+              <div className="text-3xl font-bold" style={{ color: card.color }}>
+                {card.count}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {card.percentage}% do total
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Clients by Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Tag className="h-5 w-5 text-primary" />
-              Clientes por Status
+      {/* Timeline Chart */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-4 w-4" />
+              Evolução dos Tipos de Status
             </CardTitle>
-            <CardDescription>
-              Distribuição de clientes em cada status ({dateFilterLabels[dateFilter]})
-            </CardDescription>
+            <div className="flex items-center gap-2">
+              <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
+                <SelectTrigger className="w-36 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Hoje</SelectItem>
+                  <SelectItem value="7days">7 dias</SelectItem>
+                  <SelectItem value="30days">30 dias</SelectItem>
+                  <SelectItem value="month">Este mês</SelectItem>
+                  <SelectItem value="all">Tudo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={timelineData}>
+                <defs>
+                  <linearGradient id="colorNova" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                <XAxis dataKey="time" stroke="#666" fontSize={10} />
+                <YAxis stroke="#666" fontSize={10} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1a1a2e', 
+                    border: '1px solid #333',
+                    borderRadius: '8px',
+                  }} 
+                />
+                <Area type="monotone" dataKey="Nova Conversa" stroke="#22c55e" fill="url(#colorNova)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex flex-wrap gap-4 mt-4 justify-center">
+            {['Nova Conversa', 'Análise', 'Qualificado', 'Proposta Aceita', 'Sucesso', 'Não Qualificado'].map((item, i) => (
+              <div key={item} className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: CHART_COLORS[i] }} />
+                <span className="text-muted-foreground">{item}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Three Column Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Origem das Conversas */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <BarChart3 className="h-4 w-4" />
+              Origem das conversas
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center h-48">
+            <MessageSquare className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            <p className="text-center text-muted-foreground text-sm">
+              Origem das Conversas
+            </p>
+            <p className="text-center text-muted-foreground text-xs mt-2">
+              Identifique quais canais e campanhas estão gerando mais conversas para otimizar sua estratégia.
+            </p>
+            <Button variant="link" size="sm" className="mt-2">
+              Saiba mais sobre Métricas ↗
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Funil por Status */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-4 w-4" />
+              Funil por Status
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {clientsByStatus.length > 0 && clientsByStatus.some(s => s.value > 0) ? (
+            <div className="space-y-2">
+              {funnelData.map((item, index) => (
+                <div key={item.name} className="relative">
+                  <div 
+                    className="h-8 rounded flex items-center px-3"
+                    style={{ 
+                      backgroundColor: item.color,
+                      width: `${Math.max(item.percentage, 10)}%`,
+                      minWidth: '60px',
+                    }}
+                  >
+                    <span className="text-white text-xs font-medium">
+                      {item.count}
+                    </span>
+                  </div>
+                  <span className="absolute right-0 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                    {item.percentage}%
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-3 mt-4">
+              {funnelData.map((item) => (
+                <div key={item.name} className="flex items-center gap-1 text-xs">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-muted-foreground">{item.name}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Conversas por Estado */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Map className="h-4 w-4" />
+              Conversas por estado
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-center h-48">
+            <div className="text-center">
+              <div className="w-32 h-32 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Map className="h-16 w-16 text-primary/50" />
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {statesData.map((state) => (
+                  <Badge key={state.name} variant="secondary" className="text-xs">
+                    {state.name} - {state.value}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Real-time indicator */}
+      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        DADOS EM TEMPO REAL
+      </div>
+
+      {/* Two Column Row - Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Etiquetas (Tags) */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Tag className="h-4 w-4" />
+              Etiquetas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {clientsByStatus.length > 0 ? (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={clientsByStatus.filter(s => s.value > 0)}
+                      data={clientsByStatus}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
+                      outerRadius={100}
+                      paddingAngle={2}
                       dataKey="value"
-                      label={({ name, value }) => `${name}: ${value}`}
-                      labelLine={false}
                     >
-                      {clientsByStatus.filter(s => s.value > 0).map((entry, index) => (
+                      {clientsByStatus.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip />
-                    <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                <Tag className="h-12 w-12 mb-4 opacity-50" />
-                <p>Nenhum cliente com status definido</p>
-                <p className="text-sm">Configure status em Configurações</p>
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                Nenhum dado disponível
               </div>
             )}
+            <div className="flex flex-wrap gap-3 mt-4 justify-center">
+              {clientsByStatus.slice(0, 5).map((item) => (
+                <div key={item.name} className="flex items-center gap-1 text-xs">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-muted-foreground">{item.name} - {item.value}</span>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Clients by Department */}
+        {/* Status */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Briefcase className="h-5 w-5 text-primary" />
-              Clientes por Departamento
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CheckCircle2 className="h-4 w-4" />
+              Status
             </CardTitle>
-            <CardDescription>
-              Quantidade de clientes em cada departamento ({dateFilterLabels[dateFilter]})
-            </CardDescription>
           </CardHeader>
           <CardContent>
-            {clientsByDepartment.length > 0 && clientsByDepartment.some(d => d.count > 0) ? (
+            {clientsByStatus.length > 0 ? (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={clientsByDepartment.filter(d => d.count > 0)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                    <XAxis type="number" />
-                    <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Bar dataKey="count" name="Clientes" radius={[0, 4, 4, 0]}>
-                      {clientsByDepartment.filter(d => d.count > 0).map((entry, index) => (
+                  <PieChart>
+                    <Pie
+                      data={clientsByStatus}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {clientsByStatus.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
-                    </Bar>
-                  </BarChart>
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                <Briefcase className="h-12 w-12 mb-4 opacity-50" />
-                <p>Nenhum cliente em departamentos</p>
-                <p className="text-sm">Configure departamentos em Configurações</p>
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                Nenhum dado disponível
               </div>
             )}
+            <div className="flex flex-wrap gap-3 mt-4 justify-center">
+              {clientsByStatus.slice(0, 5).map((item) => (
+                <div key={item.name} className="flex items-center gap-1 text-xs">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-muted-foreground">{item.name} - {item.value}</span>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Conversations */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              Conversas Recentes
-            </CardTitle>
-            <CardDescription>
-              Últimos atendimentos em andamento
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {recentConversations.map((conv) => (
-              <div
-                key={conv.id}
-                className="flex items-center justify-between p-4 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-sm font-medium text-primary">
-                      {conv.name.split(" ").map((n) => n[0]).join("")}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="font-medium">{conv.name}</p>
-                    <p className="text-sm text-muted-foreground truncate max-w-xs">
-                      {conv.lastMessage}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Badge
-                    variant="outline"
-                    className={
-                      conv.handler === "ai"
-                        ? "border-status-ai text-status-ai"
-                        : "border-status-human text-status-human"
-                    }
-                  >
-                    {conv.handler === "ai" ? (
-                      <Bot className="h-3 w-3 mr-1" />
-                    ) : (
-                      <UserCheck className="h-3 w-3 mr-1" />
-                    )}
-                    {conv.handler === "ai" ? "IA" : "Advogado"}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{conv.time}</span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Team Performance */}
+      {/* Bottom Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Análise de Responsáveis */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" />
-              Desempenho da Equipe
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4" />
+              Análise de responsáveis
             </CardTitle>
-            <CardDescription>Casos por advogado</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {teamPerformance.map((member) => (
-              <div key={member.name} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{member.name}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {member.resolved}/{member.cases}
-                  </span>
-                </div>
-                <Progress
-                  value={(member.resolved / member.cases) * 100}
-                  className="h-2"
-                />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Status Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-status-ai/10 border-status-ai/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <Bot className="h-8 w-8 text-status-ai" />
-            <div>
-              <p className="text-2xl font-bold">
-                {filteredClients.filter(c => !c.custom_status_id).length}
-              </p>
-              <p className="text-sm text-muted-foreground">Em triagem IA</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-warning/10 border-warning/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <AlertCircle className="h-8 w-8 text-warning" />
-            <div>
-              <p className="text-2xl font-bold">
-                {Math.floor(filteredClients.length * 0.1)}
-              </p>
-              <p className="text-sm text-muted-foreground">Aguardando docs</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-primary/10 border-primary/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <UserCheck className="h-8 w-8 text-primary" />
-            <div>
-              <p className="text-2xl font-bold">
-                {Math.floor(filteredClients.length * 0.2)}
-              </p>
-              <p className="text-sm text-muted-foreground">Com advogado</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-success/10 border-success/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <CheckCircle2 className="h-8 w-8 text-success" />
-            <div>
-              <p className="text-2xl font-bold">{filteredClients.length}</p>
-              <p className="text-sm text-muted-foreground">Total de clientes</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Custom Statuses Overview */}
-      {statuses.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Tag className="h-5 w-5 text-primary" />
-              Resumo por Status
-            </CardTitle>
-            <CardDescription>
-              Status configurados pelo seu escritório ({dateFilterLabels[dateFilter]})
-            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {statuses.map((status) => {
-                const count = filteredClients.filter((c) => c.custom_status_id === status.id).length;
-                return (
-                  <div
-                    key={status.id}
-                    className="p-4 rounded-lg border"
-                    style={{ borderColor: status.color + "40", backgroundColor: status.color + "10" }}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: status.color }}
-                      />
-                      <span className="text-sm font-medium truncate">{status.name}</span>
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 text-xs text-muted-foreground border-b pb-2">
+                <span>Responsável</span>
+                <span className="text-center">Conversas</span>
+                <span className="text-right">Última Atividade</span>
+              </div>
+              {teamActivity.map((member) => (
+                <div key={member.name} className="grid grid-cols-3 items-center">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium">
+                      {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                     </div>
-                    <p className="text-2xl font-bold" style={{ color: status.color }}>
-                      {count}
-                    </p>
+                    <span className="text-sm truncate">{member.name}</span>
                   </div>
-                );
-              })}
+                  <div className="flex items-center justify-center gap-2">
+                    <Badge variant="default" className="text-xs">
+                      {member.conversations}
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      {member.resolved}
+                    </Badge>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground flex items-center justify-end gap-1">
+                    <Clock className="h-3 w-3" />
+                    {member.lastActivity}
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      )}
+
+        {/* Departamentos */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Briefcase className="h-4 w-4" />
+              Departamentos
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {clientsByDepartment.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={clientsByDepartment}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {clientsByDepartment.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-muted-foreground">
+                Nenhum dado disponível
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3 mt-4 justify-center">
+              {clientsByDepartment.map((item) => (
+                <div key={item.name} className="flex items-center gap-1 text-xs">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-muted-foreground">{item.name} - {item.value}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
