@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Bot,
   UserCheck,
@@ -117,6 +119,7 @@ interface Message {
 }
 
 export default function Conversations() {
+  const { user } = useAuth();
   const { conversations, isLoading, transferHandler, updateConversation } = useConversations();
   const { departments } = useDepartments();
   const { tags } = useTags();
@@ -257,9 +260,17 @@ export default function Conversations() {
     }
   }, [conversations]);
 
+  // Calculate total unread for favicon and title
+  const totalUnread = useMemo(() => 
+    Object.values(unreadCounts).reduce((sum, count) => sum + count, 0),
+    [unreadCounts]
+  );
+
+  // Dynamic favicon based on unread count
+  useDynamicFavicon(totalUnread);
+
   // Update browser tab title with unread count
   useEffect(() => {
-    const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
     const baseTitle = "Conversas";
     
     if (totalUnread > 0) {
@@ -272,7 +283,7 @@ export default function Conversations() {
     return () => {
       document.title = "FMO Advogados";
     };
-  }, [unreadCounts]);
+  }, [totalUnread]);
 
   // Search matches
   const searchMatches = useMemo(() => {
@@ -523,7 +534,8 @@ export default function Conversations() {
       // Tab filter
       switch (activeTab) {
         case "chat":
-          return conv.handler === "human" && conv.assignedTo;
+          // "Meus Chats": Only show conversations assigned to current user
+          return conv.handler === "human" && conv.assignedTo === user?.id;
         case "ai":
           return conv.handler === "ai";
         case "queue":
@@ -532,7 +544,7 @@ export default function Conversations() {
           return true;
       }
     });
-  }, [mappedConversations, conversationFilters, searchQuery, activeTab]);
+  }, [mappedConversations, conversationFilters, searchQuery, activeTab, user?.id]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
