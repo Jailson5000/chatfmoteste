@@ -11,6 +11,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   CheckCircle2,
   RefreshCw,
   ChevronRight,
@@ -36,7 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 interface ConnectionDetailPanelProps {
-  instance: WhatsAppInstance;
+  instance: WhatsAppInstance & { default_department_id?: string | null };
   onClose: () => void;
   onConnect: (instance: WhatsAppInstance) => void;
   onDelete: (id: string) => void;
@@ -45,6 +52,7 @@ interface ConnectionDetailPanelProps {
   onConfigureWebhook: () => void;
   rejectCalls: boolean;
   onToggleRejectCalls: (enabled: boolean) => void;
+  onUpdateDefaultDepartment: (departmentId: string | null) => void;
   isLoading: {
     status: boolean;
     phone: boolean;
@@ -64,6 +72,7 @@ export function ConnectionDetailPanel({
   onConfigureWebhook,
   rejectCalls,
   onToggleRejectCalls,
+  onUpdateDefaultDepartment,
   isLoading,
 }: ConnectionDetailPanelProps) {
   const { toast } = useToast();
@@ -191,13 +200,36 @@ export function ConnectionDetailPanel({
                 <span className="text-sm text-muted-foreground">Status</span>
               </div>
               
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
-                {departments.length > 0 ? (
-                  <Badge variant="outline">{departments[0].name}</Badge>
-                ) : (
-                  <span className="text-sm text-muted-foreground">Nenhum departamento</span>
-                )}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Building2 className="h-4 w-4" />
+                  <span>Departamento Padrão</span>
+                </div>
+                <Select
+                  value={instance.default_department_id || "none"}
+                  onValueChange={(value) => onUpdateDefaultDepartment(value === "none" ? null : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecionar departamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    {departments.map((dept) => (
+                      <SelectItem key={dept.id} value={dept.id}>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: dept.color }}
+                          />
+                          {dept.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Novos clientes desta instância serão vinculados automaticamente a este departamento.
+                </p>
               </div>
             </div>
 

@@ -379,6 +379,30 @@ export function useWhatsAppInstances() {
       });
     },
   });
+  const updateDefaultDepartment = useMutation({
+    mutationFn: async ({ instanceId, departmentId }: { instanceId: string; departmentId: string | null }) => {
+      const { error } = await supabase
+        .from("whatsapp_instances")
+        .update({ default_department_id: departmentId } as any)
+        .eq("id", instanceId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Departamento atualizado",
+        description: "O departamento padrão foi configurado com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar departamento",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   return {
     instances,
@@ -395,5 +419,6 @@ export function useWhatsAppInstances() {
     setSettings,
     refreshStatus,
     refreshPhone,
+    updateDefaultDepartment,
   };
 }

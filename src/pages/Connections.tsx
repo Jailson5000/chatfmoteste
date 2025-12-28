@@ -51,6 +51,7 @@ export default function Connections() {
     refreshStatus,
     refreshPhone,
     refetch,
+    updateDefaultDepartment,
   } = useWhatsAppInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -400,6 +401,9 @@ export default function Connections() {
                 } catch {
                   setRejectCalls((prev) => ({ ...prev, [selectedInstance.id]: !enabled }));
                 }
+              }}
+              onUpdateDefaultDepartment={(departmentId) => {
+                updateDefaultDepartment.mutate({ instanceId: selectedInstance.id, departmentId });
               }}
               isLoading={{
                 status: refreshStatus.isPending,
