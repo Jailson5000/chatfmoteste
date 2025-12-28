@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -52,7 +52,10 @@ function isEncryptedMedia(url: string): boolean {
 // Playback speed options
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-// Custom audio player component with decryption support, progress bar, and speed control
+// Transcription cache
+const transcriptionCache = new Map<string, string>();
+
+// Custom audio player component with decryption support, progress bar, speed control, and transcription
 function AudioPlayer({ 
   src, 
   mimeType,
@@ -74,6 +77,11 @@ function AudioPlayer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  
+  // Transcription state
+  const [transcription, setTranscription] = useState<string | null>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [showTranscription, setShowTranscription] = useState(false);
 
   // Check if needs decryption
   const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
@@ -136,6 +144,16 @@ function AudioPlayer({
     // Cleanup old cache entries periodically
     cleanupOldCache();
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  // Check for cached transcription
+  useEffect(() => {
+    if (whatsappMessageId) {
+      const cached = transcriptionCache.get(whatsappMessageId);
+      if (cached) {
+        setTranscription(cached);
+      }
+    }
+  }, [whatsappMessageId]);
 
   // Use decrypted source or original
   const audioSrc = needsDecryption ? decryptedSrc : src;
@@ -207,6 +225,71 @@ function AudioPlayer({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const handleTranscribe = async () => {
+    if (isTranscribing || !audioSrc) return;
+
+    // Check cache first
+    if (whatsappMessageId && transcriptionCache.has(whatsappMessageId)) {
+      setTranscription(transcriptionCache.get(whatsappMessageId)!);
+      setShowTranscription(true);
+      return;
+    }
+
+    setIsTranscribing(true);
+    try {
+      // Get base64 from audio source
+      let audioBase64: string;
+      
+      if (audioSrc.startsWith('data:')) {
+        // Already base64
+        audioBase64 = audioSrc.split(',')[1];
+      } else {
+        // Fetch and convert
+        const response = await fetch(audioSrc);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        audioBase64 = await new Promise((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      const response = await supabase.functions.invoke("transcribe-audio", {
+        body: {
+          audioBase64,
+          mimeType: mimeType || "audio/ogg",
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      if (response.data?.transcription) {
+        const text = response.data.transcription;
+        setTranscription(text);
+        setShowTranscription(true);
+        
+        // Cache the transcription
+        if (whatsappMessageId) {
+          transcriptionCache.set(whatsappMessageId, text);
+        }
+      } else if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+    } catch (err) {
+      console.error("Error transcribing audio:", err);
+      setTranscription("Erro ao transcrever áudio");
+      setShowTranscription(true);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
   // Calculate progress percentage for visual bar
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -245,78 +328,119 @@ function AudioPlayer({
   }
 
   return (
-    <div className={cn(
-      "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
-      isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
-    )}>
-      {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
-      
-      {/* Mic icon indicator */}
+    <div className="space-y-2">
       <div className={cn(
-        "h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
-        isPlaying 
-          ? "bg-primary text-primary-foreground" 
-          : isFromMe ? "bg-primary/30" : "bg-muted"
+        "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
+        isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
       )}>
-        <Mic className="h-5 w-5" />
-      </div>
-      
-      {/* Play button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-9 w-9 rounded-full flex-shrink-0 hover:scale-110 transition-transform"
-        onClick={togglePlay}
-        disabled={!audioSrc}
-      >
-        {isPlaying ? (
-          <Pause className="h-5 w-5" />
-        ) : (
-          <Play className="h-5 w-5 ml-0.5" />
-        )}
-      </Button>
-      
-      {/* Progress section */}
-      <div className="flex-1 space-y-1.5">
-        {/* Visual progress bar */}
-        <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden cursor-pointer group">
-          <Slider
-            value={[currentTime]}
-            max={duration || 100}
-            step={0.1}
-            onValueChange={handleSeek}
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            disabled={!audioSrc}
-          />
-          <div 
-            className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-100 relative"
-            style={{ width: `${progressPercent}%` }}
-          >
-            {/* Animated pulse at the end */}
-            <div className={cn(
-              "absolute right-0 top-1/2 -translate-y-1/2 h-3 w-3 rounded-full bg-primary shadow-lg transition-opacity",
-              isPlaying ? "opacity-100 animate-pulse" : "opacity-0 group-hover:opacity-100"
-            )} />
-          </div>
+        {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+        
+        {/* Mic icon indicator */}
+        <div className={cn(
+          "h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
+          isPlaying 
+            ? "bg-primary text-primary-foreground" 
+            : isFromMe ? "bg-primary/30" : "bg-muted"
+        )}>
+          <Mic className="h-5 w-5" />
         </div>
         
-        {/* Time and speed controls */}
-        <div className="flex justify-between items-center">
-          <span className="text-xs opacity-70 tabular-nums">{formatTime(currentTime)}</span>
-          <button
-            onClick={cycleSpeed}
-            className={cn(
-              "text-xs font-medium px-1.5 py-0.5 rounded transition-colors",
-              "hover:bg-primary/20 active:scale-95",
-              playbackSpeed !== 1 ? "text-primary" : "opacity-70"
-            )}
-            title="Velocidade de reprodução"
-          >
-            {playbackSpeed}x
-          </button>
-          <span className="text-xs opacity-70 tabular-nums">{formatTime(duration)}</span>
+        {/* Play button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-full flex-shrink-0 hover:scale-110 transition-transform"
+          onClick={togglePlay}
+          disabled={!audioSrc}
+        >
+          {isPlaying ? (
+            <Pause className="h-5 w-5" />
+          ) : (
+            <Play className="h-5 w-5 ml-0.5" />
+          )}
+        </Button>
+        
+        {/* Progress section */}
+        <div className="flex-1 space-y-1.5">
+          {/* Visual progress bar */}
+          <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden cursor-pointer group">
+            <Slider
+              value={[currentTime]}
+              max={duration || 100}
+              step={0.1}
+              onValueChange={handleSeek}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              disabled={!audioSrc}
+            />
+            <div 
+              className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-100 relative"
+              style={{ width: `${progressPercent}%` }}
+            >
+              {/* Animated pulse at the end */}
+              <div className={cn(
+                "absolute right-0 top-1/2 -translate-y-1/2 h-3 w-3 rounded-full bg-primary shadow-lg transition-opacity",
+                isPlaying ? "opacity-100 animate-pulse" : "opacity-0 group-hover:opacity-100"
+              )} />
+            </div>
+          </div>
+          
+          {/* Time and speed controls */}
+          <div className="flex justify-between items-center">
+            <span className="text-xs opacity-70 tabular-nums">{formatTime(currentTime)}</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={cycleSpeed}
+                className={cn(
+                  "text-xs font-medium px-1.5 py-0.5 rounded transition-colors",
+                  "hover:bg-primary/20 active:scale-95",
+                  playbackSpeed !== 1 ? "text-primary" : "opacity-70"
+                )}
+                title="Velocidade de reprodução"
+              >
+                {playbackSpeed}x
+              </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-6 w-6 rounded transition-colors",
+                  transcription ? "text-primary" : "opacity-70 hover:opacity-100"
+                )}
+                onClick={handleTranscribe}
+                disabled={isTranscribing || !audioSrc}
+                title="Transcrever áudio"
+              >
+                {isTranscribing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FileAudio className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+            <span className="text-xs opacity-70 tabular-nums">{formatTime(duration)}</span>
+          </div>
         </div>
       </div>
+
+      {/* Transcription display */}
+      {showTranscription && transcription && (
+        <div className={cn(
+          "p-2 rounded-lg text-xs leading-relaxed max-w-[320px] animate-in fade-in slide-in-from-top-1 duration-200",
+          isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
+        )}>
+          <div className="flex items-center gap-1 mb-1 text-muted-foreground">
+            <FileAudio className="h-3 w-3" />
+            <span className="font-medium">Transcrição:</span>
+            <button 
+              onClick={() => setShowTranscription(false)}
+              className="ml-auto hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <p className="whitespace-pre-wrap">{transcription}</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,10 +9,12 @@ import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useAutomations } from "@/hooks/useAutomations";
+import { useClients } from "@/hooks/useClients";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
 import { Link } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 import {
   Select,
   SelectContent,
@@ -35,6 +37,8 @@ export default function Kanban() {
   const { statuses: customStatuses } = useCustomStatuses();
   const { members } = useTeamMembers();
   const { automations } = useAutomations();
+  const { updateClientStatus } = useClients();
+  const { toast } = useToast();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
   const [draggedDepartment, setDraggedDepartment] = useState<string | null>(null);
@@ -139,6 +143,30 @@ export default function Kanban() {
     setDraggedConversation(null);
   };
 
+  // Handle status change via drag and drop
+  const handleStatusDrop = (statusId: string, conversation: typeof conversations[0]) => {
+    if (!conversation.client_id) {
+      toast({
+        title: "Sem cliente vinculado",
+        description: "Esta conversa não tem um cliente vinculado para atualizar o status.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    updateClientStatus.mutate({ 
+      clientId: conversation.client_id, 
+      statusId 
+    }, {
+      onSuccess: () => {
+        toast({
+          title: "Status atualizado",
+          description: `Cliente movido para o novo status.`,
+        });
+      },
+    });
+  };
+
   const handleDepartmentDrop = (targetDepartmentId: string) => {
     if (!draggedDepartment || draggedDepartment === targetDepartmentId) {
       setDraggedDepartment(null);
@@ -165,6 +193,13 @@ export default function Kanban() {
     setSelectedConversation(conversation);
     setSheetOpen(true);
   };
+
+  // Group conversations by status when in status mode
+  const getConversationsByStatus = (statusId: string | null) =>
+    filteredConversations.filter((c) => {
+      const clientStatusId = c.client?.custom_status_id || null;
+      return clientStatusId === statusId;
+    });
 
   const getConversationsByDepartment = (departmentId: string | null) =>
     filteredConversations.filter((c) => c.department_id === departmentId);
@@ -316,51 +351,110 @@ export default function Kanban() {
       {/* Kanban Board */}
       <ScrollArea className="flex-1">
         <div className="flex gap-3 p-3 md:p-4 min-w-max items-start">
-          {/* Unassigned column */}
-          {unassignedConversations.length > 0 && (
-            <KanbanColumn
-              id={null}
-              name="Sem Departamento"
-              color="#71717a"
-              conversations={unassignedConversations}
-              customStatuses={customStatuses}
-              tags={tags}
-              automations={automations}
-              isDragging={false}
-              draggedConversation={draggedConversation}
-              onDrop={() => handleConversationDrop(null)}
-              onConversationDragStart={(id) => setDraggedConversation(id)}
-              onConversationClick={handleConversationClick}
-            />
-          )}
+          {groupBy === 'department' ? (
+            <>
+              {/* Unassigned column */}
+              {unassignedConversations.length > 0 && (
+                <KanbanColumn
+                  id={null}
+                  name="Sem Departamento"
+                  color="#71717a"
+                  conversations={unassignedConversations}
+                  customStatuses={customStatuses}
+                  tags={tags}
+                  automations={automations}
+                  isDragging={false}
+                  draggedConversation={draggedConversation}
+                  onDrop={() => handleConversationDrop(null)}
+                  onConversationDragStart={(id) => setDraggedConversation(id)}
+                  onConversationClick={handleConversationClick}
+                />
+              )}
 
-          {/* Department columns */}
-          {activeDepartments.map((department) => {
-            const departmentConversations = getConversationsByDepartment(department.id);
-            const isDraggingThis = draggedDepartment === department.id;
-            
-            return (
+              {/* Department columns */}
+              {activeDepartments.map((department) => {
+                const departmentConversations = getConversationsByDepartment(department.id);
+                const isDraggingThis = draggedDepartment === department.id;
+                
+                return (
+                  <KanbanColumn
+                    key={department.id}
+                    id={department.id}
+                    name={department.name}
+                    color={department.color}
+                    conversations={departmentConversations}
+                    customStatuses={customStatuses}
+                    tags={tags}
+                    automations={automations}
+                    isDragging={isDraggingThis}
+                    isDraggable={true}
+                    draggedConversation={draggedConversation}
+                    onDragStart={() => setDraggedDepartment(department.id)}
+                    onDragEnd={() => setDraggedDepartment(null)}
+                    onDrop={() => handleConversationDrop(department.id)}
+                    onColumnDrop={() => handleDepartmentDrop(department.id)}
+                    onConversationDragStart={(id) => setDraggedConversation(id)}
+                    onConversationClick={handleConversationClick}
+                  />
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {/* Status columns - Sem Status first */}
               <KanbanColumn
-                key={department.id}
-                id={department.id}
-                name={department.name}
-                color={department.color}
-                conversations={departmentConversations}
+                id={null}
+                name="Sem Status"
+                color="#71717a"
+                conversations={getConversationsByStatus(null)}
                 customStatuses={customStatuses}
                 tags={tags}
                 automations={automations}
-                isDragging={isDraggingThis}
-                isDraggable={true}
+                isDragging={false}
                 draggedConversation={draggedConversation}
-                onDragStart={() => setDraggedDepartment(department.id)}
-                onDragEnd={() => setDraggedDepartment(null)}
-                onDrop={() => handleConversationDrop(department.id)}
-                onColumnDrop={() => handleDepartmentDrop(department.id)}
+                groupByStatus={true}
+                onDrop={() => {
+                  const conv = conversations.find(c => c.id === draggedConversation);
+                  if (conv && conv.client_id) {
+                    updateClientStatus.mutate({ clientId: conv.client_id, statusId: null });
+                  }
+                  setDraggedConversation(null);
+                }}
                 onConversationDragStart={(id) => setDraggedConversation(id)}
                 onConversationClick={handleConversationClick}
               />
-            );
-          })}
+
+              {/* Custom status columns */}
+              {customStatuses.filter(s => s.is_active).map((status) => {
+                const statusConversations = getConversationsByStatus(status.id);
+                
+                return (
+                  <KanbanColumn
+                    key={status.id}
+                    id={status.id}
+                    name={status.name}
+                    color={status.color}
+                    conversations={statusConversations}
+                    customStatuses={customStatuses}
+                    tags={tags}
+                    automations={automations}
+                    isDragging={false}
+                    draggedConversation={draggedConversation}
+                    groupByStatus={true}
+                    onDrop={() => {
+                      const conv = conversations.find(c => c.id === draggedConversation);
+                      if (conv) {
+                        handleStatusDrop(status.id, conv);
+                      }
+                      setDraggedConversation(null);
+                    }}
+                    onConversationDragStart={(id) => setDraggedConversation(id)}
+                    onConversationClick={handleConversationClick}
+                  />
+                );
+              })}
+            </>
+          )}
 
           {conversations.length === 0 && (
             <div className="flex items-center justify-center w-full h-48 border-2 border-dashed rounded-xl text-muted-foreground">

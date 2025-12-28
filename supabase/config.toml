@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.sync-n8n-prompt]
 verify_jwt = false
+
+[functions.transcribe-audio]
+verify_jwt = false

@@ -29,12 +29,13 @@ interface KanbanColumnProps {
   name: string;
   color: string;
   conversations: Conversation[];
-  customStatuses: Array<{ id: string; name: string; color: string }>;
+  customStatuses: Array<{ id: string; name: string; color: string; is_active?: boolean }>;
   tags: Array<{ id: string; name: string; color: string }>;
   automations: Array<{ id: string; name: string; is_active: boolean }>;
   isDragging: boolean;
   isDraggable?: boolean;
   draggedConversation: string | null;
+  groupByStatus?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onDrop: () => void;
@@ -54,6 +55,7 @@ export function KanbanColumn({
   isDragging,
   isDraggable = false,
   draggedConversation,
+  groupByStatus = false,
   onDragStart,
   onDragEnd,
   onDrop,
