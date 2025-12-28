@@ -48,8 +48,6 @@ import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours,
 import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { DateRange } from "react-day-picker";
-import { BrazilMap } from "@/components/dashboard/BrazilMap";
-import { getStateFromPhone } from "@/lib/dddToState";
 
 type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
@@ -307,18 +305,6 @@ export default function Dashboard() {
     }));
   }, [teamMembers]);
 
-  // Brazil states data from clients - extract state from phone DDD
-  const clientsByState = useMemo(() => {
-    const stateMap: Record<string, number> = {};
-    filteredClients.forEach((client) => {
-      // First try to get state from phone DDD
-      const stateFromPhone = getStateFromPhone(client.phone);
-      if (stateFromPhone) {
-        stateMap[stateFromPhone] = (stateMap[stateFromPhone] || 0) + 1;
-      }
-    });
-    return stateMap;
-  }, [filteredClients]);
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
@@ -519,8 +505,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Brazil Map - Clients by State */}
-        <BrazilMap clientsByState={clientsByState} totalClients={filteredClients.length} />
       </div>
 
       {/* Real-time indicator */}
