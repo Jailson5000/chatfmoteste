@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_knowledge: {
+        Row: {
+          automation_id: string
+          created_at: string
+          id: string
+          knowledge_item_id: string
+        }
+        Insert: {
+          automation_id: string
+          created_at?: string
+          id?: string
+          knowledge_item_id: string
+        }
+        Update: {
+          automation_id?: string
+          created_at?: string
+          id?: string
+          knowledge_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_knowledge_automation_id_fkey"
+            columns: ["automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_knowledge_knowledge_item_id_fkey"
+            columns: ["knowledge_item_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       automations: {
         Row: {
           ai_prompt: string | null
@@ -252,6 +288,7 @@ export type Database = {
           name: string
           notes: string | null
           phone: string
+          state: string | null
           updated_at: string
         }
         Insert: {
@@ -268,6 +305,7 @@ export type Database = {
           name: string
           notes?: string | null
           phone: string
+          state?: string | null
           updated_at?: string
         }
         Update: {
@@ -284,6 +322,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string
+          state?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -623,6 +662,59 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "kanban_columns_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_items: {
+        Row: {
+          category: string
+          content: string | null
+          created_at: string
+          file_name: string | null
+          file_size: number | null
+          file_type: string | null
+          file_url: string | null
+          id: string
+          item_type: string
+          law_firm_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          content?: string | null
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          item_type?: string
+          law_firm_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          content?: string | null
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          item_type?: string
+          law_firm_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_items_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"

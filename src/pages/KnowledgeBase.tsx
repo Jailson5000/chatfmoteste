@@ -1,24 +1,18 @@
 import { useState } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useKnowledgeItems, KnowledgeItem } from "@/hooks/useKnowledgeItems";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Trash2, Edit, BookOpen, FileText, Search, Database } from "lucide-react";
+import { Loader2, Plus, Trash2, Edit, BookOpen, FileText, Search, Database, Upload } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useLawFirm } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
-
-// TODO: Create knowledge_base table and hook
-interface KnowledgeItem {
-  id: string;
-  title: string;
-  content: string;
-  category: string;
-  created_at: string;
-  updated_at: string;
-}
 
 const CATEGORIES = [
   { value: 'legal', label: 'Informações Legais' },
@@ -31,32 +25,15 @@ const CATEGORIES = [
 
 export default function KnowledgeBase() {
   const { isAdmin, loading: roleLoading } = useUserRole();
+  const { knowledgeItems, isLoading, createItem, updateItem, deleteItem } = useKnowledgeItems();
+  const { lawFirm } = useLawFirm();
   const { toast } = useToast();
   
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Mock data - will be replaced with actual database
-  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([
-    {
-      id: '1',
-      title: 'Prazo para Contestação',
-      content: 'O prazo para contestação em ações cíveis é de 15 dias úteis, conforme o artigo 335 do CPC. Este prazo começa a contar da data da audiência de conciliação ou mediação, ou da última data designada para audiência, caso tenha sido dispensada.',
-      category: 'legal',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      title: 'Documentos para Ação Trabalhista',
-      content: 'Para ingressar com uma ação trabalhista, são necessários: RG, CPF, CTPS, comprovante de residência, últimos 3 contracheques, termo de rescisão (se houver), e qualquer documento que comprove a relação de emprego.',
-      category: 'procedures',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ]);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [newItem, setNewItem] = useState({
     title: '',
@@ -86,7 +63,7 @@ export default function KnowledgeBase() {
     );
   }
 
-  if (roleLoading) {
+  if (roleLoading || isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -94,56 +71,93 @@ export default function KnowledgeBase() {
     );
   }
 
-  const handleCreateItem = () => {
-    const item: KnowledgeItem = {
-      id: Date.now().toString(),
-      ...newItem,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    setKnowledgeItems([...knowledgeItems, item]);
+  const handleCreateItem = async () => {
+    await createItem.mutateAsync({
+      title: newItem.title,
+      content: newItem.content,
+      category: newItem.category,
+      item_type: 'text',
+      file_url: null,
+      file_name: null,
+      file_type: null,
+      file_size: null,
+    });
     setIsCreateDialogOpen(false);
     setNewItem({ title: '', content: '', category: 'other' });
-    toast({
-      title: "Item criado",
-      description: "O conhecimento foi adicionado à base.",
-    });
   };
 
-  const handleEditItem = () => {
-    setKnowledgeItems(items =>
-      items.map(item =>
-        item.id === editItem.id
-          ? { ...item, ...editItem, updated_at: new Date().toISOString() }
-          : item
-      )
-    );
+  const handleEditItem = async () => {
+    await updateItem.mutateAsync({
+      id: editItem.id,
+      title: editItem.title,
+      content: editItem.content,
+      category: editItem.category,
+    });
     setIsEditDialogOpen(false);
     if (selectedItem?.id === editItem.id) {
-      setSelectedItem({ ...selectedItem, ...editItem, updated_at: new Date().toISOString() });
+      setSelectedItem({ ...selectedItem, title: editItem.title, content: editItem.content, category: editItem.category });
     }
-    toast({
-      title: "Item atualizado",
-      description: "As alterações foram salvas.",
-    });
   };
 
-  const handleDeleteItem = (id: string) => {
-    setKnowledgeItems(items => items.filter(item => item.id !== id));
+  const handleDeleteItem = async (id: string) => {
+    await deleteItem.mutateAsync(id);
     if (selectedItem?.id === id) {
       setSelectedItem(null);
     }
-    toast({
-      title: "Item excluído",
-      description: "O conhecimento foi removido da base.",
-    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !lawFirm?.id) return;
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${lawFirm.id}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('internal-chat-files')
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('internal-chat-files')
+        .getPublicUrl(fileName);
+
+      await createItem.mutateAsync({
+        title: file.name,
+        content: null,
+        category: 'other',
+        item_type: 'document',
+        file_url: publicUrl,
+        file_name: file.name,
+        file_type: file.type,
+        file_size: file.size,
+      });
+
+      toast({
+        title: 'Documento enviado',
+        description: 'O arquivo foi adicionado à base de conhecimento.',
+      });
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast({
+        title: 'Erro no upload',
+        description: 'Não foi possível enviar o arquivo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
   };
 
   const openEditDialog = (item: KnowledgeItem) => {
     setEditItem({
       id: item.id,
       title: item.title,
-      content: item.content,
+      content: item.content || '',
       category: item.category,
     });
     setIsEditDialogOpen(true);
@@ -155,7 +169,7 @@ export default function KnowledgeBase() {
 
   const filteredItems = knowledgeItems.filter(item =>
     item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.content.toLowerCase().includes(searchQuery.toLowerCase())
+    (item.content?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -168,69 +182,92 @@ export default function KnowledgeBase() {
           </p>
         </div>
         
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Conhecimento
+        <div className="flex gap-2">
+          <Label htmlFor="kb-file-upload" className="cursor-pointer">
+            <Button variant="outline" asChild disabled={isUploading}>
+              <span>
+                {isUploading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-2" />
+                )}
+                Enviar Documento
+              </span>
             </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[625px]">
-            <DialogHeader>
-              <DialogTitle>Adicionar Conhecimento</DialogTitle>
-              <DialogDescription>
-                Adicione informações que a IA poderá usar para responder perguntas.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="title">Título</Label>
-                <Input
-                  id="title"
-                  value={newItem.title}
-                  onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
-                  placeholder="Ex: Prazo para Recurso"
-                />
+          </Label>
+          <input
+            id="kb-file-upload"
+            type="file"
+            className="hidden"
+            onChange={handleFileUpload}
+            disabled={isUploading}
+          />
+
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Conhecimento
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[625px]">
+              <DialogHeader>
+                <DialogTitle>Adicionar Conhecimento</DialogTitle>
+                <DialogDescription>
+                  Adicione informações que a IA poderá usar para responder perguntas.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="title">Título</Label>
+                  <Input
+                    id="title"
+                    value={newItem.title}
+                    onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
+                    placeholder="Ex: Prazo para Recurso"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="category">Categoria</Label>
+                  <select
+                    id="category"
+                    value={newItem.category}
+                    onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    {CATEGORIES.map((cat) => (
+                      <option key={cat.value} value={cat.value}>
+                        {cat.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="content">Conteúdo</Label>
+                  <Textarea
+                    id="content"
+                    value={newItem.content}
+                    onChange={(e) => setNewItem({ ...newItem, content: e.target.value })}
+                    placeholder="Digite o conteúdo completo..."
+                    className="min-h-[200px]"
+                  />
+                </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="category">Categoria</Label>
-                <select
-                  id="category"
-                  value={newItem.category}
-                  onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleCreateItem}
+                  disabled={!newItem.title || !newItem.content || createItem.isPending}
                 >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="content">Conteúdo</Label>
-                <Textarea
-                  id="content"
-                  value={newItem.content}
-                  onChange={(e) => setNewItem({ ...newItem, content: e.target.value })}
-                  placeholder="Digite o conteúdo completo..."
-                  className="min-h-[200px]"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleCreateItem}
-                disabled={!newItem.title || !newItem.content}
-              >
-                Adicionar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                  {createItem.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Adicionar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Search */}
@@ -272,12 +309,23 @@ export default function KnowledgeBase() {
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-2 flex-1 min-w-0">
-                        <FileText className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                        {item.item_type === 'document' ? (
+                          <Upload className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                        ) : (
+                          <FileText className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                        )}
                         <div className="min-w-0">
                           <span className="font-medium text-sm block truncate">{item.title}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {getCategoryLabel(item.category)}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              {getCategoryLabel(item.category)}
+                            </span>
+                            {item.item_type === 'document' && (
+                              <Badge variant="outline" className="text-[10px]">
+                                Documento
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
@@ -338,11 +386,18 @@ export default function KnowledgeBase() {
                 <div className="flex items-start justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
-                      <BookOpen className="h-5 w-5" />
+                      {selectedItem.item_type === 'document' ? (
+                        <Upload className="h-5 w-5" />
+                      ) : (
+                        <BookOpen className="h-5 w-5" />
+                      )}
                       {selectedItem.title}
                     </CardTitle>
-                    <CardDescription className="mt-1">
+                    <CardDescription className="mt-1 flex items-center gap-2">
                       {getCategoryLabel(selectedItem.category)}
+                      {selectedItem.item_type === 'document' && (
+                        <Badge variant="secondary">Documento</Badge>
+                      )}
                     </CardDescription>
                   </div>
                   <Button
@@ -356,9 +411,29 @@ export default function KnowledgeBase() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <p className="whitespace-pre-wrap">{selectedItem.content}</p>
-                </div>
+                {selectedItem.item_type === 'document' && selectedItem.file_url ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-muted rounded-lg">
+                      <p className="text-sm">
+                        <strong>Arquivo:</strong> {selectedItem.file_name}
+                      </p>
+                      {selectedItem.file_size && (
+                        <p className="text-sm text-muted-foreground">
+                          Tamanho: {(selectedItem.file_size / 1024).toFixed(2)} KB
+                        </p>
+                      )}
+                    </div>
+                    <Button asChild>
+                      <a href={selectedItem.file_url} target="_blank" rel="noopener noreferrer">
+                        Abrir Documento
+                      </a>
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <p className="whitespace-pre-wrap">{selectedItem.content}</p>
+                  </div>
+                )}
                 <div className="mt-6 pt-4 border-t text-xs text-muted-foreground">
                   <p>Criado em: {new Date(selectedItem.created_at).toLocaleDateString('pt-BR')}</p>
                   <p>Atualizado em: {new Date(selectedItem.updated_at).toLocaleDateString('pt-BR')}</p>
@@ -428,8 +503,9 @@ export default function KnowledgeBase() {
             </Button>
             <Button 
               onClick={handleEditItem}
-              disabled={!editItem.title || !editItem.content}
+              disabled={!editItem.title || updateItem.isPending}
             >
+              {updateItem.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Salvar
             </Button>
           </DialogFooter>
