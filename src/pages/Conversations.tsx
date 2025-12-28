@@ -1026,28 +1026,28 @@ export default function Conversations() {
       <div className={cn("md:hidden w-full", showMobileChat && "hidden")}>
         <div className="h-full flex flex-col bg-card">
           {/* Mobile Header */}
-          <div className="p-4 border-b border-border space-y-4">
-            <h1 className="font-display text-xl font-bold">Atendimentos</h1>
+          <div className="p-3 border-b border-border space-y-3">
+            <h1 className="font-display text-lg font-bold">Atendimentos</h1>
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="chat" className="gap-2">
-                  <Users className="h-4 w-4" />
+              <TabsList className="grid w-full grid-cols-3 h-8">
+                <TabsTrigger value="chat" className="gap-1 text-xs h-7">
+                  <Users className="h-3 w-3" />
                   Chat
-                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("chat")}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="ai" className="gap-2">
-                  <Bot className="h-4 w-4" />
+                <TabsTrigger value="ai" className="gap-1 text-xs h-7">
+                  <Bot className="h-3 w-3" />
                   IA
-                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("ai")}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="queue" className="gap-2">
-                  <Inbox className="h-4 w-4" />
+                <TabsTrigger value="queue" className="gap-1 text-xs h-7">
+                  <Inbox className="h-3 w-3" />
                   Fila
-                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("queue")}
                   </Badge>
                 </TabsTrigger>
@@ -1077,36 +1077,46 @@ export default function Conversations() {
                     key={conv.id}
                     onClick={() => handleSelectConversation(conv.id)}
                     className={cn(
-                      "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted",
+                      "p-2 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted",
                       selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20"
                     )}
                   >
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <span className="text-sm font-semibold text-primary">
+                    <div className="flex items-start gap-2">
+                      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-semibold text-primary">
                           {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium truncate">{conv.name}</span>
-                          <span className="text-xs text-muted-foreground flex-shrink-0">{conv.time}</span>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-sm font-medium truncate">{conv.name}</span>
+                          <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                         </div>
-                        <p className="text-sm text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
-                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <p className="text-[11px] text-muted-foreground truncate">{conv.phone}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
+                        <div className="flex items-center gap-1 mt-1.5 flex-wrap">
                           <Badge
                             variant="outline"
                             className={cn(
-                              "text-xs",
+                              "text-[10px] h-5 px-1.5",
                               conv.handler === "ai"
                                 ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
                                 : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
                             )}
                           >
-                            {conv.handler === "ai" ? <Bot className="h-3 w-3 mr-1" /> : <UserCheck className="h-3 w-3 mr-1" />}
-                            {conv.handler === "ai" ? "IA" : conv.assignedTo || "Humano"}
+                            {conv.handler === "ai" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <UserCheck className="h-2.5 w-2.5 mr-0.5" />}
+                            {conv.handler === "ai" ? "IA" : (conv.assignedTo?.split(" ")[0] || "Humano")}
                           </Badge>
-                          {conv.status && <Badge variant="outline" className="text-xs">{conv.status.replace('_', ' ')}</Badge>}
+                          {conv.status && (
+                            <Badge variant="outline" className="text-[10px] h-5 px-1.5">
+                              {conv.status.replace(/_/g, ' ')}
+                            </Badge>
+                          )}
+                          {conv.tags.slice(0, 2).map((tag, i) => (
+                            <Badge key={i} variant="secondary" className="text-[10px] h-5 px-1.5 truncate max-w-[60px]">
+                              {tag}
+                            </Badge>
+                          ))}
                           {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                         </div>
                       </div>
@@ -1258,30 +1268,30 @@ export default function Conversations() {
         {/* Conversations List Panel */}
         <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="bg-card flex flex-col min-h-0">
         {/* Header */}
-        <div className="p-4 border-b border-border space-y-4">
-          <h1 className="font-display text-xl font-bold">Atendimentos</h1>
+        <div className="p-3 border-b border-border space-y-3">
+          <h1 className="font-display text-lg font-bold">Atendimentos</h1>
           
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="chat" className="gap-2">
-                <Users className="h-4 w-4" />
+            <TabsList className="grid w-full grid-cols-3 h-8">
+              <TabsTrigger value="chat" className="gap-1 text-xs h-7">
+                <Users className="h-3 w-3" />
                 Chat
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("chat")}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="ai" className="gap-2">
-                <Bot className="h-4 w-4" />
+              <TabsTrigger value="ai" className="gap-1 text-xs h-7">
+                <Bot className="h-3 w-3" />
                 IA
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("ai")}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="queue" className="gap-2">
-                <Inbox className="h-4 w-4" />
+              <TabsTrigger value="queue" className="gap-1 text-xs h-7">
+                <Inbox className="h-3 w-3" />
                 Fila
-                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("queue")}
                 </Badge>
               </TabsTrigger>
@@ -1317,52 +1327,47 @@ export default function Conversations() {
                   key={conv.id}
                   onClick={() => handleSelectConversation(conv.id)}
                   className={cn(
-                    "p-3 rounded-lg cursor-pointer transition-all duration-200",
-                    "hover:bg-muted",
+                    "p-2 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted",
                     selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20"
                   )}
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-semibold text-primary">
+                  <div className="flex items-start gap-2">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-xs font-semibold text-primary">
                         {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium truncate">{conv.name}</span>
-                        <span className="text-xs text-muted-foreground flex-shrink-0">
-                          {conv.time}
-                        </span>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-sm font-medium truncate">{conv.name}</span>
+                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
-                      <p className="text-sm text-muted-foreground truncate mt-0.5">
-                        {conv.lastMessage}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <p className="text-[11px] text-muted-foreground truncate">{conv.phone}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-xs",
+                            "text-[10px] h-5 px-1.5",
                             conv.handler === "ai"
                               ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
                               : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
                           )}
                         >
-                          {conv.handler === "ai" ? (
-                            <Bot className="h-3 w-3 mr-1" />
-                          ) : (
-                            <UserCheck className="h-3 w-3 mr-1" />
-                          )}
-                          {conv.handler === "ai" ? "IA" : conv.assignedTo || "Humano"}
+                          {conv.handler === "ai" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <UserCheck className="h-2.5 w-2.5 mr-0.5" />}
+                          {conv.handler === "ai" ? "IA" : (conv.assignedTo?.split(" ")[0] || "Humano")}
                         </Badge>
                         {conv.status && (
-                          <Badge variant="outline" className="text-xs">
-                            {conv.status.replace('_', ' ')}
+                          <Badge variant="outline" className="text-[10px] h-5 px-1.5">
+                            {conv.status.replace(/_/g, ' ')}
                           </Badge>
                         )}
-                        {conv.unread > 0 && (
-                          <UnreadBadge count={conv.unread} />
-                        )}
+                        {conv.tags.slice(0, 2).map((tag, i) => (
+                          <Badge key={i} variant="secondary" className="text-[10px] h-5 px-1.5 truncate max-w-[60px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                        {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                       </div>
                     </div>
                   </div>
