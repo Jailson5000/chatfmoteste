@@ -29,6 +29,7 @@ import { ChatDropZone } from "@/components/conversations/ChatDropZone";
 import { MessageSearch, highlightText } from "@/components/conversations/MessageSearch";
 import { ReplyPreview } from "@/components/conversations/ReplyPreview";
 import { TemplatePopup } from "@/components/conversations/TemplatePopup";
+import { ContactStatusTags } from "@/components/conversations/ContactStatusTags";
 import { UnreadBadge } from "@/components/conversations/UnreadBadge";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
 import { useTemplates, Template } from "@/hooks/useTemplates";
@@ -518,9 +519,9 @@ export default function Conversations() {
         ));
       } else {
         // Normal message - send to WhatsApp
-        // If NOT in pontual mode and handler is AI, switch to human
+        // If NOT in pontual mode and handler is AI, switch to human FIRST (await!)
         if (!wasPontualMode && selectedConversation.current_handler === "ai") {
-          transferHandler.mutate({
+          await transferHandler.mutateAsync({
             conversationId: selectedConversationId,
             handlerType: "human",
           });
@@ -1128,7 +1129,8 @@ export default function Conversations() {
         {selectedConversation ? (
           <>
             {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between flex-shrink-0">
+            <div className="p-4 border-b border-border flex-shrink-0">
+              <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"
@@ -1301,6 +1303,14 @@ export default function Conversations() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+              </div>
+              {/* Contact Status and Tags */}
+              <ContactStatusTags
+                clientId={selectedConversation.client_id}
+                conversationId={selectedConversation.id}
+                contactPhone={selectedConversation.contact_phone}
+                contactName={selectedConversation.contact_name}
+              />
             </div>
 
             {/* Message Search Bar */}
