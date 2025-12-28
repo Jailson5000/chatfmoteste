@@ -1110,6 +1110,7 @@ export type Database = {
           api_key_encrypted: boolean | null
           api_url: string
           created_at: string
+          default_department_id: string | null
           id: string
           instance_id: string | null
           instance_name: string
@@ -1125,6 +1126,7 @@ export type Database = {
           api_key_encrypted?: boolean | null
           api_url: string
           created_at?: string
+          default_department_id?: string | null
           id?: string
           instance_id?: string | null
           instance_name: string
@@ -1140,6 +1142,7 @@ export type Database = {
           api_key_encrypted?: boolean | null
           api_url?: string
           created_at?: string
+          default_department_id?: string | null
           id?: string
           instance_id?: string | null
           instance_name?: string
@@ -1151,6 +1154,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "whatsapp_instances_default_department_id_fkey"
+            columns: ["default_department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "whatsapp_instances_law_firm_id_fkey"
             columns: ["law_firm_id"]
