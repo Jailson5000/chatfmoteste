@@ -1,20 +1,29 @@
+import { useState, useMemo } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Phone, 
   Mail, 
@@ -30,12 +39,15 @@ import {
   ChevronRight,
   Pencil,
   ArrowRightLeft,
-  X
+  X,
+  Check,
+  Users,
+  CircleDot,
+  Search,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
 
 interface ContactDetailsPanelProps {
   conversation: {
@@ -47,22 +59,28 @@ interface ContactDetailsPanelProps {
     tags: string[] | null;
     created_at: string;
     last_message_at: string | null;
+    assigned_to?: string | null;
     client?: {
+      id?: string;
       email?: string | null;
       address?: string | null;
       document?: string | null;
       notes?: string | null;
+      custom_status_id?: string | null;
     } | null;
     assigned_profile?: { full_name: string } | null;
     whatsapp_instance?: { instance_name: string; phone_number?: string | null } | null;
   } | null;
   departments: Array<{ id: string; name: string; color: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
+  statuses: Array<{ id: string; name: string; color: string }>;
   members: Array<{ id: string; full_name: string }>;
   onClose: () => void;
   onEditName: () => void;
-  onTransferHandler: (handler: 'ai' | 'human') => void;
+  onTransferHandler: (handler: 'ai' | 'human', assignedTo?: string | null) => void;
   onChangeDepartment: (deptId: string | null) => void;
+  onChangeStatus?: (statusId: string | null) => void;
+  onChangeTags?: (tagNames: string[]) => void;
 }
 
 function getInitials(name: string | null): string {
@@ -76,15 +94,46 @@ export function ContactDetailsPanel({
   conversation,
   departments,
   tags,
+  statuses,
   members,
   onClose,
   onEditName,
   onTransferHandler,
   onChangeDepartment,
+  onChangeStatus,
+  onChangeTags,
 }: ContactDetailsPanelProps) {
-  const [infoOpen, setInfoOpen] = useState(true);
-  const [actionsOpen, setActionsOpen] = useState(true);
-  const [tagsOpen, setTagsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
+  const [attendantSearch, setAttendantSearch] = useState("");
+
+  // Get current status
+  const currentStatus = useMemo(() => {
+    if (!conversation?.client?.custom_status_id) return null;
+    return statuses.find(s => s.id === conversation.client?.custom_status_id);
+  }, [conversation?.client?.custom_status_id, statuses]);
+
+  // Get current department
+  const currentDepartment = useMemo(() => {
+    if (!conversation?.department_id) return null;
+    return departments.find(d => d.id === conversation.department_id);
+  }, [conversation?.department_id, departments]);
+
+  // Get current tags
+  const conversationTags = useMemo(() => {
+    if (!conversation?.tags) return [];
+    return (conversation.tags || [])
+      .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
+      .filter(Boolean) as Array<{ id: string; name: string; color: string }>;
+  }, [conversation?.tags, tags]);
+
+  // Filtered members
+  const filteredMembers = useMemo(() => {
+    if (!attendantSearch) return members;
+    return members.filter(m => 
+      m.full_name.toLowerCase().includes(attendantSearch.toLowerCase())
+    );
+  }, [members, attendantSearch]);
 
   if (!conversation) {
     return (
@@ -94,16 +143,23 @@ export function ContactDetailsPanel({
     );
   }
 
-  const currentDepartment = departments.find(d => d.id === conversation.department_id);
-  const conversationTags = (conversation.tags || [])
-    .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
-    .filter(Boolean);
+  const handleTagToggle = (tag: { id: string; name: string }) => {
+    if (!onChangeTags) return;
+    
+    const currentTagNames = conversation.tags || [];
+    const hasTag = currentTagNames.includes(tag.name);
+    
+    if (hasTag) {
+      onChangeTags(currentTagNames.filter(t => t !== tag.name));
+    } else {
+      onChangeTags([...currentTagNames, tag.name]);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-card">
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
-        <h3 className="font-semibold text-sm">Detalhes do Contato</h3>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
@@ -113,18 +169,18 @@ export function ContactDetailsPanel({
         <div className="p-4 space-y-4">
           {/* Contact Card */}
           <div className="text-center space-y-3">
-            <Avatar className="h-16 w-16 mx-auto">
+            <Avatar className="h-20 w-20 mx-auto">
               <AvatarImage 
                 src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} 
               />
-              <AvatarFallback className="bg-primary/10 text-primary text-lg font-medium">
+              <AvatarFallback className="bg-primary/10 text-primary text-xl font-medium">
                 {getInitials(conversation.contact_name)}
               </AvatarFallback>
             </Avatar>
             
             <div>
               <div className="flex items-center justify-center gap-1">
-                <h4 className="font-semibold">
+                <h4 className="font-semibold text-lg">
                   {conversation.contact_name || conversation.contact_phone || "Sem nome"}
                 </h4>
                 <Button 
@@ -136,44 +192,243 @@ export function ContactDetailsPanel({
                   <Pencil className="h-3 w-3" />
                 </Button>
               </div>
-              <p className="text-sm text-muted-foreground flex items-center justify-center gap-1">
+              <p className="text-sm text-muted-foreground flex items-center justify-center gap-1 mt-1">
                 <Phone className="h-3 w-3" />
                 {conversation.contact_phone || "---"}
               </p>
             </div>
-
-            {/* Handler Badge */}
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-xs",
-                conversation.current_handler === "ai"
-                  ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                  : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
-              )}
-            >
-              {conversation.current_handler === "ai" ? (
-                <Bot className="h-3 w-3 mr-1" />
-              ) : (
-                <User className="h-3 w-3 mr-1" />
-              )}
-              {conversation.current_handler === "ai" 
-                ? "Atendimento IA" 
-                : `${conversation.assigned_profile?.full_name || 'Humano'}`
-              }
-            </Badge>
           </div>
 
           <Separator />
 
-          {/* Info Section */}
+          {/* Atendimento Section */}
+          <div className="space-y-3">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Atendimento
+            </h5>
+
+            {/* Handler/Attendant Selector */}
+            <div className="space-y-2">
+              <Popover open={attendantPopoverOpen} onOpenChange={setAttendantPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={attendantPopoverOpen}
+                    className="w-full justify-start h-auto py-2"
+                  >
+                    <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {conversation.current_handler === "ai" ? (
+                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0">
+                          <Bot className="h-3 w-3 mr-1" />
+                          IA
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">
+                          <User className="h-3 w-3 mr-1" />
+                          {conversation.assigned_profile?.full_name || "Humano"}
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground ml-auto">Buscar responsável...</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[300px] p-0" align="start">
+                  <Command>
+                    <CommandInput 
+                      placeholder="Buscar responsável..." 
+                      value={attendantSearch}
+                      onValueChange={setAttendantSearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>Nenhum atendente encontrado.</CommandEmpty>
+                      <CommandGroup>
+                        {/* AI Option */}
+                        <CommandItem
+                          value="ai"
+                          onSelect={() => {
+                            onTransferHandler("ai", null);
+                            setAttendantPopoverOpen(false);
+                            setAttendantSearch("");
+                          }}
+                          className="flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                              <Bot className="h-4 w-4 text-purple-600" />
+                            </div>
+                            <span>Inteligência Artificial</span>
+                          </div>
+                          {conversation.current_handler === "ai" && (
+                            <Badge variant="secondary" className="text-xs">IA</Badge>
+                          )}
+                          {conversation.current_handler === "ai" && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </CommandItem>
+
+                        {/* Team Members */}
+                        {filteredMembers.map(member => (
+                          <CommandItem
+                            key={member.id}
+                            value={member.full_name}
+                            onSelect={() => {
+                              onTransferHandler("human", member.id);
+                              setAttendantPopoverOpen(false);
+                              setAttendantSearch("");
+                            }}
+                            className="flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-8 w-8">
+                                <AvatarFallback className="text-xs">
+                                  {getInitials(member.full_name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span>{member.full_name}</span>
+                            </div>
+                            {conversation.current_handler === "human" && 
+                             conversation.assigned_to === member.id && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                    <div className="p-2 border-t text-xs text-muted-foreground">
+                      Use ↑↓ para navegar, ↵ para selecionar, Tab para próximo, Esc para fechar
+                    </div>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Propriedades Section */}
+          <div className="space-y-3">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Propriedades
+            </h5>
+
+            {/* Status */}
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <CircleDot className="h-3 w-3" />
+                Status
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {statuses.map(status => {
+                  const isSelected = currentStatus?.id === status.id;
+                  return (
+                    <Badge
+                      key={status.id}
+                      variant="outline"
+                      className={cn(
+                        "cursor-pointer transition-all text-xs",
+                        isSelected 
+                          ? "ring-2 ring-offset-1" 
+                          : "opacity-60 hover:opacity-100"
+                      )}
+                      style={{
+                        borderColor: status.color,
+                        backgroundColor: isSelected ? `${status.color}30` : 'transparent',
+                        color: status.color,
+                      }}
+                      onClick={() => onChangeStatus?.(isSelected ? null : status.id)}
+                    >
+                      {status.name}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Tags */}
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Tag className="h-3 w-3" />
+                Etiquetas
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {tags.map(tag => {
+                  const isSelected = conversationTags.some(t => t.id === tag.id);
+                  return (
+                    <Badge
+                      key={tag.id}
+                      variant="outline"
+                      className={cn(
+                        "cursor-pointer transition-all text-xs",
+                        isSelected 
+                          ? "ring-2 ring-offset-1" 
+                          : "opacity-60 hover:opacity-100"
+                      )}
+                      style={{
+                        borderColor: tag.color,
+                        backgroundColor: isSelected ? `${tag.color}30` : 'transparent',
+                        color: tag.color,
+                      }}
+                      onClick={() => handleTagToggle(tag)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  );
+                })}
+                {tags.length === 0 && (
+                  <span className="text-xs text-muted-foreground">Nenhuma etiqueta cadastrada</span>
+                )}
+              </div>
+            </div>
+
+            {/* Department */}
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                <Folder className="h-3 w-3" />
+                Departamento
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {departments.map(dept => {
+                  const isSelected = currentDepartment?.id === dept.id;
+                  return (
+                    <Badge
+                      key={dept.id}
+                      variant="outline"
+                      className={cn(
+                        "cursor-pointer transition-all text-xs",
+                        isSelected 
+                          ? "ring-2 ring-offset-1" 
+                          : "opacity-60 hover:opacity-100"
+                      )}
+                      style={{
+                        borderColor: dept.color,
+                        backgroundColor: isSelected ? `${dept.color}30` : 'transparent',
+                        color: dept.color,
+                      }}
+                      onClick={() => onChangeDepartment(isSelected ? null : dept.id)}
+                    >
+                      {dept.name}
+                    </Badge>
+                  );
+                })}
+                {departments.length === 0 && (
+                  <span className="text-xs text-muted-foreground">Nenhum departamento cadastrado</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Ver mais - Info Section */}
           <Collapsible open={infoOpen} onOpenChange={setInfoOpen}>
             <CollapsibleTrigger asChild>
               <Button 
                 variant="ghost" 
-                className="w-full justify-between h-9 px-2"
+                className="w-full justify-between h-9 px-2 text-muted-foreground"
               >
-                <span className="text-sm font-medium">Informações</span>
+                <span className="text-sm">Ver mais</span>
                 {infoOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               </Button>
             </CollapsibleTrigger>
@@ -228,140 +483,19 @@ export function ContactDetailsPanel({
                   </span>
                 </div>
               )}
-            </CollapsibleContent>
-          </Collapsible>
 
-          <Separator />
-
-          {/* Actions Section */}
-          <Collapsible open={actionsOpen} onOpenChange={setActionsOpen}>
-            <CollapsibleTrigger asChild>
-              <Button 
-                variant="ghost" 
-                className="w-full justify-between h-9 px-2"
-              >
-                <span className="text-sm font-medium">Ações</span>
-                {actionsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-3 pt-2">
-              {/* Department */}
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Folder className="h-3 w-3" />
-                  Departamento
-                </label>
-                <Select 
-                  value={conversation.department_id || "none"} 
-                  onValueChange={(v) => onChangeDepartment(v === "none" ? null : v)}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Selecionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sem departamento</SelectItem>
-                    {departments.map(dept => (
-                      <SelectItem key={dept.id} value={dept.id}>
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-2 h-2 rounded-full" 
-                            style={{ backgroundColor: dept.color }} 
-                          />
-                          {dept.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Transfer Handler */}
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <ArrowRightLeft className="h-3 w-3" />
-                  Transferir atendimento
-                </label>
-                <div className="flex gap-2">
-                  <Button
-                    variant={conversation.current_handler === "ai" ? "secondary" : "outline"}
-                    size="sm"
-                    className="flex-1 h-9"
-                    onClick={() => onTransferHandler("ai")}
-                    disabled={conversation.current_handler === "ai"}
-                  >
-                    <Bot className="h-4 w-4 mr-1" />
-                    IA
-                  </Button>
-                  <Button
-                    variant={conversation.current_handler === "human" ? "secondary" : "outline"}
-                    size="sm"
-                    className="flex-1 h-9"
-                    onClick={() => onTransferHandler("human")}
-                    disabled={conversation.current_handler === "human"}
-                  >
-                    <User className="h-4 w-4 mr-1" />
-                    Humano
-                  </Button>
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
-          <Separator />
-
-          {/* Tags Section */}
-          <Collapsible open={tagsOpen} onOpenChange={setTagsOpen}>
-            <CollapsibleTrigger asChild>
-              <Button 
-                variant="ghost" 
-                className="w-full justify-between h-9 px-2"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Etiquetas</span>
-                  {conversationTags.length > 0 && (
-                    <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                      {conversationTags.length}
-                    </Badge>
-                  )}
-                </div>
-                {tagsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pt-2">
-              {conversationTags.length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                  {conversationTags.map((tag, i) => (
-                    <Badge 
-                      key={i}
-                      variant="outline"
-                      className="text-xs"
-                      style={{ 
-                        borderColor: tag!.color, 
-                        backgroundColor: `${tag!.color}20`,
-                        color: tag!.color 
-                      }}
-                    >
-                      <Tag className="h-3 w-3 mr-1" />
-                      {tag!.name}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Nenhuma etiqueta</p>
+              {/* Notes */}
+              {conversation.client?.notes && (
+                <>
+                  <Separator className="my-2" />
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-medium">Observações</h4>
+                    <p className="text-sm text-muted-foreground">{conversation.client.notes}</p>
+                  </div>
+                </>
               )}
             </CollapsibleContent>
           </Collapsible>
-
-          {/* Notes */}
-          {conversation.client?.notes && (
-            <>
-              <Separator />
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium">Observações</h4>
-                <p className="text-sm text-muted-foreground">{conversation.client.notes}</p>
-              </div>
-            </>
-          )}
         </div>
       </ScrollArea>
     </div>
