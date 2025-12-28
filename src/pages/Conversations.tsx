@@ -25,6 +25,9 @@ import {
   Zap,
   MessageCircle,
   Lock,
+  User,
+  PanelRightOpen,
+  PanelRightClose,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -64,8 +67,10 @@ import {
 import { ConversationFilters } from "@/components/conversations/ConversationFilters";
 import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
+import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { useConversations } from "@/hooks/useConversations";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
@@ -121,7 +126,8 @@ interface Message {
 
 export default function Conversations() {
   const { user } = useAuth();
-  const { conversations, isLoading, transferHandler, updateConversation } = useConversations();
+  const { conversations, isLoading, transferHandler, updateConversation, updateConversationDepartment, updateConversationTags, updateClientStatus } = useConversations();
+  const { members: teamMembers } = useTeamMembers();
   const { departments } = useDepartments();
   const { tags } = useTags();
   const { statuses } = useCustomStatuses();
@@ -185,6 +191,9 @@ export default function Conversations() {
   
   // Message filter (all, internal, external)
   const [messageFilter, setMessageFilter] = useState<"all" | "internal" | "external">("all");
+  
+  // Details panel state
+  const [showDetailsPanel, setShowDetailsPanel] = useState(true);
   
   // User profile for signature
   const [userProfile, setUserProfile] = useState<{ full_name: string } | null>(null);
@@ -1020,11 +1029,39 @@ export default function Conversations() {
     }
   };
 
-  const handleTransferHandler = (handler: "ai" | "human") => {
+  const handleTransferHandler = (handler: "ai" | "human", assignedTo?: string | null) => {
     if (selectedConversation) {
       transferHandler.mutate({
         conversationId: selectedConversation.id,
         handlerType: handler,
+        assignedTo: assignedTo,
+      });
+    }
+  };
+
+  const handleChangeDepartment = (departmentId: string | null) => {
+    if (selectedConversation) {
+      updateConversationDepartment.mutate({
+        conversationId: selectedConversation.id,
+        departmentId,
+      });
+    }
+  };
+
+  const handleChangeStatus = (statusId: string | null) => {
+    if (selectedConversation?.client_id) {
+      updateClientStatus.mutate({
+        clientId: selectedConversation.client_id,
+        statusId,
+      });
+    }
+  };
+
+  const handleChangeTags = (tagNames: string[]) => {
+    if (selectedConversation) {
+      updateConversationTags.mutate({
+        conversationId: selectedConversation.id,
+        tags: tagNames,
       });
     }
   };
@@ -1457,7 +1494,7 @@ export default function Conversations() {
         <ResizableHandle withHandle />
 
         {/* Chat Area Panel */}
-        <ResizablePanel defaultSize={75} minSize={50} className="flex flex-col min-h-0 min-w-0">
+        <ResizablePanel defaultSize={showDetailsPanel ? 53 : 75} minSize={40} className="flex flex-col min-h-0 min-w-0">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1649,6 +1686,26 @@ export default function Conversations() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+
+                {/* Toggle Details Panel */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      onClick={() => setShowDetailsPanel(!showDetailsPanel)}
+                    >
+                      {showDetailsPanel ? (
+                        <PanelRightClose className="h-5 w-5" />
+                      ) : (
+                        <PanelRightOpen className="h-5 w-5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {showDetailsPanel ? "Fechar painel" : "Abrir detalhes"}
+                  </TooltipContent>
+                </Tooltip>
               </div>
               </div>
               {/* Contact Status and Tags */}
@@ -2024,6 +2081,35 @@ export default function Conversations() {
         </div>
           </ChatDropZone>
         </ResizablePanel>
+
+        {/* Contact Details Panel */}
+        {showDetailsPanel && selectedConversation && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={22} minSize={18} maxSize={30} className="bg-card">
+              <ContactDetailsPanel
+                conversation={{
+                  ...selectedConversation,
+                  assigned_to: selectedConversation.assigned_to,
+                  client: selectedConversation.client_id ? {
+                    id: selectedConversation.client_id,
+                    custom_status_id: (selectedConversation as any).client?.custom_status_id,
+                  } : null,
+                }}
+                departments={departments.map(d => ({ id: d.id, name: d.name, color: d.color }))}
+                tags={tags.map(t => ({ id: t.id, name: t.name, color: t.color }))}
+                statuses={statuses.map(s => ({ id: s.id, name: s.name, color: s.color }))}
+                members={teamMembers.map(m => ({ id: m.id, full_name: m.full_name }))}
+                onClose={() => setShowDetailsPanel(false)}
+                onEditName={openEditName}
+                onTransferHandler={handleTransferHandler}
+                onChangeDepartment={handleChangeDepartment}
+                onChangeStatus={handleChangeStatus}
+                onChangeTags={handleChangeTags}
+              />
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
 
       {/* Edit Name Dialog */}

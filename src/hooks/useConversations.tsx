@@ -237,6 +237,49 @@ export function useConversations() {
     },
   });
 
+  const updateConversationTags = useMutation({
+    mutationFn: async ({ conversationId, tags }: { conversationId: string; tags: string[] }) => {
+      const { error } = await supabase
+        .from("conversations")
+        .update({ tags })
+        .eq("id", conversationId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao atualizar etiquetas",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateClientStatus = useMutation({
+    mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
+      const { error } = await supabase
+        .from("clients")
+        .update({ custom_status_id: statusId })
+        .eq("id", clientId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao atualizar status",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     conversations,
     isLoading,
@@ -244,6 +287,8 @@ export function useConversations() {
     updateConversation,
     updateConversationStatus,
     updateConversationDepartment,
+    updateConversationTags,
+    updateClientStatus,
     transferHandler,
   };
 }
