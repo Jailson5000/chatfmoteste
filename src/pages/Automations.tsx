@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Slider } from "@/components/ui/slider";
-import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check, RefreshCw } from "lucide-react";
+import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -55,6 +55,8 @@ export default function Automations() {
   const [editedTemperature, setEditedTemperature] = useState(0.7);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   if (!isAdmin) {
     return (
@@ -216,6 +218,53 @@ export default function Automations() {
 
   const getTriggerLabel = (type: string) => {
     return TRIGGER_TYPES.find(t => t.value === type)?.label || type;
+  };
+
+  const handleTestConnection = async (webhookUrl: string) => {
+    setIsTestingConnection(true);
+    setConnectionStatus('idle');
+    
+    try {
+      const testPayload = {
+        event: 'connection_test',
+        timestamp: new Date().toISOString(),
+        message: 'Teste de conexão do FMO Inbox',
+      };
+
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(testPayload),
+      });
+
+      if (response.ok) {
+        setConnectionStatus('success');
+        toast({
+          title: "Conexão bem-sucedida!",
+          description: "O webhook do N8N está respondendo corretamente.",
+        });
+      } else {
+        setConnectionStatus('error');
+        toast({
+          title: "Erro na conexão",
+          description: `O webhook retornou status ${response.status}. Verifique a URL e se o workflow está ativo.`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      setConnectionStatus('error');
+      toast({
+        title: "Falha na conexão",
+        description: "Não foi possível conectar ao webhook. Verifique a URL e tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTestingConnection(false);
+      // Reset status after 3 seconds
+      setTimeout(() => setConnectionStatus('idle'), 3000);
+    }
   };
 
   const hasPromptChanges = selectedAutomation && (
@@ -514,6 +563,7 @@ export default function Automations() {
                         variant="outline"
                         size="icon"
                         onClick={() => handleCopyWebhook(selectedAutomation.webhook_url, selectedAutomation.id)}
+                        title="Copiar URL"
                       >
                         {copiedId === selectedAutomation.id ? (
                           <Check className="h-4 w-4 text-green-500" />
@@ -521,7 +571,34 @@ export default function Automations() {
                           <Copy className="h-4 w-4" />
                         )}
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleTestConnection(selectedAutomation.webhook_url)}
+                        disabled={isTestingConnection}
+                        title="Testar conexão"
+                        className={
+                          connectionStatus === 'success' 
+                            ? 'border-green-500 text-green-500' 
+                            : connectionStatus === 'error' 
+                              ? 'border-destructive text-destructive' 
+                              : ''
+                        }
+                      >
+                        {isTestingConnection ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : connectionStatus === 'success' ? (
+                          <Wifi className="h-4 w-4 text-green-500" />
+                        ) : connectionStatus === 'error' ? (
+                          <WifiOff className="h-4 w-4" />
+                        ) : (
+                          <Wifi className="h-4 w-4" />
+                        )}
+                      </Button>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      Clique no ícone de Wi-Fi para testar a conexão com o webhook
+                    </p>
                   </div>
 
                   {/* Prompt Editor */}
