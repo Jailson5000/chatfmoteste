@@ -84,6 +84,12 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type ConversationTab = "chat" | "ai" | "queue";
 
@@ -446,8 +452,14 @@ export default function Conversations() {
     });
   }, [messages, scrollMessagesToBottom]);
 
-  // Map conversations for display
+  // Map conversations for display with tag colors
   const mappedConversations = useMemo(() => {
+    // Create a map of tag names to their colors
+    const tagColorMap = tags.reduce((acc, tag) => {
+      acc[tag.name] = tag.color;
+      return acc;
+    }, {} as Record<string, string>);
+
     return conversations.map(conv => ({
       id: conv.id,
       name: conv.contact_name || conv.contact_phone || "Sem nome",
@@ -459,11 +471,14 @@ export default function Conversations() {
       unread: unreadCounts[conv.id] || 0,
       handler: conv.current_handler as 'ai' | 'human',
       status: conv.status,
-      tags: conv.tags || [],
+      tags: (conv.tags || []).map(tagName => ({
+        name: tagName,
+        color: tagColorMap[tagName] || '#6366f1'
+      })),
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.instance_name || null,
     }));
-  }, [conversations, unreadCounts]);
+  }, [conversations, unreadCounts, tags]);
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
@@ -484,7 +499,7 @@ export default function Conversations() {
 
       // Tags filter
       if (conversationFilters.tags.length > 0) {
-        const hasMatchingTag = conv.tags.some(t => conversationFilters.tags.includes(t));
+        const hasMatchingTag = conv.tags.some(t => conversationFilters.tags.includes(t.name));
         if (!hasMatchingTag) return false;
       }
 
@@ -1021,6 +1036,7 @@ export default function Conversations() {
   }
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="h-[calc(100vh-64px)] flex overflow-hidden min-h-0">
       {/* Mobile: show list or chat */}
       <div className={cn("md:hidden w-full", showMobileChat && "hidden")}>
@@ -1113,9 +1129,24 @@ export default function Conversations() {
                             </Badge>
                           )}
                           {conv.tags.slice(0, 2).map((tag, i) => (
-                            <Badge key={i} variant="secondary" className="text-[10px] h-5 px-1.5 truncate max-w-[60px]">
-                              {tag}
-                            </Badge>
+                            <Tooltip key={i}>
+                              <TooltipTrigger asChild>
+                                <Badge 
+                                  variant="outline" 
+                                  className="text-[10px] h-5 px-1.5 truncate max-w-[60px] cursor-default"
+                                  style={{ 
+                                    borderColor: tag.color, 
+                                    backgroundColor: `${tag.color}20`,
+                                    color: tag.color 
+                                  }}
+                                >
+                                  {tag.name}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{tag.name}</p>
+                              </TooltipContent>
+                            </Tooltip>
                           ))}
                           {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                         </div>
@@ -1363,9 +1394,24 @@ export default function Conversations() {
                           </Badge>
                         )}
                         {conv.tags.slice(0, 2).map((tag, i) => (
-                          <Badge key={i} variant="secondary" className="text-[10px] h-5 px-1.5 truncate max-w-[60px]">
-                            {tag}
-                          </Badge>
+                          <Tooltip key={i}>
+                            <TooltipTrigger asChild>
+                              <Badge 
+                                variant="outline" 
+                                className="text-[10px] h-5 px-1.5 truncate max-w-[60px] cursor-default"
+                                style={{ 
+                                  borderColor: tag.color, 
+                                  backgroundColor: `${tag.color}20`,
+                                  color: tag.color 
+                                }}
+                              >
+                                {tag.name}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{tag.name}</p>
+                            </TooltipContent>
+                          </Tooltip>
                         ))}
                         {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                       </div>
@@ -1985,5 +2031,6 @@ export default function Conversations() {
         isSending={isSending}
       />
     </div>
+    </TooltipProvider>
   );
 }

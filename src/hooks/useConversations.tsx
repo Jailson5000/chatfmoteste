@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
+import { useEffect } from "react";
 
 type Conversation = Tables<"conversations">;
 
@@ -78,6 +79,47 @@ export function useConversations() {
     },
   });
 
+  // Real-time subscription for conversations
+  useEffect(() => {
+    const conversationsChannel = supabase
+      .channel('conversations-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversations'
+        },
+        () => {
+          // Invalidate and refetch conversations
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      )
+      .subscribe();
+
+    // Also listen for new messages to update last_message
+    const messagesChannel = supabase
+      .channel('messages-for-conversations')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages'
+        },
+        () => {
+          // Refetch conversations to update last_message
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(conversationsChannel);
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [queryClient]);
+
   const updateConversation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Conversation> & { id: string }) => {
       const { error } = await supabase
@@ -146,7 +188,6 @@ export function useConversations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      // Toast notification removed - silent update
     },
     onError: (error) => {
       toast({
@@ -168,7 +209,6 @@ export function useConversations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      // Toast notification removed - silent update
     },
     onError: (error) => {
       toast({
