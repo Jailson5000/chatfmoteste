@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAutomations, Automation, CreateAutomationParams, UpdateAutomationParams } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Slider } from "@/components/ui/slider";
-import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Loader2, Plus, Trash2, Edit, Zap, Bot, Brain, Save, Copy, Check, RefreshCw, Wifi, WifiOff, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -24,6 +25,7 @@ const TRIGGER_TYPES = [
 ];
 
 export default function AIAgents() {
+  const navigate = useNavigate();
   const { isAdmin, loading: roleLoading } = useUserRole();
   const { automations, isLoading, createAutomation, updateAutomation, deleteAutomation, toggleAutomation } = useAutomations();
   const { toast } = useToast();
@@ -357,8 +359,21 @@ export default function AIAgents() {
                           className="h-7 w-7"
                           onClick={(e) => {
                             e.stopPropagation();
+                            navigate(`/ai-agents/${automation.id}/edit`);
+                          }}
+                          title="Editar agente"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             openEditDialog(automation);
                           }}
+                          title="Configurações rápidas"
                         >
                           <Edit className="h-3 w-3" />
                         </Button>

@@ -14,6 +14,7 @@ import Settings from "./pages/Settings";
 import Contacts from "./pages/Contacts";
 import Connections from "./pages/Connections";
 import AIAgents from "./pages/AIAgents";
+import AIAgentEdit from "./pages/AIAgentEdit";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
@@ -107,6 +108,17 @@ const App = () => (
             }
           >
             <Route index element={<AIAgents />} />
+          </Route>
+          
+          <Route
+            path="/ai-agents/:id/edit"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<AIAgentEdit />} />
           </Route>
           
           <Route
