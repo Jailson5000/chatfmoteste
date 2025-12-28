@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Input } from "@/components/ui/input";
 import {
   Collapsible,
   CollapsibleContent,
@@ -23,7 +22,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Phone, 
   Mail, 
@@ -38,12 +36,10 @@ import {
   ChevronDown,
   ChevronRight,
   Pencil,
-  ArrowRightLeft,
   X,
   Check,
   Users,
   CircleDot,
-  Search,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -106,6 +102,11 @@ export function ContactDetailsPanel({
   const [infoOpen, setInfoOpen] = useState(false);
   const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
   const [attendantSearch, setAttendantSearch] = useState("");
+  
+  // Collapsible states for properties
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [departmentOpen, setDepartmentOpen] = useState(false);
 
   // Get current status
   const currentStatus = useMemo(() => {
@@ -119,7 +120,7 @@ export function ContactDetailsPanel({
     return departments.find(d => d.id === conversation.department_id);
   }, [conversation?.department_id, departments]);
 
-  // Get current tags
+  // Get current tags (max 4)
   const conversationTags = useMemo(() => {
     if (!conversation?.tags) return [];
     return (conversation.tags || [])
@@ -152,8 +153,22 @@ export function ContactDetailsPanel({
     if (hasTag) {
       onChangeTags(currentTagNames.filter(t => t !== tag.name));
     } else {
+      // Max 4 tags
+      if (currentTagNames.length >= 4) return;
       onChangeTags([...currentTagNames, tag.name]);
     }
+  };
+
+  const handleStatusSelect = (statusId: string) => {
+    const isSelected = currentStatus?.id === statusId;
+    onChangeStatus?.(isSelected ? null : statusId);
+    setStatusOpen(false);
+  };
+
+  const handleDepartmentSelect = (deptId: string) => {
+    const isSelected = currentDepartment?.id === deptId;
+    onChangeDepartment(isSelected ? null : deptId);
+    setDepartmentOpen(false);
   };
 
   return (
@@ -261,9 +276,6 @@ export function ContactDetailsPanel({
                             <span>Inteligência Artificial</span>
                           </div>
                           {conversation.current_handler === "ai" && (
-                            <Badge variant="secondary" className="text-xs">IA</Badge>
-                          )}
-                          {conversation.current_handler === "ai" && (
                             <Check className="h-4 w-4 text-primary" />
                           )}
                         </CommandItem>
@@ -297,7 +309,7 @@ export function ContactDetailsPanel({
                       </CommandGroup>
                     </CommandList>
                     <div className="p-2 border-t text-xs text-muted-foreground">
-                      Use ↑↓ para navegar, ↵ para selecionar, Tab para próximo, Esc para fechar
+                      Use ↑↓ para navegar, ↵ para selecionar, Esc para fechar
                     </div>
                   </Command>
                 </PopoverContent>
@@ -313,13 +325,36 @@ export function ContactDetailsPanel({
               Propriedades
             </h5>
 
-            {/* Status */}
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <CircleDot className="h-3 w-3" />
-                Status
-              </label>
-              <div className="flex flex-wrap gap-1">
+            {/* Status - Collapsible, single selection */}
+            <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
+              <CollapsibleTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <CircleDot className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Status</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {currentStatus ? (
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                        style={{
+                          borderColor: currentStatus.color,
+                          backgroundColor: `${currentStatus.color}30`,
+                          color: currentStatus.color,
+                        }}
+                      >
+                        {currentStatus.name}
+                      </Badge>
+                    ) : null}
+                    {statusOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 pl-6 space-y-1">
                 {statuses.map(status => {
                   const isSelected = currentStatus?.id === status.id;
                   return (
@@ -327,68 +362,133 @@ export function ContactDetailsPanel({
                       key={status.id}
                       variant="outline"
                       className={cn(
-                        "cursor-pointer transition-all text-xs",
+                        "cursor-pointer transition-all text-xs mr-1 mb-1",
                         isSelected 
                           ? "ring-2 ring-offset-1" 
-                          : "opacity-60 hover:opacity-100"
+                          : "opacity-70 hover:opacity-100"
                       )}
                       style={{
                         borderColor: status.color,
                         backgroundColor: isSelected ? `${status.color}30` : 'transparent',
                         color: status.color,
                       }}
-                      onClick={() => onChangeStatus?.(isSelected ? null : status.id)}
+                      onClick={() => handleStatusSelect(status.id)}
                     >
                       {status.name}
                     </Badge>
                   );
                 })}
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Tag className="h-3 w-3" />
-                Etiquetas
-              </label>
-              <div className="flex flex-wrap gap-1">
-                {tags.map(tag => {
-                  const isSelected = conversationTags.some(t => t.id === tag.id);
-                  return (
-                    <Badge
-                      key={tag.id}
-                      variant="outline"
-                      className={cn(
-                        "cursor-pointer transition-all text-xs",
-                        isSelected 
-                          ? "ring-2 ring-offset-1" 
-                          : "opacity-60 hover:opacity-100"
-                      )}
-                      style={{
-                        borderColor: tag.color,
-                        backgroundColor: isSelected ? `${tag.color}30` : 'transparent',
-                        color: tag.color,
-                      }}
-                      onClick={() => handleTagToggle(tag)}
-                    >
-                      {tag.name}
-                    </Badge>
-                  );
-                })}
-                {tags.length === 0 && (
-                  <span className="text-xs text-muted-foreground">Nenhuma etiqueta cadastrada</span>
+                {statuses.length === 0 && (
+                  <span className="text-xs text-muted-foreground">Nenhum status cadastrado</span>
                 )}
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
-            {/* Department */}
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Folder className="h-3 w-3" />
-                Departamento
-              </label>
-              <div className="flex flex-wrap gap-1">
+            {/* Tags - Collapsible, max 4 selections */}
+            <Collapsible open={tagsOpen} onOpenChange={setTagsOpen}>
+              <CollapsibleTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Etiquetas</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {conversationTags.length > 0 && (
+                      <div className="flex gap-1 flex-wrap max-w-[150px]">
+                        {conversationTags.slice(0, 2).map(tag => (
+                          <Badge
+                            key={tag.id}
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0"
+                            style={{
+                              borderColor: tag.color,
+                              backgroundColor: `${tag.color}30`,
+                              color: tag.color,
+                            }}
+                          >
+                            {tag.name}
+                          </Badge>
+                        ))}
+                        {conversationTags.length > 2 && (
+                          <span className="text-[10px] text-muted-foreground">+{conversationTags.length - 2}</span>
+                        )}
+                      </div>
+                    )}
+                    {tagsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 pl-6">
+                <div className="flex flex-wrap gap-1">
+                  {tags.map(tag => {
+                    const isSelected = conversationTags.some(t => t.id === tag.id);
+                    const isDisabled = !isSelected && conversationTags.length >= 4;
+                    return (
+                      <Badge
+                        key={tag.id}
+                        variant="outline"
+                        className={cn(
+                          "cursor-pointer transition-all text-xs",
+                          isSelected 
+                            ? "ring-2 ring-offset-1" 
+                            : isDisabled 
+                              ? "opacity-30 cursor-not-allowed"
+                              : "opacity-70 hover:opacity-100"
+                        )}
+                        style={{
+                          borderColor: tag.color,
+                          backgroundColor: isSelected ? `${tag.color}30` : 'transparent',
+                          color: tag.color,
+                        }}
+                        onClick={() => !isDisabled && handleTagToggle(tag)}
+                      >
+                        {tag.name}
+                      </Badge>
+                    );
+                  })}
+                  {tags.length === 0 && (
+                    <span className="text-xs text-muted-foreground">Nenhuma etiqueta cadastrada</span>
+                  )}
+                </div>
+                {conversationTags.length >= 4 && (
+                  <p className="text-[10px] text-muted-foreground mt-2">Máximo de 4 etiquetas</p>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+
+            {/* Department - Collapsible, single selection */}
+            <Collapsible open={departmentOpen} onOpenChange={setDepartmentOpen}>
+              <CollapsibleTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <Folder className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Departamento</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {currentDepartment ? (
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                        style={{
+                          borderColor: currentDepartment.color,
+                          backgroundColor: `${currentDepartment.color}30`,
+                          color: currentDepartment.color,
+                        }}
+                      >
+                        {currentDepartment.name}
+                      </Badge>
+                    ) : null}
+                    {departmentOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </div>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 pl-6 space-y-1">
                 {departments.map(dept => {
                   const isSelected = currentDepartment?.id === dept.id;
                   return (
@@ -396,17 +496,17 @@ export function ContactDetailsPanel({
                       key={dept.id}
                       variant="outline"
                       className={cn(
-                        "cursor-pointer transition-all text-xs",
+                        "cursor-pointer transition-all text-xs mr-1 mb-1",
                         isSelected 
                           ? "ring-2 ring-offset-1" 
-                          : "opacity-60 hover:opacity-100"
+                          : "opacity-70 hover:opacity-100"
                       )}
                       style={{
                         borderColor: dept.color,
                         backgroundColor: isSelected ? `${dept.color}30` : 'transparent',
                         color: dept.color,
                       }}
-                      onClick={() => onChangeDepartment(isSelected ? null : dept.id)}
+                      onClick={() => handleDepartmentSelect(dept.id)}
                     >
                       {dept.name}
                     </Badge>
@@ -415,8 +515,8 @@ export function ContactDetailsPanel({
                 {departments.length === 0 && (
                   <span className="text-xs text-muted-foreground">Nenhum departamento cadastrado</span>
                 )}
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
           <Separator />
