@@ -915,6 +915,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          job_title: string | null
           law_firm_id: string | null
           notification_browser_enabled: boolean
           notification_sound_enabled: boolean
@@ -929,6 +930,7 @@ export type Database = {
           full_name: string
           id: string
           is_active?: boolean
+          job_title?: string | null
           law_firm_id?: string | null
           notification_browser_enabled?: boolean
           notification_sound_enabled?: boolean
@@ -943,6 +945,7 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          job_title?: string | null
           law_firm_id?: string | null
           notification_browser_enabled?: boolean
           notification_sound_enabled?: boolean

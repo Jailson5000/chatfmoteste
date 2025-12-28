@@ -12,6 +12,7 @@ import {
   Bell,
   Volume2,
   Globe,
+  Briefcase,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export default function Profile() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [oabNumber, setOabNumber] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -87,6 +89,7 @@ export default function Profile() {
         setEmail(data.email || "");
         setPhone(data.phone || "");
         setOabNumber(data.oab_number || "");
+        setJobTitle(data.job_title || "");
         setAvatarUrl(data.avatar_url);
       } catch (error) {
         console.error("Error loading profile:", error);
@@ -114,6 +117,7 @@ export default function Profile() {
           full_name: fullName,
           phone: phone || null,
           oab_number: oabNumber || null,
+          job_title: jobTitle || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);
@@ -391,6 +395,23 @@ export default function Profile() {
                 />
               </div>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="jobTitle">Cargo / Função</Label>
+            <div className="relative">
+              <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="jobTitle"
+                value={jobTitle}
+                onChange={(e) => setJobTitle(e.target.value)}
+                placeholder="Ex: Advogado, Estagiário, Atendente"
+                className="pl-10"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Este cargo será exibido na assinatura das suas mensagens
+            </p>
           </div>
 
           <Separator />
