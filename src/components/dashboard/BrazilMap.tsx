@@ -144,16 +144,16 @@ export function BrazilMap({ clientsByState, totalClients }: BrazilMapProps) {
 
   const getStateColor = (abbr: string) => {
     const data = stateData[abbr];
-    if (!data || data.count === 0) return 'hsl(210, 60%, 35%)'; // Blue base for empty states
+    if (!data || data.count === 0) return '#6ba3d6'; // Light blue for empty states
     
     const intensity = data.count / maxCount;
     
-    // Blue gradient from light to dark (like the reference image)
-    if (intensity > 0.8) return 'hsl(220, 70%, 35%)'; // Darkest blue
-    if (intensity > 0.6) return 'hsl(215, 65%, 45%)';
-    if (intensity > 0.4) return 'hsl(210, 60%, 55%)';
-    if (intensity > 0.2) return 'hsl(205, 55%, 65%)';
-    return 'hsl(200, 50%, 72%)'; // Lightest blue
+    // Blue gradient matching the reference image
+    if (intensity > 0.7) return '#1e3a5f'; // Darkest navy blue
+    if (intensity > 0.5) return '#2d5a87';
+    if (intensity > 0.3) return '#4a7ab0';
+    if (intensity > 0.15) return '#5c8fc4';
+    return '#7eb1dc'; // Light blue for low values
   };
 
   const topStates = useMemo(() => {
@@ -204,7 +204,7 @@ export function BrazilMap({ clientsByState, totalClients }: BrazilMapProps) {
                         <path
                           d={state.path}
                           fill={getStateColor(abbr)}
-                          stroke="hsl(210, 30%, 85%)"
+                          stroke="#a8cce8"
                           strokeWidth={isHovered ? 2 : 0.8}
                           filter={isHovered ? 'url(#glow)' : undefined}
                           onMouseEnter={() => setHoveredState(abbr)}
@@ -294,7 +294,7 @@ export function BrazilMap({ clientsByState, totalClients }: BrazilMapProps) {
                 <div 
                   className="h-1.5 rounded-full overflow-hidden"
                   style={{
-                    background: 'linear-gradient(to right, hsl(200, 50%, 72%), hsl(205, 55%, 65%), hsl(210, 60%, 55%), hsl(215, 65%, 45%), hsl(220, 70%, 35%))',
+                    background: 'linear-gradient(to right, #7eb1dc, #5c8fc4, #4a7ab0, #2d5a87, #1e3a5f)',
                   }}
                 />
               </div>
