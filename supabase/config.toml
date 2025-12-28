@@ -7,4 +7,4 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.sync-n8n-prompt]
-verify_jwt = true
+verify_jwt = false
