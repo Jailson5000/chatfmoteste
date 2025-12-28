@@ -133,10 +133,18 @@ export default function AIAgents() {
 
   const handleSavePrompt = async () => {
     if (!selectedAutomation) return;
-    
+
     setIsSavingPrompt(true);
     try {
-      const { data, error } = await supabase.functions.invoke('sync-n8n-prompt', {
+      // 1) Persistir no banco
+      await updateAutomation.mutateAsync({
+        id: selectedAutomation.id,
+        ai_prompt: editedPrompt,
+        ai_temperature: editedTemperature,
+      });
+
+      // 2) Sincronizar com N8N
+      const { error: syncError } = await supabase.functions.invoke('sync-n8n-prompt', {
         body: {
           automation_id: selectedAutomation.id,
           ai_prompt: editedPrompt,
@@ -145,12 +153,18 @@ export default function AIAgents() {
         },
       });
 
-      if (error) throw error;
-
-      toast({
-        title: "Prompt salvo e sincronizado",
-        description: "As configurações foram atualizadas e enviadas para o N8N.",
-      });
+      if (syncError) {
+        console.error('Error syncing prompt:', syncError);
+        toast({
+          title: "Prompt salvo",
+          description: "Salvo no sistema, mas não foi possível sincronizar com o N8N.",
+        });
+      } else {
+        toast({
+          title: "Prompt salvo e sincronizado",
+          description: "As configurações foram salvas e enviadas para o N8N.",
+        });
+      }
 
       setSelectedAutomation({
         ...selectedAutomation,
@@ -161,7 +175,7 @@ export default function AIAgents() {
       console.error('Error saving prompt:', error);
       toast({
         title: "Erro ao salvar",
-        description: "Não foi possível sincronizar com o N8N. As alterações foram salvas localmente.",
+        description: "Não foi possível salvar o prompt. Tente novamente.",
         variant: "destructive",
       });
     } finally {
