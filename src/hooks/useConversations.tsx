@@ -146,10 +146,7 @@ export function useConversations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      toast({
-        title: "Transferência realizada",
-        description: "A conversa foi transferida com sucesso.",
-      });
+      // Toast notification removed - silent update
     },
     onError: (error) => {
       toast({
@@ -171,10 +168,7 @@ export function useConversations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      toast({
-        title: "Departamento atualizado",
-        description: "A conversa foi movida para o novo departamento.",
-      });
+      // Toast notification removed - silent update
     },
     onError: (error) => {
       toast({
