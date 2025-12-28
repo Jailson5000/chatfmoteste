@@ -161,6 +161,7 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
           .limit(15);
 
         // Build payload - contact_phone at root level for easy n8n access
+        const currentHandler = String(conversation?.current_handler ?? 'ai').trim();
         const payload = {
           event: automation.trigger_type || 'new_message',
           // Root level fields for easy n8n access
@@ -168,6 +169,9 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
           contact_phone: context.contactPhone,
           contact_name: context.contactName,
           remote_jid: context.remoteJid,
+          // Root-level fields for Switch rules in n8n
+          fromMe: false, // this function only triggers for inbound messages
+          current_handler: currentHandler,
           // Root-level chat input (string) to avoid n8n Memory "input key" issues
           input: context.messageContent,
           automation: {
@@ -184,7 +188,7 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
             contact_name: context.contactName,
             contact_phone: context.contactPhone,
             status: conversation?.status || 'novo_contato',
-            current_handler: conversation?.current_handler || 'ai',
+            current_handler: currentHandler,
             ai_summary: conversation?.ai_summary,
             needs_human_handoff: conversation?.needs_human_handoff,
           },
