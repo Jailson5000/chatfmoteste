@@ -1155,7 +1155,7 @@ export default function Conversations() {
       >
         <div
           className={cn(
-            "flex-1 flex flex-col bg-background min-h-0 overflow-hidden",
+            "flex-1 flex flex-col bg-background min-h-0 min-w-0 overflow-hidden",
             !showMobileChat && "hidden md:flex"
           )}
         >
