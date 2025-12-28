@@ -39,15 +39,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
         playNotification();
       }
 
-      // Show toast notification (always shown for UX)
-      toast({
-        title: "Nova mensagem",
-        description: message.content
-          ? message.content.length > 50
-            ? `${message.content.substring(0, 50)}...`
-            : message.content
-          : "Nova mensagem recebida",
-      });
+      // Toast notification removed - only use sound and browser notification
 
       // Show browser notification if enabled and permission granted
       if (browserEnabled && "Notification" in window && Notification.permission === "granted") {

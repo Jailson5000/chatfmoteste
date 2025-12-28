@@ -21,6 +21,8 @@ import {
   Search,
   ChevronDown,
   Zap,
+  MessageCircle,
+  Lock,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -93,6 +95,7 @@ interface Message {
   read_at?: string | null;
   reply_to_message_id?: string | null;
   whatsapp_message_id?: string | null;
+  is_internal?: boolean;
   reply_to?: {
     id: string;
     content: string | null;
@@ -159,6 +162,12 @@ export default function Conversations() {
   
   // Pontual intervention mode (send message without changing handler)
   const [isPontualMode, setIsPontualMode] = useState(false);
+  
+  // Internal chat mode (messages only visible to team, not sent to WhatsApp)
+  const [isInternalMode, setIsInternalMode] = useState(false);
+  
+  // Internal file upload refs
+  const internalFileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -466,6 +475,7 @@ export default function Conversations() {
     
     const messageToSend = messageInput.trim();
     const wasPontualMode = isPontualMode;
+    const wasInternalMode = isInternalMode;
     setMessageInput(""); // Clear input immediately for better UX
     setIsSending(true);
     setIsPontualMode(false); // Reset pontual mode after sending
@@ -479,43 +489,67 @@ export default function Conversations() {
       is_from_me: true,
       sender_type: "human",
       ai_generated: false,
-      status: "sending" as MessageStatus,
+      status: wasInternalMode ? "sent" as MessageStatus : "sending" as MessageStatus,
+      is_internal: wasInternalMode,
     };
     
     setMessages(prev => [...prev, newMessage]);
     
     try {
-      // If NOT in pontual mode and handler is AI, switch to human
-      if (!wasPontualMode && selectedConversation.current_handler === "ai") {
-        transferHandler.mutate({
-          conversationId: selectedConversationId,
-          handlerType: "human",
+      if (wasInternalMode) {
+        // Internal message - save directly to database, don't send to WhatsApp
+        const { error } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: selectedConversationId,
+            content: messageToSend,
+            message_type: "text",
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+            is_internal: true,
+          });
+        
+        if (error) throw error;
+        
+        // Update temp message to saved
+        setMessages(prev => prev.map(m => 
+          m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
+        ));
+      } else {
+        // Normal message - send to WhatsApp
+        // If NOT in pontual mode and handler is AI, switch to human
+        if (!wasPontualMode && selectedConversation.current_handler === "ai") {
+          transferHandler.mutate({
+            conversationId: selectedConversationId,
+            handlerType: "human",
+          });
+        }
+        
+        // Use async send for <1s response
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_message_async",
+            conversationId: selectedConversationId,
+            message: messageToSend,
+          },
         });
-      }
-      
-      // Use async send for <1s response
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_message_async",
-          conversationId: selectedConversationId,
-          message: messageToSend,
-        },
-      });
 
-      if (response.error) {
-        throw new Error(response.error.message || "Falha ao enviar mensagem");
-      }
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar mensagem");
+        }
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || "Falha ao enviar mensagem");
-      }
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar mensagem");
+        }
 
-      // Update to "sent" - message is now queued
-      setMessages(prev => prev.map(m => 
-        m.id === tempId 
-          ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
-          : m
-      ));
+        // Update to "sent" - message is now queued
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
+            : m
+        ));
+      }
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
       // Update message to show error status
@@ -528,6 +562,73 @@ export default function Conversations() {
       toast({
         title: "Erro ao enviar",
         description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+  
+  // Handle internal file upload
+  const handleInternalFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !selectedConversationId) return;
+    
+    event.target.value = ""; // Reset input
+    setIsSending(true);
+    
+    try {
+      // Upload file to internal-chat-files bucket
+      const fileName = `${selectedConversationId}/${Date.now()}_${file.name}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("internal-chat-files")
+        .upload(fileName, file);
+      
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from("internal-chat-files")
+        .getPublicUrl(fileName);
+      
+      // Save internal message with file
+      const { error: msgError } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: selectedConversationId,
+          content: `📎 ${file.name}`,
+          message_type: "document",
+          media_url: urlData.publicUrl,
+          media_mime_type: file.type,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          is_internal: true,
+        });
+      
+      if (msgError) throw msgError;
+      
+      // Add to local state
+      const newMessage: Message = {
+        id: crypto.randomUUID(),
+        content: `📎 ${file.name}`,
+        created_at: new Date().toISOString(),
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+        message_type: "document",
+        media_url: urlData.publicUrl,
+        media_mime_type: file.type,
+        status: "sent",
+        is_internal: true,
+      };
+      
+      setMessages(prev => [...prev, newMessage]);
+    } catch (error) {
+      console.error("Erro ao enviar arquivo interno:", error);
+      toast({
+        title: "Erro ao enviar arquivo",
+        description: error instanceof Error ? error.message : "Falha ao enviar arquivo",
         variant: "destructive",
       });
     } finally {
@@ -1257,6 +1358,7 @@ export default function Conversations() {
                           whatsappMessageId={msg.whatsapp_message_id}
                           conversationId={selectedConversationId || undefined}
                           replyTo={msg.reply_to}
+                          isInternal={msg.is_internal}
                           onReply={handleReply}
                           onScrollToMessage={scrollToMessage}
                           onRetry={handleRetryMessage}
@@ -1297,7 +1399,8 @@ export default function Conversations() {
             {/* Input Area */}
             <div className={cn(
               "flex-shrink-0 p-4 border-t border-border bg-card",
-              isPontualMode && "border-t-2 border-t-amber-500"
+              isPontualMode && "border-t-2 border-t-amber-500",
+              isInternalMode && "border-t-2 border-t-yellow-500 bg-yellow-50/50 dark:bg-yellow-900/10"
             )}>
               {/* Pontual Mode Indicator */}
               {isPontualMode && (
@@ -1317,6 +1420,35 @@ export default function Conversations() {
                 </div>
               )}
               
+              {/* Internal Mode Indicator */}
+              {isInternalMode && (
+                <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 px-3 py-1.5 rounded-md text-sm">
+                  <span className="flex items-center gap-2">
+                    <Lock className="h-4 w-4" />
+                    Conversa interna - apenas a equipe pode ver estas mensagens
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 text-xs text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/20"
+                      onClick={() => internalFileInputRef.current?.click()}
+                    >
+                      <Paperclip className="h-3 w-3 mr-1" />
+                      Arquivo
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 text-xs text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/20"
+                      onClick={() => setIsInternalMode(false)}
+                    >
+                      Sair
+                    </Button>
+                  </div>
+                </div>
+              )}
+              
               {/* Hidden file inputs */}
               <input
                 ref={imageInputRef}
@@ -1332,6 +1464,12 @@ export default function Conversations() {
                 className="hidden"
                 onChange={(e) => handleFileSelect(e, "document")}
               />
+              <input
+                ref={internalFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleInternalFileUpload}
+              />
               
               {showAudioRecorder ? (
                 <div className="max-w-3xl mx-auto">
@@ -1343,8 +1481,26 @@ export default function Conversations() {
                 </div>
               ) : (
                 <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
-                  {/* Pontual Intervention Button - Show when handler is AI */}
-                  {selectedConversation?.current_handler === "ai" && (
+                  {/* Internal Chat Toggle Button */}
+                  <Button
+                    variant={isInternalMode ? "default" : "ghost"}
+                    size="icon"
+                    className={cn(
+                      isInternalMode 
+                        ? "bg-yellow-500 hover:bg-yellow-600 text-white" 
+                        : "text-muted-foreground hover:text-yellow-500"
+                    )}
+                    onClick={() => {
+                      setIsInternalMode(!isInternalMode);
+                      setIsPontualMode(false); // Disable pontual when switching to internal
+                    }}
+                    title="Conversa interna - apenas equipe pode ver"
+                  >
+                    <MessageCircle className="h-5 w-5" />
+                  </Button>
+                  
+                  {/* Pontual Intervention Button - Show when handler is AI and NOT in internal mode */}
+                  {selectedConversation?.current_handler === "ai" && !isInternalMode && (
                     <Button
                       variant={isPontualMode ? "default" : "ghost"}
                       size="icon"
@@ -1359,28 +1515,32 @@ export default function Conversations() {
                       <Zap className="h-5 w-5" />
                     </Button>
                   )}
-                  <div className="flex gap-1">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="text-muted-foreground"
-                      onClick={() => documentInputRef.current?.click()}
-                      disabled={isSending}
-                      title="Enviar documento"
-                    >
-                      <Paperclip className="h-5 w-5" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="text-muted-foreground"
-                      onClick={() => imageInputRef.current?.click()}
-                      disabled={isSending}
-                      title="Enviar imagem"
-                    >
-                      <Image className="h-5 w-5" />
-                    </Button>
-                  </div>
+                  
+                  {/* File buttons - hide when in internal mode (use the button in the indicator instead) */}
+                  {!isInternalMode && (
+                    <div className="flex gap-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-muted-foreground"
+                        onClick={() => documentInputRef.current?.click()}
+                        disabled={isSending}
+                        title="Enviar documento"
+                      >
+                        <Paperclip className="h-5 w-5" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-muted-foreground"
+                        onClick={() => imageInputRef.current?.click()}
+                        disabled={isSending}
+                        title="Enviar imagem"
+                      >
+                        <Image className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  )}
                   <div className="flex-1 relative">
                     <TemplatePopup
                       isOpen={showTemplatePopup}

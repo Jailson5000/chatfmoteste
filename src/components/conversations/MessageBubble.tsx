@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -27,6 +27,7 @@ interface MessageBubbleProps {
   readAt?: string | null;
   whatsappMessageId?: string | null;
   conversationId?: string;
+  isInternal?: boolean;
   replyTo?: {
     id: string;
     content: string | null;
@@ -602,6 +603,7 @@ export function MessageBubble({
   whatsappMessageId,
   conversationId,
   replyTo,
+  isInternal = false,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -758,11 +760,13 @@ export function MessageBubble({
       <div
         className={cn(
           "max-w-[80%] rounded-2xl px-4 py-2.5 transition-all",
-          isFromMe
-            ? aiGenerated
-              ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
-              : "bg-primary text-primary-foreground rounded-br-md"
-            : "bg-muted rounded-bl-md",
+          isInternal
+            ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
+            : isFromMe
+              ? aiGenerated
+                ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
+                : "bg-green-500 text-white rounded-br-md dark:bg-green-600"
+              : "bg-muted rounded-bl-md",
           isHighlighted && "ring-2 ring-yellow-400 ring-offset-2"
         )}
       >
@@ -775,7 +779,14 @@ export function MessageBubble({
           />
         )}
         
-        {aiGenerated && isFromMe && (
+        {isInternal && (
+          <div className="flex items-center gap-1 text-xs text-yellow-700 mb-1 dark:text-yellow-300">
+            <Lock className="h-3 w-3" />
+            Interno
+          </div>
+        )}
+        
+        {aiGenerated && isFromMe && !isInternal && (
           <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
             <Bot className="h-3 w-3" />
             Assistente IA

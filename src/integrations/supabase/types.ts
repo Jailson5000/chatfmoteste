@@ -746,6 +746,7 @@ export type Database = {
           delivered_at: string | null
           id: string
           is_from_me: boolean
+          is_internal: boolean
           media_mime_type: string | null
           media_url: string | null
           message_type: string
@@ -764,6 +765,7 @@ export type Database = {
           delivered_at?: string | null
           id?: string
           is_from_me?: boolean
+          is_internal?: boolean
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
@@ -782,6 +784,7 @@ export type Database = {
           delivered_at?: string | null
           id?: string
           is_from_me?: boolean
+          is_internal?: boolean
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
