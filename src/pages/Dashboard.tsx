@@ -243,6 +243,40 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
+      {/* Header with Global Filter */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Visão geral dos seus clientes e métricas</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={dateFilter} onValueChange={(v) => {
+            setDateFilter(v as DateFilter);
+            if (v !== 'custom') {
+              setCustomDateRange(undefined);
+            }
+          }}>
+            <SelectTrigger className="w-40 h-9">
+              <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Hoje</SelectItem>
+              <SelectItem value="7days">Últimos 7 dias</SelectItem>
+              <SelectItem value="30days">Últimos 30 dias</SelectItem>
+              <SelectItem value="month">Este mês</SelectItem>
+              <SelectItem value="all">Todo período</SelectItem>
+              <SelectItem value="custom">Personalizado</SelectItem>
+            </SelectContent>
+          </Select>
+          {dateFilter === 'custom' && (
+            <DateRangePicker
+              dateRange={customDateRange}
+              onDateRangeChange={setCustomDateRange}
+            />
+          )}
+        </div>
+      </div>
+
       {/* Status Cards Row */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {statusCards.map((card, index) => (
@@ -269,38 +303,10 @@ export default function Dashboard() {
       {/* Timeline Chart */}
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-4 w-4" />
-              Evolução dos Tipos de Status
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Select value={dateFilter} onValueChange={(v) => {
-                setDateFilter(v as DateFilter);
-                if (v !== 'custom') {
-                  setCustomDateRange(undefined);
-                }
-              }}>
-                <SelectTrigger className="w-36 h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="today">Hoje</SelectItem>
-                  <SelectItem value="7days">7 dias</SelectItem>
-                  <SelectItem value="30days">30 dias</SelectItem>
-                  <SelectItem value="month">Este mês</SelectItem>
-                  <SelectItem value="all">Tudo</SelectItem>
-                  <SelectItem value="custom">Personalizado</SelectItem>
-                </SelectContent>
-              </Select>
-              {dateFilter === 'custom' && (
-                <DateRangePicker
-                  dateRange={customDateRange}
-                  onDateRangeChange={setCustomDateRange}
-                />
-              )}
-            </div>
-          </div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <TrendingUp className="h-4 w-4" />
+            Evolução dos Tipos de Status
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-48">
