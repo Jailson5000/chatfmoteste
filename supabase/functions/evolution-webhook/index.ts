@@ -167,6 +167,8 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
           contact_phone: context.contactPhone,
           contact_name: context.contactName,
           remote_jid: context.remoteJid,
+          // Root-level chat input (string) to avoid n8n Memory "input key" issues
+          input: context.messageContent,
           automation: {
             id: automation.id,
             name: automation.name,
