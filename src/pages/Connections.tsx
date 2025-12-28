@@ -52,6 +52,8 @@ export default function Connections() {
     refreshPhone,
     refetch,
     updateDefaultDepartment,
+    updateDefaultStatus,
+    updateDefaultAssigned,
   } = useWhatsAppInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -79,7 +81,7 @@ export default function Connections() {
     );
   }, [instances, searchQuery]);
 
-  const handleCreateInstance = async (instanceName: string) => {
+  const handleCreateInstance = async (displayName: string, instanceName: string) => {
     if (!isApiConfigured) {
       toast({
         title: "API não configurada",
@@ -90,8 +92,9 @@ export default function Connections() {
     }
 
     try {
+      // Use the random instanceName for backend, but we'll update display later
       const result = await createInstance.mutateAsync({
-        instanceName,
+        instanceName, // Random unique name for Evolution API
         apiUrl: evolutionApiUrl,
         apiKey: evolutionApiKey,
       });
@@ -404,6 +407,12 @@ export default function Connections() {
               }}
               onUpdateDefaultDepartment={(departmentId) => {
                 updateDefaultDepartment.mutate({ instanceId: selectedInstance.id, departmentId });
+              }}
+              onUpdateDefaultStatus={(statusId) => {
+                updateDefaultStatus.mutate({ instanceId: selectedInstance.id, statusId });
+              }}
+              onUpdateDefaultAssigned={(userId) => {
+                updateDefaultAssigned.mutate({ instanceId: selectedInstance.id, userId });
               }}
               isLoading={{
                 status: refreshStatus.isPending,

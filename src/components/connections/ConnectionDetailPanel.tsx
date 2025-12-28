@@ -43,7 +43,11 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 interface ConnectionDetailPanelProps {
-  instance: WhatsAppInstance & { default_department_id?: string | null };
+  instance: WhatsAppInstance & { 
+    default_department_id?: string | null;
+    default_status_id?: string | null;
+    default_assigned_to?: string | null;
+  };
   onClose: () => void;
   onConnect: (instance: WhatsAppInstance) => void;
   onDelete: (id: string) => void;
@@ -53,6 +57,8 @@ interface ConnectionDetailPanelProps {
   rejectCalls: boolean;
   onToggleRejectCalls: (enabled: boolean) => void;
   onUpdateDefaultDepartment: (departmentId: string | null) => void;
+  onUpdateDefaultStatus: (statusId: string | null) => void;
+  onUpdateDefaultAssigned: (userId: string | null) => void;
   isLoading: {
     status: boolean;
     phone: boolean;
@@ -73,6 +79,8 @@ export function ConnectionDetailPanel({
   rejectCalls,
   onToggleRejectCalls,
   onUpdateDefaultDepartment,
+  onUpdateDefaultStatus,
+  onUpdateDefaultAssigned,
   isLoading,
 }: ConnectionDetailPanelProps) {
   const { toast } = useToast();
@@ -192,14 +200,40 @@ export function ConnectionDetailPanel({
             <Separator />
 
             {/* Default Classes */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               <h4 className="font-medium">Classes Padrão</h4>
               
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
-                <Circle className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Status</span>
+              {/* Status Padrão */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Circle className="h-4 w-4" />
+                  <span>Status Padrão</span>
+                </div>
+                <Select
+                  value={instance.default_status_id || "none"}
+                  onValueChange={(value) => onUpdateDefaultStatus(value === "none" ? null : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecionar status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum</SelectItem>
+                    {statuses.map((status) => (
+                      <SelectItem key={status.id} value={status.id}>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: status.color }}
+                          />
+                          {status.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               
+              {/* Departamento Padrão */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Building2 className="h-4 w-4" />
@@ -227,10 +261,11 @@ export function ConnectionDetailPanel({
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
-                  Novos clientes desta instância serão vinculados automaticamente a este departamento.
-                </p>
               </div>
+
+              <p className="text-xs text-muted-foreground">
+                Novos clientes desta instância serão vinculados automaticamente a esses valores.
+              </p>
             </div>
 
             <Separator />
@@ -239,30 +274,39 @@ export function ConnectionDetailPanel({
             <div className="space-y-3">
               <h4 className="font-medium">Responsável Padrão</h4>
               
-              <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
-                {teamMembers.length > 0 ? (
-                  <div className="flex items-center gap-3">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <Avatar className="h-6 w-6">
-                      <AvatarImage src={teamMembers[0].avatar_url || undefined} />
-                      <AvatarFallback className="text-xs bg-primary/20 text-primary">
-                        {teamMembers[0].full_name.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{teamMembers[0].full_name}</span>
-                    <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">
-                      IA
-                    </Badge>
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground">Nenhum responsável</span>
-                )}
+              <div className="space-y-2">
+                <Select
+                  value={instance.default_assigned_to || "ai"}
+                  onValueChange={(value) => onUpdateDefaultAssigned(value === "ai" ? null : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecionar responsável" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ai">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1.5">IA</Badge>
+                        <span>Inteligência Artificial</span>
+                      </div>
+                    </SelectItem>
+                    {teamMembers.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-5 w-5">
+                            <AvatarImage src={member.avatar_url || undefined} />
+                            <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
+                              {member.full_name.charAt(0)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span>{member.full_name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 
-                <p className="text-xs text-primary mt-3">
-                  Sempre que uma nova conversa for iniciada com este contato, o responsável abaixo será associado automaticamente. Se você não selecionar nenhum responsável padrão, você ainda pode utilizar keywords.{" "}
-                  <Button variant="link" size="sm" className="text-primary h-auto p-0 text-xs">
-                    Ver mais
-                  </Button>
+                <p className="text-xs text-muted-foreground">
+                  Novas conversas serão atribuídas automaticamente a este responsável.
                 </p>
               </div>
             </div>

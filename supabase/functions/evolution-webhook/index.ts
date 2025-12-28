@@ -385,7 +385,7 @@ serve(async (req) => {
     
     const { data: instance, error: instanceError } = await supabaseClient
       .from('whatsapp_instances')
-      .select('*, law_firms(id, name)')
+      .select('*, law_firms(id, name), default_department_id, default_status_id, default_assigned_to')
       .eq('instance_name', body.instance)
       .single();
 
@@ -402,7 +402,10 @@ serve(async (req) => {
       requestId, 
       instanceId: instance.id, 
       lawFirmId: instance.law_firm_id,
-      instanceName: instance.instance_name
+      instanceName: instance.instance_name,
+      defaultDepartment: instance.default_department_id,
+      defaultStatus: instance.default_status_id,
+      defaultAssigned: instance.default_assigned_to
     });
     
     const lawFirmId = instance.law_firm_id;
@@ -495,6 +498,9 @@ serve(async (req) => {
           const contactName = (!isFromMe && data.pushName) ? data.pushName : phoneNumber;
           logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
+          // Use instance defaults for handler
+          const defaultHandler = instance.default_assigned_to ? 'human' : 'ai';
+          
           const { data: newConv, error: createError } = await supabaseClient
             .from('conversations')
             .insert({
@@ -503,7 +509,9 @@ serve(async (req) => {
               contact_name: contactName,
               contact_phone: phoneNumber,
               status: 'novo_contato',
-              current_handler: 'ai',
+              current_handler: defaultHandler,
+              assigned_to: instance.default_assigned_to || null,
+              department_id: instance.default_department_id || null,
               whatsapp_instance_id: instance.id,
               last_message_at: new Date().toISOString(),
             })
@@ -515,7 +523,59 @@ serve(async (req) => {
             break;
           }
           conversation = newConv;
-          logDebug('DB', `Created new conversation`, { requestId, conversationId: conversation.id });
+          logDebug('DB', `Created new conversation with defaults`, { 
+            requestId, 
+            conversationId: conversation.id,
+            assignedTo: instance.default_assigned_to,
+            departmentId: instance.default_department_id,
+            handler: defaultHandler
+          });
+          
+          // Also create/update the client with default department and status
+          const { data: existingClient } = await supabaseClient
+            .from('clients')
+            .select('id')
+            .eq('phone', phoneNumber)
+            .eq('law_firm_id', lawFirmId)
+            .maybeSingle();
+          
+          if (!existingClient) {
+            // Create new client with instance defaults
+            const { data: newClient, error: clientError } = await supabaseClient
+              .from('clients')
+              .insert({
+                law_firm_id: lawFirmId,
+                name: contactName,
+                phone: phoneNumber,
+                department_id: instance.default_department_id || null,
+                custom_status_id: instance.default_status_id || null,
+              })
+              .select()
+              .single();
+            
+            if (clientError) {
+              logDebug('ERROR', `Failed to create client`, { requestId, error: clientError });
+            } else {
+              logDebug('DB', `Created new client with defaults`, { 
+                requestId, 
+                clientId: newClient.id,
+                departmentId: instance.default_department_id,
+                statusId: instance.default_status_id
+              });
+              
+              // Link client to conversation
+              await supabaseClient
+                .from('conversations')
+                .update({ client_id: newClient.id })
+                .eq('id', conversation.id);
+            }
+          } else {
+            // Link existing client to conversation
+            await supabaseClient
+              .from('conversations')
+              .update({ client_id: existingClient.id })
+              .eq('id', conversation.id);
+          }
         } else if (convError) {
           logDebug('ERROR', `Error fetching conversation`, { requestId, error: convError });
           break;

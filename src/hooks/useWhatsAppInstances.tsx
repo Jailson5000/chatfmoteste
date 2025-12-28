@@ -404,6 +404,56 @@ export function useWhatsAppInstances() {
     },
   });
 
+  const updateDefaultStatus = useMutation({
+    mutationFn: async ({ instanceId, statusId }: { instanceId: string; statusId: string | null }) => {
+      const { error } = await supabase
+        .from("whatsapp_instances")
+        .update({ default_status_id: statusId } as any)
+        .eq("id", instanceId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Status atualizado",
+        description: "O status padrão foi configurado com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar status",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateDefaultAssigned = useMutation({
+    mutationFn: async ({ instanceId, userId }: { instanceId: string; userId: string | null }) => {
+      const { error } = await supabase
+        .from("whatsapp_instances")
+        .update({ default_assigned_to: userId } as any)
+        .eq("id", instanceId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Responsável atualizado",
+        description: "O responsável padrão foi configurado com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar responsável",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     isLoading,
@@ -420,5 +470,7 @@ export function useWhatsAppInstances() {
     refreshStatus,
     refreshPhone,
     updateDefaultDepartment,
+    updateDefaultStatus,
+    updateDefaultAssigned,
   };
 }

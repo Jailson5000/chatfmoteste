@@ -1110,7 +1110,9 @@ export type Database = {
           api_key_encrypted: boolean | null
           api_url: string
           created_at: string
+          default_assigned_to: string | null
           default_department_id: string | null
+          default_status_id: string | null
           id: string
           instance_id: string | null
           instance_name: string
@@ -1126,7 +1128,9 @@ export type Database = {
           api_key_encrypted?: boolean | null
           api_url: string
           created_at?: string
+          default_assigned_to?: string | null
           default_department_id?: string | null
+          default_status_id?: string | null
           id?: string
           instance_id?: string | null
           instance_name: string
@@ -1142,7 +1146,9 @@ export type Database = {
           api_key_encrypted?: boolean | null
           api_url?: string
           created_at?: string
+          default_assigned_to?: string | null
           default_department_id?: string | null
+          default_status_id?: string | null
           id?: string
           instance_id?: string | null
           instance_name?: string
@@ -1155,10 +1161,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "whatsapp_instances_default_assigned_to_fkey"
+            columns: ["default_assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "whatsapp_instances_default_department_id_fkey"
             columns: ["default_department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_default_status_id_fkey"
+            columns: ["default_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
             referencedColumns: ["id"]
           },
           {

@@ -57,6 +57,7 @@ export default function Contacts() {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [filterResponsible, setFilterResponsible] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterDepartment, setFilterDepartment] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: "",
@@ -78,9 +79,11 @@ export default function Contacts() {
       client.email?.toLowerCase().includes(search.toLowerCase());
 
     const matchesStatus = filterStatus === "all" || client.custom_status_id === filterStatus;
+    const matchesDepartment = filterDepartment === "all" || client.department_id === filterDepartment;
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesDepartment;
   });
+
 
   const handleCreate = async () => {
     await createClient.mutateAsync(formData);
@@ -211,6 +214,20 @@ export default function Contacts() {
               {statuses.map((status) => (
                 <SelectItem key={status.id} value={status.id}>
                   {status.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+            <SelectTrigger className="w-[150px] bg-muted/30">
+              <SelectValue placeholder="Departamento" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              {departments.map((dept) => (
+                <SelectItem key={dept.id} value={dept.id}>
+                  {dept.name}
                 </SelectItem>
               ))}
             </SelectContent>
