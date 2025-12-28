@@ -1020,7 +1020,7 @@ export default function Conversations() {
       {/* Conversations List */}
       <div
         className={cn(
-          "w-full md:w-96 border-r border-border bg-card flex flex-col min-h-0",
+          "w-full md:w-[360px] lg:w-[400px] border-r border-border bg-card flex flex-col min-h-0 flex-shrink-0",
           showMobileChat && "hidden md:flex"
         )}
       >
@@ -1405,7 +1405,7 @@ export default function Conversations() {
             {/* Messages */}
             <div className="relative flex-1 min-h-0">
               <ScrollArea ref={messagesScrollAreaRef} className="h-full">
-                <div className="p-4 space-y-4 max-w-3xl mx-auto">
+                <div className="p-4 space-y-4 max-w-4xl mx-auto px-4 lg:px-8">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -1492,7 +1492,7 @@ export default function Conversations() {
             )}>
               {/* Pontual Mode Indicator */}
               {isPontualMode && (
-                <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm">
+                <div className="max-w-4xl mx-auto mb-2 flex items-center justify-between bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm">
                   <span className="flex items-center gap-2">
                     <Zap className="h-4 w-4" />
                     Modo intervenção pontual - a IA continuará respondendo após esta mensagem
@@ -1510,7 +1510,7 @@ export default function Conversations() {
               
               {/* Internal Mode Indicator */}
               {isInternalMode && (
-                <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 px-3 py-1.5 rounded-md text-sm">
+                <div className="max-w-4xl mx-auto mb-2 flex items-center justify-between bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 px-3 py-1.5 rounded-md text-sm">
                   <span className="flex items-center gap-2">
                     <Lock className="h-4 w-4" />
                     Conversa interna - apenas a equipe pode ver estas mensagens
@@ -1560,7 +1560,7 @@ export default function Conversations() {
               />
               
               {showAudioRecorder ? (
-                <div className="max-w-3xl mx-auto">
+                <div className="max-w-4xl mx-auto px-4 lg:px-8">
                   <AudioRecorder
                     onSend={handleSendAudioRecording}
                     onCancel={() => setShowAudioRecorder(false)}
@@ -1568,7 +1568,7 @@ export default function Conversations() {
                   />
                 </div>
               ) : (
-                <div className="max-w-3xl mx-auto flex items-end gap-2 relative">
+                <div className="max-w-4xl mx-auto px-4 lg:px-8 flex items-end gap-2 relative">
                   {/* Internal Chat Toggle Button */}
                   <Button
                     variant={isInternalMode ? "default" : "ghost"}
