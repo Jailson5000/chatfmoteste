@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Link2,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,7 @@ const atendimentoItems = [
 
 // Items that require admin/non-attendant access
 const adminOnlyItems = [
+  { icon: Brain, label: "Automações", path: "/automations" },
   { icon: Link2, label: "Conexões", path: "/connections" },
 ];
 
