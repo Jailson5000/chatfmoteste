@@ -563,13 +563,16 @@ export default function Conversations() {
     const wasPontualMode = isPontualMode;
     const wasInternalMode = isInternalMode;
     
-    // Add signature if enabled and not internal mode
+    // Add signature if enabled and not internal mode - name on top, message below
     if (signatureEnabled && userProfile?.full_name && !wasInternalMode) {
-      const firstName = userProfile.full_name.split(' ')[0];
+      const nameParts = userProfile.full_name.split(' ');
+      const displayName = nameParts.length >= 2 
+        ? `${nameParts[0]} ${nameParts[nameParts.length - 1]}`
+        : nameParts[0];
       const signature = userProfile.job_title 
-        ? `— ${firstName}, ${userProfile.job_title}`
-        : `— ${firstName}`;
-      messageToSend = `${messageToSend}\n\n${signature}`;
+        ? `*${displayName}* - ${userProfile.job_title}:`
+        : `*${displayName}*:`;
+      messageToSend = `${signature}\n${messageInput.trim()}`;
     }
     
     setMessageInput(""); // Clear input immediately for better UX
