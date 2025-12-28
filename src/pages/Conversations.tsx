@@ -97,6 +97,7 @@ interface Message {
   reply_to_message_id?: string | null;
   whatsapp_message_id?: string | null;
   is_internal?: boolean;
+  is_pontual?: boolean;
   reply_to?: {
     id: string;
     content: string | null;
@@ -167,6 +168,12 @@ export default function Conversations() {
   // Internal chat mode (messages only visible to team, not sent to WhatsApp)
   const [isInternalMode, setIsInternalMode] = useState(false);
   
+  // Message filter (all, internal, external)
+  const [messageFilter, setMessageFilter] = useState<"all" | "internal" | "external">("all");
+  
+  // User profile for signature
+  const [userProfile, setUserProfile] = useState<{ full_name: string } | null>(null);
+  
   // Internal file upload refs
   const internalFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -193,6 +200,25 @@ export default function Conversations() {
     conversations.find((c) => c.id === selectedConversationId),
     [conversations, selectedConversationId]
   );
+
+  // Fetch user profile for signature
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .single();
+      
+      if (profile) {
+        setUserProfile(profile);
+      }
+    };
+    fetchProfile();
+  }, []);
 
   // Fetch unread counts for all conversations
   useEffect(() => {
@@ -474,9 +500,15 @@ export default function Conversations() {
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
     
-    const messageToSend = messageInput.trim();
+    let messageToSend = messageInput.trim();
     const wasPontualMode = isPontualMode;
     const wasInternalMode = isInternalMode;
+    
+    // Add signature if enabled and not internal mode
+    if (signatureEnabled && userProfile?.full_name && !wasInternalMode) {
+      messageToSend = `${messageToSend}\n\n— ${userProfile.full_name}`;
+    }
+    
     setMessageInput(""); // Clear input immediately for better UX
     setIsSending(true);
     setIsPontualMode(false); // Reset pontual mode after sending
@@ -492,6 +524,7 @@ export default function Conversations() {
       ai_generated: false,
       status: wasInternalMode ? "sent" as MessageStatus : "sending" as MessageStatus,
       is_internal: wasInternalMode,
+      is_pontual: wasPontualMode,
     };
     
     setMessages(prev => [...prev, newMessage]);
@@ -1337,6 +1370,38 @@ export default function Conversations() {
               }}
             />
 
+            {/* Message Filter Tabs */}
+            <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Mostrar:</span>
+              <div className="flex gap-1">
+                <Button
+                  variant={messageFilter === "all" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => setMessageFilter("all")}
+                >
+                  Todas
+                </Button>
+                <Button
+                  variant={messageFilter === "external" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => setMessageFilter("external")}
+                >
+                  Cliente
+                </Button>
+                <Button
+                  variant={messageFilter === "internal" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 text-xs text-yellow-600"
+                  onClick={() => setMessageFilter("internal")}
+                >
+                  <Lock className="h-3 w-3 mr-1" />
+                  Interna
+                </Button>
+              </div>
+            </div>
+
             {/* Messages */}
             <div className="relative flex-1 min-h-0">
               <ScrollArea ref={messagesScrollAreaRef} className="h-full">
@@ -1345,13 +1410,25 @@ export default function Conversations() {
                     <div className="flex items-center justify-center py-8">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                     </div>
-                  ) : messages.length === 0 ? (
+                  ) : messages.filter(m => {
+                    if (messageFilter === "all") return true;
+                    if (messageFilter === "internal") return m.is_internal === true;
+                    if (messageFilter === "external") return !m.is_internal;
+                    return true;
+                  }).length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">Nenhuma mensagem ainda</p>
+                      <p className="text-sm">{messageFilter === "internal" ? "Nenhuma mensagem interna" : messageFilter === "external" ? "Nenhuma mensagem externa" : "Nenhuma mensagem ainda"}</p>
                     </div>
                   ) : (
-                    messages.map((msg) => (
+                    messages
+                      .filter(m => {
+                        if (messageFilter === "all") return true;
+                        if (messageFilter === "internal") return m.is_internal === true;
+                        if (messageFilter === "external") return !m.is_internal;
+                        return true;
+                      })
+                      .map((msg) => (
                       <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
                         <MessageBubble
                           id={msg.id}
@@ -1369,6 +1446,7 @@ export default function Conversations() {
                           conversationId={selectedConversationId || undefined}
                           replyTo={msg.reply_to}
                           isInternal={msg.is_internal}
+                          isPontual={msg.is_pontual}
                           onReply={handleReply}
                           onScrollToMessage={scrollToMessage}
                           onRetry={handleRetryMessage}
