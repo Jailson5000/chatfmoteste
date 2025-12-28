@@ -141,25 +141,104 @@ export default function Dashboard() {
     return cards.slice(0, 6);
   }, [statuses, filteredClients]);
 
-  // Timeline data (hourly for today, daily for longer periods)
+  // Timeline data - real evolution based on client creation dates
   const timelineData = useMemo(() => {
+    if (filteredClients.length === 0) return [];
+
     const now = new Date();
-    const hours = [];
+    let periods: { start: Date; end: Date; label: string }[] = [];
     
-    for (let i = 23; i >= 0; i--) {
-      const hour = subHours(now, i);
-      const hourStr = format(hour, 'HH:00');
-      hours.push({
-        time: hourStr,
-        'Nova Conversa': Math.floor(Math.random() * 3),
-        'Análise': Math.floor(Math.random() * 2),
-        'Qualificado': Math.floor(Math.random() * 2),
-        'Proposta Aceita': Math.floor(Math.random() * 1),
-        'Sucesso': Math.floor(Math.random() * 1),
-      });
+    // Determine granularity based on date filter
+    if (dateFilter === 'today') {
+      // Hourly for today
+      for (let i = 23; i >= 0; i--) {
+        const hour = subHours(now, i);
+        periods.push({
+          start: startOfDay(hour).getTime() === startOfDay(now).getTime() 
+            ? new Date(hour.getFullYear(), hour.getMonth(), hour.getDate(), hour.getHours(), 0, 0)
+            : hour,
+          end: new Date(hour.getFullYear(), hour.getMonth(), hour.getDate(), hour.getHours(), 59, 59),
+          label: format(hour, 'HH:00'),
+        });
+      }
+    } else if (dateFilter === '7days') {
+      // Daily for 7 days
+      for (let i = 6; i >= 0; i--) {
+        const day = subDays(now, i);
+        periods.push({
+          start: startOfDay(day),
+          end: endOfDay(day),
+          label: format(day, 'dd/MM', { locale: ptBR }),
+        });
+      }
+    } else if (dateFilter === '30days' || dateFilter === 'month') {
+      // Daily for 30 days
+      const days = dateFilter === '30days' ? 30 : new Date().getDate();
+      for (let i = days - 1; i >= 0; i--) {
+        const day = subDays(now, i);
+        periods.push({
+          start: startOfDay(day),
+          end: endOfDay(day),
+          label: format(day, 'dd/MM', { locale: ptBR }),
+        });
+      }
+    } else if (dateFilter === 'custom' && customDateRange?.from) {
+      // Calculate days in custom range
+      const startDate = startOfDay(customDateRange.from);
+      const endDate = customDateRange.to ? endOfDay(customDateRange.to) : endOfDay(now);
+      const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      for (let i = 0; i < Math.min(daysDiff, 60); i++) {
+        const day = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+        periods.push({
+          start: startOfDay(day),
+          end: endOfDay(day),
+          label: format(day, 'dd/MM', { locale: ptBR }),
+        });
+      }
+    } else {
+      // All time - show last 30 days by default
+      for (let i = 29; i >= 0; i--) {
+        const day = subDays(now, i);
+        periods.push({
+          start: startOfDay(day),
+          end: endOfDay(day),
+          label: format(day, 'dd/MM', { locale: ptBR }),
+        });
+      }
     }
-    return hours;
-  }, []);
+
+    // Build data for each period
+    const activeStatuses = statuses.slice(0, 5);
+    
+    return periods.map(period => {
+      const dataPoint: Record<string, string | number> = { time: period.label };
+      
+      activeStatuses.forEach(status => {
+        const count = filteredClients.filter(client => {
+          const clientDate = parseISO(client.created_at);
+          return client.custom_status_id === status.id &&
+                 clientDate >= period.start &&
+                 clientDate <= period.end;
+        }).length;
+        dataPoint[status.name] = count;
+      });
+
+      // Count clients without status
+      const noStatusCount = filteredClients.filter(client => {
+        const clientDate = parseISO(client.created_at);
+        return !client.custom_status_id &&
+               clientDate >= period.start &&
+               clientDate <= period.end;
+      }).length;
+      
+      if (noStatusCount > 0) {
+        dataPoint['Sem Status'] = noStatusCount;
+      }
+      
+      return dataPoint;
+    });
+  }, [filteredClients, statuses, dateFilter, customDateRange]);
 
   // Funnel data
   const funnelData = useMemo(() => {
@@ -309,34 +388,66 @@ export default function Dashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={timelineData}>
-                <defs>
-                  <linearGradient id="colorNova" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis dataKey="time" stroke="#666" fontSize={10} />
-                <YAxis stroke="#666" fontSize={10} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1a1a2e', 
-                    border: '1px solid #333',
-                    borderRadius: '8px',
-                  }} 
-                />
-                <Area type="monotone" dataKey="Nova Conversa" stroke="#22c55e" fill="url(#colorNova)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {timelineData.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-muted-foreground">
+              Nenhum dado disponível para o período selecionado
+            </div>
+          ) : (
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timelineData}>
+                  <defs>
+                    {statuses.slice(0, 5).map((status, index) => (
+                      <linearGradient key={status.id} id={`color-${index}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={status.color || CHART_COLORS[index]} stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor={status.color || CHART_COLORS[index]} stopOpacity={0.05}/>
+                      </linearGradient>
+                    ))}
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                  <XAxis 
+                    dataKey="time" 
+                    className="text-muted-foreground" 
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis 
+                    className="text-muted-foreground" 
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'hsl(var(--popover))', 
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    }}
+                    labelStyle={{ color: 'hsl(var(--foreground))' }}
+                  />
+                  {statuses.slice(0, 5).map((status, index) => (
+                    <Area 
+                      key={status.id}
+                      type="monotone" 
+                      dataKey={status.name} 
+                      stroke={status.color || CHART_COLORS[index]} 
+                      fill={`url(#color-${index})`}
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
           <div className="flex flex-wrap gap-4 mt-4 justify-center">
-            {['Nova Conversa', 'Análise', 'Qualificado', 'Proposta Aceita', 'Sucesso', 'Não Qualificado'].map((item, i) => (
-              <div key={item} className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: CHART_COLORS[i] }} />
-                <span className="text-muted-foreground">{item}</span>
+            {statuses.slice(0, 5).map((status, i) => (
+              <div key={status.id} className="flex items-center gap-2 text-xs">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: status.color || CHART_COLORS[i] }} />
+                <span className="text-muted-foreground">{status.name}</span>
               </div>
             ))}
           </div>
