@@ -160,9 +160,13 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
           .order('created_at', { ascending: false })
           .limit(15);
 
-        // Build payload
+        // Build payload - contact_phone at root level for easy n8n access
         const payload = {
           event: automation.trigger_type || 'new_message',
+          // Root level fields for easy n8n access
+          contact_phone: context.contactPhone,
+          contact_name: context.contactName,
+          remote_jid: context.remoteJid,
           automation: {
             id: automation.id,
             name: automation.name,
