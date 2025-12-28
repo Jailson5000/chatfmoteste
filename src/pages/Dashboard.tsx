@@ -540,39 +540,33 @@ export default function Dashboard() {
               <>
                 <div className="h-48">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={clientsByState} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" horizontal={false} />
-                      <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis 
-                        type="category" 
-                        dataKey="name" 
-                        fontSize={11} 
-                        tickLine={false} 
-                        axisLine={false}
-                        width={30}
-                      />
+                    <PieChart>
+                      <Pie
+                        data={clientsByState}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={80}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {clientsByState.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
                       <Tooltip 
                         contentStyle={{ 
                           backgroundColor: 'hsl(var(--popover))', 
                           border: '1px solid hsl(var(--border))',
                           borderRadius: '8px',
                         }}
-                        formatter={(value: number) => [`${value} clientes`, 'Total']}
+                        formatter={(value: number, name: string) => [`${value} clientes`, name]}
                       />
-                      <Bar 
-                        dataKey="value" 
-                        radius={[0, 4, 4, 0]}
-                        fill="#3b82f6"
-                      >
-                        {clientsByState.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
+                    </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="flex flex-wrap gap-2 mt-3 justify-center">
-                  {clientsByState.slice(0, 6).map((item) => (
+                  {clientsByState.slice(0, 8).map((item) => (
                     <div key={item.name} className="flex items-center gap-1 text-xs">
                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="text-muted-foreground">{item.name}: {item.value}</span>
