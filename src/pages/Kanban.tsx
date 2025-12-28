@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { FolderPlus, MessageSquare, Plus, Users, CircleDot, SlidersHorizontal, LayoutGrid } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, Users, CircleDot, SlidersHorizontal, LayoutGrid, Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -48,6 +48,7 @@ export default function Kanban() {
   const [groupBy, setGroupBy] = useState<'department' | 'status'>('department');
   const [filterHandler, setFilterHandler] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterConnection, setFilterConnection] = useState<string>('all');
   const [filters, setFilters] = useState<{
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
@@ -55,6 +56,20 @@ export default function Kanban() {
     departments: string[];
     tags: string[];
   }>({ statuses: [], handlers: [], connections: [], departments: [], tags: [] });
+
+  // Get available connections with phone numbers from WhatsApp instances
+  const availableInstancesWithPhone = useMemo(() => {
+    const instancesMap = new Map<string, { name: string; phone?: string | null }>();
+    conversations.forEach(conv => {
+      if (conv.whatsapp_instance?.instance_name) {
+        instancesMap.set(conv.whatsapp_instance.instance_name, {
+          name: conv.whatsapp_instance.instance_name,
+          phone: conv.whatsapp_instance.phone_number
+        });
+      }
+    });
+    return Array.from(instancesMap.values());
+  }, [conversations]);
 
   // Get available connections from conversations
   const availableConnections = useMemo(() => {
@@ -99,6 +114,14 @@ export default function Kanban() {
 
       // Status dropdown filter
       if (filterStatus !== 'all' && conv.status !== filterStatus) return false;
+
+      // Connection dropdown filter (when grouping by status)
+      if (filterConnection !== 'all') {
+        if (!conv.whatsapp_instance?.instance_name || 
+            conv.whatsapp_instance.instance_name !== filterConnection) {
+          return false;
+        }
+      }
       
       // Advanced filters
       if (filters.handlers.length > 0) {
@@ -314,6 +337,24 @@ export default function Kanban() {
                 ))}
               </SelectContent>
             </Select>
+
+            {/* Connection dropdown - visible when grouping by status */}
+            {groupBy === 'status' && (
+              <Select value={filterConnection} onValueChange={setFilterConnection}>
+                <SelectTrigger className="w-[160px] h-9">
+                  <Phone className="h-4 w-4 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Conexão" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas conexões</SelectItem>
+                  {availableInstancesWithPhone.map(inst => (
+                    <SelectItem key={inst.name} value={inst.name}>
+                      {inst.name} {inst.phone ? `(${inst.phone.slice(-4)})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             {/* More filters button */}
             <Popover>

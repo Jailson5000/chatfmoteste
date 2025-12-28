@@ -62,6 +62,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConversationFilters } from "@/components/conversations/ConversationFilters";
+import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { useConversations } from "@/hooks/useConversations";
