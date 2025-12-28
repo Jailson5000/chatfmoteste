@@ -45,7 +45,7 @@ const TRIGGER_TYPES = [
   { value: 'new_client', label: 'Novo Cliente' },
 ];
 
-const MAX_PROMPT_CHARS = 5000;
+const MAX_PROMPT_CHARS = 10000;
 
 // Available mention variables
 const MENTION_VARIABLES = [
