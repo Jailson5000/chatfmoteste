@@ -257,6 +257,23 @@ export default function Conversations() {
     }
   }, [conversations]);
 
+  // Update browser tab title with unread count
+  useEffect(() => {
+    const totalUnread = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+    const baseTitle = "Conversas";
+    
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) ${baseTitle}`;
+    } else {
+      document.title = baseTitle;
+    }
+
+    // Cleanup: reset title when leaving page
+    return () => {
+      document.title = "FMO Advogados";
+    };
+  }, [unreadCounts]);
+
   // Search matches
   const searchMatches = useMemo(() => {
     if (!messageSearchQuery.trim()) return [];
