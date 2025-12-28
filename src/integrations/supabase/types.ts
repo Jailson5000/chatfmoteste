@@ -22,6 +22,7 @@ export type Database = {
           description: string | null
           id: string
           is_active: boolean
+          last_prompt: string | null
           law_firm_id: string
           name: string
           trigger_config: Json | null
@@ -36,6 +37,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          last_prompt?: string | null
           law_firm_id: string
           name: string
           trigger_config?: Json | null
@@ -50,6 +52,7 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean
+          last_prompt?: string | null
           law_firm_id?: string
           name?: string
           trigger_config?: Json | null
