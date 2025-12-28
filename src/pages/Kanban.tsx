@@ -1,163 +1,48 @@
 import { useState, useMemo, useEffect } from "react";
-import { Plus, GripVertical, Folder, Bot, User, Clock, MessageSquare, Phone, Wifi, Tag, FolderPlus } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, Users, CircleDot, SlidersHorizontal, LayoutGrid } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useConversations } from "@/hooks/useConversations";
 import { useTags } from "@/hooks/useTags";
-import { formatDistanceToNow } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { Link } from "react-router-dom";
-
-interface ConversationCardProps {
-  conversation: {
-    id: string;
-    contact_name: string | null;
-    contact_phone: string | null;
-    status: string;
-    current_handler: 'ai' | 'human';
-    last_message_at: string | null;
-    tags: string[] | null;
-    department_id: string | null;
-    last_message?: { content: string | null; created_at: string } | null;
-    whatsapp_instance?: { instance_name: string } | null;
-    assigned_profile?: { full_name: string } | null;
-  };
-  isDragging: boolean;
-  onDragStart: () => void;
-  onClick: () => void;
-}
-
-function ConversationCard({ conversation, isDragging, onDragStart, onClick }: ConversationCardProps) {
-  const lastFourDigits = conversation.contact_phone?.slice(-4) || "----";
-  const timeAgo = conversation.last_message_at 
-    ? formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: false, locale: ptBR })
-    : "---";
-  
-  const handlerName = conversation.current_handler === 'ai' 
-    ? 'IA' 
-    : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Humano');
-
-  const connectionName = conversation.whatsapp_instance?.instance_name || 'WhatsApp';
-  
-  return (
-    <Card
-      className={cn(
-        "cursor-grab active:cursor-grabbing transition-all hover:shadow-lg hover:-translate-y-0.5 bg-card",
-        isDragging && "opacity-50 scale-95"
-      )}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", conversation.id);
-        e.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
-      onClick={onClick}
-    >
-      <CardContent className="p-3 space-y-2">
-        {/* Header: Name and Time */}
-        <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-sm truncate flex-1">
-            {conversation.contact_name || conversation.contact_phone || "Sem nome"}
-          </h4>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
-            <Clock className="h-3 w-3" />
-            <span className="whitespace-nowrap">{timeAgo}</span>
-          </div>
-        </div>
-        
-        {/* Status Badge */}
-        <Badge 
-          className="text-xs h-5 px-1.5"
-          variant="secondary"
-        >
-          {conversation.status.replace('_', ' ')}
-        </Badge>
-        
-        {/* Tags */}
-        {conversation.tags && conversation.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {conversation.tags.slice(0, 2).map((tag, idx) => (
-              <Badge 
-                key={idx}
-                variant="outline" 
-                className="text-xs h-5 px-1.5"
-              >
-                <Tag className="h-2.5 w-2.5 mr-0.5" />
-                {tag}
-              </Badge>
-            ))}
-            {conversation.tags.length > 2 && (
-              <Badge variant="outline" className="text-xs h-5 px-1.5">
-                +{conversation.tags.length - 2}
-              </Badge>
-            )}
-          </div>
-        )}
-        
-        {/* Message Preview */}
-        <div className="flex items-start gap-2">
-          <MessageSquare className="h-3 w-3 text-muted-foreground mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {conversation.last_message?.content || "Sem mensagens"}
-          </p>
-        </div>
-        
-        {/* Footer: Phone, Connection, Handler */}
-        <div className="flex items-center justify-between pt-1 border-t border-border/50">
-          <div className="flex items-center gap-2">
-            {/* Phone last 4 digits */}
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Phone className="h-3 w-3" />
-              <span>•••• {lastFourDigits}</span>
-            </div>
-            
-            {/* Connection */}
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Wifi className="h-3 w-3" />
-              <span className="truncate max-w-[60px]">{connectionName.replace('WhatsApp ', '')}</span>
-            </div>
-          </div>
-          
-          {/* Handler Badge */}
-          <Badge 
-            variant="secondary"
-            className={cn(
-              "text-xs px-1.5 py-0 h-5 gap-1",
-              conversation.current_handler === 'ai' 
-                ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" 
-                : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-            )}
-          >
-            {conversation.current_handler === 'ai' ? (
-              <Bot className="h-3 w-3" />
-            ) : (
-              <User className="h-3 w-3" />
-            )}
-            <span className="truncate max-w-[50px]">{handlerName}</span>
-          </Badge>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 
 export default function Kanban() {
   const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
   const { conversations, isLoading: convsLoading, updateConversationDepartment, transferHandler } = useConversations();
   const { tags } = useTags();
+  const { statuses: customStatuses } = useCustomStatuses();
+  const { members } = useTeamMembers();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
   const [draggedDepartment, setDraggedDepartment] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<typeof conversations[0] | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [groupBy, setGroupBy] = useState<'department' | 'status'>('department');
+  const [filterHandler, setFilterHandler] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filters, setFilters] = useState<{
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
@@ -177,29 +62,17 @@ export default function Kanban() {
     return Array.from(connections);
   }, [conversations]);
 
-  // Real-time subscription for conversations updates
+  // Real-time subscription
   useEffect(() => {
     const channel = supabase
       .channel('conversations-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations'
-        },
-        (payload) => {
-          console.log('Conversation realtime update:', payload);
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {})
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Apply filters and search
+  // Apply all filters
   const filteredConversations = useMemo(() => {
     return conversations.filter(conv => {
       // Search filter
@@ -210,17 +83,23 @@ export default function Kanban() {
         if (!nameMatch && !phoneMatch) return false;
       }
       
-      // Status filter
-      if (filters.statuses.length > 0) {
-        if (!filters.statuses.includes(conv.status)) return false;
+      // Handler dropdown filter
+      if (filterHandler !== 'all') {
+        if (filterHandler === 'ai' && conv.current_handler !== 'ai') return false;
+        if (filterHandler !== 'ai' && filterHandler !== 'all') {
+          // Check if assigned to specific member
+          if (conv.assigned_to !== filterHandler && conv.current_handler !== 'human') return false;
+        }
       }
+
+      // Status dropdown filter
+      if (filterStatus !== 'all' && conv.status !== filterStatus) return false;
       
-      // Handler filter
+      // Advanced filters
       if (filters.handlers.length > 0) {
         if (!filters.handlers.includes(conv.current_handler)) return false;
       }
       
-      // Connection filter
       if (filters.connections.length > 0) {
         if (!conv.whatsapp_instance?.instance_name || 
             !filters.connections.includes(conv.whatsapp_instance.instance_name)) {
@@ -228,42 +107,26 @@ export default function Kanban() {
         }
       }
       
-      // Department filter
       if (filters.departments.length > 0) {
-        // Handle "none" filter for unassigned conversations
         const hasNoneFilter = filters.departments.includes("none");
         const otherDeptFilters = filters.departments.filter(d => d !== "none");
         
         if (hasNoneFilter && otherDeptFilters.length > 0) {
-          // Include unassigned OR selected departments
-          if (conv.department_id && !otherDeptFilters.includes(conv.department_id)) {
-            return false;
-          }
+          if (conv.department_id && !otherDeptFilters.includes(conv.department_id)) return false;
         } else if (hasNoneFilter) {
-          // Only unassigned
           if (conv.department_id) return false;
         } else {
-          // Only selected departments
-          if (!conv.department_id || !otherDeptFilters.includes(conv.department_id)) {
-            return false;
-          }
+          if (!conv.department_id || !otherDeptFilters.includes(conv.department_id)) return false;
         }
       }
       
-      // Tags filter
       if (filters.tags.length > 0) {
-        if (!conv.tags || !conv.tags.some(t => filters.tags.includes(t))) {
-          return false;
-        }
+        if (!conv.tags || !conv.tags.some(t => filters.tags.includes(t))) return false;
       }
       
       return true;
     });
-  }, [conversations, filters, searchQuery]);
-
-  const handleConversationDragStart = (conversationId: string) => {
-    setDraggedConversation(conversationId);
-  };
+  }, [conversations, filters, searchQuery, filterHandler, filterStatus]);
 
   const handleConversationDrop = (departmentId: string | null) => {
     if (draggedConversation) {
@@ -273,11 +136,6 @@ export default function Kanban() {
       });
     }
     setDraggedConversation(null);
-  };
-
-  // Department drag handlers
-  const handleDepartmentDragStart = (departmentId: string) => {
-    setDraggedDepartment(departmentId);
   };
 
   const handleDepartmentDrop = (targetDepartmentId: string) => {
@@ -294,12 +152,10 @@ export default function Kanban() {
       return;
     }
 
-    // Create new order
     const newOrder = [...activeDepartments];
     const [removed] = newOrder.splice(currentIndex, 1);
     newOrder.splice(targetIndex, 0, removed);
 
-    // Update positions
     reorderDepartments.mutate(newOrder.map(d => d.id));
     setDraggedDepartment(null);
   };
@@ -309,17 +165,33 @@ export default function Kanban() {
     setSheetOpen(true);
   };
 
-  // Get conversations by department
   const getConversationsByDepartment = (departmentId: string | null) =>
     filteredConversations.filter((c) => c.department_id === departmentId);
 
-  // Get unassigned conversations (no department)
   const unassignedConversations = filteredConversations.filter(c => !c.department_id);
-
-  // Active departments only
   const activeDepartments = departments.filter(d => d.is_active);
-
   const isLoading = deptsLoading || convsLoading;
+
+  // Get handlers for dropdown (AI + team members)
+  const handlerOptions = useMemo(() => {
+    const options = [
+      { value: 'all', label: 'Todos' },
+      { value: 'ai', label: 'IA' },
+    ];
+    members.forEach(m => {
+      options.push({ value: m.id, label: m.full_name.split(' ')[0] });
+    });
+    return options;
+  }, [members]);
+
+  // Status options for dropdown
+  const statusOptions = useMemo(() => {
+    const options = [{ value: 'all', label: 'Todos' }];
+    customStatuses.forEach(s => {
+      options.push({ value: s.name, label: s.name });
+    });
+    return options;
+  }, [customStatuses]);
 
   if (isLoading) {
     return (
@@ -329,7 +201,6 @@ export default function Kanban() {
     );
   }
 
-  // Empty state - no departments created
   if (activeDepartments.length === 0) {
     return (
       <div className="h-screen flex flex-col animate-fade-in">
@@ -347,7 +218,7 @@ export default function Kanban() {
             </div>
             <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
             <p className="text-muted-foreground mb-6">
-              Crie departamentos para organizar suas conversas no Kanban. Os departamentos representam as áreas de atuação do seu escritório.
+              Crie departamentos para organizar suas conversas no Kanban.
             </p>
             <Button asChild>
               <Link to="/settings">
@@ -363,91 +234,102 @@ export default function Kanban() {
 
   return (
     <div className="h-screen flex flex-col animate-fade-in">
-      {/* Header */}
-      <div className="p-4 md:p-6 border-b border-border flex-shrink-0">
-        <div className="flex flex-col gap-4">
-          <div>
-            <h1 className="font-display text-2xl md:text-3xl font-bold">Kanban</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Arraste conversas entre departamentos para organizar
-            </p>
+      {/* Top Filter Bar */}
+      <div className="p-3 md:p-4 border-b border-border flex-shrink-0 bg-background/95 backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          {/* Left: Search and main filters */}
+          <div className="flex items-center gap-2 flex-1">
+            <KanbanFilters 
+              filters={filters}
+              onFiltersChange={setFilters}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              availableConnections={availableConnections}
+              availableDepartments={departments}
+              availableTags={tags}
+            />
+            
+            {/* Responsável dropdown */}
+            <Select value={filterHandler} onValueChange={setFilterHandler}>
+              <SelectTrigger className="w-[140px] h-9">
+                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="Responsável" />
+              </SelectTrigger>
+              <SelectContent>
+                {handlerOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Status dropdown */}
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[130px] h-9">
+                <CircleDot className="h-4 w-4 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statusOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* More filters button */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-9 gap-2">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Mais filtros
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-4" align="start">
+                <p className="text-sm text-muted-foreground">
+                  Use o painel de filtros para opções avançadas.
+                </p>
+              </PopoverContent>
+            </Popover>
           </div>
-          
-          {/* Filters */}
-          <KanbanFilters 
-            filters={filters}
-            onFiltersChange={setFilters}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            availableConnections={availableConnections}
-            availableDepartments={departments}
-            availableTags={tags}
-          />
+
+          {/* Right: Group by selector */}
+          <div className="flex items-center gap-2">
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as 'department' | 'status')}>
+              <SelectTrigger className="w-[180px] h-9">
+                <LayoutGrid className="h-4 w-4 mr-2 text-muted-foreground" />
+                <span className="text-muted-foreground mr-1">Agrupar:</span>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="department">Departamento</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
-      {/* Kanban Board with horizontal scroll */}
+      {/* Kanban Board */}
       <ScrollArea className="flex-1">
-        <div className="flex gap-4 p-4 md:p-6 min-w-max items-start">
-          {/* Unassigned column - conversations without department */}
+        <div className="flex gap-3 p-3 md:p-4 min-w-max items-start">
+          {/* Unassigned column */}
           {unassignedConversations.length > 0 && (
-            <div
-              className="w-72 md:w-80 flex-shrink-0"
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.add("ring-2", "ring-primary/50");
-              }}
-              onDragLeave={(e) => {
-                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-                handleConversationDrop(null);
-              }}
-            >
-              <div 
-                className="rounded-xl border"
-                style={{ 
-                  backgroundColor: `#71717a08`,
-                  borderColor: `#71717a30`
-                }}
-              >
-                <div 
-                  className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl"
-                  style={{ 
-                    borderColor: `#71717a30`,
-                    backgroundColor: `#71717a10`
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
-                    <h3 className="font-semibold text-sm">Sem Departamento</h3>
-                    <Badge 
-                      variant="outline" 
-                      className="text-xs h-5 px-1.5"
-                    >
-                      {unassignedConversations.length}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="p-3 space-y-2">
-                  {unassignedConversations.map((conv) => (
-                    <ConversationCard
-                      key={conv.id}
-                      conversation={conv}
-                      isDragging={draggedConversation === conv.id}
-                      onDragStart={() => handleConversationDragStart(conv.id)}
-                      onClick={() => handleConversationClick(conv)}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
+            <KanbanColumn
+              id={null}
+              name="Sem Departamento"
+              color="#71717a"
+              conversations={unassignedConversations}
+              customStatuses={customStatuses}
+              tags={tags}
+              isDragging={false}
+              draggedConversation={draggedConversation}
+              onDrop={() => handleConversationDrop(null)}
+              onConversationDragStart={(id) => setDraggedConversation(id)}
+              onConversationClick={handleConversationClick}
+            />
           )}
 
           {/* Department columns */}
@@ -456,105 +338,24 @@ export default function Kanban() {
             const isDraggingThis = draggedDepartment === department.id;
             
             return (
-              <div
+              <KanbanColumn
                 key={department.id}
-                className={cn(
-                  "w-72 md:w-80 flex-shrink-0 transition-all",
-                  isDraggingThis && "opacity-50 scale-95"
-                )}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  // Only show drop effect if dragging a conversation
-                  if (draggedConversation) {
-                    e.dataTransfer.dropEffect = "move";
-                  }
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault();
-                  if (draggedConversation) {
-                    e.currentTarget.classList.add("ring-2", "ring-primary/50");
-                  }
-                }}
-                onDragLeave={(e) => {
-                  e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.classList.remove("ring-2", "ring-primary/50");
-                  if (draggedConversation) {
-                    handleConversationDrop(department.id);
-                  }
-                }}
-              >
-                <div 
-                  className={cn(
-                    "rounded-xl border transition-shadow",
-                    draggedDepartment && !isDraggingThis && "hover:ring-2 hover:ring-primary/30"
-                  )}
-                  style={{ 
-                    backgroundColor: `${department.color}08`,
-                    borderColor: `${department.color}30`
-                  }}
-                >
-                  {/* Draggable header */}
-                  <div 
-                    className="flex items-center justify-between p-3 border-b sticky top-0 backdrop-blur-sm z-10 rounded-t-xl cursor-grab active:cursor-grabbing"
-                    style={{ 
-                      borderColor: `${department.color}30`,
-                      backgroundColor: `${department.color}10`
-                    }}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("department", department.id);
-                      e.dataTransfer.effectAllowed = "move";
-                      handleDepartmentDragStart(department.id);
-                    }}
-                    onDragEnd={() => setDraggedDepartment(null)}
-                    onDragOver={(e) => {
-                      if (draggedDepartment && draggedDepartment !== department.id) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
-                    }}
-                    onDrop={(e) => {
-                      if (draggedDepartment) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleDepartmentDrop(department.id);
-                      }
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <GripVertical className="h-4 w-4 text-muted-foreground/50" />
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: department.color }} />
-                      <h3 className="font-semibold text-sm">{department.name}</h3>
-                      <Badge 
-                        variant="outline" 
-                        className="text-xs h-5 px-1.5"
-                        style={{ borderColor: department.color, color: department.color }}
-                      >
-                        {departmentConversations.length}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="p-3 space-y-2">
-                    {departmentConversations.map((conv) => (
-                      <ConversationCard
-                        key={conv.id}
-                        conversation={conv}
-                        isDragging={draggedConversation === conv.id}
-                        onDragStart={() => handleConversationDragStart(conv.id)}
-                        onClick={() => handleConversationClick(conv)}
-                      />
-                    ))}
-                    {departmentConversations.length === 0 && (
-                      <div className="text-center py-8 text-muted-foreground text-sm">
-                        Arraste conversas para cá
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+                id={department.id}
+                name={department.name}
+                color={department.color}
+                conversations={departmentConversations}
+                customStatuses={customStatuses}
+                tags={tags}
+                isDragging={isDraggingThis}
+                isDraggable={true}
+                draggedConversation={draggedConversation}
+                onDragStart={() => setDraggedDepartment(department.id)}
+                onDragEnd={() => setDraggedDepartment(null)}
+                onDrop={() => handleConversationDrop(department.id)}
+                onColumnDrop={() => handleDepartmentDrop(department.id)}
+                onConversationDragStart={(id) => setDraggedConversation(id)}
+                onConversationClick={handleConversationClick}
+              />
             );
           })}
 
@@ -563,7 +364,6 @@ export default function Kanban() {
               <div className="text-center">
                 <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-sm">Nenhuma conversa encontrada</p>
-                <p className="text-xs mt-1">As conversas aparecerão aqui quando chegarem</p>
               </div>
             </div>
           )}
@@ -573,51 +373,70 @@ export default function Kanban() {
 
       {/* Conversation Detail Sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>
-              {selectedConversation?.contact_name || selectedConversation?.contact_phone || "Conversa"}
-            </SheetTitle>
-          </SheetHeader>
+        <SheetContent className="w-full sm:max-w-md p-0 flex flex-col">
           {selectedConversation && (
-            <div className="mt-6 space-y-4">
-              <div>
-                <span className="text-sm text-muted-foreground">Telefone:</span>
-                <p className="font-medium">{selectedConversation.contact_phone || "---"}</p>
+            <>
+              {/* Header */}
+              <div className="p-4 border-b border-border flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${selectedConversation.contact_name}`} />
+                    <AvatarFallback>
+                      {selectedConversation.contact_name?.charAt(0) || "?"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h3 className="font-semibold">
+                      {selectedConversation.contact_name || selectedConversation.contact_phone}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedConversation.contact_phone}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="destructive" size="sm">
+                  Arquivar chat
+                </Button>
               </div>
-              <div>
-                <span className="text-sm text-muted-foreground">Status:</span>
-                <p className="font-medium">{selectedConversation.status.replace('_', ' ')}</p>
-              </div>
-              <div>
-                <span className="text-sm text-muted-foreground">Departamento:</span>
-                <p className="font-medium">
-                  {departments.find(d => d.id === selectedConversation.department_id)?.name || "Não atribuído"}
-                </p>
-              </div>
-              <div>
-                <span className="text-sm text-muted-foreground">Handler:</span>
-                <Badge 
-                  variant="secondary"
-                  className={cn(
-                    "ml-2",
-                    selectedConversation.current_handler === 'ai' 
-                      ? "bg-purple-100 text-purple-700" 
-                      : "bg-green-100 text-green-700"
-                  )}
-                >
-                  {selectedConversation.current_handler === 'ai' ? 'IA' : 'Humano'}
-                </Badge>
-              </div>
-              {selectedConversation.last_message?.content && (
+
+              {/* Content */}
+              <div className="flex-1 p-4 space-y-4 overflow-y-auto">
                 <div>
-                  <span className="text-sm text-muted-foreground">Última mensagem:</span>
-                  <p className="text-sm mt-1 p-3 bg-muted rounded-lg">
-                    {selectedConversation.last_message.content}
+                  <span className="text-sm text-muted-foreground">Departamento</span>
+                  <p className="font-medium">
+                    {departments.find(d => d.id === selectedConversation.department_id)?.name || "Não atribuído"}
                   </p>
                 </div>
-              )}
-              <div className="pt-4 space-y-2">
+                <div>
+                  <span className="text-sm text-muted-foreground">Status</span>
+                  <p className="font-medium">{selectedConversation.status.replace('_', ' ')}</p>
+                </div>
+                <div>
+                  <span className="text-sm text-muted-foreground">Handler</span>
+                  <Badge 
+                    variant="secondary"
+                    className={cn(
+                      "ml-2",
+                      selectedConversation.current_handler === 'ai' 
+                        ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" 
+                        : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                    )}
+                  >
+                    {selectedConversation.current_handler === 'ai' ? 'IA' : 'Humano'}
+                  </Badge>
+                </div>
+                {selectedConversation.last_message?.content && (
+                  <div>
+                    <span className="text-sm text-muted-foreground">Última mensagem</span>
+                    <p className="text-sm mt-1 p-3 bg-muted rounded-lg">
+                      {selectedConversation.last_message.content}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="p-4 border-t border-border space-y-2">
                 <Button 
                   variant="outline" 
                   className="w-full"
@@ -633,8 +452,16 @@ export default function Kanban() {
                     ? 'Transferir para Humano' 
                     : 'Transferir para IA'}
                 </Button>
+                <Button 
+                  className="w-full"
+                  asChild
+                >
+                  <Link to={`/conversations?id=${selectedConversation.id}`}>
+                    Abrir Conversa
+                  </Link>
+                </Button>
               </div>
-            </div>
+            </>
           )}
         </SheetContent>
       </Sheet>
