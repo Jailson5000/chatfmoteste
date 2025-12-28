@@ -85,18 +85,10 @@ serve(async (req) => {
       );
     }
 
-    // Determine which webhook URL to use
-    const targetWebhookUrl = webhook_url || automation.webhook_url || n8nWebhookUrl;
+    // Use dedicated prompt sync webhook URL
+    const promptSyncWebhookUrl = 'https://n8n.fmoadv.com.br/webhook/atualizaprompt';
 
-    if (!targetWebhookUrl) {
-      console.error('No webhook URL configured');
-      return new Response(
-        JSON.stringify({ error: 'No N8N webhook URL configured' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Sending prompt sync to N8N:', targetWebhookUrl);
+    console.log('Sending prompt sync to N8N:', promptSyncWebhookUrl);
 
     // Prepare the payload for N8N
     const n8nPayload = {
@@ -125,7 +117,7 @@ serve(async (req) => {
     }
 
     // Send to N8N
-    const n8nResponse = await fetch(targetWebhookUrl, {
+    const n8nResponse = await fetch(promptSyncWebhookUrl, {
       method: 'POST',
       headers: n8nHeaders,
       body: JSON.stringify(n8nPayload),
