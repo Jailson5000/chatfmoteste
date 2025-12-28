@@ -1657,44 +1657,6 @@ export default function Conversations() {
                     onCheckedChange={setSignatureEnabled}
                   />
                 </div>
-
-                {/* Handler Toggle (IA ↔ Humano) */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/50"
-                      role="group"
-                      tabIndex={0}
-                      aria-label="Alternar atendimento entre IA e Humano"
-                    >
-                      {selectedConversation.current_handler === "ai" ? (
-                        <Bot className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <UserCheck className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <Label htmlFor="handler-toggle" className="text-xs cursor-pointer">
-                        Atendimento
-                      </Label>
-                      <Switch
-                        id="handler-toggle"
-                        checked={selectedConversation.current_handler === "human"}
-                        onCheckedChange={(checked) =>
-                          handleTransferHandler(checked ? "human" : "ai")
-                        }
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {selectedConversation.current_handler === "ai" ? "IA" : "Humano"}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>
-                      {selectedConversation.current_handler === "ai"
-                        ? "Ativo: IA (automação pode responder)"
-                        : "Ativo: Humano (automação não responde)"}
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon">
