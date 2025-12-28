@@ -196,7 +196,7 @@ export default function Conversations() {
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
   
   // User profile for signature
-  const [userProfile, setUserProfile] = useState<{ full_name: string } | null>(null);
+  const [userProfile, setUserProfile] = useState<{ full_name: string; job_title: string | null } | null>(null);
   
   // Internal file upload refs
   const internalFileInputRef = useRef<HTMLInputElement>(null);
@@ -233,7 +233,7 @@ export default function Conversations() {
       
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name")
+        .select("full_name, job_title")
         .eq("id", user.id)
         .single();
       
@@ -565,7 +565,11 @@ export default function Conversations() {
     
     // Add signature if enabled and not internal mode
     if (signatureEnabled && userProfile?.full_name && !wasInternalMode) {
-      messageToSend = `${messageToSend}\n\n— ${userProfile.full_name}`;
+      const firstName = userProfile.full_name.split(' ')[0];
+      const signature = userProfile.job_title 
+        ? `— ${firstName}, ${userProfile.job_title}`
+        : `— ${firstName}`;
+      messageToSend = `${messageToSend}\n\n${signature}`;
     }
     
     setMessageInput(""); // Clear input immediately for better UX
