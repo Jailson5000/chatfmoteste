@@ -44,11 +44,12 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours } from "date-fns";
+import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours, isBefore, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { DateRange } from "react-day-picker";
 import { BrazilMap } from "@/components/dashboard/BrazilMap";
+import { getStateFromPhone } from "@/lib/dddToState";
 
 type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
@@ -227,15 +228,14 @@ export default function Dashboard() {
     }));
   }, [teamMembers]);
 
-  // Brazil states data from clients
+  // Brazil states data from clients - extract state from phone DDD
   const clientsByState = useMemo(() => {
     const stateMap: Record<string, number> = {};
     filteredClients.forEach((client) => {
-      // Try to extract state from address or use the state field
-      const state = (client as any).state;
-      if (state) {
-        const abbr = state.toUpperCase().trim();
-        stateMap[abbr] = (stateMap[abbr] || 0) + 1;
+      // First try to get state from phone DDD
+      const stateFromPhone = getStateFromPhone(client.phone);
+      if (stateFromPhone) {
+        stateMap[stateFromPhone] = (stateMap[stateFromPhone] || 0) + 1;
       }
     });
     return stateMap;
@@ -275,7 +275,12 @@ export default function Dashboard() {
               Evolução dos Tipos de Status
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
+              <Select value={dateFilter} onValueChange={(v) => {
+                setDateFilter(v as DateFilter);
+                if (v !== 'custom') {
+                  setCustomDateRange(undefined);
+                }
+              }}>
                 <SelectTrigger className="w-36 h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -285,8 +290,15 @@ export default function Dashboard() {
                   <SelectItem value="30days">30 dias</SelectItem>
                   <SelectItem value="month">Este mês</SelectItem>
                   <SelectItem value="all">Tudo</SelectItem>
+                  <SelectItem value="custom">Personalizado</SelectItem>
                 </SelectContent>
               </Select>
+              {dateFilter === 'custom' && (
+                <DateRangePicker
+                  dateRange={customDateRange}
+                  onDateRangeChange={setCustomDateRange}
+                />
+              )}
             </div>
           </div>
         </CardHeader>
