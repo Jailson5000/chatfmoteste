@@ -79,6 +79,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
 type ConversationTab = "chat" | "ai" | "queue";
 
@@ -1017,13 +1022,241 @@ export default function Conversations() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex overflow-hidden min-h-0">
-      {/* Conversations List */}
-      <div
-        className={cn(
-          "w-full md:w-[360px] lg:w-[400px] border-r border-border bg-card flex flex-col min-h-0 flex-shrink-0",
-          showMobileChat && "hidden md:flex"
-        )}
-      >
+      {/* Mobile: show list or chat */}
+      <div className={cn("md:hidden w-full", showMobileChat && "hidden")}>
+        <div className="h-full flex flex-col bg-card">
+          {/* Mobile Header */}
+          <div className="p-4 border-b border-border space-y-4">
+            <h1 className="font-display text-xl font-bold">Atendimentos</h1>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="chat" className="gap-2">
+                  <Users className="h-4 w-4" />
+                  Chat
+                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                    {getTabCount("chat")}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="ai" className="gap-2">
+                  <Bot className="h-4 w-4" />
+                  IA
+                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                    {getTabCount("ai")}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="queue" className="gap-2">
+                  <Inbox className="h-4 w-4" />
+                  Fila
+                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                    {getTabCount("queue")}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <ConversationFilters
+              filters={conversationFilters}
+              onFiltersChange={setConversationFilters}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              availableStatuses={availableStatuses}
+              availableTags={availableTags}
+            />
+          </div>
+          <ScrollArea className="flex-1">
+            <div className="p-2 space-y-1">
+              {filteredConversations.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">
+                    {conversations.length === 0 ? "Nenhuma conversa ainda" : "Nenhuma conversa encontrada"}
+                  </p>
+                </div>
+              ) : (
+                filteredConversations.map((conv) => (
+                  <div
+                    key={conv.id}
+                    onClick={() => handleSelectConversation(conv.id)}
+                    className={cn(
+                      "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted",
+                      selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20"
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-sm font-semibold text-primary">
+                          {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium truncate">{conv.name}</span>
+                          <span className="text-xs text-muted-foreground flex-shrink-0">{conv.time}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-xs",
+                              conv.handler === "ai"
+                                ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                                : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
+                            )}
+                          >
+                            {conv.handler === "ai" ? <Bot className="h-3 w-3 mr-1" /> : <UserCheck className="h-3 w-3 mr-1" />}
+                            {conv.handler === "ai" ? "IA" : conv.assignedTo || "Humano"}
+                          </Badge>
+                          {conv.status && <Badge variant="outline" className="text-xs">{conv.status.replace('_', ' ')}</Badge>}
+                          {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </div>
+
+      {/* Mobile: Chat view */}
+      <div className={cn("md:hidden w-full h-full", !showMobileChat && "hidden")}>
+        <ChatDropZone
+          onFileDrop={(file, mediaType) => {
+            const previewUrl = URL.createObjectURL(file);
+            setMediaPreview({ open: true, file, mediaType, previewUrl });
+          }}
+          disabled={isSending || !selectedConversation}
+        >
+          <div className="flex flex-col bg-background h-full min-h-0 overflow-hidden">
+            {selectedConversation ? (
+              <>
+                {/* Mobile Chat Header */}
+                <div className="p-4 border-b border-border flex-shrink-0">
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowMobileChat(false)}
+                    >
+                      <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <span className="text-sm font-semibold text-primary">
+                        {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="font-medium">
+                        {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
+                      </p>
+                      <p className="text-sm text-muted-foreground flex items-center gap-1">
+                        <Phone className="h-3 w-3" />
+                        {selectedConversation.contact_phone || "---"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mobile Messages */}
+                <ScrollArea className="flex-1 min-h-0">
+                  <div className="p-4 space-y-4">
+                    {messagesLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                      </div>
+                    ) : messages.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Nenhuma mensagem ainda</p>
+                      </div>
+                    ) : (
+                      messages
+                        .filter((msg) => {
+                          if (messageFilter === "all") return true;
+                          if (messageFilter === "external") return !msg.is_internal;
+                          if (messageFilter === "internal") return msg.is_internal;
+                          return true;
+                        })
+                        .map((msg) => (
+                          <MessageBubble
+                            key={msg.id}
+                            id={msg.id}
+                            content={msg.content}
+                            createdAt={msg.created_at}
+                            isFromMe={msg.is_from_me}
+                            senderType={msg.sender_type}
+                            aiGenerated={msg.ai_generated}
+                            mediaUrl={msg.media_url}
+                            mediaMimeType={msg.media_mime_type}
+                            messageType={msg.message_type}
+                            status={msg.status || "sent"}
+                            readAt={msg.read_at}
+                            whatsappMessageId={msg.whatsapp_message_id}
+                            conversationId={selectedConversationId || undefined}
+                            replyTo={msg.reply_to}
+                            isInternal={msg.is_internal}
+                            isPontual={msg.is_pontual}
+                            onReply={handleReply}
+                            onScrollToMessage={scrollToMessage}
+                            onRetry={handleRetryMessage}
+                          />
+                        ))
+                    )}
+                  </div>
+                </ScrollArea>
+
+                {/* Mobile Input */}
+                <div className="flex-shrink-0 p-4 border-t border-border bg-card">
+                  <div className="flex items-end gap-2">
+                    <Textarea
+                      placeholder="Digite sua mensagem..."
+                      className="min-h-[44px] max-h-[120px] resize-none"
+                      rows={1}
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      disabled={isSending}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                    />
+                    <Button 
+                      size="icon" 
+                      onClick={handleSendMessage}
+                      disabled={isSending || !messageInput.trim()}
+                    >
+                      {isSending ? (
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                      ) : (
+                        <Send className="h-5 w-5" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Selecione uma conversa para começar</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </ChatDropZone>
+      </div>
+
+      <ResizablePanelGroup direction="horizontal" className="hidden md:flex h-full">
+        {/* Conversations List Panel */}
+        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="bg-card flex flex-col min-h-0">
         {/* Header */}
         <div className="p-4 border-b border-border space-y-4">
           <h1 className="font-display text-xl font-bold">Atendimentos</h1>
@@ -1138,26 +1371,26 @@ export default function Conversations() {
             )}
           </div>
         </ScrollArea>
-      </div>
+        </ResizablePanel>
 
-      {/* Chat Area with Drop Zone */}
-      <ChatDropZone
-        onFileDrop={(file, mediaType) => {
-          const previewUrl = URL.createObjectURL(file);
-          setMediaPreview({
-            open: true,
-            file,
-            mediaType,
-            previewUrl,
+        <ResizableHandle withHandle />
+
+        {/* Chat Area Panel */}
+        <ResizablePanel defaultSize={75} minSize={50} className="flex flex-col min-h-0 min-w-0">
+          <ChatDropZone
+            onFileDrop={(file, mediaType) => {
+              const previewUrl = URL.createObjectURL(file);
+              setMediaPreview({
+                open: true,
+                file,
+                mediaType,
+                previewUrl,
           });
         }}
         disabled={isSending || !selectedConversation}
       >
         <div
-          className={cn(
-            "flex-1 flex flex-col bg-background min-h-0 min-w-0 overflow-hidden",
-            !showMobileChat && "hidden md:flex"
-          )}
+          className="flex-1 flex flex-col bg-background min-h-0 min-w-0 overflow-hidden h-full"
         >
         {selectedConversation ? (
           <>
@@ -1708,7 +1941,10 @@ export default function Conversations() {
           </div>
         )}
         </div>
-      </ChatDropZone>
+          </ChatDropZone>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
       {/* Edit Name Dialog */}
       <Dialog open={editNameDialogOpen} onOpenChange={setEditNameDialogOpen}>
         <DialogContent>
