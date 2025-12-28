@@ -164,6 +164,7 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
         const payload = {
           event: automation.trigger_type || 'new_message',
           // Root level fields for easy n8n access
+          session_id: context.conversationId, // Use as Session ID in n8n Memory node
           contact_phone: context.contactPhone,
           contact_name: context.contactName,
           remote_jid: context.remoteJid,
