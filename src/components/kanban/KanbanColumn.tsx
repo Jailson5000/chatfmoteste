@@ -21,6 +21,7 @@ interface Conversation {
   whatsapp_instance?: { instance_name: string; phone_number?: string | null } | null;
   assigned_profile?: { full_name: string } | null;
   client?: { custom_status_id?: string | null } | null;
+  unread_count?: number;
 }
 
 interface KanbanColumnProps {
@@ -30,6 +31,7 @@ interface KanbanColumnProps {
   conversations: Conversation[];
   customStatuses: Array<{ id: string; name: string; color: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
+  automations: Array<{ id: string; name: string; is_active: boolean }>;
   isDragging: boolean;
   isDraggable?: boolean;
   draggedConversation: string | null;
@@ -48,6 +50,7 @@ export function KanbanColumn({
   conversations,
   customStatuses,
   tags,
+  automations,
   isDragging,
   isDraggable = false,
   draggedConversation,
@@ -163,6 +166,7 @@ export function KanbanColumn({
               conversation={conv}
               customStatus={getCustomStatus(conv)}
               tags={tags}
+              automations={automations}
               isDragging={draggedConversation === conv.id}
               onDragStart={() => onConversationDragStart(conv.id)}
               onClick={() => onConversationClick(conv)}

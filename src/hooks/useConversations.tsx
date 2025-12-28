@@ -10,12 +10,19 @@ interface ConversationWithLastMessage extends Conversation {
   last_message?: {
     content: string | null;
     created_at: string;
+    message_type?: string;
+    is_from_me?: boolean;
   } | null;
   whatsapp_instance?: {
     instance_name: string;
+    phone_number?: string | null;
   } | null;
   assigned_profile?: {
     full_name: string;
+  } | null;
+  unread_count?: number;
+  client?: {
+    custom_status_id?: string | null;
   } | null;
 }
 
@@ -26,12 +33,13 @@ export function useConversations() {
   const { data: conversations = [], isLoading, error } = useQuery({
     queryKey: ["conversations"],
     queryFn: async () => {
-      // Fetch conversations with related data
+      // Fetch conversations with related data including phone_number
       const { data: convs, error: convError } = await supabase
         .from("conversations")
         .select(`
           *,
-          whatsapp_instance:whatsapp_instances(instance_name)
+          whatsapp_instance:whatsapp_instances(instance_name, phone_number),
+          client:clients(custom_status_id)
         `)
         .order("last_message_at", { ascending: false, nullsFirst: false });
 
@@ -55,22 +63,32 @@ export function useConversations() {
         }, {} as Record<string, string>);
       }
 
-      // Fetch last message for each conversation
+      // Fetch last message and unread count for each conversation
       const conversationsWithMessages: ConversationWithLastMessage[] = await Promise.all(
         (convs || []).map(async (conv) => {
-          const { data: lastMsg } = await supabase
-            .from("messages")
-            .select("content, created_at")
-            .eq("conversation_id", conv.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const [lastMsgResult, unreadResult] = await Promise.all([
+            supabase
+              .from("messages")
+              .select("content, created_at, message_type, is_from_me")
+              .eq("conversation_id", conv.id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from("messages")
+              .select("id", { count: "exact", head: true })
+              .eq("conversation_id", conv.id)
+              .eq("is_from_me", false)
+              .is("read_at", null)
+          ]);
 
           return {
             ...conv,
-            last_message: lastMsg,
-            whatsapp_instance: conv.whatsapp_instance as { instance_name: string } | null,
+            last_message: lastMsgResult.data,
+            whatsapp_instance: conv.whatsapp_instance as { instance_name: string; phone_number?: string | null } | null,
             assigned_profile: conv.assigned_to ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" } : null,
+            unread_count: unreadResult.count || 0,
+            client: conv.client as { custom_status_id?: string | null } | null,
           };
         })
       );
