@@ -687,23 +687,36 @@ serve(async (req) => {
         // IMPORTANT: Only trigger automations if:
         // 1. Message is NOT from us (external message from client)
         // 2. The conversation handler is set to 'ai' (not 'human')
-        const shouldTriggerAutomation = !isFromMe && savedMessage && conversation.current_handler === 'ai';
-        
-        if (shouldTriggerAutomation) {
-          logDebug('AUTOMATION', `Triggering automation - handler is AI`, { requestId, handler: conversation.current_handler });
-          await processAutomations(supabaseClient, {
-            lawFirmId,
-            conversationId: conversation.id,
-            messageContent,
-            messageType,
-            contactName: data.pushName || phoneNumber,
-            contactPhone: phoneNumber,
-            remoteJid,
-            instanceId: instance.id,
-            instanceName: instance.instance_name,
-          });
-        } else if (!isFromMe && savedMessage) {
-          logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: conversation.current_handler });
+        // 
+        // RE-FETCH the conversation to get the LATEST handler value
+        // This prevents race conditions where handler was changed to 'human'
+        // but the cached conversation object still shows 'ai'
+        if (!isFromMe && savedMessage) {
+          const { data: freshConversation } = await supabaseClient
+            .from('conversations')
+            .select('current_handler')
+            .eq('id', conversation.id)
+            .single();
+          
+          const currentHandler = freshConversation?.current_handler || conversation.current_handler;
+          const shouldTriggerAutomation = currentHandler === 'ai';
+          
+          if (shouldTriggerAutomation) {
+            logDebug('AUTOMATION', `Triggering automation - handler is AI`, { requestId, handler: currentHandler });
+            await processAutomations(supabaseClient, {
+              lawFirmId,
+              conversationId: conversation.id,
+              messageContent,
+              messageType,
+              contactName: data.pushName || phoneNumber,
+              contactPhone: phoneNumber,
+              remoteJid,
+              instanceId: instance.id,
+              instanceName: instance.instance_name,
+            });
+          } else {
+            logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
+          }
         }
 
         break;
