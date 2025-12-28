@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, User, Phone, Tag, Check, CheckCheck, Image, Mic, Video, FileText } from "lucide-react";
+import { Bot, User, Phone, Tag, CheckCheck, Image, Mic, Video, FileText } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -23,9 +23,12 @@ interface KanbanCardProps {
     } | null;
     whatsapp_instance?: { instance_name: string; phone_number?: string | null } | null;
     assigned_profile?: { full_name: string } | null;
+    unread_count?: number;
+    client?: { custom_status_id?: string | null } | null;
   };
   customStatus?: { name: string; color: string } | null;
   tags?: Array<{ id: string; name: string; color: string }>;
+  automations?: Array<{ id: string; name: string; is_active: boolean }>;
   isDragging: boolean;
   onDragStart: () => void;
   onClick: () => void;
@@ -40,7 +43,6 @@ function getInitials(name: string | null): string {
 
 function maskPhone(phone: string | null): string {
   if (!phone) return "----";
-  // Show only last 4 digits
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 4) return `•••${digits}`;
   return `•••${digits.slice(-4)}`;
@@ -50,7 +52,6 @@ function getTimeAgo(date: string | null): string {
   if (!date) return "---";
   try {
     const result = formatDistanceToNow(new Date(date), { addSuffix: false, locale: ptBR });
-    // Shorten common terms
     return result
       .replace(" minutos", "m")
       .replace(" minuto", "m")
@@ -98,6 +99,7 @@ export function KanbanCard({
   conversation, 
   customStatus, 
   tags: allTags = [],
+  automations = [],
   isDragging, 
   onDragStart, 
   onClick 
@@ -105,10 +107,15 @@ export function KanbanCard({
   const maskedPhone = maskPhone(conversation.contact_phone);
   const timeAgo = getTimeAgo(conversation.last_message_at);
   
+  // Get handler name: if AI, show "IA + automation name", if human, show person's name
+  const activeAutomation = automations.find(a => a.is_active);
   const handlerName = conversation.current_handler === 'ai' 
-    ? 'IA' 
-    : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Humano');
+    ? `IA ${activeAutomation?.name || ''}`.trim()
+    : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Sem responsável');
+  
+  const isAI = conversation.current_handler === 'ai';
 
+  // Instance phone last 4 digits
   const instanceLastFour = conversation.whatsapp_instance?.phone_number?.slice(-4) || "----";
   
   // Get matched tags
@@ -127,10 +134,12 @@ export function KanbanCard({
     messagePreview = messageLabel;
   }
 
+  const unreadCount = conversation.unread_count || 0;
+
   return (
     <div
       className={cn(
-        "group rounded-lg bg-card border border-border/50 p-3 cursor-grab active:cursor-grabbing",
+        "group relative rounded-lg bg-card border border-border/50 p-3 cursor-grab active:cursor-grabbing",
         "transition-all duration-200 hover:border-border hover:shadow-md hover:-translate-y-0.5",
         isDragging && "opacity-50 scale-95"
       )}
@@ -142,6 +151,13 @@ export function KanbanCard({
       }}
       onClick={onClick}
     >
+      {/* Unread Badge */}
+      {unreadCount > 0 && (
+        <div className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1.5 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs font-bold">
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </div>
+      )}
+
       {/* Header: Avatar, Name, Phone, Time */}
       <div className="flex items-start gap-3">
         <Avatar className="h-10 w-10 border-2 border-success/30">
@@ -231,12 +247,15 @@ export function KanbanCard({
 
         {/* Handler */}
         <div className="flex items-center gap-1.5">
-          {conversation.current_handler === 'ai' ? (
+          {isAI ? (
             <Bot className="h-3.5 w-3.5 text-purple-500" />
           ) : (
             <User className="h-3.5 w-3.5 text-success" />
           )}
-          <span className="text-xs text-muted-foreground truncate max-w-[80px]">
+          <span className={cn(
+            "text-xs truncate max-w-[100px]",
+            isAI ? "text-purple-500" : "text-success"
+          )}>
             {handlerName}
           </span>
         </div>

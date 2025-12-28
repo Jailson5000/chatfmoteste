@@ -8,8 +8,10 @@ import { useConversations } from "@/hooks/useConversations";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
+import { useAutomations } from "@/hooks/useAutomations";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
+import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
 import { Link } from "react-router-dom";
 import {
   Select,
@@ -23,9 +25,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 export default function Kanban() {
@@ -34,6 +34,7 @@ export default function Kanban() {
   const { tags } = useTags();
   const { statuses: customStatuses } = useCustomStatuses();
   const { members } = useTeamMembers();
+  const { automations } = useAutomations();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
   const [draggedDepartment, setDraggedDepartment] = useState<string | null>(null);
@@ -324,6 +325,7 @@ export default function Kanban() {
               conversations={unassignedConversations}
               customStatuses={customStatuses}
               tags={tags}
+              automations={automations}
               isDragging={false}
               draggedConversation={draggedConversation}
               onDrop={() => handleConversationDrop(null)}
@@ -346,6 +348,7 @@ export default function Kanban() {
                 conversations={departmentConversations}
                 customStatuses={customStatuses}
                 tags={tags}
+                automations={automations}
                 isDragging={isDraggingThis}
                 isDraggable={true}
                 draggedConversation={draggedConversation}
@@ -371,97 +374,18 @@ export default function Kanban() {
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
 
-      {/* Conversation Detail Sheet */}
+      {/* Conversation Chat Panel */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-md p-0 flex flex-col">
+        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col">
           {selectedConversation && (
-            <>
-              {/* Header */}
-              <div className="p-4 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${selectedConversation.contact_name}`} />
-                    <AvatarFallback>
-                      {selectedConversation.contact_name?.charAt(0) || "?"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <h3 className="font-semibold">
-                      {selectedConversation.contact_name || selectedConversation.contact_phone}
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedConversation.contact_phone}
-                    </p>
-                  </div>
-                </div>
-                <Button variant="destructive" size="sm">
-                  Arquivar chat
-                </Button>
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-                <div>
-                  <span className="text-sm text-muted-foreground">Departamento</span>
-                  <p className="font-medium">
-                    {departments.find(d => d.id === selectedConversation.department_id)?.name || "Não atribuído"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-sm text-muted-foreground">Status</span>
-                  <p className="font-medium">{selectedConversation.status.replace('_', ' ')}</p>
-                </div>
-                <div>
-                  <span className="text-sm text-muted-foreground">Handler</span>
-                  <Badge 
-                    variant="secondary"
-                    className={cn(
-                      "ml-2",
-                      selectedConversation.current_handler === 'ai' 
-                        ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" 
-                        : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                    )}
-                  >
-                    {selectedConversation.current_handler === 'ai' ? 'IA' : 'Humano'}
-                  </Badge>
-                </div>
-                {selectedConversation.last_message?.content && (
-                  <div>
-                    <span className="text-sm text-muted-foreground">Última mensagem</span>
-                    <p className="text-sm mt-1 p-3 bg-muted rounded-lg">
-                      {selectedConversation.last_message.content}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="p-4 border-t border-border space-y-2">
-                <Button 
-                  variant="outline" 
-                  className="w-full"
-                  onClick={() => {
-                    transferHandler.mutate({
-                      conversationId: selectedConversation.id,
-                      handlerType: selectedConversation.current_handler === 'ai' ? 'human' : 'ai'
-                    });
-                    setSheetOpen(false);
-                  }}
-                >
-                  {selectedConversation.current_handler === 'ai' 
-                    ? 'Transferir para Humano' 
-                    : 'Transferir para IA'}
-                </Button>
-                <Button 
-                  className="w-full"
-                  asChild
-                >
-                  <Link to={`/conversations?id=${selectedConversation.id}`}>
-                    Abrir Conversa
-                  </Link>
-                </Button>
-              </div>
-            </>
+            <KanbanChatPanel
+              conversationId={selectedConversation.id}
+              contactName={selectedConversation.contact_name}
+              contactPhone={selectedConversation.contact_phone}
+              currentHandler={selectedConversation.current_handler}
+              assignedProfile={selectedConversation.assigned_profile}
+              onClose={() => setSheetOpen(false)}
+            />
           )}
         </SheetContent>
       </Sheet>
