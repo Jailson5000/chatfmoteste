@@ -515,6 +515,8 @@ export default function Conversations() {
       })),
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.instance_name || null,
+      avatarUrl: conv.client?.avatar_url || null,
+      clientStatus: conv.client?.custom_status || null,
     }));
   }, [conversations, unreadCounts, tags]);
 
@@ -1437,66 +1439,90 @@ export default function Conversations() {
                   )}
                 >
                   <div className="flex items-start gap-2">
-                    {/* Contact Avatar */}
+                    {/* Contact Avatar with unread badge */}
                     <div className="relative flex-shrink-0">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden border-2 border-background shadow-sm">
-                        <span className="text-xs font-bold text-primary">
+                        {conv.avatarUrl ? (
+                          <img 
+                            src={conv.avatarUrl} 
+                            alt={conv.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                            }}
+                          />
+                        ) : null}
+                        <span className={cn("text-xs font-bold text-primary", conv.avatarUrl && "hidden")}>
                           {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
                         </span>
                       </div>
+                      {/* Unread badge on avatar */}
+                      {conv.unread > 0 && (
+                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-red-500 flex items-center justify-center border-2 border-card">
+                          <span className="text-[10px] font-bold text-white px-1">{conv.unread > 99 ? '99+' : conv.unread}</span>
+                        </div>
+                      )}
                       {/* WhatsApp indicator */}
-                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center border-2 border-card">
+                      <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center border-2 border-card">
                         <MessageCircle className="h-2 w-2 text-white" />
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-[13px] font-medium truncate">{conv.name}</span>
+                        <span className={cn("text-[13px] font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
-                        <MessageCircle className="h-3 w-3 text-green-500" />
+                      <p className={cn(
+                        "text-[11px] text-muted-foreground truncate flex items-center gap-1",
+                        conv.unread > 0 && "text-foreground font-medium"
+                      )}>
+                        <MessageCircle className="h-3 w-3 text-green-500 flex-shrink-0" />
                         {conv.lastMessage}
                       </p>
-                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {/* Client Status Badge */}
+                        {conv.clientStatus && (
+                          <Badge 
+                            variant="outline" 
+                            className="text-[9px] h-4 px-1 font-medium"
+                            style={{ 
+                              borderColor: conv.clientStatus.color, 
+                              backgroundColor: `${conv.clientStatus.color}15`,
+                              color: conv.clientStatus.color 
+                            }}
+                          >
+                            {conv.clientStatus.name}
+                          </Badge>
+                        )}
+                        {/* Handler Badge */}
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-[10px] h-5 px-1.5",
+                            "text-[9px] h-4 px-1",
                             conv.handler === "ai"
                               ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
                               : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
                           )}
                         >
-                          {conv.handler === "ai" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <UserCheck className="h-2.5 w-2.5 mr-0.5" />}
+                          {conv.handler === "ai" ? <Bot className="h-2 w-2 mr-0.5" /> : <UserCheck className="h-2 w-2 mr-0.5" />}
                           {conv.handler === "ai" ? "IA" : (conv.assignedTo?.split(" ")[0] || "Humano")}
                         </Badge>
-                        {conv.status && (
-                          <Badge variant="outline" className="text-[10px] h-5 px-1.5">
-                            {conv.status.replace(/_/g, ' ')}
+                        {/* Tags */}
+                        {conv.tags.slice(0, 1).map((tag, i) => (
+                          <Badge 
+                            key={i}
+                            variant="outline" 
+                            className="text-[9px] h-4 px-1 truncate max-w-[50px]"
+                            style={{ 
+                              borderColor: tag.color, 
+                              backgroundColor: `${tag.color}15`,
+                              color: tag.color 
+                            }}
+                          >
+                            {tag.name}
                           </Badge>
-                        )}
-                        {conv.tags.slice(0, 2).map((tag, i) => (
-                          <Tooltip key={i}>
-                            <TooltipTrigger asChild>
-                              <Badge 
-                                variant="outline" 
-                                className="text-[10px] h-5 px-1.5 truncate max-w-[60px] cursor-default"
-                                style={{ 
-                                  borderColor: tag.color, 
-                                  backgroundColor: `${tag.color}20`,
-                                  color: tag.color 
-                                }}
-                              >
-                                {tag.name}
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{tag.name}</p>
-                            </TooltipContent>
-                          </Tooltip>
                         ))}
-                        {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                       </div>
                     </div>
                   </div>
@@ -2087,7 +2113,7 @@ export default function Conversations() {
 
         {/* Contact Details Panel - Fixed width */}
         {showDetailsPanel && selectedConversation && (
-          <div className="w-80 flex-shrink-0 bg-card border-l border-border">
+          <div className="w-72 flex-shrink-0 bg-card border-l border-border overflow-hidden">
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
