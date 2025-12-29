@@ -28,21 +28,45 @@ export default function ResetPassword() {
   const [isValidSession, setIsValidSession] = useState(false);
 
   useEffect(() => {
-    // Check if user has a valid recovery session
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setIsValidSession(true);
-      } else {
-        toast({
-          title: "Link inválido",
-          description: "O link de recuperação é inválido ou expirou.",
-          variant: "destructive",
-        });
-        navigate("/auth");
-      }
+    document.title = "Redefinir senha | MiauChat";
+
+    let resolved = false;
+
+    const resolveWithSession = () => {
+      if (resolved) return;
+      resolved = true;
+      setIsValidSession(true);
     };
-    checkSession();
+
+    const timeoutId = window.setTimeout(() => {
+      if (resolved) return;
+      toast({
+        title: "Link inválido",
+        description: "O link de recuperação é inválido ou expirou.",
+        variant: "destructive",
+      });
+      navigate("/auth", { replace: true });
+    }, 3000);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        window.clearTimeout(timeoutId);
+        resolveWithSession();
+      }
+    });
+
+    // Check if user already has a valid recovery session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        window.clearTimeout(timeoutId);
+        resolveWithSession();
+      }
+    });
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, [navigate, toast]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
