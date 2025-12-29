@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
@@ -69,6 +70,7 @@ export default function GlobalAdminCompanies() {
     max_users: 5,
     max_instances: 2,
     subdomain: "",
+    auto_activate_workflow: true,
   });
 
   const filteredCompanies = companies.filter(
@@ -88,16 +90,19 @@ export default function GlobalAdminCompanies() {
   };
 
   const handleCreate = async () => {
-    await createCompany.mutateAsync(formData);
+    await createCompany.mutateAsync({
+      ...formData,
+      auto_activate_workflow: formData.auto_activate_workflow,
+    });
     setIsCreateDialogOpen(false);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "" });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true });
   };
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
     await updateCompany.mutateAsync({ id: editingCompany, ...formData });
     setEditingCompany(null);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "" });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true });
   };
 
   const handleDelete = async (company: typeof companies[0]) => {
@@ -116,6 +121,7 @@ export default function GlobalAdminCompanies() {
       max_users: company.max_users,
       max_instances: company.max_instances,
       subdomain: company.law_firm?.subdomain || "",
+      auto_activate_workflow: true,
     });
     setEditingCompany(company.id);
   };
@@ -251,6 +257,23 @@ export default function GlobalAdminCompanies() {
                     onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
                   />
                 </div>
+              </div>
+              
+              {/* n8n Workflow Settings */}
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div className="space-y-0.5">
+                  <Label htmlFor="auto_activate" className="text-base font-medium">
+                    Ativar Workflow n8n Automaticamente
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    Ativa o workflow após criação para receber mensagens imediatamente
+                  </p>
+                </div>
+                <Switch
+                  id="auto_activate"
+                  checked={formData.auto_activate_workflow}
+                  onCheckedChange={(checked) => setFormData({ ...formData, auto_activate_workflow: checked })}
+                />
               </div>
             </div>
             <DialogFooter>

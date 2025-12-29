@@ -44,6 +44,7 @@ interface CreateCompanyData {
   max_users?: number;
   max_instances?: number;
   subdomain?: string;
+  auto_activate_workflow?: boolean;
 }
 
 interface ProvisionResponse {

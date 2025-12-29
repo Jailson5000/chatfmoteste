@@ -14,7 +14,8 @@ import {
   Sun,
   ChevronRight,
   Menu,
-  X
+  X,
+  FileText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +53,7 @@ const principalNavItems = [
 const adminNavItems = [
   { icon: Users, label: "Usuários Admin", path: "/global-admin/users", roles: ["super_admin"] },
   { icon: CreditCard, label: "Planos", path: "/global-admin/plans", roles: ["super_admin", "admin_financeiro"] },
+  { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
 ];
 
 const roleLabels: Record<string, { label: string; color: string }> = {
@@ -69,6 +71,7 @@ const breadcrumbMap: Record<string, string> = {
   monitoring: "Monitoramento",
   settings: "Configurações",
   "n8n-settings": "Configuração n8n",
+  "audit-logs": "Logs de Auditoria",
 };
 
 export function GlobalAdminLayout() {

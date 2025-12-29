@@ -15,6 +15,7 @@ interface ProvisionRequest {
   max_users?: number;
   max_instances?: number;
   subdomain: string;
+  auto_activate_workflow?: boolean;
 }
 
 function generateSubdomain(companyName: string): string {
@@ -116,7 +117,7 @@ serve(async (req) => {
 
     // Parse request body
     const body: ProvisionRequest = await req.json();
-    const { name, document, email, phone, plan_id, max_users = 5, max_instances = 2 } = body;
+    const { name, document, email, phone, plan_id, max_users = 5, max_instances = 2, auto_activate_workflow = true } = body;
 
     if (!name) {
       return new Response(
@@ -284,6 +285,7 @@ serve(async (req) => {
           company_name: name,
           law_firm_id: lawFirm.id,
           subdomain: subdomain,
+          auto_activate: auto_activate_workflow,
         }),
       });
 
