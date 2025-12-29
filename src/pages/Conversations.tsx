@@ -1473,16 +1473,7 @@ export default function Conversations() {
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
-                          {/* Phone digits next to name */}
-                          {conv.whatsappPhone && (
-                            <span className="text-[10px] text-yellow-500 font-medium flex items-center gap-0.5 flex-shrink-0">
-                              <Phone className="h-2.5 w-2.5" />
-                              {conv.whatsappPhone.slice(-4)}
-                            </span>
-                          )}
-                        </div>
+                        <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
                     </div>
@@ -1499,10 +1490,9 @@ export default function Conversations() {
                     </p>
                   </div>
                   
-                  {/* Row 3: Status + Handler */}
-                  <div className="mt-2 pl-[52px] flex items-center gap-2 flex-wrap">
-                    {/* Client Status Badge */}
-                    {conv.clientStatus && (
+                  {/* Row 3: Status Badge */}
+                  {conv.clientStatus && (
+                    <div className="mt-1.5 pl-[52px]">
                       <Badge 
                         variant="outline" 
                         className="text-[10px] h-5 px-1.5 font-medium"
@@ -1514,45 +1504,34 @@ export default function Conversations() {
                       >
                         {conv.clientStatus.name}
                       </Badge>
-                    )}
-                    
-                    {/* Tags */}
-                    {conv.tags.slice(0, 1).map((tag, i) => (
-                      <Badge 
-                        key={i}
-                        variant="outline" 
-                        className="text-[10px] h-5 px-1.5 truncate max-w-[60px]"
-                        style={{ 
-                          borderColor: tag.color, 
-                          backgroundColor: `${tag.color}15`,
-                          color: tag.color 
-                        }}
-                      >
-                        {tag.name}
-                      </Badge>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                   
-                  {/* Row 4: Handler Badge */}
-                  <div className="mt-1.5 pl-[52px]">
+                  {/* Row 4: Phone digits + Handler */}
+                  <div className="mt-1.5 pl-[52px] flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <MessageCircle className="h-3 w-3" />
+                      <Phone className="h-3 w-3" />
+                      {conv.whatsappPhone ? conv.whatsappPhone.slice(-4) : "----"}
+                    </span>
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-[10px] h-5 px-1.5 gap-1 max-w-[140px]",
+                        "text-[10px] h-5 px-1.5 gap-1",
                         conv.handler === "ai"
-                          ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                          : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                          ? "border-purple-500/50 text-purple-400 bg-purple-900/20"
+                          : "border-blue-500/50 text-blue-400 bg-blue-900/20"
                       )}
                     >
                       {conv.handler === "ai" ? (
                         <>
                           <Zap className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">IA {conv.aiAgentName}</span>
+                          <span>IA {conv.aiAgentName}</span>
                         </>
                       ) : (
                         <>
                           <User className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
+                          <span>{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
                         </>
                       )}
                     </Badge>
