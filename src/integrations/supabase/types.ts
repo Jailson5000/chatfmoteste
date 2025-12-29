@@ -885,6 +885,41 @@ export type Database = {
           },
         ]
       }
+      instance_status_history: {
+        Row: {
+          changed_at: string
+          created_at: string
+          id: string
+          instance_id: string
+          previous_status: string | null
+          status: string
+        }
+        Insert: {
+          changed_at?: string
+          created_at?: string
+          id?: string
+          instance_id: string
+          previous_status?: string | null
+          status: string
+        }
+        Update: {
+          changed_at?: string
+          created_at?: string
+          id?: string
+          instance_id?: string
+          previous_status?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instance_status_history_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       kanban_columns: {
         Row: {
           color: string
@@ -1517,9 +1552,11 @@ export type Database = {
           default_assigned_to: string | null
           default_department_id: string | null
           default_status_id: string | null
+          disconnected_since: string | null
           id: string
           instance_id: string | null
           instance_name: string
+          last_alert_sent_at: string | null
           last_webhook_at: string | null
           last_webhook_event: string | null
           law_firm_id: string
@@ -1535,9 +1572,11 @@ export type Database = {
           default_assigned_to?: string | null
           default_department_id?: string | null
           default_status_id?: string | null
+          disconnected_since?: string | null
           id?: string
           instance_id?: string | null
           instance_name: string
+          last_alert_sent_at?: string | null
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id: string
@@ -1553,9 +1592,11 @@ export type Database = {
           default_assigned_to?: string | null
           default_department_id?: string | null
           default_status_id?: string | null
+          disconnected_since?: string | null
           id?: string
           instance_id?: string | null
           instance_name?: string
+          last_alert_sent_at?: string | null
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id?: string

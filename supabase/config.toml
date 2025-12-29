@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.evolution-health]
 verify_jwt = false
 
+[functions.check-instance-alerts]
+verify_jwt = false
+
 [functions.sync-n8n-prompt]
 verify_jwt = false
 
