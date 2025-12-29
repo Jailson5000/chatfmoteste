@@ -41,8 +41,11 @@ import {
   GlobalAdminProvisioningDashboard,
   GlobalAdminAlertHistory,
 } from "./pages/global-admin";
+import { APP_BUILD_ID } from "@/lib/buildInfo";
 
 const queryClient = new QueryClient();
+console.log("[MiauChat] Build:", APP_BUILD_ID);
+
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
