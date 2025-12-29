@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
@@ -64,6 +64,9 @@ export default function GlobalAdminCompanies() {
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
   const [resettingPassword, setResettingPassword] = useState<string | null>(null);
+  const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [activeTab, setActiveTab] = useState("pending");
 
   const handleResetPassword = async (company: typeof companies[0]) => {
     if (!company.admin_user_id) {
@@ -193,6 +196,18 @@ export default function GlobalAdminCompanies() {
     cancelled: "Cancelada",
   };
 
+  const approvalStatusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    pending_approval: "secondary",
+    approved: "default",
+    rejected: "destructive",
+  };
+
+  const approvalStatusLabels: Record<string, string> = {
+    pending_approval: "Pendente",
+    approved: "Aprovada",
+    rejected: "Rejeitada",
+  };
+
   const provisioningStatusColors: Record<string, string> = {
     active: "text-green-600 bg-green-50 border-green-200",
     partial: "text-yellow-600 bg-yellow-50 border-yellow-200",
@@ -225,6 +240,29 @@ export default function GlobalAdminCompanies() {
     unhealthy: "text-red-600",
     unknown: "text-muted-foreground",
   };
+
+  const handleApprove = async (company: typeof companies[0]) => {
+    const confirmApprove = confirm(
+      `Aprovar empresa "${company.name}"?\n\nIsso irá provisionar o APP do cliente, criar workflow n8n e enviar email de acesso.`
+    );
+    if (!confirmApprove) return;
+    await approveCompany.mutateAsync({ companyId: company.id });
+  };
+
+  const handleReject = async () => {
+    if (!rejectingCompany) return;
+    await rejectCompany.mutateAsync({ 
+      companyId: rejectingCompany.id, 
+      reason: rejectionReason 
+    });
+    setRejectingCompany(null);
+    setRejectionReason("");
+  };
+
+  // Filter companies by approval status for tabs
+  const pendingCompanies = companies.filter(c => c.approval_status === 'pending_approval');
+  const approvedCompanies = companies.filter(c => c.approval_status === 'approved' || !c.approval_status);
+  const rejectedCompanies = companies.filter(c => c.approval_status === 'rejected');
 
   return (
     <div className="space-y-6">
@@ -458,285 +496,446 @@ export default function GlobalAdminCompanies() {
         </CardContent>
       </Card>
 
-      {/* Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5" />
-            Lista de Empresas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Subdomínio</TableHead>
-                  <TableHead>Plano</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Provisionamento</TableHead>
-                  <TableHead>Email Acesso</TableHead>
-                  <TableHead>Usuários</TableHead>
-                  <TableHead>Conexões</TableHead>
-                  <TableHead>Criada em</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCompanies.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                      Nenhuma empresa encontrada
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredCompanies.map((company) => (
-                    <TableRow key={company.id}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{company.name}</p>
-                          <p className="text-sm text-muted-foreground">{company.email}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {company.law_firm?.subdomain ? (
-                          <a 
-                            href={`https://${company.law_firm.subdomain}.miauchat.com.br`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-primary hover:underline"
-                          >
-                            <Globe className="h-3 w-3" />
-                            {company.law_firm.subdomain}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {company.plan?.name || "-"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusColors[company.status] || "outline"}>
-                          {statusLabels[company.status] || company.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md border text-xs font-medium cursor-pointer ${provisioningStatusColors[company.provisioning_status] || provisioningStatusColors.pending}`}>
-                                {company.provisioning_status === 'active' && <CheckCircle2 className="h-3.5 w-3.5" />}
-                                {company.provisioning_status === 'partial' && <AlertCircle className="h-3.5 w-3.5" />}
-                                {company.provisioning_status === 'pending' && <Clock className="h-3.5 w-3.5 animate-pulse" />}
-                                {company.provisioning_status === 'error' && <AlertCircle className="h-3.5 w-3.5" />}
-                                {provisioningStatusLabels[company.provisioning_status] || 'Pendente'}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent className="w-72 p-0" side="right">
-                              <div className="p-3 space-y-3">
-                                <p className="font-semibold text-sm border-b pb-2">Status de Provisionamento</p>
-                                
-                                {/* Client App Status */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Server className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm">Client App</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {componentStatusIcons[company.client_app_status] || componentStatusIcons.pending}
-                                    <span className="text-xs capitalize">{company.client_app_status || 'pending'}</span>
-                                  </div>
-                                </div>
+      {/* Tabs for Approval Status */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-3 mb-4">
+          <TabsTrigger value="pending" className="flex items-center gap-2">
+            <Hourglass className="h-4 w-4" />
+            Pendentes
+            {pendingCompanies.length > 0 && (
+              <Badge variant="secondary" className="ml-1">{pendingCompanies.length}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="approved" className="flex items-center gap-2">
+            <UserCheck className="h-4 w-4" />
+            Aprovadas
+          </TabsTrigger>
+          <TabsTrigger value="rejected" className="flex items-center gap-2">
+            <UserX className="h-4 w-4" />
+            Rejeitadas
+          </TabsTrigger>
+        </TabsList>
 
-                                {/* n8n Workflow Status */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Zap className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm">Workflow n8n</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {componentStatusIcons[company.n8n_workflow_status || 'pending'] || componentStatusIcons.pending}
-                                    <span className="text-xs capitalize">{company.n8n_workflow_status || 'pending'}</span>
-                                  </div>
-                                </div>
-
-                                {/* n8n Details if created */}
-                                {company.n8n_workflow_status === 'created' && company.n8n_workflow_id && (
-                                  <div className="pt-2 border-t space-y-2">
-                                    <p className="text-xs font-medium">{company.n8n_workflow_name}</p>
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 px-2 text-xs"
-                                        onClick={() => {
-                                          const webhookUrl = `https://n8n.miauchat.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
-                                          navigator.clipboard.writeText(webhookUrl);
-                                          toast.success("Webhook URL copiado!");
-                                        }}
-                                      >
-                                        <Copy className="h-3 w-3 mr-1" /> Copiar Webhook
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 px-2 text-xs"
-                                        onClick={() => {
-                                          window.open(`https://n8n.miauchat.com.br/workflow/${company.n8n_workflow_id}`, '_blank');
-                                        }}
-                                      >
-                                        <ExternalLink className="h-3 w-3 mr-1" /> Abrir n8n
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Error message */}
-                                {company.n8n_last_error && (
-                                  <div className="pt-2 border-t">
-                                    <p className="text-xs text-destructive">{company.n8n_last_error}</p>
-                                  </div>
-                                )}
-
-                                {/* Retry buttons */}
-                                {(company.n8n_workflow_status === 'error' || company.n8n_workflow_status === 'failed' || !company.n8n_workflow_status) && (
-                                  <div className="pt-2 border-t">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => retryN8nWorkflow.mutate(company)}
-                                      disabled={retryN8nWorkflow.isPending}
-                                      className="w-full h-7 text-xs"
-                                    >
-                                      <RefreshCw className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
-                                      Recriar Workflow n8n
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-                      {/* Email de Acesso Inicial */}
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="flex items-center gap-2">
-                                {company.initial_access_email_sent ? (
-                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-green-600 bg-green-50 border-green-200">
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                    Enviado
-                                  </div>
-                                ) : company.initial_access_email_error ? (
-                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-red-600 bg-red-50 border-red-200">
-                                    <MailX className="h-3.5 w-3.5" />
-                                    Erro
-                                  </div>
-                                ) : company.admin_user_id ? (
-                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-yellow-600 bg-yellow-50 border-yellow-200">
-                                    <Clock className="h-3.5 w-3.5" />
-                                    Pendente
-                                  </div>
-                                ) : (
-                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-muted-foreground bg-muted/50">
-                                    <Mail className="h-3.5 w-3.5" />
-                                    Sem Admin
-                                  </div>
-                                )}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-xs p-3" side="top">
-                              {company.initial_access_email_sent ? (
-                                <div className="space-y-1">
-                                  <p className="font-medium text-sm">Email enviado com sucesso</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {company.initial_access_email_sent_at 
-                                      ? new Date(company.initial_access_email_sent_at).toLocaleString("pt-BR")
-                                      : "Data não registrada"}
-                                  </p>
-                                </div>
-                              ) : company.initial_access_email_error ? (
-                                <div className="space-y-1">
-                                  <p className="font-medium text-sm text-destructive">Falha no envio</p>
-                                  <p className="text-xs">{company.initial_access_email_error}</p>
-                                </div>
-                              ) : company.admin_user_id ? (
-                                <p className="text-sm">Email de acesso ainda não enviado</p>
-                              ) : (
-                                <p className="text-sm">Nenhum administrador configurado</p>
-                              )}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        {/* Botão de reenvio */}
-                        {company.admin_user_id && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 mt-1"
-                            onClick={() => resendInitialAccess.mutate({ companyId: company.id, resetPassword: true })}
-                            disabled={resendInitialAccess.isPending}
-                          >
-                            <Send className={`h-3 w-3 mr-1 ${resendInitialAccess.isPending ? 'animate-pulse' : ''}`} />
-                            <span className="text-xs">Reenviar</span>
-                          </Button>
-                        )}
-                      </TableCell>
-                      <TableCell>{company.max_users}</TableCell>
-                      <TableCell>{company.max_instances}</TableCell>
-                      <TableCell>
-                        {new Date(company.created_at).toLocaleDateString("pt-BR")}
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(company)}>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setDomainConfigCompany(company)}>
-                              <Settings className="mr-2 h-4 w-4" />
-                              Configurar Domínio
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => handleResetPassword(company)}
-                              disabled={resettingPassword === company.id || !company.admin_user_id}
-                            >
-                              <KeyRound className="mr-2 h-4 w-4" />
-                              {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => handleDelete(company)}
-                              className="text-destructive"
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+        {/* Pending Companies Tab */}
+        <TabsContent value="pending">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Hourglass className="h-5 w-5 text-yellow-500" />
+                Empresas Pendentes de Aprovação
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pendingCompanies.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Nenhuma empresa aguardando aprovação
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Contato</TableHead>
+                      <TableHead>Cadastrada em</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingCompanies.map((company) => (
+                      <TableRow key={company.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{company.name}</p>
+                            <p className="text-sm text-muted-foreground">{company.document || '-'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm">{company.email}</p>
+                            <p className="text-sm text-muted-foreground">{company.phone || '-'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(company.created_at).toLocaleDateString("pt-BR", {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApprove(company)}
+                              disabled={approveCompany.isPending}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              <Check className="h-4 w-4 mr-1" />
+                              Aprovar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => setRejectingCompany(company)}
+                              disabled={rejectCompany.isPending}
+                            >
+                              <X className="h-4 w-4 mr-1" />
+                              Rejeitar
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Approved Companies Tab */}
+        <TabsContent value="approved">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                Empresas Aprovadas
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Subdomínio</TableHead>
+                      <TableHead>Plano</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Provisionamento</TableHead>
+                      <TableHead>Email Acesso</TableHead>
+                      <TableHead>Usuários</TableHead>
+                      <TableHead>Conexões</TableHead>
+                      <TableHead>Criada em</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredCompanies.filter(c => c.approval_status !== 'pending_approval' && c.approval_status !== 'rejected').length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                          Nenhuma empresa encontrada
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredCompanies.filter(c => c.approval_status !== 'pending_approval' && c.approval_status !== 'rejected').map((company) => (
+                        <TableRow key={company.id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{company.name}</p>
+                              <p className="text-sm text-muted-foreground">{company.email}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {company.law_firm?.subdomain ? (
+                              <a 
+                                href={`https://${company.law_firm.subdomain}.miauchat.com.br`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-primary hover:underline"
+                              >
+                                <Globe className="h-3 w-3" />
+                                {company.law_firm.subdomain}
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {company.plan?.name || "-"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={statusColors[company.status] || "outline"}>
+                              {statusLabels[company.status] || company.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md border text-xs font-medium cursor-pointer ${provisioningStatusColors[company.provisioning_status] || provisioningStatusColors.pending}`}>
+                                    {company.provisioning_status === 'active' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                                    {company.provisioning_status === 'partial' && <AlertCircle className="h-3.5 w-3.5" />}
+                                    {company.provisioning_status === 'pending' && <Clock className="h-3.5 w-3.5 animate-pulse" />}
+                                    {company.provisioning_status === 'error' && <AlertCircle className="h-3.5 w-3.5" />}
+                                    {provisioningStatusLabels[company.provisioning_status] || 'Pendente'}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="w-72 p-0" side="right">
+                                  <div className="p-3 space-y-3">
+                                    <p className="font-semibold text-sm border-b pb-2">Status de Provisionamento</p>
+                                    
+                                    {/* Client App Status */}
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <Server className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm">Client App</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        {componentStatusIcons[company.client_app_status] || componentStatusIcons.pending}
+                                        <span className="text-xs capitalize">{company.client_app_status || 'pending'}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* n8n Workflow Status */}
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <Zap className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm">Workflow n8n</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        {componentStatusIcons[company.n8n_workflow_status || 'pending'] || componentStatusIcons.pending}
+                                        <span className="text-xs capitalize">{company.n8n_workflow_status || 'pending'}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* n8n Details if created */}
+                                    {company.n8n_workflow_status === 'created' && company.n8n_workflow_id && (
+                                      <div className="pt-2 border-t space-y-2">
+                                        <p className="text-xs font-medium">{company.n8n_workflow_name}</p>
+                                        <div className="flex items-center gap-1">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs"
+                                            onClick={() => {
+                                              const webhookUrl = `https://n8n.miauchat.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
+                                              navigator.clipboard.writeText(webhookUrl);
+                                              toast.success("Webhook URL copiado!");
+                                            }}
+                                          >
+                                            <Copy className="h-3 w-3 mr-1" /> Copiar Webhook
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs"
+                                            onClick={() => {
+                                              window.open(`https://n8n.miauchat.com.br/workflow/${company.n8n_workflow_id}`, '_blank');
+                                            }}
+                                          >
+                                            <ExternalLink className="h-3 w-3 mr-1" /> Abrir n8n
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Error message */}
+                                    {company.n8n_last_error && (
+                                      <div className="pt-2 border-t">
+                                        <p className="text-xs text-destructive">{company.n8n_last_error}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Retry buttons */}
+                                    {(company.n8n_workflow_status === 'error' || company.n8n_workflow_status === 'failed' || !company.n8n_workflow_status) && (
+                                      <div className="pt-2 border-t">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => retryN8nWorkflow.mutate(company)}
+                                          disabled={retryN8nWorkflow.isPending}
+                                          className="w-full h-7 text-xs"
+                                        >
+                                          <RefreshCw className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                          Recriar Workflow n8n
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </TableCell>
+                          {/* Email de Acesso Inicial */}
+                          <TableCell>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-2">
+                                    {company.initial_access_email_sent ? (
+                                      <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-green-600 bg-green-50 border-green-200">
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        Enviado
+                                      </div>
+                                    ) : company.initial_access_email_error ? (
+                                      <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-red-600 bg-red-50 border-red-200">
+                                        <MailX className="h-3.5 w-3.5" />
+                                        Erro
+                                      </div>
+                                    ) : company.admin_user_id ? (
+                                      <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-yellow-600 bg-yellow-50 border-yellow-200">
+                                        <Clock className="h-3.5 w-3.5" />
+                                        Pendente
+                                      </div>
+                                    ) : (
+                                      <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-muted-foreground bg-muted/50">
+                                        <Mail className="h-3.5 w-3.5" />
+                                        Sem Admin
+                                      </div>
+                                    )}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs p-3" side="top">
+                                  {company.initial_access_email_sent ? (
+                                    <div className="space-y-1">
+                                      <p className="font-medium text-sm">Email enviado com sucesso</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {company.initial_access_email_sent_at 
+                                          ? new Date(company.initial_access_email_sent_at).toLocaleString("pt-BR")
+                                          : "Data não registrada"}
+                                      </p>
+                                    </div>
+                                  ) : company.initial_access_email_error ? (
+                                    <div className="space-y-1">
+                                      <p className="font-medium text-sm text-destructive">Falha no envio</p>
+                                      <p className="text-xs">{company.initial_access_email_error}</p>
+                                    </div>
+                                  ) : company.admin_user_id ? (
+                                    <p className="text-sm">Email de acesso ainda não enviado</p>
+                                  ) : (
+                                    <p className="text-sm">Nenhum administrador configurado</p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            {/* Botão de reenvio */}
+                            {company.admin_user_id && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 mt-1"
+                                onClick={() => resendInitialAccess.mutate({ companyId: company.id, resetPassword: true })}
+                                disabled={resendInitialAccess.isPending}
+                              >
+                                <Send className={`h-3 w-3 mr-1 ${resendInitialAccess.isPending ? 'animate-pulse' : ''}`} />
+                                <span className="text-xs">Reenviar</span>
+                              </Button>
+                            )}
+                          </TableCell>
+                          <TableCell>{company.max_users}</TableCell>
+                          <TableCell>{company.max_instances}</TableCell>
+                          <TableCell>
+                            {new Date(company.created_at).toLocaleDateString("pt-BR")}
+                          </TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditDialog(company)}>
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setDomainConfigCompany(company)}>
+                                  <Settings className="mr-2 h-4 w-4" />
+                                  Configurar Domínio
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  onClick={() => handleResetPassword(company)}
+                                  disabled={resettingPassword === company.id || !company.admin_user_id}
+                                >
+                                  <KeyRound className="mr-2 h-4 w-4" />
+                                  {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  onClick={() => handleDelete(company)}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Excluir
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Rejected Companies Tab */}
+        <TabsContent value="rejected">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <UserX className="h-5 w-5 text-red-500" />
+                Empresas Rejeitadas
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {rejectedCompanies.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Nenhuma empresa rejeitada
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Contato</TableHead>
+                      <TableHead>Motivo da Rejeição</TableHead>
+                      <TableHead>Rejeitada em</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rejectedCompanies.map((company) => (
+                      <TableRow key={company.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{company.name}</p>
+                            <p className="text-sm text-muted-foreground">{company.document || '-'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm">{company.email}</p>
+                            <p className="text-sm text-muted-foreground">{company.phone || '-'}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm text-muted-foreground max-w-xs truncate">
+                            {company.rejection_reason || 'Não informado'}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          {company.rejected_at 
+                            ? new Date(company.rejected_at).toLocaleDateString("pt-BR")
+                            : '-'
+                          }
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Edit Dialog */}
       <Dialog open={!!editingCompany} onOpenChange={(open) => !open && setEditingCompany(null)}>
@@ -838,6 +1037,45 @@ export default function GlobalAdminCompanies() {
         onOpenChange={(open) => !open && setDomainConfigCompany(null)}
         company={domainConfigCompany}
       />
+
+      {/* Rejection Dialog */}
+      <Dialog open={!!rejectingCompany} onOpenChange={(open) => !open && setRejectingCompany(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserX className="h-5 w-5 text-red-500" />
+              Rejeitar Empresa
+            </DialogTitle>
+            <DialogDescription>
+              Confirme a rejeição da empresa "{rejectingCompany?.name}". Esta ação não poderá ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="rejection-reason">Motivo da Rejeição (opcional)</Label>
+              <Textarea
+                id="rejection-reason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Informe o motivo da rejeição..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectingCompany(null)}>
+              Cancelar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleReject}
+              disabled={rejectCompany.isPending}
+            >
+              {rejectCompany.isPending ? "Rejeitando..." : "Confirmar Rejeição"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
