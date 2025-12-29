@@ -144,7 +144,7 @@ export function AppSidebar() {
               <img 
                 src={miauchatLogo} 
                 alt="MiauChat" 
-                className="w-8 h-8 rounded-lg object-contain"
+                className="w-10 h-10 rounded-lg object-contain"
               />
               <span className="font-display font-semibold text-sidebar-foreground truncate max-w-[140px]">
                 MiauChat
