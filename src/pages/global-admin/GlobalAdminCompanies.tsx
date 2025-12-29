@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
@@ -54,7 +54,7 @@ function generateSubdomainFromName(name: string): string {
 }
 
 export default function GlobalAdminCompanies() {
-  const { companies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow } = useCompanies();
+  const { companies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows } = useCompanies();
   const { plans } = usePlans();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -161,6 +161,18 @@ export default function GlobalAdminCompanies() {
     error: <AlertCircle className="h-3.5 w-3.5 text-red-600" />,
   };
 
+  // Count companies with issues
+  const failedWorkflowsCount = companies.filter(c => 
+    c.n8n_workflow_status === 'error' || c.n8n_workflow_status === 'failed'
+  ).length;
+
+  const healthStatusColors: Record<string, string> = {
+    healthy: "text-green-600",
+    degraded: "text-yellow-600",
+    unhealthy: "text-red-600",
+    unknown: "text-muted-foreground",
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -171,142 +183,180 @@ export default function GlobalAdminCompanies() {
             Gerencie as empresas cadastradas no sistema
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Nova Empresa
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nova Empresa</DialogTitle>
-              <DialogDescription>
-                Preencha os dados para cadastrar uma nova empresa
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nome da Empresa</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => handleNameChange(e.target.value)}
-                  placeholder="Nome da empresa"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="subdomain">Subdomínio</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="subdomain"
-                    value={formData.subdomain}
-                    onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
-                    placeholder="empresa"
-                    className="flex-1"
-                  />
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Este será o endereço de acesso: https://{formData.subdomain || 'empresa'}.miauchat.com.br
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="document">CNPJ/CPF</Label>
-                  <Input
-                    id="document"
-                    value={formData.document}
-                    onChange={(e) => setFormData({ ...formData, document: e.target.value })}
-                    placeholder="00.000.000/0000-00"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Telefone</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="(00) 00000-0000"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="contato@empresa.com"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="plan">Plano</Label>
-                <Select
-                  value={formData.plan_id}
-                  onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+        <div className="flex items-center gap-2">
+          {/* Health Check Button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  onClick={() => runHealthCheck.mutate(undefined)}
+                  disabled={runHealthCheck.isPending}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um plano" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {plans.map((plan) => (
-                      <SelectItem key={plan.id} value={plan.id}>
-                        {plan.name} - R$ {plan.price}/mês
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+                  <Heart className={`mr-2 h-4 w-4 ${runHealthCheck.isPending ? 'animate-pulse' : ''}`} />
+                  Health Check
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Verificar saúde de todos os tenants</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Retry Failed Workflows Button */}
+          {failedWorkflowsCount > 0 && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    onClick={() => retryAllFailedWorkflows.mutate()}
+                    disabled={retryAllFailedWorkflows.isPending}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${retryAllFailedWorkflows.isPending ? 'animate-spin' : ''}`} />
+                    Retry ({failedWorkflowsCount})
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Tentar novamente workflows que falharam</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Nova Empresa
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nova Empresa</DialogTitle>
+                <DialogDescription>
+                  Preencha os dados para cadastrar uma nova empresa
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label htmlFor="max_users">Máx. Usuários</Label>
+                  <Label htmlFor="name">Nome da Empresa</Label>
                   <Input
-                    id="max_users"
-                    type="number"
-                    value={formData.max_users}
-                    onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    placeholder="Nome da empresa"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="max_instances">Máx. Conexões</Label>
-                  <Input
-                    id="max_instances"
-                    type="number"
-                    value={formData.max_instances}
-                    onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
-                  />
-                </div>
-              </div>
-              
-              {/* n8n Workflow Settings */}
-              <div className="flex items-center justify-between rounded-lg border p-4">
-                <div className="space-y-0.5">
-                  <Label htmlFor="auto_activate" className="text-base font-medium">
-                    Ativar Workflow n8n Automaticamente
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    Ativa o workflow após criação para receber mensagens imediatamente
+                  <Label htmlFor="subdomain">Subdomínio</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="subdomain"
+                      value={formData.subdomain}
+                      onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                      placeholder="empresa"
+                      className="flex-1"
+                    />
+                    <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Este será o endereço de acesso: https://{formData.subdomain || 'empresa'}.miauchat.com.br
                   </p>
                 </div>
-                <Switch
-                  id="auto_activate"
-                  checked={formData.auto_activate_workflow}
-                  onCheckedChange={(checked) => setFormData({ ...formData, auto_activate_workflow: checked })}
-                />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="document">CNPJ/CPF</Label>
+                    <Input
+                      id="document"
+                      value={formData.document}
+                      onChange={(e) => setFormData({ ...formData, document: e.target.value })}
+                      placeholder="00.000.000/0000-00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input
+                      id="phone"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      placeholder="(00) 00000-0000"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="contato@empresa.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="plan">Plano</Label>
+                  <Select
+                    value={formData.plan_id}
+                    onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {plans.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.name} - R$ {plan.price}/mês
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="max_users">Máx. Usuários</Label>
+                    <Input
+                      id="max_users"
+                      type="number"
+                      value={formData.max_users}
+                      onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="max_instances">Máx. Conexões</Label>
+                    <Input
+                      id="max_instances"
+                      type="number"
+                      value={formData.max_instances}
+                      onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
+                    />
+                  </div>
+                </div>
+                
+                {/* n8n Workflow Settings */}
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="auto_activate" className="text-base font-medium">
+                      Ativar Workflow n8n Automaticamente
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Ativa o workflow após criação para receber mensagens imediatamente
+                    </p>
+                  </div>
+                  <Switch
+                    id="auto_activate"
+                    checked={formData.auto_activate_workflow}
+                    onCheckedChange={(checked) => setFormData({ ...formData, auto_activate_workflow: checked })}
+                  />
+                </div>
               </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleCreate} disabled={createCompany.isPending || !formData.name || !formData.subdomain}>
-                {createCompany.isPending ? "Provisionando..." : "Criar Empresa"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleCreate} disabled={createCompany.isPending || !formData.name || !formData.subdomain}>
+                  {createCompany.isPending ? "Provisionando..." : "Criar Empresa"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Search */}

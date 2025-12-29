@@ -454,12 +454,16 @@ export type Database = {
           created_at: string
           document: string | null
           email: string | null
+          health_status: string | null
           id: string
+          last_health_check_at: string | null
           law_firm_id: string | null
           max_instances: number | null
           max_users: number | null
           n8n_created_at: string | null
           n8n_last_error: string | null
+          n8n_next_retry_at: string | null
+          n8n_retry_count: number
           n8n_updated_at: string | null
           n8n_workflow_id: string | null
           n8n_workflow_name: string | null
@@ -477,12 +481,16 @@ export type Database = {
           created_at?: string
           document?: string | null
           email?: string | null
+          health_status?: string | null
           id?: string
+          last_health_check_at?: string | null
           law_firm_id?: string | null
           max_instances?: number | null
           max_users?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
+          n8n_next_retry_at?: string | null
+          n8n_retry_count?: number
           n8n_updated_at?: string | null
           n8n_workflow_id?: string | null
           n8n_workflow_name?: string | null
@@ -500,12 +508,16 @@ export type Database = {
           created_at?: string
           document?: string | null
           email?: string | null
+          health_status?: string | null
           id?: string
+          last_health_check_at?: string | null
           law_firm_id?: string | null
           max_instances?: number | null
           max_users?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
+          n8n_next_retry_at?: string | null
+          n8n_retry_count?: number
           n8n_updated_at?: string | null
           n8n_workflow_id?: string | null
           n8n_workflow_name?: string | null
