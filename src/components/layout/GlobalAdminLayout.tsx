@@ -55,6 +55,7 @@ const principalNavItems = [
 const adminNavItems = [
   { icon: Users, label: "Usuários Admin", path: "/global-admin/users", roles: ["super_admin"] },
   { icon: CreditCard, label: "Planos", path: "/global-admin/plans", roles: ["super_admin", "admin_financeiro"] },
+  { icon: Bell, label: "Histórico de Alertas", path: "/global-admin/alert-history", roles: ["super_admin", "admin_operacional"] },
   { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
 ];
 
@@ -75,6 +76,7 @@ const breadcrumbMap: Record<string, string> = {
   settings: "Configurações",
   "n8n-settings": "Configuração n8n",
   "audit-logs": "Logs de Auditoria",
+  "alert-history": "Histórico de Alertas",
 };
 
 export function GlobalAdminLayout() {
