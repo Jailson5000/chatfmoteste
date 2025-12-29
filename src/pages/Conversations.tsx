@@ -358,6 +358,17 @@ export default function Conversations() {
     return () => viewport.removeEventListener("scroll", onScroll as any);
   }, [selectedConversationId]);
 
+  // Scroll to bottom when details panel is closed (layout reflow)
+  useEffect(() => {
+    if (!showDetailsPanel && selectedConversationId) {
+      // Small delay to allow layout to settle before scrolling
+      const timer = setTimeout(() => {
+        scrollMessagesToBottom("auto");
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [showDetailsPanel, selectedConversationId, scrollMessagesToBottom]);
+
   // Handle reply
   const handleReply = useCallback((messageId: string) => {
     const message = messages.find(m => m.id === messageId);
