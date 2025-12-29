@@ -1,11 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { User, Session, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
-
-interface Profile {
-  must_change_password: boolean;
-}
 
 // Token refresh margin: refresh 5 minutes before expiry
 const TOKEN_REFRESH_MARGIN_SECONDS = 300;
@@ -15,11 +10,26 @@ export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
-  const { toast } = useToast();
+  const [sessionExpired, setSessionExpired] = useState(false);
   
   // Refs to track refresh state and prevent duplicate operations
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRefreshingRef = useRef(false);
+
+  // Check if an auth error is fatal (requires re-login)
+  const isAuthErrorFatal = useCallback((error: AuthError): boolean => {
+    const fatalMessages = [
+      'invalid_grant',
+      'invalid claim',
+      'missing sub claim',
+      'bad_jwt',
+      'session_not_found',
+      'refresh_token_not_found',
+    ];
+    
+    const errorStr = `${error.message} ${error.code || ''}`.toLowerCase();
+    return fatalMessages.some(msg => errorStr.includes(msg.toLowerCase()));
+  }, []);
 
   // Handle session expiration - auto logout
   const handleSessionExpired = useCallback(async (reason: string = "Sessão expirada") => {
@@ -29,6 +39,7 @@ export function useAuth() {
     setSession(null);
     setUser(null);
     setMustChangePassword(false);
+    setSessionExpired(true);
     
     // Clear any pending refresh
     if (refreshTimeoutRef.current) {
@@ -42,14 +53,47 @@ export function useAuth() {
     } catch (e) {
       console.error("[useAuth] Erro ao fazer signOut:", e);
     }
-    
-    // Notify user
-    toast({
-      title: "Sessão expirada",
-      description: "Por favor, faça login novamente.",
-      variant: "destructive",
-    });
-  }, [toast]);
+  }, []);
+
+  // Refresh the token
+  const refreshToken = useCallback(async () => {
+    if (isRefreshingRef.current) {
+      console.log("[useAuth] Refresh já em andamento, ignorando...");
+      return;
+    }
+
+    isRefreshingRef.current = true;
+    console.log("[useAuth] Iniciando refresh de token...");
+
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      
+      if (error) {
+        console.error("[useAuth] Erro ao refresh:", error.message);
+        
+        // Check if it's a fatal error (token completely invalid)
+        if (isAuthErrorFatal(error)) {
+          await handleSessionExpired("Token inválido");
+        }
+        return;
+      }
+
+      if (data.session) {
+        console.log("[useAuth] Token refreshed com sucesso");
+        setSession(data.session);
+        setUser(data.session.user);
+        setSessionExpired(false);
+      } else {
+        console.log("[useAuth] Refresh retornou sem sessão");
+        await handleSessionExpired("Refresh sem sessão");
+      }
+    } catch (err) {
+      console.error("[useAuth] Exceção no refresh:", err);
+      await handleSessionExpired("Erro no refresh");
+    } finally {
+      isRefreshingRef.current = false;
+    }
+  }, [handleSessionExpired, isAuthErrorFatal]);
 
   // Proactive token refresh before expiry
   const scheduleTokenRefresh = useCallback((currentSession: Session) => {
@@ -83,66 +127,10 @@ export function useAuth() {
       console.log("[useAuth] Executando refresh agendado...");
       refreshToken();
     }, refreshTime);
-  }, []);
-
-  // Refresh the token
-  const refreshToken = useCallback(async () => {
-    if (isRefreshingRef.current) {
-      console.log("[useAuth] Refresh já em andamento, ignorando...");
-      return;
-    }
-
-    isRefreshingRef.current = true;
-    console.log("[useAuth] Iniciando refresh de token...");
-
-    try {
-      const { data, error } = await supabase.auth.refreshSession();
-      
-      if (error) {
-        console.error("[useAuth] Erro ao refresh:", error.message);
-        
-        // Check if it's a fatal error (token completely invalid)
-        if (isAuthErrorFatal(error)) {
-          await handleSessionExpired("Token inválido");
-        }
-        return;
-      }
-
-      if (data.session) {
-        console.log("[useAuth] Token refreshed com sucesso");
-        setSession(data.session);
-        setUser(data.session.user);
-        // Schedule next refresh
-        scheduleTokenRefresh(data.session);
-      } else {
-        console.log("[useAuth] Refresh retornou sem sessão");
-        await handleSessionExpired("Refresh sem sessão");
-      }
-    } catch (err) {
-      console.error("[useAuth] Exceção no refresh:", err);
-      await handleSessionExpired("Erro no refresh");
-    } finally {
-      isRefreshingRef.current = false;
-    }
-  }, [handleSessionExpired, scheduleTokenRefresh]);
-
-  // Check if an auth error is fatal (requires re-login)
-  const isAuthErrorFatal = (error: AuthError): boolean => {
-    const fatalMessages = [
-      'invalid_grant',
-      'invalid claim',
-      'missing sub claim',
-      'bad_jwt',
-      'session_not_found',
-      'refresh_token_not_found',
-    ];
-    
-    const errorStr = `${error.message} ${error.code || ''}`.toLowerCase();
-    return fatalMessages.some(msg => errorStr.includes(msg.toLowerCase()));
-  };
+  }, [refreshToken]);
 
   // Handle API errors that might indicate token issues
-  const handleApiError = useCallback(async (error: any) => {
+  const handleApiError = useCallback(async (error: any): Promise<boolean> => {
     if (!error) return false;
     
     const errorMessage = error?.message || error?.error_description || String(error);
@@ -167,6 +155,8 @@ export function useAuth() {
           return true;
         }
         console.log("[useAuth] Token refreshed após erro de API");
+        setSession(data.session);
+        setUser(data.session.user);
         return false;
       } catch (e) {
         await handleSessionExpired("Falha no refresh após erro");
@@ -203,6 +193,7 @@ export function useAuth() {
             if (currentSession) {
               setSession(currentSession);
               setUser(currentSession.user);
+              setSessionExpired(false);
               scheduleTokenRefresh(currentSession);
             }
             break;
@@ -212,6 +203,7 @@ export function useAuth() {
             if (currentSession) {
               setSession(currentSession);
               setUser(currentSession.user);
+              setSessionExpired(false);
               scheduleTokenRefresh(currentSession);
               
               // Check must_change_password flag (deferred to avoid deadlock)
@@ -224,11 +216,7 @@ export function useAuth() {
                   .maybeSingle();
                 
                 if (error) {
-                  // Check if error is auth-related
-                  const isAuthError = await handleApiError(error);
-                  if (!isAuthError) {
-                    console.error("[useAuth] Erro ao buscar profile:", error.message);
-                  }
+                  console.error("[useAuth] Erro ao buscar profile:", error.message);
                   return;
                 }
                 
@@ -273,6 +261,7 @@ export function useAuth() {
       if (existingSession) {
         setSession(existingSession);
         setUser(existingSession.user);
+        setSessionExpired(false);
         scheduleTokenRefresh(existingSession);
       } else {
         setSession(null);
@@ -289,7 +278,7 @@ export function useAuth() {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [scheduleTokenRefresh, handleApiError]);
+  }, [scheduleTokenRefresh]);
 
   const clearMustChangePassword = async () => {
     if (user) {
@@ -316,6 +305,11 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, []);
 
+  // Clear session expired flag (for UI to reset after showing message)
+  const clearSessionExpired = useCallback(() => {
+    setSessionExpired(false);
+  }, []);
+
   return { 
     user, 
     session, 
@@ -325,5 +319,7 @@ export function useAuth() {
     signOut,
     refreshToken,
     handleApiError,
+    sessionExpired,
+    clearSessionExpired,
   };
 }
