@@ -6,14 +6,17 @@ interface CompanyApprovalStatus {
   approval_status: 'pending_approval' | 'approved' | 'rejected' | null;
   rejection_reason: string | null;
   company_name: string | null;
+  company_subdomain: string | null;
   loading: boolean;
 }
 
 /**
- * Hook to check company approval status for the current user
+ * Hook to check company approval status and subdomain for the current user
  * 
- * Returns the approval status of the company associated with the user's law_firm.
- * Used to block access for pending_approval or rejected companies.
+ * Returns the approval status and subdomain of the company associated with the user's law_firm.
+ * Used to:
+ * - Block access for pending_approval or rejected companies
+ * - Validate that user is accessing via their correct subdomain
  */
 export function useCompanyApproval(): CompanyApprovalStatus {
   const { user } = useAuth();
@@ -21,6 +24,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     approval_status: null,
     rejection_reason: null,
     company_name: null,
+    company_subdomain: null,
     loading: true,
   });
 
@@ -30,6 +34,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         approval_status: null,
         rejection_reason: null,
         company_name: null,
+        company_subdomain: null,
         loading: false,
       });
       return;
@@ -50,15 +55,16 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             approval_status: 'approved', // Default to approved if no company found (e.g., global admin)
             rejection_reason: null,
             company_name: null,
+            company_subdomain: null,
             loading: false,
           });
           return;
         }
 
-        // Get company status by law_firm_id
+        // Get company status and law_firm subdomain
         const { data: company, error: companyError } = await supabase
           .from('companies')
-          .select('approval_status, rejection_reason, name')
+          .select('approval_status, rejection_reason, name, law_firm:law_firms(subdomain)')
           .eq('law_firm_id', profile.law_firm_id)
           .maybeSingle();
 
@@ -70,17 +76,22 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             approval_status: 'approved',
             rejection_reason: null,
             company_name: null,
+            company_subdomain: null,
             loading: false,
           });
           return;
         }
 
-        console.log('[useCompanyApproval] Company status:', company.approval_status);
+        // Extract subdomain from law_firm relation
+        const subdomain = (company.law_firm as any)?.subdomain || null;
+
+        console.log('[useCompanyApproval] Company status:', company.approval_status, 'Subdomain:', subdomain);
         
         setStatus({
           approval_status: company.approval_status as 'pending_approval' | 'approved' | 'rejected',
           rejection_reason: company.rejection_reason,
           company_name: company.name,
+          company_subdomain: subdomain,
           loading: false,
         });
       } catch (err) {
@@ -89,6 +100,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           approval_status: 'approved', // Default to approved on error
           rejection_reason: null,
           company_name: null,
+          company_subdomain: null,
           loading: false,
         });
       }
