@@ -368,24 +368,52 @@ function AudioPlayer({
         
         {/* Progress section */}
         <div className="flex-1 space-y-1.5">
-          {/* Visual progress bar */}
-          <div className="relative h-2 bg-muted/50 rounded-full overflow-hidden cursor-pointer group">
-            <Slider
-              value={[currentTime]}
-              max={duration || 100}
-              step={0.1}
-              onValueChange={handleSeek}
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              disabled={!audioSrc}
-            />
+          {/* Waveform visualization */}
+          <div 
+            className="relative h-8 flex items-center gap-[2px] cursor-pointer group"
+            onClick={(e) => {
+              if (!audioSrc || !duration) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const percentage = clickX / rect.width;
+              const newTime = percentage * duration;
+              handleSeek([newTime]);
+            }}
+          >
+            {/* Waveform bars */}
+            {Array.from({ length: 40 }).map((_, i) => {
+              const barProgress = (i + 1) / 40;
+              const isPlayed = progressPercent / 100 >= barProgress;
+              // Generate pseudo-random heights based on index for consistent waveform
+              const seed = (i * 7 + 13) % 17;
+              const height = 20 + (seed / 17) * 80; // 20% to 100% height
+              
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex-1 rounded-full transition-all duration-150",
+                    isPlayed 
+                      ? "bg-primary" 
+                      : "bg-muted-foreground/30 group-hover:bg-muted-foreground/50",
+                    isPlaying && isPlayed && "animate-pulse"
+                  )}
+                  style={{ 
+                    height: `${height}%`,
+                    opacity: isPlayed ? 1 : 0.6
+                  }}
+                />
+              );
+            })}
+            
+            {/* Progress indicator line */}
             <div 
-              className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full transition-all duration-100 relative"
-              style={{ width: `${progressPercent}%` }}
+              className="absolute top-0 bottom-0 w-0.5 bg-primary shadow-lg transition-all duration-100 z-10"
+              style={{ left: `${progressPercent}%` }}
             >
-              {/* Animated pulse at the end */}
               <div className={cn(
-                "absolute right-0 top-1/2 -translate-y-1/2 h-3 w-3 rounded-full bg-primary shadow-lg transition-opacity",
-                isPlaying ? "opacity-100 animate-pulse" : "opacity-0 group-hover:opacity-100"
+                "absolute -top-0.5 -bottom-0.5 -left-1 w-2.5 rounded-full bg-primary/20",
+                isPlaying && "animate-pulse"
               )} />
             </div>
           </div>
