@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play } from "lucide-react";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
@@ -357,67 +357,122 @@ export default function GlobalAdminCompanies() {
                                   <TooltipTrigger asChild>
                                     <div className="flex items-center gap-1 text-green-600 cursor-pointer">
                                       <CheckCircle2 className="h-4 w-4" />
-                                      <span className="text-xs">{company.n8n_workflow_id?.slice(0, 8)}...</span>
+                                      <span className="text-xs font-mono">{company.n8n_workflow_id?.slice(0, 8)}...</span>
                                     </div>
                                   </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-medium">{company.n8n_workflow_name}</p>
-                                    <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
-                                    <div className="mt-2 pt-2 border-t">
-                                      <p className="text-xs font-medium flex items-center gap-1">
-                                        <Link className="h-3 w-3" /> Webhook URL:
-                                      </p>
-                                      <code className="text-xs text-primary break-all">
-                                        {`https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`}
-                                      </code>
+                                  <TooltipContent className="max-w-sm">
+                                    <div className="space-y-2">
+                                      <p className="font-medium">{company.n8n_workflow_name}</p>
+                                      <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
+                                      <div className="pt-2 border-t">
+                                        <p className="text-xs font-medium flex items-center gap-1">
+                                          <Link className="h-3 w-3" /> Webhook URL:
+                                        </p>
+                                        <code className="text-xs text-primary break-all">
+                                          {`https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`}
+                                        </code>
+                                      </div>
+                                      {company.n8n_created_at && (
+                                        <p className="text-xs text-muted-foreground">
+                                          Criado: {new Date(company.n8n_created_at).toLocaleString('pt-BR')}
+                                        </p>
+                                      )}
                                     </div>
                                   </TooltipContent>
                                 </Tooltip>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={() => {
-                                    const webhookUrl = `https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
-                                    navigator.clipboard.writeText(webhookUrl);
-                                    toast.success("Webhook URL copiado!");
-                                  }}
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </Button>
+                                
+                                {/* Copy Webhook URL */}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => {
+                                        const webhookUrl = `https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
+                                        navigator.clipboard.writeText(webhookUrl);
+                                        toast.success("Webhook URL copiado!");
+                                      }}
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Copiar Webhook URL</TooltipContent>
+                                </Tooltip>
+
+                                {/* Open in n8n */}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => {
+                                        window.open(`https://n8n.fmoadv.com.br/workflow/${company.n8n_workflow_id}`, '_blank');
+                                      }}
+                                    >
+                                      <ExternalLink className="h-3 w-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Abrir no n8n</TooltipContent>
+                                </Tooltip>
                               </>
                             )}
+                            
                             {company.n8n_workflow_status === 'pending' && (
                               <div className="flex items-center gap-1 text-yellow-600">
                                 <Clock className="h-4 w-4 animate-pulse" />
                                 <span className="text-xs">Criando...</span>
                               </div>
                             )}
+                            
                             {company.n8n_workflow_status === 'failed' && (
+                              <>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="flex items-center gap-1 text-destructive cursor-pointer">
+                                      <AlertCircle className="h-4 w-4" />
+                                      <span className="text-xs">Falhou</span>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs">
+                                    <p className="font-medium text-destructive">Erro ao criar workflow</p>
+                                    <p className="text-xs text-muted-foreground mt-1">{company.n8n_last_error}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => retryN8nWorkflow.mutate(company)}
+                                      disabled={retryN8nWorkflow.isPending}
+                                      className="h-6 px-2"
+                                    >
+                                      <RefreshCw className={`h-3 w-3 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Tentar novamente</TooltipContent>
+                                </Tooltip>
+                              </>
+                            )}
+                            
+                            {!company.n8n_workflow_status && (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <div className="flex items-center gap-1 text-destructive">
-                                    <AlertCircle className="h-4 w-4" />
-                                    <span className="text-xs">Falhou</span>
-                                  </div>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => retryN8nWorkflow.mutate(company)}
+                                    disabled={retryN8nWorkflow.isPending}
+                                    className="h-7 px-2"
+                                  >
+                                    <Play className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                    <span className="text-xs">Criar</span>
+                                  </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>
-                                  <p className="font-medium">Erro ao criar workflow</p>
-                                  <p className="text-xs text-muted-foreground">{company.n8n_last_error}</p>
-                                </TooltipContent>
+                                <TooltipContent>Criar workflow n8n</TooltipContent>
                               </Tooltip>
-                            )}
-                            {(!company.n8n_workflow_status || company.n8n_workflow_status === 'failed') && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => retryN8nWorkflow.mutate(company)}
-                                disabled={retryN8nWorkflow.isPending}
-                                className="h-7 px-2"
-                              >
-                                <RefreshCw className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
-                                <span className="text-xs">Criar</span>
-                              </Button>
                             )}
                           </div>
                         </TooltipProvider>

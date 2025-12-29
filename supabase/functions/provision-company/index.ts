@@ -28,17 +28,50 @@ function generateSubdomain(companyName: string): string {
     .substring(0, 30); // Limit length
 }
 
+// Log audit event with full context
+async function logAudit(
+  supabase: any,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  status: 'success' | 'failed',
+  metadata: Record<string, any>,
+  adminUserId: string
+) {
+  try {
+    await supabase.from('audit_logs').insert({
+      admin_user_id: adminUserId,
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      new_values: {
+        status,
+        timestamp: new Date().toISOString(),
+        ...metadata,
+      },
+    });
+    console.log(`Audit: ${action} on ${entityType} - ${status}`);
+  } catch (error) {
+    console.error('Failed to log audit:', error);
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const n8nWebhookUrl = Deno.env.get('N8N_WEBHOOK_URL');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const n8nWebhookUrl = Deno.env.get('N8N_WEBHOOK_URL');
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+  let adminUserId = '';
+  let lawFirmId: string | null = null;
+  let companyId: string | null = null;
+
+  try {
     // Get authorization header
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
@@ -48,9 +81,6 @@ serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // Create Supabase client with service role for admin operations
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Verify user is an admin
     const { data: { user }, error: authError } = await supabase.auth.getUser(
@@ -64,6 +94,8 @@ serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    adminUserId = user.id;
 
     // Check if user is admin
     const { data: adminRole } = await supabase
@@ -110,6 +142,13 @@ serve(async (req) => {
 
     console.log('Creating company with subdomain:', subdomain);
 
+    // Log provisioning start
+    await logAudit(supabase, 'COMPANY_PROVISION_START', 'company', null, 'success', {
+      company_name: name,
+      subdomain,
+      plan_id,
+    }, adminUserId);
+
     // Step 1: Create law_firm with subdomain
     const { data: lawFirm, error: lawFirmError } = await supabase
       .from('law_firms')
@@ -125,13 +164,25 @@ serve(async (req) => {
 
     if (lawFirmError) {
       console.error('Error creating law firm:', lawFirmError);
+      
+      await logAudit(supabase, 'COMPANY_PROVISION_FAIL', 'law_firm', null, 'failed', {
+        error: lawFirmError.message,
+        step: 'create_law_firm',
+      }, adminUserId);
+
       return new Response(
         JSON.stringify({ error: 'Failed to create law firm', details: lawFirmError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    lawFirmId = lawFirm.id;
     console.log('Law firm created:', lawFirm.id);
+
+    await logAudit(supabase, 'LAW_FIRM_CREATE', 'law_firm', lawFirm.id, 'success', {
+      name,
+      subdomain,
+    }, adminUserId);
 
     // Step 2: Create company linked to law_firm
     const { data: company, error: companyError } = await supabase
@@ -146,23 +197,41 @@ serve(async (req) => {
         max_instances,
         law_firm_id: lawFirm.id,
         status: 'active',
+        n8n_workflow_status: 'pending', // Start as pending
       })
       .select()
       .single();
 
     if (companyError) {
       console.error('Error creating company:', companyError);
+      
+      await logAudit(supabase, 'COMPANY_PROVISION_FAIL', 'company', null, 'failed', {
+        error: companyError.message,
+        step: 'create_company',
+        law_firm_id: lawFirm.id,
+      }, adminUserId);
+
       // Rollback: delete the law firm
       await supabase.from('law_firms').delete().eq('id', lawFirm.id);
+      
       return new Response(
         JSON.stringify({ error: 'Failed to create company', details: companyError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    companyId = company.id;
     console.log('Company created:', company.id);
 
+    await logAudit(supabase, 'COMPANY_CREATE', 'company', company.id, 'success', {
+      name,
+      law_firm_id: lawFirm.id,
+      subdomain,
+      plan_id,
+    }, adminUserId);
+
     // Step 3: Create default automation for the company
+    let automationId: string | null = null;
     const { data: automation, error: automationError } = await supabase
       .from('automations')
       .insert({
@@ -180,16 +249,30 @@ serve(async (req) => {
 
     if (automationError) {
       console.error('Error creating automation:', automationError);
+      await logAudit(supabase, 'AUTOMATION_CREATE', 'automation', null, 'failed', {
+        error: automationError.message,
+        company_id: company.id,
+      }, adminUserId);
       // Continue without automation - not critical
     } else {
+      automationId = automation?.id || null;
       console.log('Automation created:', automation?.id);
+      await logAudit(supabase, 'AUTOMATION_CREATE', 'automation', automation?.id, 'success', {
+        company_id: company.id,
+        law_firm_id: lawFirm.id,
+      }, adminUserId);
     }
 
-    // Step 5: Create n8n workflow for the company
+    // Step 4: Create n8n workflow for the company (async, non-blocking)
     let n8nWorkflowResult = null;
     try {
       console.log('Creating n8n workflow for company...');
       
+      await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_START', 'n8n_workflow', company.id, 'success', {
+        company_name: name,
+        subdomain,
+      }, adminUserId);
+
       const n8nResponse = await fetch(`${supabaseUrl}/functions/v1/create-n8n-workflow`, {
         method: 'POST',
         headers: {
@@ -207,30 +290,62 @@ serve(async (req) => {
       if (n8nResponse.ok) {
         n8nWorkflowResult = await n8nResponse.json();
         console.log('N8N workflow created:', n8nWorkflowResult);
+        
+        await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_COMPLETE', 'n8n_workflow', company.id, 'success', {
+          workflow_id: n8nWorkflowResult?.workflow_id,
+          workflow_name: n8nWorkflowResult?.workflow_name,
+        }, adminUserId);
       } else {
         const errorText = await n8nResponse.text();
         console.warn('Failed to create n8n workflow:', errorText);
+        
+        await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_FAIL', 'n8n_workflow', company.id, 'failed', {
+          error: errorText,
+          status_code: n8nResponse.status,
+        }, adminUserId);
+
+        // Update company with failed status (for retry later)
+        await supabase
+          .from('companies')
+          .update({
+            n8n_workflow_status: 'failed',
+            n8n_last_error: errorText.substring(0, 500),
+            n8n_updated_at: new Date().toISOString(),
+          })
+          .eq('id', company.id);
       }
     } catch (n8nError) {
       console.warn('Error creating n8n workflow:', n8nError);
+      
+      const errorMessage = n8nError instanceof Error ? n8nError.message : 'Unknown error';
+      
+      await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_FAIL', 'n8n_workflow', company.id, 'failed', {
+        error: errorMessage,
+        critical: false,
+      }, adminUserId);
+
+      // Update company with failed status
+      await supabase
+        .from('companies')
+        .update({
+          n8n_workflow_status: 'failed',
+          n8n_last_error: errorMessage.substring(0, 500),
+          n8n_updated_at: new Date().toISOString(),
+        })
+        .eq('id', company.id);
+
       // Continue - n8n workflow creation is not critical for provisioning
     }
 
-    // Step 6: Log the audit
-    await supabase.from('audit_logs').insert({
-      admin_user_id: user.id,
-      action: 'create',
-      entity_type: 'company',
-      entity_id: company.id,
-      new_values: {
-        company_id: company.id,
-        law_firm_id: lawFirm.id,
-        name,
-        subdomain,
-        plan_id,
-        n8n_workflow_id: n8nWorkflowResult?.workflow_id,
-      },
-    });
+    // Final success log
+    await logAudit(supabase, 'COMPANY_PROVISION_COMPLETE', 'company', company.id, 'success', {
+      company_id: company.id,
+      law_firm_id: lawFirm.id,
+      subdomain,
+      automation_id: automationId,
+      n8n_workflow_id: n8nWorkflowResult?.workflow_id || null,
+      n8n_workflow_status: n8nWorkflowResult ? 'created' : 'failed',
+    }, adminUserId);
 
     console.log('Company provisioning completed successfully');
 
@@ -241,9 +356,10 @@ serve(async (req) => {
         law_firm: lawFirm,
         subdomain: subdomain,
         subdomain_url: `https://${subdomain}.miauchat.com.br`,
-        automation_id: automation?.id,
+        automation_id: automationId,
         n8n_workflow_id: n8nWorkflowResult?.workflow_id,
         n8n_workflow_name: n8nWorkflowResult?.workflow_name,
+        n8n_workflow_status: n8nWorkflowResult ? 'created' : 'failed',
         message: 'Company provisioned successfully',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -251,9 +367,18 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in provision-company:', error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    // Log critical failure
+    await logAudit(supabase, 'COMPANY_PROVISION_CRITICAL_FAIL', 'company', companyId, 'failed', {
+      error: errorMessage,
+      law_firm_id: lawFirmId,
+    }, adminUserId);
+
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
         success: false,
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
