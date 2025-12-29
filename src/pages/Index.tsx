@@ -4,17 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
   ArrowRight, 
-  Sparkles, 
-  Monitor, 
-  Smartphone, 
-  Tablet,
-  MessageSquare,
+  MessageCircle,
+  Bot,
   Zap,
   Shield,
   BarChart3,
   Users,
-  Phone,
-  Check
+  ChevronRight,
+  Play,
+  Star,
+  Sparkles
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import miauchatLogo from "@/assets/miauchat-logo.png";
@@ -31,203 +30,252 @@ const Index = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0c0c0c]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-red-500 border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-black">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-red-500 border-t-transparent" />
       </div>
     );
   }
 
   const features = [
     {
-      icon: MessageSquare,
-      title: "Multi-Atendimento",
-      description: "Gerencie múltiplas conversas simultâneas com facilidade e eficiência."
+      icon: MessageCircle,
+      title: "Conversas Inteligentes",
+      description: "IA que entende contexto e responde naturalmente"
+    },
+    {
+      icon: Bot,
+      title: "Automação Total",
+      description: "Fluxos automatizados que funcionam 24/7"
     },
     {
       icon: Zap,
-      title: "Automação Inteligente",
-      description: "Automatize respostas e fluxos de atendimento com integração N8N."
+      title: "Respostas Instantâneas",
+      description: "Velocidade que seus clientes merecem"
     },
     {
       icon: Shield,
-      title: "Segurança Total",
-      description: "Seus dados protegidos com criptografia de ponta a ponta."
+      title: "100% Seguro",
+      description: "Criptografia end-to-end em todas conversas"
     },
     {
       icon: BarChart3,
-      title: "Relatórios Detalhados",
-      description: "Acompanhe métricas e performance do seu atendimento em tempo real."
+      title: "Analytics Avançado",
+      description: "Insights em tempo real do seu atendimento"
     },
     {
       icon: Users,
-      title: "Gestão de Equipes",
-      description: "Organize sua equipe com diferentes níveis de acesso e permissões."
-    },
-    {
-      icon: Phone,
-      title: "WhatsApp Oficial",
-      description: "Integração completa com a API oficial do WhatsApp Business."
+      title: "Multi-Equipe",
+      description: "Gerencie times com permissões granulares"
     }
   ];
 
-  const plans = [
+  const testimonials = [
     {
-      name: "Starter",
-      price: "97",
-      features: ["1 Conexão WhatsApp", "2 Usuários", "Suporte por email", "Relatórios básicos"],
-      highlighted: false
+      name: "Ana Silva",
+      role: "CEO, TechStart",
+      content: "Reduzimos 70% do tempo de resposta ao cliente.",
+      avatar: "AS"
     },
     {
-      name: "Professional",
-      price: "197",
-      features: ["5 Conexões WhatsApp", "10 Usuários", "Suporte prioritário", "Automação avançada", "Relatórios completos"],
-      highlighted: true
+      name: "Carlos Mendes",
+      role: "Diretor, Vendas Pro",
+      content: "A automação do MiauChat transformou nosso suporte.",
+      avatar: "CM"
     },
     {
-      name: "Enterprise",
-      price: "397",
-      features: ["Conexões ilimitadas", "Usuários ilimitados", "Suporte 24/7", "API completa", "Customizações"],
-      highlighted: false
+      name: "Lucia Santos",
+      role: "Head de CS, FinBank",
+      content: "ROI de 300% em apenas 3 meses de uso.",
+      avatar: "LS"
     }
   ];
 
   return (
-    <div className="min-h-screen bg-[#0c0c0c] text-white font-[Poppins]">
+    <div className="min-h-screen bg-black text-white overflow-x-hidden">
+      {/* Animated background */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-red-600/10 rounded-full blur-[200px] animate-pulse" />
+        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-red-800/10 rounded-full blur-[180px]" />
+      </div>
+
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#0c0c0c]/90 backdrop-blur-md border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
-            <span className="text-red-500 font-medium text-lg">MIAUChat</span>
-          </Link>
-          
-          <div className="flex items-center gap-4">
-            <Link 
-              to="/auth" 
-              className="text-white/70 hover:text-white text-sm transition-colors"
-            >
-              Entrar
-            </Link>
-            <Button 
-              asChild 
-              className="bg-red-600 hover:bg-red-700 text-white text-sm px-5 h-9 rounded-lg"
-            >
-              <Link to="/auth?tab=signup">
-                Começar agora
-                <ArrowRight className="ml-1.5 h-4 w-4" />
+      <header className="fixed top-0 left-0 right-0 z-50">
+        <div className="mx-4 mt-4">
+          <div className="max-w-7xl mx-auto bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 px-6 py-3">
+            <div className="flex items-center justify-between">
+              <Link to="/" className="flex items-center gap-3">
+                <img src={miauchatLogo} alt="MiauChat" className="h-10 w-10" />
+                <span className="text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+                  MiauChat
+                </span>
               </Link>
-            </Button>
+              
+              <nav className="hidden md:flex items-center gap-8">
+                <a href="#features" className="text-sm text-white/60 hover:text-white transition-colors">Recursos</a>
+                <a href="#testimonials" className="text-sm text-white/60 hover:text-white transition-colors">Depoimentos</a>
+                <a href="#pricing" className="text-sm text-white/60 hover:text-white transition-colors">Planos</a>
+              </nav>
+              
+              <div className="flex items-center gap-3">
+                <Button 
+                  variant="ghost" 
+                  asChild 
+                  className="text-white/70 hover:text-white hover:bg-white/10"
+                >
+                  <Link to="/auth">Entrar</Link>
+                </Button>
+                <Button 
+                  asChild 
+                  className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl px-6"
+                >
+                  <Link to="/auth?tab=signup">
+                    Começar grátis
+                  </Link>
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center pt-16 overflow-hidden">
-        {/* Background glow */}
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-red-900/20 blur-[200px] rounded-full pointer-events-none" />
-        
-        <div className="relative z-10 max-w-4xl mx-auto px-6 py-20 text-center">
+      <section className="relative min-h-screen flex items-center justify-center pt-32 pb-20">
+        <div className="relative z-10 max-w-6xl mx-auto px-6 text-center">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-red-500/30 bg-red-500/10 text-red-400 text-sm mb-14">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm mb-8 animate-fade-in">
             <Sparkles className="h-4 w-4" />
-            <span>Multiplataforma de Inteligência Artificial Unificada</span>
+            <span>Novo: Integração com IA Generativa</span>
+            <ChevronRight className="h-4 w-4" />
           </div>
 
-          {/* Logo with devices */}
-          <div className="flex items-center justify-center mb-14">
-            <div className="relative">
-              {/* Main logo */}
-              <div className="w-24 h-24 rounded-2xl border-2 border-red-500/40 bg-[#0c0c0c] flex items-center justify-center">
-                <img src={miauchatLogo} alt="MiauChat" className="h-16 w-16" />
-              </div>
-              
-              {/* Monitor - left */}
-              <Monitor 
-                className="absolute -left-14 top-1/2 -translate-y-1/2 h-8 w-8 text-red-500/50" 
-                strokeWidth={1.5} 
-              />
-              
-              {/* Tablet - right */}
-              <Tablet 
-                className="absolute -right-12 top-1/2 -translate-y-1/2 h-7 w-7 text-red-500/50" 
-                strokeWidth={1.5} 
-              />
-              
-              {/* Phone - bottom */}
-              <Smartphone 
-                className="absolute left-1/2 -translate-x-1/2 -bottom-10 h-6 w-6 text-red-500/50" 
-                strokeWidth={1.5} 
-              />
+          {/* Logo floating */}
+          <div className="relative w-32 h-32 mx-auto mb-10">
+            <div className="absolute inset-0 bg-red-500/20 rounded-3xl blur-2xl animate-pulse" />
+            <div className="relative w-full h-full rounded-3xl bg-gradient-to-br from-red-500/20 to-red-900/20 border border-red-500/30 flex items-center justify-center backdrop-blur-sm">
+              <img src={miauchatLogo} alt="MiauChat" className="h-20 w-20" />
             </div>
           </div>
 
-          {/* Title */}
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-red-500 tracking-wide mb-5">
-            MIAUCHAT
+          {/* Main heading */}
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-black mb-6 leading-tight">
+            <span className="text-white">Atendimento que</span>
+            <br />
+            <span className="bg-gradient-to-r from-red-400 via-red-500 to-red-600 bg-clip-text text-transparent">
+              encanta clientes
+            </span>
           </h1>
 
           {/* Subtitle */}
-          <h2 className="text-xl md:text-2xl text-white/90 font-normal mb-4">
-            Multiplataforma de Inteligência Artificial Unificada
-          </h2>
-
-          {/* Description */}
-          <p className="text-base text-white/50 max-w-xl mx-auto mb-10 leading-relaxed">
-            Plataforma de comunicação que centraliza todos os seus canais, automatiza 
-            conversas e aumenta a produtividade da sua equipe.
+          <p className="text-xl md:text-2xl text-white/50 max-w-2xl mx-auto mb-12 leading-relaxed">
+            Unifique WhatsApp, automatize conversas com IA e 
+            <span className="text-white/80"> multiplique suas vendas</span>
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-8">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
             <Button 
+              size="lg"
               asChild 
-              className="bg-red-600 hover:bg-red-700 text-white px-7 h-12 text-sm font-medium rounded-lg"
+              className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-10 h-14 text-lg font-semibold rounded-2xl shadow-lg shadow-red-500/25"
             >
-              <Link to="/auth">
-                Login Cliente
-                <ArrowRight className="ml-2 h-4 w-4" />
+              <Link to="/auth?tab=signup">
+                Começar agora — é grátis
+                <ArrowRight className="ml-2 h-5 w-5" />
               </Link>
             </Button>
             <Button 
+              size="lg"
               variant="outline" 
-              asChild 
-              className="border-white/20 bg-transparent hover:bg-white/5 text-white px-7 h-12 text-sm font-medium rounded-lg"
+              className="border-white/20 bg-white/5 hover:bg-white/10 text-white px-8 h-14 text-lg rounded-2xl group"
             >
-              <a href="#demo">Ver demonstração</a>
+              <Play className="mr-2 h-5 w-5 group-hover:scale-110 transition-transform" />
+              Ver demo
             </Button>
           </div>
 
-          {/* Trust text */}
-          <p className="text-sm text-white/40">
-            Sem cartão de crédito • Cancele quando quiser
-          </p>
+          {/* Stats */}
+          <div className="flex flex-wrap items-center justify-center gap-8 md:gap-16">
+            {[
+              { value: "10k+", label: "Empresas ativas" },
+              { value: "50M+", label: "Mensagens/mês" },
+              { value: "99.9%", label: "Uptime" },
+            ].map((stat, i) => (
+              <div key={i} className="text-center">
+                <div className="text-3xl md:text-4xl font-bold text-white">{stat.value}</div>
+                <div className="text-sm text-white/40">{stat.label}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
       {/* Features Section */}
-      <section id="recursos" className="py-24 bg-[#0a0a0a]">
+      <section id="features" className="py-32 relative">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
-              Tudo que você precisa em um só lugar
+          <div className="text-center mb-20">
+            <span className="text-red-500 font-medium text-sm uppercase tracking-widest mb-4 block">Recursos</span>
+            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
+              Tudo que você precisa
             </h2>
-            <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              Recursos poderosos para escalar seu atendimento e encantar seus clientes.
+            <p className="text-xl text-white/50 max-w-2xl mx-auto">
+              Ferramentas poderosas para escalar seu atendimento
             </p>
           </div>
           
-          <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {features.map((feature, index) => (
               <Card 
                 key={index} 
-                className="bg-[#111] border-white/5 hover:border-red-500/20 transition-all duration-300"
+                className="group bg-white/[0.02] border-white/5 hover:border-red-500/30 hover:bg-white/[0.04] transition-all duration-500 rounded-2xl overflow-hidden"
               >
-                <CardContent className="p-6">
-                  <div className="mb-4 w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-                    <feature.icon className="h-6 w-6 text-red-500" />
+                <CardContent className="p-8">
+                  <div className="mb-6 w-14 h-14 rounded-2xl bg-gradient-to-br from-red-500/20 to-red-900/10 border border-red-500/20 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                    <feature.icon className="h-7 w-7 text-red-500" />
                   </div>
-                  <h3 className="text-lg font-medium text-white mb-2">{feature.title}</h3>
-                  <p className="text-white/50 text-sm leading-relaxed">{feature.description}</p>
+                  <h3 className="text-xl font-semibold text-white mb-3">{feature.title}</h3>
+                  <p className="text-white/50 leading-relaxed">{feature.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials Section */}
+      <section id="testimonials" className="py-32 bg-gradient-to-b from-transparent via-red-950/10 to-transparent">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-20">
+            <span className="text-red-500 font-medium text-sm uppercase tracking-widest mb-4 block">Depoimentos</span>
+            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
+              Amado por milhares
+            </h2>
+            <p className="text-xl text-white/50 max-w-2xl mx-auto">
+              Veja o que nossos clientes dizem
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {testimonials.map((testimonial, index) => (
+              <Card 
+                key={index} 
+                className="bg-white/[0.02] border-white/5 rounded-2xl"
+              >
+                <CardContent className="p-8">
+                  <div className="flex gap-1 mb-6">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="h-5 w-5 fill-red-500 text-red-500" />
+                    ))}
+                  </div>
+                  <p className="text-lg text-white/80 mb-8 leading-relaxed">"{testimonial.content}"</p>
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white font-bold">
+                      {testimonial.avatar}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white">{testimonial.name}</div>
+                      <div className="text-sm text-white/40">{testimonial.role}</div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -236,100 +284,122 @@ const Index = () => {
       </section>
 
       {/* Pricing Section */}
-      <section id="planos" className="py-24 bg-[#0c0c0c]">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
-              Planos para todos os tamanhos
+      <section id="pricing" className="py-32">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-20">
+            <span className="text-red-500 font-medium text-sm uppercase tracking-widest mb-4 block">Preços</span>
+            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
+              Simples e transparente
             </h2>
-            <p className="text-white/50 text-lg max-w-2xl mx-auto">
-              Escolha o plano ideal para o seu negócio e comece a transformar seu atendimento.
+            <p className="text-xl text-white/50 max-w-2xl mx-auto">
+              Sem surpresas. Cancele quando quiser.
             </p>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            {plans.map((plan, index) => (
-              <Card 
-                key={index} 
-                className={`relative bg-[#111] border transition-all duration-300 ${
-                  plan.highlighted 
-                    ? 'border-red-500 shadow-xl shadow-red-500/10' 
-                    : 'border-white/5 hover:border-white/10'
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-red-600 text-white text-xs font-medium rounded-full">
-                    Mais popular
-                  </div>
-                )}
-                <CardContent className="p-7">
-                  <div className="text-center mb-6">
-                    <h3 className="text-xl font-medium text-white mb-4">{plan.name}</h3>
-                    <div className="flex items-baseline justify-center">
-                      <span className="text-xl text-white/60">R$</span>
-                      <span className="text-5xl font-bold text-white mx-1">{plan.price}</span>
-                      <span className="text-white/50">/mês</span>
-                    </div>
-                  </div>
-                  
-                  <ul className="space-y-3 mb-8">
-                    {plan.features.map((feature, i) => (
-                      <li key={i} className="flex items-center gap-3 text-white/70">
-                        <Check className="h-4 w-4 text-red-500 shrink-0" />
-                        <span className="text-sm">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  
-                  <Button 
-                    className={`w-full h-11 text-sm font-medium rounded-lg ${
-                      plan.highlighted 
-                        ? 'bg-red-600 hover:bg-red-700 text-white' 
-                        : 'bg-white/5 hover:bg-white/10 text-white border border-white/10'
-                    }`}
-                    asChild
-                  >
-                    <Link to="/auth?tab=signup">Começar agora</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="grid gap-8 md:grid-cols-2">
+            {/* Starter */}
+            <Card className="bg-white/[0.02] border-white/10 rounded-3xl overflow-hidden">
+              <CardContent className="p-10">
+                <div className="mb-8">
+                  <h3 className="text-2xl font-bold text-white mb-2">Starter</h3>
+                  <p className="text-white/50">Para pequenas equipes</p>
+                </div>
+                <div className="mb-8">
+                  <span className="text-5xl font-bold text-white">R$97</span>
+                  <span className="text-white/40">/mês</span>
+                </div>
+                <ul className="space-y-4 mb-10">
+                  {["1 conexão WhatsApp", "3 usuários", "1.000 msgs/mês", "Suporte email"].map((f, i) => (
+                    <li key={i} className="flex items-center gap-3 text-white/70">
+                      <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center">
+                        <ChevronRight className="h-3 w-3 text-white" />
+                      </div>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <Button 
+                  className="w-full h-14 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-lg"
+                  asChild
+                >
+                  <Link to="/auth?tab=signup">Começar</Link>
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Pro */}
+            <Card className="bg-gradient-to-br from-red-500/20 to-red-900/20 border-red-500/30 rounded-3xl overflow-hidden relative">
+              <div className="absolute top-6 right-6 px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full">
+                Popular
+              </div>
+              <CardContent className="p-10">
+                <div className="mb-8">
+                  <h3 className="text-2xl font-bold text-white mb-2">Professional</h3>
+                  <p className="text-white/60">Para empresas em crescimento</p>
+                </div>
+                <div className="mb-8">
+                  <span className="text-5xl font-bold text-white">R$297</span>
+                  <span className="text-white/40">/mês</span>
+                </div>
+                <ul className="space-y-4 mb-10">
+                  {["5 conexões WhatsApp", "15 usuários", "Mensagens ilimitadas", "Automação IA", "Suporte prioritário"].map((f, i) => (
+                    <li key={i} className="flex items-center gap-3 text-white/80">
+                      <div className="w-5 h-5 rounded-full bg-red-500/30 flex items-center justify-center">
+                        <ChevronRight className="h-3 w-3 text-red-400" />
+                      </div>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <Button 
+                  className="w-full h-14 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-2xl text-lg font-semibold shadow-lg shadow-red-500/25"
+                  asChild
+                >
+                  <Link to="/auth?tab=signup">Começar agora</Link>
+                </Button>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-24 relative overflow-hidden bg-[#0a0a0a]">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-red-900/15 blur-[180px] rounded-full pointer-events-none" />
-        
-        <div className="relative z-10 max-w-3xl mx-auto px-6 text-center">
-          <h2 className="text-3xl md:text-4xl font-semibold text-white mb-5">
-            Pronto para revolucionar seu atendimento?
+      {/* Final CTA */}
+      <section className="py-32 relative">
+        <div className="absolute inset-0 bg-gradient-to-t from-red-950/20 to-transparent pointer-events-none" />
+        <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
+          <div className="w-20 h-20 mx-auto mb-10 rounded-2xl bg-gradient-to-br from-red-500/20 to-red-900/20 border border-red-500/30 flex items-center justify-center">
+            <img src={miauchatLogo} alt="MiauChat" className="h-12 w-12" />
+          </div>
+          <h2 className="text-4xl md:text-6xl font-bold text-white mb-6">
+            Pronto para começar?
           </h2>
-          <p className="text-white/50 text-lg mb-10">
-            Junte-se a milhares de empresas que já transformaram seu atendimento com o MIAUChat.
+          <p className="text-xl text-white/50 mb-10 max-w-xl mx-auto">
+            Junte-se a milhares de empresas que já transformaram seu atendimento
           </p>
           <Button 
+            size="lg"
             asChild 
-            className="bg-red-600 hover:bg-red-700 text-white px-8 h-12 text-sm font-medium rounded-lg"
+            className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-12 h-16 text-lg font-semibold rounded-2xl shadow-xl shadow-red-500/30"
           >
             <Link to="/auth?tab=signup">
-              Começar gratuitamente
-              <ArrowRight className="ml-2 h-4 w-4" />
+              Criar conta grátis
+              <ArrowRight className="ml-3 h-5 w-5" />
             </Link>
           </Button>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-8 border-t border-white/5 bg-[#0c0c0c]">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <img src={miauchatLogo} alt="MiauChat" className="h-7 w-7" />
-            <span className="text-red-500 font-medium">MIAUChat</span>
+      <footer className="py-12 border-t border-white/5">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
+            <span className="font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+              MiauChat
+            </span>
           </div>
-          <p className="text-sm text-white/40">
-            © {new Date().getFullYear()} MIAUChat. Todos os direitos reservados.
+          <p className="text-sm text-white/30">
+            © {new Date().getFullYear()} MiauChat. Todos os direitos reservados.
           </p>
         </div>
       </footer>
