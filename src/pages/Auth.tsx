@@ -59,9 +59,11 @@ export default function Auth() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[Auth] handleLogin iniciado");
     
     const result = loginSchema.safeParse(loginData);
     if (!result.success) {
+      console.log("[Auth] Validação falhou:", result.error.errors[0].message);
       toast({
         title: "Erro de validação",
         description: result.error.errors[0].message,
@@ -71,21 +73,34 @@ export default function Auth() {
     }
 
     setIsLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: loginData.email,
-      password: loginData.password,
-    });
-
-    if (error) {
-      toast({
-        title: "Falha na autenticação",
-        description: "Email ou senha incorretos. Por favor, tente novamente.",
-        variant: "destructive",
+    console.log("[Auth] Chamando supabase.auth.signInWithPassword...");
+    
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginData.email,
+        password: loginData.password,
       });
-    } else {
+
+      if (error) {
+        console.error("[Auth] Erro de login:", error.message, "| Código:", error.status);
+        toast({
+          title: "Falha na autenticação",
+          description: "Email ou senha incorretos. Por favor, tente novamente.",
+          variant: "destructive",
+        });
+      } else {
+        console.log("[Auth] Login bem-sucedido, sessão:", data.session ? "presente" : "ausente");
+        toast({
+          title: "Bem-vindo!",
+          description: "Login realizado com sucesso.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Auth] Exceção no login:", err?.message || err);
       toast({
-        title: "Bem-vindo!",
-        description: "Login realizado com sucesso.",
+        title: "Erro de conexão",
+        description: "Não foi possível conectar ao servidor. Verifique sua conexão.",
+        variant: "destructive",
       });
     }
     setIsLoading(false);
@@ -93,9 +108,11 @@ export default function Auth() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[Auth] handleSignup iniciado");
     
     const result = signupSchema.safeParse(signupData);
     if (!result.success) {
+      console.log("[Auth] Validação signup falhou:", result.error.errors[0].message);
       toast({
         title: "Erro de validação",
         description: result.error.errors[0].message,
@@ -105,28 +122,41 @@ export default function Auth() {
     }
 
     setIsLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: signupData.email,
-      password: signupData.password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        data: {
-          full_name: signupData.adminName,
-          company_name: signupData.companyName,
+    console.log("[Auth] Chamando supabase.auth.signUp...");
+    
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: signupData.email,
+        password: signupData.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            full_name: signupData.adminName,
+            company_name: signupData.companyName,
+          },
         },
-      },
-    });
-
-    if (error) {
-      toast({
-        title: "Erro ao criar conta",
-        description: "Não foi possível criar a conta. Verifique os dados e tente novamente.",
-        variant: "destructive",
       });
-    } else {
+
+      if (error) {
+        console.error("[Auth] Erro de signup:", error.message, "| Código:", error.status);
+        toast({
+          title: "Erro ao criar conta",
+          description: "Não foi possível criar a conta. Verifique os dados e tente novamente.",
+          variant: "destructive",
+        });
+      } else {
+        console.log("[Auth] Signup bem-sucedido, user:", data.user ? "criado" : "não criado");
+        toast({
+          title: "Conta criada!",
+          description: "Você já pode acessar o sistema.",
+        });
+      }
+    } catch (err: any) {
+      console.error("[Auth] Exceção no signup:", err?.message || err);
       toast({
-        title: "Conta criada!",
-        description: "Você já pode acessar o sistema.",
+        title: "Erro de conexão",
+        description: "Não foi possível conectar ao servidor.",
+        variant: "destructive",
       });
     }
     setIsLoading(false);

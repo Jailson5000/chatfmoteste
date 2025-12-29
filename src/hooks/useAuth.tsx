@@ -13,9 +13,12 @@ export function useAuth() {
   const [mustChangePassword, setMustChangePassword] = useState(false);
 
   useEffect(() => {
+    console.log("[useAuth] Inicializando listener de auth...");
+    
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log("[useAuth] onAuthStateChange:", event, "| Sessão:", session ? "presente" : "ausente");
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -23,13 +26,19 @@ export function useAuth() {
         // Check must_change_password flag (deferred to avoid deadlock)
         if (session?.user) {
           setTimeout(async () => {
-            const { data: profile } = await supabase
+            console.log("[useAuth] Buscando profile para must_change_password...");
+            const { data: profile, error } = await supabase
               .from('profiles')
               .select('must_change_password')
               .eq('id', session.user.id)
               .maybeSingle();
             
+            if (error) {
+              console.error("[useAuth] Erro ao buscar profile:", error.message);
+            }
+            
             if (profile?.must_change_password) {
+              console.log("[useAuth] Usuário precisa trocar senha");
               setMustChangePassword(true);
             } else {
               setMustChangePassword(false);
@@ -42,7 +51,12 @@ export function useAuth() {
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    console.log("[useAuth] Verificando sessão existente...");
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error("[useAuth] Erro ao obter sessão:", error.message);
+      }
+      console.log("[useAuth] getSession resultado:", session ? "sessão encontrada" : "sem sessão");
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);

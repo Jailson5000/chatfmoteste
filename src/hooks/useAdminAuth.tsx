@@ -35,41 +35,58 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchAdminData = async (userId: string) => {
+    console.log("[useAdminAuth] fetchAdminData para userId:", userId);
     try {
       // Fetch admin profile
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("admin_profiles")
         .select("*")
         .eq("user_id", userId)
         .maybeSingle();
 
+      if (profileError) {
+        console.error("[useAdminAuth] Erro ao buscar admin_profiles:", profileError.message);
+      }
+
       if (profile) {
+        console.log("[useAdminAuth] Admin profile encontrado:", profile.email);
         setAdminProfile(profile);
       } else {
+        console.log("[useAdminAuth] Admin profile não encontrado");
         setAdminProfile(null);
       }
 
       // Fetch admin role using RPC to avoid RLS issues
-      const { data: roleData } = await supabase.rpc("get_admin_role", {
+      console.log("[useAdminAuth] Buscando role via RPC...");
+      const { data: roleData, error: roleError } = await supabase.rpc("get_admin_role", {
         _user_id: userId,
       });
 
+      if (roleError) {
+        console.error("[useAdminAuth] Erro ao buscar role:", roleError.message);
+      }
+
       if (roleData) {
+        console.log("[useAdminAuth] Role encontrada:", roleData);
         setAdminRole(roleData as AdminRole);
       } else {
+        console.log("[useAdminAuth] Role não encontrada");
         setAdminRole(null);
       }
-    } catch (error) {
-      console.error("Error fetching admin data:", error);
+    } catch (error: any) {
+      console.error("[useAdminAuth] Exceção em fetchAdminData:", error?.message || error);
       setAdminProfile(null);
       setAdminRole(null);
     }
   };
 
   useEffect(() => {
+    console.log("[useAdminAuth] Inicializando listener de auth...");
+    
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log("[useAdminAuth] onAuthStateChange:", event, "| Sessão:", session ? "presente" : "ausente");
         setSession(session);
         setUser(session?.user ?? null);
 
@@ -90,7 +107,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    console.log("[useAdminAuth] Verificando sessão existente...");
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error("[useAdminAuth] Erro getSession:", error.message);
+      }
+      console.log("[useAdminAuth] getSession:", session ? "sessão encontrada" : "sem sessão");
       setSession(session);
       setUser(session?.user ?? null);
 
@@ -107,18 +129,22 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    console.log("[useAdminAuth] signIn iniciado para:", email);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
+        console.error("[useAdminAuth] Erro signInWithPassword:", error.message);
         return { error };
       }
 
+      console.log("[useAdminAuth] signIn sucesso, sessão:", data.session ? "presente" : "ausente");
       return { error: null };
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[useAdminAuth] Exceção signIn:", error?.message || error);
       return { error: error as Error };
     }
   };

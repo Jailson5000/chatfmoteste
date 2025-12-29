@@ -42,6 +42,8 @@ export default function AuthCallback() {
 
   useEffect(() => {
     document.title = "Autenticação | MiauChat";
+    console.log("[AuthCallback] Iniciando processamento de callback...");
+    console.log("[AuthCallback] URL atual:", window.location.href);
 
     let cancelled = false;
 
@@ -50,27 +52,51 @@ export default function AuthCallback() {
         const url = new URL(window.location.href);
         const next = sanitizeNext(url.searchParams.get("next"));
         const code = url.searchParams.get("code");
+        const errorParam = url.searchParams.get("error");
+        const errorDesc = url.searchParams.get("error_description");
+        
+        console.log("[AuthCallback] Params: next=", next, "| code=", code ? "presente" : "ausente");
+        
+        // Check for OAuth error in URL
+        if (errorParam) {
+          console.error("[AuthCallback] Erro OAuth na URL:", errorParam, errorDesc);
+          throw new Error(errorDesc || errorParam);
+        }
 
         // PKCE/code flow support
         if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
+          console.log("[AuthCallback] Trocando code por sessão...");
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            console.error("[AuthCallback] Erro exchangeCodeForSession:", error.message);
+            throw error;
+          }
+          console.log("[AuthCallback] exchangeCodeForSession sucesso, sessão:", data.session ? "presente" : "ausente");
         }
 
         // Already have session?
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log("[AuthCallback] Verificando sessão existente...");
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error("[AuthCallback] Erro getSession:", sessionError.message);
+        }
+        
         if (session) {
+          console.log("[AuthCallback] Sessão encontrada, redirecionando para:", next);
           if (!cancelled) navigate(next, { replace: true });
           return;
         }
 
         // Wait a bit for session to be detected
+        console.log("[AuthCallback] Aguardando sessão por 3s...");
         const gotSession = await waitForSession(3000);
         if (cancelled) return;
 
         if (gotSession) {
+          console.log("[AuthCallback] Sessão detectada via listener, redirecionando para:", next);
           navigate(next, { replace: true });
         } else {
+          console.warn("[AuthCallback] Timeout: nenhuma sessão detectada");
           toast({
             title: "Link inválido",
             description: "Não foi possível concluir a autenticação. Tente novamente.",
@@ -80,6 +106,7 @@ export default function AuthCallback() {
         }
       } catch (err: any) {
         if (cancelled) return;
+        console.error("[AuthCallback] Exceção:", err?.message || err);
         toast({
           title: "Erro de autenticação",
           description: err?.message ?? "Não foi possível concluir a autenticação.",
