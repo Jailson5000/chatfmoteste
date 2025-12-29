@@ -187,13 +187,13 @@ export default function Auth() {
         </div>
         
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
-          <div className="flex items-center gap-4 animate-fade-in" style={{ animationDelay: "0.1s" }}>
-            <img src={miauchatLogo} alt="MiauChat" className="w-24 h-24 object-contain bg-transparent" />
+          <div className="flex items-center gap-5 animate-fade-in" style={{ animationDelay: "0.1s" }}>
+            <img src={miauchatLogo} alt="MiauChat" className="w-32 h-32 object-contain bg-transparent" />
             <div>
-              <span className="font-bold text-2xl text-white tracking-wide">
+              <span className="font-bold text-3xl text-white tracking-wide">
                 MIAUCHAT
               </span>
-              <p className="text-zinc-500 text-sm">Plataforma de Comunicação</p>
+              <p className="text-zinc-500 text-base">Plataforma de Comunicação</p>
             </div>
           </div>
           
