@@ -17,6 +17,9 @@ interface Company {
   created_at: string;
   updated_at: string;
   subdomain?: string;
+  // Provisioning status fields
+  client_app_status: string;
+  provisioning_status: string;
   // n8n workflow fields
   n8n_workflow_id: string | null;
   n8n_workflow_name: string | null;
@@ -51,9 +54,15 @@ interface ProvisionResponse {
   success: boolean;
   company: Company;
   law_firm: { id: string; subdomain: string };
+  tenant_id: string;
   subdomain: string;
   subdomain_url: string;
   automation_id?: string;
+  // Provisioning status
+  client_app_status: string;
+  n8n_workflow_status: string;
+  provisioning_status: string;
+  // n8n details
   n8n_workflow_id?: string;
   n8n_workflow_name?: string;
   message: string;

@@ -18,6 +18,10 @@ interface ProvisionRequest {
   auto_activate_workflow?: boolean;
 }
 
+// Provisioning status enum
+type ProvisioningStatus = 'pending' | 'partial' | 'active' | 'error';
+type ComponentStatus = 'pending' | 'creating' | 'created' | 'error';
+
 function generateSubdomain(companyName: string): string {
   return companyName
     .toLowerCase()
@@ -27,6 +31,26 @@ function generateSubdomain(companyName: string): string {
     .replace(/-+/g, '-') // Replace multiple hyphens with single
     .replace(/^-|-$/g, '') // Remove leading/trailing hyphens
     .substring(0, 30); // Limit length
+}
+
+// Calculate overall provisioning status based on component statuses
+function calculateProvisioningStatus(
+  clientAppStatus: ComponentStatus, 
+  n8nStatus: ComponentStatus
+): ProvisioningStatus {
+  if (clientAppStatus === 'created' && n8nStatus === 'created') {
+    return 'active';
+  }
+  if (clientAppStatus === 'error' && n8nStatus === 'error') {
+    return 'error';
+  }
+  if (clientAppStatus === 'created' || n8nStatus === 'created') {
+    return 'partial';
+  }
+  if (clientAppStatus === 'error' || n8nStatus === 'error') {
+    return 'partial';
+  }
+  return 'pending';
 }
 
 // Log audit event with full context
@@ -55,6 +79,32 @@ async function logAudit(
   } catch (error) {
     console.error('Failed to log audit:', error);
   }
+}
+
+// Update company provisioning status
+async function updateCompanyStatus(
+  supabase: any,
+  companyId: string,
+  clientAppStatus: ComponentStatus,
+  n8nStatus: ComponentStatus,
+  errorMessage?: string
+) {
+  const provisioningStatus = calculateProvisioningStatus(clientAppStatus, n8nStatus);
+  
+  const updateData: Record<string, any> = {
+    client_app_status: clientAppStatus,
+    n8n_workflow_status: n8nStatus,
+    provisioning_status: provisioningStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (errorMessage) {
+    updateData.n8n_last_error = errorMessage.substring(0, 500);
+  }
+
+  await supabase.from('companies').update(updateData).eq('id', companyId);
+  
+  return provisioningStatus;
 }
 
 serve(async (req) => {
@@ -141,16 +191,26 @@ serve(async (req) => {
       subdomain = `${subdomain}-${Math.random().toString(36).substring(2, 6)}`;
     }
 
-    console.log('Creating company with subdomain:', subdomain);
+    console.log('=== ATOMIC PROVISIONING STARTED ===');
+    console.log('Company:', name, '| Subdomain:', subdomain);
 
     // Log provisioning start
     await logAudit(supabase, 'COMPANY_PROVISION_START', 'company', null, 'success', {
       company_name: name,
       subdomain,
       plan_id,
+      atomic_flow: true,
     }, adminUserId);
 
-    // Step 1: Create law_firm with subdomain
+    // ========================================
+    // STEP 1: PROVISION CLIENT APP (law_firm + company)
+    // ========================================
+    console.log('=== STEP 1: Provisioning Client App ===');
+    
+    let clientAppStatus: ComponentStatus = 'creating';
+    let n8nStatus: ComponentStatus = 'pending';
+
+    // Step 1.1: Create law_firm with subdomain (tenant)
     const { data: lawFirm, error: lawFirmError } = await supabase
       .from('law_firms')
       .insert({
@@ -165,27 +225,35 @@ serve(async (req) => {
 
     if (lawFirmError) {
       console.error('Error creating law firm:', lawFirmError);
+      clientAppStatus = 'error';
       
-      await logAudit(supabase, 'COMPANY_PROVISION_FAIL', 'law_firm', null, 'failed', {
+      await logAudit(supabase, 'CLIENT_APP_PROVISION_FAIL', 'law_firm', null, 'failed', {
         error: lawFirmError.message,
         step: 'create_law_firm',
       }, adminUserId);
 
       return new Response(
-        JSON.stringify({ error: 'Failed to create law firm', details: lawFirmError.message }),
+        JSON.stringify({ 
+          error: 'Failed to create law firm', 
+          details: lawFirmError.message,
+          client_app_status: 'error',
+          n8n_workflow_status: 'pending',
+          provisioning_status: 'error',
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     lawFirmId = lawFirm.id;
-    console.log('Law firm created:', lawFirm.id);
+    console.log('Law firm created:', lawFirm.id, '| Subdomain:', subdomain);
 
     await logAudit(supabase, 'LAW_FIRM_CREATE', 'law_firm', lawFirm.id, 'success', {
       name,
       subdomain,
+      tenant_id: lawFirm.id,
     }, adminUserId);
 
-    // Step 2: Create company linked to law_firm
+    // Step 1.2: Create company linked to law_firm
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .insert({
@@ -198,15 +266,19 @@ serve(async (req) => {
         max_instances,
         law_firm_id: lawFirm.id,
         status: 'active',
-        n8n_workflow_status: 'pending', // Start as pending
+        // Provisioning status tracking
+        client_app_status: 'creating',
+        n8n_workflow_status: 'pending',
+        provisioning_status: 'pending',
       })
       .select()
       .single();
 
     if (companyError) {
       console.error('Error creating company:', companyError);
+      clientAppStatus = 'error';
       
-      await logAudit(supabase, 'COMPANY_PROVISION_FAIL', 'company', null, 'failed', {
+      await logAudit(supabase, 'CLIENT_APP_PROVISION_FAIL', 'company', null, 'failed', {
         error: companyError.message,
         step: 'create_company',
         law_firm_id: lawFirm.id,
@@ -216,7 +288,13 @@ serve(async (req) => {
       await supabase.from('law_firms').delete().eq('id', lawFirm.id);
       
       return new Response(
-        JSON.stringify({ error: 'Failed to create company', details: companyError.message }),
+        JSON.stringify({ 
+          error: 'Failed to create company', 
+          details: companyError.message,
+          client_app_status: 'error',
+          n8n_workflow_status: 'pending',
+          provisioning_status: 'error',
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -224,14 +302,7 @@ serve(async (req) => {
     companyId = company.id;
     console.log('Company created:', company.id);
 
-    await logAudit(supabase, 'COMPANY_CREATE', 'company', company.id, 'success', {
-      name,
-      law_firm_id: lawFirm.id,
-      subdomain,
-      plan_id,
-    }, adminUserId);
-
-    // Step 3: Create default automation for the company
+    // Step 1.3: Create default automation for the company
     let automationId: string | null = null;
     const { data: automation, error: automationError } = await supabase
       .from('automations')
@@ -254,7 +325,7 @@ serve(async (req) => {
         error: automationError.message,
         company_id: company.id,
       }, adminUserId);
-      // Continue without automation - not critical
+      // Continue without automation - not critical for Client App
     } else {
       automationId = automation?.id || null;
       console.log('Automation created:', automation?.id);
@@ -264,14 +335,36 @@ serve(async (req) => {
       }, adminUserId);
     }
 
-    // Step 4: Create n8n workflow for the company (async, non-blocking)
+    // Client App provisioned successfully
+    clientAppStatus = 'created';
+    
+    // Update company status - Client App done, n8n pending
+    await updateCompanyStatus(supabase, company.id, clientAppStatus, n8nStatus);
+
+    await logAudit(supabase, 'CLIENT_APP_PROVISION_COMPLETE', 'company', company.id, 'success', {
+      company_id: company.id,
+      law_firm_id: lawFirm.id,
+      subdomain,
+      tenant_id: lawFirm.id,
+    }, adminUserId);
+
+    console.log('=== CLIENT APP PROVISIONED ===');
+
+    // ========================================
+    // STEP 2: PROVISION N8N WORKFLOW
+    // ========================================
+    console.log('=== STEP 2: Provisioning n8n Workflow ===');
+    
+    n8nStatus = 'creating';
+    await updateCompanyStatus(supabase, company.id, clientAppStatus, n8nStatus);
+
     let n8nWorkflowResult = null;
+    
     try {
-      console.log('Creating n8n workflow for company...');
-      
       await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_START', 'n8n_workflow', company.id, 'success', {
         company_name: name,
         subdomain,
+        tenant_id: lawFirm.id,
       }, adminUserId);
 
       const n8nResponse = await fetch(`${supabaseUrl}/functions/v1/create-n8n-workflow`, {
@@ -291,14 +384,19 @@ serve(async (req) => {
 
       if (n8nResponse.ok) {
         n8nWorkflowResult = await n8nResponse.json();
+        n8nStatus = 'created';
+        
         console.log('N8N workflow created:', n8nWorkflowResult);
         
         await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_COMPLETE', 'n8n_workflow', company.id, 'success', {
           workflow_id: n8nWorkflowResult?.workflow_id,
           workflow_name: n8nWorkflowResult?.workflow_name,
+          active: n8nWorkflowResult?.active,
         }, adminUserId);
       } else {
         const errorText = await n8nResponse.text();
+        n8nStatus = 'error';
+        
         console.warn('Failed to create n8n workflow:', errorText);
         
         await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_FAIL', 'n8n_workflow', company.id, 'failed', {
@@ -306,63 +404,63 @@ serve(async (req) => {
           status_code: n8nResponse.status,
         }, adminUserId);
 
-        // Update company with failed status (for retry later)
-        await supabase
-          .from('companies')
-          .update({
-            n8n_workflow_status: 'failed',
-            n8n_last_error: errorText.substring(0, 500),
-            n8n_updated_at: new Date().toISOString(),
-          })
-          .eq('id', company.id);
+        await updateCompanyStatus(supabase, company.id, clientAppStatus, n8nStatus, errorText);
       }
     } catch (n8nError) {
-      console.warn('Error creating n8n workflow:', n8nError);
-      
+      n8nStatus = 'error';
       const errorMessage = n8nError instanceof Error ? n8nError.message : 'Unknown error';
+      
+      console.warn('Error creating n8n workflow:', n8nError);
       
       await logAudit(supabase, 'N8N_WORKFLOW_PROVISION_FAIL', 'n8n_workflow', company.id, 'failed', {
         error: errorMessage,
-        critical: false,
       }, adminUserId);
 
-      // Update company with failed status
-      await supabase
-        .from('companies')
-        .update({
-          n8n_workflow_status: 'failed',
-          n8n_last_error: errorMessage.substring(0, 500),
-          n8n_updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
+      await updateCompanyStatus(supabase, company.id, clientAppStatus, n8nStatus, errorMessage);
+    }
 
-      // Continue - n8n workflow creation is not critical for provisioning
+    // Final status update
+    const finalStatus = calculateProvisioningStatus(clientAppStatus, n8nStatus);
+    
+    if (n8nStatus === 'created') {
+      await updateCompanyStatus(supabase, company.id, clientAppStatus, n8nStatus);
     }
 
     // Final success log
     await logAudit(supabase, 'COMPANY_PROVISION_COMPLETE', 'company', company.id, 'success', {
       company_id: company.id,
       law_firm_id: lawFirm.id,
+      tenant_id: lawFirm.id,
       subdomain,
       automation_id: automationId,
+      client_app_status: clientAppStatus,
+      n8n_workflow_status: n8nStatus,
+      provisioning_status: finalStatus,
       n8n_workflow_id: n8nWorkflowResult?.workflow_id || null,
-      n8n_workflow_status: n8nWorkflowResult ? 'created' : 'failed',
     }, adminUserId);
 
-    console.log('Company provisioning completed successfully');
+    console.log('=== ATOMIC PROVISIONING COMPLETED ===');
+    console.log(`Client App: ${clientAppStatus} | n8n: ${n8nStatus} | Overall: ${finalStatus}`);
 
     return new Response(
       JSON.stringify({
         success: true,
         company: company,
         law_firm: lawFirm,
+        tenant_id: lawFirm.id,
         subdomain: subdomain,
         subdomain_url: `https://${subdomain}.miauchat.com.br`,
         automation_id: automationId,
+        // Provisioning status
+        client_app_status: clientAppStatus,
+        n8n_workflow_status: n8nStatus,
+        provisioning_status: finalStatus,
+        // n8n details
         n8n_workflow_id: n8nWorkflowResult?.workflow_id,
         n8n_workflow_name: n8nWorkflowResult?.workflow_name,
-        n8n_workflow_status: n8nWorkflowResult ? 'created' : 'failed',
-        message: 'Company provisioned successfully',
+        message: finalStatus === 'active' 
+          ? 'Company fully provisioned' 
+          : `Company provisioned with status: ${finalStatus}`,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -382,6 +480,9 @@ serve(async (req) => {
       JSON.stringify({ 
         error: errorMessage,
         success: false,
+        client_app_status: 'error',
+        n8n_workflow_status: 'error',
+        provisioning_status: 'error',
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
