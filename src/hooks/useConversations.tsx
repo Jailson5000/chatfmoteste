@@ -115,7 +115,7 @@ export function useConversations() {
     },
   });
 
-  // Real-time subscription for conversations
+  // Real-time subscription for conversations, messages, clients, and custom_statuses
   useEffect(() => {
     const conversationsChannel = supabase
       .channel('conversations-realtime')
@@ -127,13 +127,12 @@ export function useConversations() {
           table: 'conversations'
         },
         () => {
-          // Invalidate and refetch conversations
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
         }
       )
       .subscribe();
 
-    // Also listen for new messages to update last_message
+    // Listen for new messages to update last_message
     const messagesChannel = supabase
       .channel('messages-for-conversations')
       .on(
@@ -144,7 +143,54 @@ export function useConversations() {
           table: 'messages'
         },
         () => {
-          // Refetch conversations to update last_message
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      )
+      .subscribe();
+
+    // Listen for client updates (status changes, avatar, etc.)
+    const clientsChannel = supabase
+      .channel('clients-for-conversations')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'clients'
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      )
+      .subscribe();
+
+    // Listen for custom_statuses updates (name/color changes)
+    const statusesChannel = supabase
+      .channel('statuses-for-conversations')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'custom_statuses'
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      )
+      .subscribe();
+
+    // Listen for departments updates (name/color changes)
+    const departmentsChannel = supabase
+      .channel('departments-for-conversations')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'departments'
+        },
+        () => {
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
         }
       )
@@ -153,6 +199,9 @@ export function useConversations() {
     return () => {
       supabase.removeChannel(conversationsChannel);
       supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(clientsChannel);
+      supabase.removeChannel(statusesChannel);
+      supabase.removeChannel(departmentsChannel);
     };
   }, [queryClient]);
 
