@@ -64,9 +64,9 @@ server {
     listen 443 ssl http2;
     server_name miauchat.com.br www.miauchat.com.br;
     
-    # SSL (Let's Encrypt ou seu certificado)
-    ssl_certificate /etc/letsencrypt/live/miauchat.com.br/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/miauchat.com.br/privkey.pem;
+    # SSL (Let's Encrypt - Wildcard)
+    ssl_certificate /etc/letsencrypt/live/miauchat.com.br-0001/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/miauchat.com.br-0001/privkey.pem;
     
     # Configurações SSL
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -105,8 +105,8 @@ server {
     listen 443 ssl http2;
     server_name *.miauchat.com.br;
     
-    ssl_certificate /etc/letsencrypt/live/miauchat.com.br/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/miauchat.com.br/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/miauchat.com.br-0001/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/miauchat.com.br-0001/privkey.pem;
     
     ssl_protocols TLSv1.2 TLSv1.3;
     
