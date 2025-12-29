@@ -34,11 +34,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link } from "lucide-react";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 
 function generateSubdomainFromName(name: string): string {
   return name
@@ -99,9 +100,9 @@ export default function GlobalAdminCompanies() {
     setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "" });
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm("Tem certeza que deseja excluir esta empresa?")) {
-      await deleteCompany.mutateAsync(id);
+  const handleDelete = async (company: typeof companies[0]) => {
+    if (confirm("Tem certeza que deseja excluir esta empresa? O workflow n8n também será removido.")) {
+      await deleteCompany.mutateAsync(company);
     }
   };
 
@@ -350,19 +351,41 @@ export default function GlobalAdminCompanies() {
                       <TableCell>
                         <TooltipProvider>
                           <div className="flex items-center gap-2">
-                            {company.n8n_workflow_status === 'created' && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="flex items-center gap-1 text-green-600">
-                                    <CheckCircle2 className="h-4 w-4" />
-                                    <span className="text-xs">{company.n8n_workflow_id?.slice(0, 8)}...</span>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p className="font-medium">{company.n8n_workflow_name}</p>
-                                  <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
-                                </TooltipContent>
-                              </Tooltip>
+                            {company.n8n_workflow_status === 'created' && company.n8n_workflow_id && (
+                              <>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="flex items-center gap-1 text-green-600 cursor-pointer">
+                                      <CheckCircle2 className="h-4 w-4" />
+                                      <span className="text-xs">{company.n8n_workflow_id?.slice(0, 8)}...</span>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs">
+                                    <p className="font-medium">{company.n8n_workflow_name}</p>
+                                    <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
+                                    <div className="mt-2 pt-2 border-t">
+                                      <p className="text-xs font-medium flex items-center gap-1">
+                                        <Link className="h-3 w-3" /> Webhook URL:
+                                      </p>
+                                      <code className="text-xs text-primary break-all">
+                                        {`https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`}
+                                      </code>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    const webhookUrl = `https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
+                                    navigator.clipboard.writeText(webhookUrl);
+                                    toast.success("Webhook URL copiado!");
+                                  }}
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </>
                             )}
                             {company.n8n_workflow_status === 'pending' && (
                               <div className="flex items-center gap-1 text-yellow-600">
@@ -421,7 +444,7 @@ export default function GlobalAdminCompanies() {
                               Configurar Domínio
                             </DropdownMenuItem>
                             <DropdownMenuItem 
-                              onClick={() => handleDelete(company.id)}
+                              onClick={() => handleDelete(company)}
                               className="text-destructive"
                             >
                               <Trash2 className="mr-2 h-4 w-4" />

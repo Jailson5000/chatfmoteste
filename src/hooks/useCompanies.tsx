@@ -126,11 +126,28 @@ export function useCompanies() {
   });
 
   const deleteCompany = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (company: Company) => {
+      // First, delete the n8n workflow if it exists
+      if (company.n8n_workflow_id) {
+        try {
+          console.log('Deleting n8n workflow:', company.n8n_workflow_id);
+          await supabase.functions.invoke('delete-n8n-workflow', {
+            body: {
+              workflow_id: company.n8n_workflow_id,
+              company_id: company.id,
+            },
+          });
+        } catch (error) {
+          console.warn('Failed to delete n8n workflow:', error);
+          // Continue with company deletion even if workflow deletion fails
+        }
+      }
+
+      // Then delete the company
       const { error } = await supabase
         .from("companies")
         .delete()
-        .eq("id", id);
+        .eq("id", company.id);
 
       if (error) throw error;
     },
