@@ -28,6 +28,9 @@ import {
   User,
   PanelRightOpen,
   PanelRightClose,
+  Plus,
+  Smile,
+  Sparkles,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -1559,7 +1562,7 @@ export default function Conversations() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {/* Transfer Handler */}
+                {/* Transfer Handler - Categorized */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -1567,59 +1570,92 @@ export default function Conversations() {
                       Transferir
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-56" align="end">
-                    <div className="space-y-3">
+                  <PopoverContent className="w-72 p-0" align="end">
+                    <div className="p-3 border-b">
                       <h4 className="font-medium text-sm">Transferir para</h4>
-                      <div className="space-y-2">
-                        <Button 
-                          variant={selectedConversation.current_handler === "ai" ? "default" : "outline"}
-                          size="sm" 
-                          className="w-full justify-start"
-                          onClick={() => handleTransferHandler("ai")}
-                        >
-                          <Bot className="h-4 w-4 mr-2" />
-                          IA
-                        </Button>
-                        <Button 
-                          variant={selectedConversation.current_handler === "human" ? "default" : "outline"}
-                          size="sm" 
-                          className="w-full justify-start"
-                          onClick={() => handleTransferHandler("human")}
-                        >
-                          <UserCheck className="h-4 w-4 mr-2" />
-                          Humano
-                        </Button>
-                      </div>
-                      {departments.length > 0 && (
-                        <div className="pt-2 border-t">
-                          <h5 className="text-xs text-muted-foreground mb-2">Departamento</h5>
-                          {departments.map(dept => (
-                            <Button
-                              key={dept.id}
-                              variant="ghost"
-                              size="sm"
-                              className="w-full justify-start mb-1"
-                            >
-                              <Folder className="h-4 w-4 mr-2" style={{ color: dept.color }} />
-                              {dept.name}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
                     </div>
+                    <ScrollArea className="max-h-80">
+                      <div className="p-2 space-y-1">
+                        {/* IA Section */}
+                        {automations.filter(a => a.is_active).length > 0 && (
+                          <div className="pb-2">
+                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                              <Bot className="h-3 w-3" />
+                              IA
+                            </div>
+                            {automations.filter(a => a.is_active).map(automation => (
+                              <Button
+                                key={automation.id}
+                                variant={selectedConversation.current_handler === "ai" ? "secondary" : "ghost"}
+                                size="sm"
+                                className="w-full justify-start h-9"
+                                onClick={() => handleTransferHandler("ai")}
+                              >
+                                <div className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mr-2">
+                                  <Zap className="h-3.5 w-3.5 text-purple-600" />
+                                </div>
+                                <span className="truncate">{automation.name}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Humano Section */}
+                        {teamMembers.length > 0 && (
+                          <div className="pb-2 border-t pt-2">
+                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                              <User className="h-3 w-3" />
+                              Humano
+                            </div>
+                            {teamMembers.map(member => (
+                              <Button
+                                key={member.id}
+                                variant={selectedConversation.current_handler === "human" && selectedConversation.assigned_to === member.id ? "secondary" : "ghost"}
+                                size="sm"
+                                className="w-full justify-start h-9"
+                                onClick={() => handleTransferHandler("human", member.id)}
+                              >
+                                <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mr-2">
+                                  <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                                    {member.full_name?.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                                  </span>
+                                </div>
+                                <span className="truncate">{member.full_name}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Departamento Section */}
+                        {departments.length > 0 && (
+                          <div className="border-t pt-2">
+                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                              <Folder className="h-3 w-3" />
+                              Departamento
+                            </div>
+                            {departments.map(dept => (
+                              <Button
+                                key={dept.id}
+                                variant={selectedConversation.department_id === dept.id ? "secondary" : "ghost"}
+                                size="sm"
+                                className="w-full justify-start h-9"
+                                onClick={() => handleChangeDepartment(dept.id)}
+                              >
+                                <div 
+                                  className="w-7 h-7 rounded-full flex items-center justify-center mr-2"
+                                  style={{ backgroundColor: `${dept.color}20` }}
+                                >
+                                  <Folder className="h-3.5 w-3.5" style={{ color: dept.color }} />
+                                </div>
+                                <span className="truncate">{dept.name}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
                   </PopoverContent>
                 </Popover>
-
-                {/* Signature Toggle */}
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-muted/50">
-                  <FileSignature className="h-4 w-4 text-muted-foreground" />
-                  <Label htmlFor="signature" className="text-xs cursor-pointer">Assinatura</Label>
-                  <Switch
-                    id="signature"
-                    checked={signatureEnabled}
-                    onCheckedChange={setSignatureEnabled}
-                  />
-                </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon">
@@ -1934,30 +1970,84 @@ export default function Conversations() {
                     </Button>
                   )}
                   
-                  {/* File buttons - hide when in internal mode (use the button in the indicator instead) */}
+                  {/* Plus Menu - Only show when NOT in internal mode */}
                   {!isInternalMode && (
-                    <div className="flex gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="text-muted-foreground"
-                        onClick={() => documentInputRef.current?.click()}
-                        disabled={isSending}
-                        title="Enviar documento"
-                      >
-                        <Paperclip className="h-5 w-5" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="text-muted-foreground"
-                        onClick={() => imageInputRef.current?.click()}
-                        disabled={isSending}
-                        title="Enviar imagem"
-                      >
-                        <Image className="h-5 w-5" />
-                      </Button>
-                    </div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="text-muted-foreground"
+                          disabled={isSending}
+                        >
+                          <Plus className="h-5 w-5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-2" align="start" side="top">
+                        <div className="space-y-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => {
+                              // Insert emoji picker placeholder - for now just add a smile
+                              setMessageInput(prev => prev + "😊");
+                              textareaRef.current?.focus();
+                            }}
+                          >
+                            <Smile className="h-4 w-4 mr-2" />
+                            Emoji
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => {
+                              documentInputRef.current?.click();
+                            }}
+                          >
+                            <Paperclip className="h-4 w-4 mr-2" />
+                            Selecionar arquivo
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => {
+                              imageInputRef.current?.click();
+                            }}
+                          >
+                            <Image className="h-4 w-4 mr-2" />
+                            Enviar imagem
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => {
+                              toast({
+                                title: "Gerar resumo",
+                                description: "Funcionalidade em desenvolvimento",
+                              });
+                            }}
+                          >
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            Gerar resumo
+                          </Button>
+                          <div className="border-t my-1" />
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <FileSignature className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm">Assinatura</span>
+                            </div>
+                            <Switch
+                              checked={signatureEnabled}
+                              onCheckedChange={setSignatureEnabled}
+                            />
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   )}
                   <div className="flex-1 relative">
                     <TemplatePopup
