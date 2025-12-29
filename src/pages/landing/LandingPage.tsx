@@ -74,75 +74,49 @@ export function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="relative z-10 min-h-[90vh] flex items-center">
-        <div className="max-w-7xl mx-auto px-6 py-24 w-full">
-          <div className="max-w-4xl">
-            {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-red-500/30 bg-red-500/10 mb-8">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-sm text-red-400">Multiplataforma de Inteligência Artificial Unificada</span>
-            </div>
-
-            {/* Title */}
-            <h1 className="text-4xl md:text-6xl font-black leading-[0.9] tracking-tight">
-              <span className="text-red-500">MIAU</span> CHAT
-            </h1>
-
-            {/* Subtitle */}
-            <p className="mt-8 text-xl md:text-2xl text-white/40 max-w-2xl leading-relaxed">
-              Plataforma de comunicação que centraliza canais, automatiza conversas e multiplica a produtividade da sua equipe.
-            </p>
-
-            {/* CTAs */}
-            <div className="mt-12 flex flex-wrap gap-4">
-              <Button asChild size="lg" className="bg-red-600 hover:bg-red-500 text-white h-14 px-10 rounded-2xl text-base font-semibold shadow-lg shadow-red-600/25">
-                <Link to="/auth?tab=signup">
-                  Começar grátis
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="outline" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-14 px-10 rounded-2xl text-base">
-                <a href="#planos">Ver planos</a>
-              </Button>
-            </div>
-
-            {/* Stats */}
-            <div className="mt-16 flex flex-wrap gap-12">
-              {[
-                { value: "10k+", label: "Empresas" },
-                { value: "50M", label: "Mensagens/mês" },
-                { value: "99.9%", label: "Uptime" },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <div className="text-3xl font-bold text-white">{stat.value}</div>
-                  <div className="text-sm text-white/30 mt-1">{stat.label}</div>
-                </div>
-              ))}
-            </div>
+      <section className="relative z-10 min-h-[90vh] flex items-center justify-center">
+        <div className="max-w-4xl mx-auto px-6 py-24 text-center">
+          {/* Badge */}
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-red-500/30 bg-red-500/10 mb-8">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-sm text-red-400">Multiplataforma de Inteligência Artificial Unificada</span>
           </div>
 
-          {/* Floating card */}
-          <div className="hidden lg:block absolute right-12 top-1/2 -translate-y-1/2 w-80">
-            <div className="relative">
-              <div className="absolute inset-0 bg-red-500/10 rounded-3xl blur-2xl" />
-              <div className="relative p-6 rounded-3xl border border-white/10 bg-white/[0.02] backdrop-blur-sm">
-                <div className="flex items-center gap-3 mb-6">
-                  <img src={miauchatLogo} alt="" className="h-10 w-10" />
-                  <div>
-                    <p className="font-medium">MiauChat</p>
-                    <p className="text-xs text-white/40">Online agora</p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="h-10 rounded-2xl bg-white/5" />
-                  <div className="h-10 rounded-2xl bg-white/[0.03]" />
-                  <div className="p-4 rounded-2xl border border-red-500/20 bg-red-500/5">
-                    <p className="text-xs text-red-400 mb-1">Sugestão IA</p>
-                    <p className="text-sm text-white/80">Como posso ajudar você hoje?</p>
-                  </div>
-                </div>
+          {/* Title */}
+          <h1 className="text-4xl md:text-6xl font-black leading-[0.9] tracking-tight">
+            <span className="text-red-500">MIAU</span> CHAT
+          </h1>
+
+          {/* Subtitle */}
+          <p className="mt-8 text-xl md:text-2xl text-white/40 max-w-2xl mx-auto leading-relaxed">
+            Plataforma de comunicação que centraliza canais, automatiza conversas e multiplica a produtividade da sua equipe.
+          </p>
+
+          {/* CTAs */}
+          <div className="mt-12 flex flex-wrap justify-center gap-4">
+            <Button asChild size="lg" className="bg-red-600 hover:bg-red-500 text-white h-14 px-10 rounded-2xl text-base font-semibold shadow-lg shadow-red-600/25">
+              <Link to="/auth?tab=signup">
+                Começar grátis
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-14 px-10 rounded-2xl text-base">
+              <a href="#planos">Ver planos</a>
+            </Button>
+          </div>
+
+          {/* Stats */}
+          <div className="mt-16 flex flex-wrap justify-center gap-12">
+            {[
+              { value: "10k+", label: "Empresas" },
+              { value: "50M", label: "Mensagens/mês" },
+              { value: "99.9%", label: "Uptime" },
+            ].map((stat) => (
+              <div key={stat.label}>
+                <div className="text-3xl font-bold text-white">{stat.value}</div>
+                <div className="text-sm text-white/30 mt-1">{stat.label}</div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
