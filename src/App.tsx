@@ -35,6 +35,7 @@ import {
   GlobalAdminMonitoring,
   GlobalAdminSettings,
   GlobalAdminN8NSettings,
+  GlobalAdminAuditLogs,
 } from "./pages/global-admin";
 
 const queryClient = new QueryClient();
@@ -219,6 +220,7 @@ const App = () => (
               }
             />
             <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
+            <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
           </Route>
           
           {/* Catch-all route */}
