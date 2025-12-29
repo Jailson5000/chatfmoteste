@@ -34,9 +34,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings } from "lucide-react";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
+import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
 
 function generateSubdomainFromName(name: string): string {
   return name
@@ -55,6 +56,7 @@ export default function GlobalAdminCompanies() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
+  const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
   
   const [formData, setFormData] = useState({
     name: "",
@@ -360,6 +362,10 @@ export default function GlobalAdminCompanies() {
                               <Pencil className="mr-2 h-4 w-4" />
                               Editar
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDomainConfigCompany(company)}>
+                              <Settings className="mr-2 h-4 w-4" />
+                              Configurar Domínio
+                            </DropdownMenuItem>
                             <DropdownMenuItem 
                               onClick={() => handleDelete(company.id)}
                               className="text-destructive"
@@ -470,6 +476,13 @@ export default function GlobalAdminCompanies() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Domain Config Dialog */}
+      <DomainConfigDialog
+        open={!!domainConfigCompany}
+        onOpenChange={(open) => !open && setDomainConfigCompany(null)}
+        company={domainConfigCompany}
+      />
     </div>
   );
 }
