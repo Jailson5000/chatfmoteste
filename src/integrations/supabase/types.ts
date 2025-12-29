@@ -457,6 +457,11 @@ export type Database = {
           law_firm_id: string | null
           max_instances: number | null
           max_users: number | null
+          n8n_created_at: string | null
+          n8n_last_error: string | null
+          n8n_workflow_id: string | null
+          n8n_workflow_name: string | null
+          n8n_workflow_status: string | null
           name: string
           phone: string | null
           plan_id: string | null
@@ -472,6 +477,11 @@ export type Database = {
           law_firm_id?: string | null
           max_instances?: number | null
           max_users?: number | null
+          n8n_created_at?: string | null
+          n8n_last_error?: string | null
+          n8n_workflow_id?: string | null
+          n8n_workflow_name?: string | null
+          n8n_workflow_status?: string | null
           name: string
           phone?: string | null
           plan_id?: string | null
@@ -487,6 +497,11 @@ export type Database = {
           law_firm_id?: string | null
           max_instances?: number | null
           max_users?: number | null
+          n8n_created_at?: string | null
+          n8n_last_error?: string | null
+          n8n_workflow_id?: string | null
+          n8n_workflow_name?: string | null
+          n8n_workflow_status?: string | null
           name?: string
           phone?: string | null
           plan_id?: string | null
