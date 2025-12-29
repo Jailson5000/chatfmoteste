@@ -56,3 +56,12 @@ verify_jwt = false
 
 [functions.reset-user-password]
 verify_jwt = false
+
+[functions.test-email]
+verify_jwt = false
+
+[functions.register-company]
+verify_jwt = false
+
+[functions.approve-company]
+verify_jwt = false
