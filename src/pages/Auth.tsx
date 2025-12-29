@@ -130,7 +130,7 @@ export default function Auth() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-950">
         <div className="animate-pulse">
-          <img src={miauchatLogo} alt="MiauChat" className="w-24 h-24 object-contain" />
+          <img src={miauchatLogo} alt="MiauChat" className="w-32 h-32 object-contain bg-transparent" />
         </div>
       </div>
     );
@@ -147,7 +147,7 @@ export default function Auth() {
         
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <div className="flex items-center gap-4">
-            <img src={miauchatLogo} alt="MiauChat" className="w-16 h-16 object-contain" />
+            <img src={miauchatLogo} alt="MiauChat" className="w-24 h-24 object-contain bg-transparent" />
             <div>
               <span className="font-bold text-2xl text-white tracking-wide">
                 MIAUCHAT
@@ -192,7 +192,7 @@ export default function Auth() {
         <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl">
           <CardHeader className="text-center pb-2">
             <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
-              <img src={miauchatLogo} alt="MiauChat" className="w-14 h-14 object-contain" />
+              <img src={miauchatLogo} alt="MiauChat" className="w-20 h-20 object-contain bg-transparent" />
               <div className="text-left">
                 <span className="font-bold text-xl text-white block">MIAUCHAT</span>
                 <span className="text-zinc-500 text-xs">Plataforma de Comunicação</span>
