@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
@@ -10,6 +10,12 @@ import { QuotedMessage } from "./ReplyPreview";
 import { Slider } from "@/components/ui/slider";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -388,17 +394,36 @@ function AudioPlayer({
           <div className="flex justify-between items-center">
             <span className="text-xs opacity-70 tabular-nums">{formatTime(currentTime)}</span>
             <div className="flex items-center gap-1">
-              <button
-                onClick={cycleSpeed}
-                className={cn(
-                  "text-xs font-medium px-1.5 py-0.5 rounded transition-colors",
-                  "hover:bg-primary/20 active:scale-95",
-                  playbackSpeed !== 1 ? "text-primary" : "opacity-70"
-                )}
-                title="Velocidade de reprodução"
-              >
-                {playbackSpeed}x
-              </button>
+              {/* Speed dropdown selector */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={cn(
+                      "text-xs font-medium px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5",
+                      "hover:bg-primary/20 active:scale-95",
+                      playbackSpeed !== 1 ? "text-primary bg-primary/10" : "opacity-70"
+                    )}
+                    title="Velocidade de reprodução"
+                  >
+                    {playbackSpeed}x
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="min-w-[60px]">
+                  {SPEED_OPTIONS.map((speed) => (
+                    <DropdownMenuItem
+                      key={speed}
+                      onClick={() => setPlaybackSpeed(speed)}
+                      className={cn(
+                        "justify-center text-xs cursor-pointer",
+                        playbackSpeed === speed && "bg-primary/10 text-primary font-medium"
+                      )}
+                    >
+                      {speed}x
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant="ghost"
                 size="icon"
