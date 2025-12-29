@@ -27,11 +27,30 @@ function getInitials(name: string): string {
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }
 
-function maskPhone(phone: string): string {
+/** Formats Brazilian phone number: +55 11 99999-9999 */
+function formatBrazilianPhone(phone: string): string {
   const digits = (phone || "").replace(/\D/g, "");
-  if (!digits) return "----";
-  if (digits.length <= 4) return `•••${digits}`;
-  return `•••${digits.slice(-4)}`;
+  if (!digits) return "Sem telefone";
+  
+  // Full Brazilian format: 55 + DDD (2) + number (8-9)
+  if (digits.length === 13) {
+    // +55 11 99999-9999
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length === 12) {
+    // +55 11 9999-9999
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  }
+  if (digits.length === 11) {
+    // 11 99999-9999 (without country code)
+    return `${digits.slice(0, 2)} ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    // 11 9999-9999 (without country code, landline)
+    return `${digits.slice(0, 2)} ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  // Return as-is for other lengths
+  return phone;
 }
 
 /** Returns connection identifier: last 4 digits of phone_number, or instance_name abbreviation */
@@ -99,7 +118,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
               <span className="tabular-nums">{conversation.time}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{conversation.phone || "Sem telefone"}</p>
+          <p className="text-xs text-muted-foreground">{formatBrazilianPhone(conversation.phone)}</p>
         </div>
       </div>
 
