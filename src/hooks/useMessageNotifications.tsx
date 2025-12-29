@@ -45,7 +45,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
         new Notification("Nova mensagem do WhatsApp", {
           body: message.content || "Nova mensagem recebida",
-          icon: "/fmo-favicon.png",
+          icon: "/favicon.png",
           tag: message.id,
         });
       }

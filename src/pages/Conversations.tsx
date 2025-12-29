@@ -300,7 +300,7 @@ export default function Conversations() {
 
     // Cleanup: reset title when leaving page
     return () => {
-      document.title = "FMO Advogados";
+      document.title = "MiauChat";
     };
   }, [totalUnread]);
 

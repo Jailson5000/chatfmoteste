@@ -36,7 +36,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import fmoLogo from "@/assets/fmo-logo.jpg";
+import miauchatLogo from "@/assets/miauchat-logo.png";
 
 const mainMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
@@ -142,12 +142,12 @@ export function AppSidebar() {
         {!collapsed && (
             <div className="flex items-center gap-2">
               <img 
-                src={fmoLogo} 
-                alt="FMO Advogados" 
-                className="w-8 h-8 rounded-lg object-contain bg-white"
+                src={miauchatLogo} 
+                alt="MiauChat" 
+                className="w-8 h-8 rounded-lg object-contain"
               />
               <span className="font-display font-semibold text-sidebar-foreground truncate max-w-[140px]">
-                FMO Atendimentos
+                MiauChat
               </span>
             </div>
           )}
