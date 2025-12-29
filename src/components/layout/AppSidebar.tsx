@@ -108,20 +108,20 @@ export function AppSidebar() {
           <NavLink
             to={item.path}
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
+              "flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-200",
               "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               isActive && "bg-sidebar-primary text-sidebar-primary-foreground shadow-lg",
-              isNested && !collapsed && "ml-4"
+              isNested && !collapsed && "ml-3"
             )}
           >
-            <item.icon className={cn("h-5 w-5 flex-shrink-0")} />
+            <item.icon className={cn("h-4 w-4 flex-shrink-0")} />
             {!collapsed && (
-              <span className="font-medium truncate">{item.label}</span>
+              <span className="text-[13px] font-medium truncate">{item.label}</span>
             )}
           </NavLink>
         </TooltipTrigger>
         {collapsed && (
-          <TooltipContent side="right" className="font-medium">
+          <TooltipContent side="right" className="text-xs font-medium">
             {item.label}
           </TooltipContent>
         )}
@@ -134,7 +134,7 @@ export function AppSidebar() {
       <aside
         className={cn(
           "flex flex-col h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300",
-          collapsed ? "w-16" : "w-64"
+          collapsed ? "w-14" : "w-56"
         )}
       >
         {/* Header */}
@@ -179,22 +179,22 @@ export function AppSidebar() {
               <CollapsibleTrigger asChild>
                 <button
                   className={cn(
-                    "flex items-center justify-between w-full px-3 py-2.5 rounded-lg transition-all duration-200",
+                    "flex items-center justify-between w-full px-2.5 py-2 rounded-lg transition-all duration-200",
                     "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   )}
                 >
-                  <div className="flex items-center gap-3">
-                    <MessageSquare className="h-5 w-5 flex-shrink-0" />
-                    <span className="font-medium">Atendimentos</span>
+                  <div className="flex items-center gap-2.5">
+                    <MessageSquare className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-[13px] font-medium">Atendimentos</span>
                   </div>
                   {atendimentoOpen ? (
-                    <ChevronUp className="h-4 w-4" />
+                    <ChevronUp className="h-3.5 w-3.5" />
                   ) : (
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown className="h-3.5 w-3.5" />
                   )}
                 </button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-1 mt-1">
+              <CollapsibleContent className="space-y-0.5 mt-0.5">
                 {atendimentoItems.map((item) => renderMenuItem(item, true))}
               </CollapsibleContent>
             </Collapsible>
@@ -209,22 +209,22 @@ export function AppSidebar() {
                 <CollapsibleTrigger asChild>
                   <button
                     className={cn(
-                      "flex items-center justify-between w-full px-3 py-2.5 rounded-lg transition-all duration-200",
+                      "flex items-center justify-between w-full px-2.5 py-2 rounded-lg transition-all duration-200",
                       "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                     )}
                   >
-                    <div className="flex items-center gap-3">
-                      <Bot className="h-5 w-5 flex-shrink-0" />
-                      <span className="font-medium">IA</span>
+                    <div className="flex items-center gap-2.5">
+                      <Bot className="h-4 w-4 flex-shrink-0" />
+                      <span className="text-[13px] font-medium">IA</span>
                     </div>
                     {aiOpen ? (
-                      <ChevronUp className="h-4 w-4" />
+                      <ChevronUp className="h-3.5 w-3.5" />
                     ) : (
-                      <ChevronDown className="h-4 w-4" />
+                      <ChevronDown className="h-3.5 w-3.5" />
                     )}
                   </button>
                 </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-1 mt-1">
+                <CollapsibleContent className="space-y-0.5 mt-0.5">
                   {aiItems.map((item) => renderMenuItem(item, true))}
                 </CollapsibleContent>
               </Collapsible>

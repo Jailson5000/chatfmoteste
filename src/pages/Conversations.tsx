@@ -1371,7 +1371,7 @@ export default function Conversations() {
 
       <div className="hidden md:flex h-full">
         {/* Conversations List Panel - Fixed width */}
-        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
+        <div className="w-72 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1437,18 +1437,27 @@ export default function Conversations() {
                   )}
                 >
                   <div className="flex items-start gap-2">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs font-semibold text-primary">
-                        {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                      </span>
+                    {/* Contact Avatar */}
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden border-2 border-background shadow-sm">
+                        <span className="text-xs font-bold text-primary">
+                          {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                      {/* WhatsApp indicator */}
+                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center border-2 border-card">
+                        <MessageCircle className="h-2 w-2 text-white" />
+                      </div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-sm font-medium truncate">{conv.name}</span>
+                        <span className="text-[13px] font-medium truncate">{conv.name}</span>
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground truncate">{conv.phone}</p>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
+                      <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1">
+                        <MessageCircle className="h-3 w-3 text-green-500" />
+                        {conv.lastMessage}
+                      </p>
                       <div className="flex items-center gap-1 mt-1.5 flex-wrap">
                         <Badge
                           variant="outline"
