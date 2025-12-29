@@ -28,11 +28,6 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
   };
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
 interface ResendRequest {
   company_id: string;
   reset_password?: boolean; // If true, also reset password
@@ -54,7 +49,7 @@ function generateTemporaryPassword(): string {
   return password;
 }
 
-// Build initial access email
+// Build initial access email - Professional template for MiauChat
 function buildInitialAccessEmail(
   companyName: string,
   adminName: string,
@@ -62,89 +57,133 @@ function buildInitialAccessEmail(
   adminEmail: string,
   temporaryPassword: string
 ): { subject: string; html: string } {
-  const accessUrl = `https://${subdomain}.miauchat.com.br`;
+  // Use main domain for now
+  const accessUrl = `https://www.miauchat.com.br/auth`;
   
   return {
-    subject: `🔐 Acesso inicial ao MIAUCHAT — ${companyName}`,
+    subject: `Bem-vindo ao MiauChat – Dados de Acesso | ${companyName}`,
     html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0f172a; color: #e2e8f0;">
-        <div style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 24px; border-radius: 12px 12px 0 0; text-align: center;">
-          <h1 style="color: white; margin: 0; font-size: 24px;">🔐 MIAUCHAT</h1>
-          <p style="color: #c7d2fe; margin: 8px 0 0 0; font-size: 14px;">Multiplataforma de Inteligência Artificial Unificada</p>
-        </div>
-        
-        <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px;">
-          <p style="margin: 0 0 20px 0; font-size: 16px; color: #e2e8f0;">
-            Olá <strong style="color: white;">${adminName}</strong>,
-          </p>
-          
-          <p style="margin: 0 0 16px 0; font-size: 16px; color: #e2e8f0;">
-            Sua empresa "<strong style="color: white;">${companyName}</strong>" foi criada com sucesso no MIAUCHAT.
-          </p>
-          
-          <div style="background: #0f172a; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <p style="margin: 0 0 16px 0; font-size: 14px; color: #94a3b8; font-weight: bold;">
-              📌 Dados de acesso inicial:
-            </p>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 12px 0; color: #94a3b8; font-size: 14px; border-bottom: 1px solid #334155;">
-                  🔗 Acesso:
-                </td>
-                <td style="padding: 12px 0; text-align: right; border-bottom: 1px solid #334155;">
-                  <a href="${accessUrl}" style="color: #60a5fa; text-decoration: none; font-weight: bold;">
-                    ${accessUrl}
-                  </a>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; color: #94a3b8; font-size: 14px; border-bottom: 1px solid #334155;">
-                  👤 Login:
-                </td>
-                <td style="padding: 12px 0; color: #e2e8f0; text-align: right; border-bottom: 1px solid #334155;">
-                  ${adminEmail}
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 12px 0; color: #94a3b8; font-size: 14px;">
-                  🔑 Senha provisória:
-                </td>
-                <td style="padding: 12px 0; text-align: right;">
-                  <code style="background: #334155; padding: 8px 12px; border-radius: 4px; color: #fbbf24; font-family: monospace; font-size: 14px; letter-spacing: 1px;">
-                    ${temporaryPassword}
-                  </code>
-                </td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="background: #fef3c7; padding: 16px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #f59e0b;">
-            <p style="margin: 0; font-size: 14px; color: #92400e;">
-              <strong>⚠️ Importante:</strong><br>
-              No seu primeiro acesso ao MIAUCHAT, você será solicitado a criar uma nova senha por segurança.
-            </p>
-          </div>
-          
-          <p style="margin: 0; font-size: 14px; color: #94a3b8;">
-            Caso não tenha solicitado este acesso ou encontre qualquer problema, entre em contato com nosso suporte.
-          </p>
-          
-          <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #334155;">
-            <p style="margin: 0; font-size: 12px; color: #64748b;">
-              — MIAUCHAT<br>
-              Plataforma de Comunicação
-            </p>
-          </div>
-        </div>
-      </div>
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f4f4f5;">
+          <tr>
+            <td style="padding: 40px 20px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 32px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold;">🐱 MiauChat</h1>
+                    <p style="color: #fecaca; margin: 8px 0 0 0; font-size: 14px;">Plataforma de Comunicação Inteligente</p>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 32px;">
+                    <p style="margin: 0 0 20px 0; font-size: 16px; color: #374151; line-height: 1.6;">
+                      Olá <strong style="color: #111827;">${adminName}</strong>,
+                    </p>
+                    
+                    <p style="margin: 0 0 24px 0; font-size: 16px; color: #374151; line-height: 1.6;">
+                      Sua conta para <strong style="color: #111827;">${companyName}</strong> foi criada com sucesso no MiauChat. Abaixo estão suas credenciais de acesso:
+                    </p>
+                    
+                    <!-- Credentials Box -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 24px;">
+                      <tr>
+                        <td style="padding: 24px;">
+                          <p style="margin: 0 0 16px 0; font-size: 14px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+                            📌 Dados de Acesso
+                          </p>
+                          
+                          <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                            <tr>
+                              <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                                <span style="color: #6b7280; font-size: 14px;">🔗 URL de Acesso:</span>
+                              </td>
+                              <td style="padding: 12px 0; text-align: right; border-bottom: 1px solid #e5e7eb;">
+                                <a href="${accessUrl}" style="color: #dc2626; text-decoration: none; font-weight: 600;">${accessUrl}</a>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                                <span style="color: #6b7280; font-size: 14px;">👤 E-mail:</span>
+                              </td>
+                              <td style="padding: 12px 0; text-align: right; border-bottom: 1px solid #e5e7eb;">
+                                <span style="color: #111827; font-weight: 500;">${adminEmail}</span>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 12px 0;">
+                                <span style="color: #6b7280; font-size: 14px;">🔑 Senha Temporária:</span>
+                              </td>
+                              <td style="padding: 12px 0; text-align: right;">
+                                <code style="background-color: #fef3c7; padding: 8px 12px; border-radius: 4px; color: #92400e; font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; letter-spacing: 1px;">${temporaryPassword}</code>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Security Warning -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b; margin-bottom: 24px;">
+                      <tr>
+                        <td style="padding: 16px;">
+                          <p style="margin: 0; font-size: 14px; color: #92400e; line-height: 1.5;">
+                            <strong>⚠️ Importante:</strong> Por segurança, você será solicitado a <strong>criar uma nova senha</strong> no seu primeiro acesso.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- CTA Button -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 24px;">
+                      <tr>
+                        <td style="text-align: center;">
+                          <a href="${accessUrl}" style="display: inline-block; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Acessar MiauChat</a>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <p style="margin: 0; font-size: 14px; color: #6b7280; line-height: 1.6;">
+                      Caso não tenha solicitado este acesso ou encontre qualquer problema, entre em contato conosco respondendo este e-mail.
+                    </p>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="background-color: #f9fafb; padding: 24px; border-top: 1px solid #e5e7eb;">
+                    <p style="margin: 0; font-size: 12px; color: #9ca3af; text-align: center; line-height: 1.5;">
+                      Este e-mail foi enviado automaticamente pelo MiauChat.<br>
+                      © ${new Date().getFullYear()} MiauChat - Todos os direitos reservados.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
     `,
   };
 }
 
 serve(async (req) => {
+  const origin = req.headers.get('origin');
+  const headers = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -163,9 +202,11 @@ serve(async (req) => {
     if (!company_id) {
       return new Response(
         JSON.stringify({ error: "company_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
+
+    console.log("[resend-initial-access] Processing request for company:", company_id);
 
     // Get company data
     const { data: company, error: companyError } = await supabase
@@ -181,16 +222,17 @@ serve(async (req) => {
       .single();
 
     if (companyError || !company) {
+      console.error("[resend-initial-access] Company not found:", companyError);
       return new Response(
         JSON.stringify({ error: "Company not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 404, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
 
     if (!company.admin_user_id) {
       return new Response(
         JSON.stringify({ error: "No admin user linked to this company" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
 
@@ -202,9 +244,10 @@ serve(async (req) => {
       .single();
 
     if (profileError || !profile) {
+      console.error("[resend-initial-access] Admin profile not found:", profileError);
       return new Response(
         JSON.stringify({ error: "Admin profile not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 404, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
 
@@ -225,10 +268,10 @@ serve(async (req) => {
       );
 
       if (updateError) {
-        console.error("Failed to reset password:", updateError);
+        console.error("[resend-initial-access] Failed to reset password:", updateError);
         return new Response(
           JSON.stringify({ error: "Failed to reset password" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 500, headers: { ...headers, "Content-Type": "application/json" } }
         );
       }
 
@@ -237,13 +280,15 @@ serve(async (req) => {
         .from('profiles')
         .update({ must_change_password: true })
         .eq('id', company.admin_user_id);
+      
+      console.log("[resend-initial-access] Password reset for user:", company.admin_user_id);
     }
 
     // Send email
     if (!RESEND_API_KEY) {
       return new Response(
         JSON.stringify({ error: "RESEND_API_KEY not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
 
@@ -255,6 +300,8 @@ serve(async (req) => {
       newPassword || '[senha não alterada]'
     );
 
+    console.log("[resend-initial-access] Sending email from suporte@miauchat.com.br to:", profile.email);
+
     const emailResponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -262,7 +309,8 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "MIAUCHAT <noreply@resend.dev>",
+        from: "MiauChat <suporte@miauchat.com.br>",
+        reply_to: "suporte@miauchat.com.br",
         to: [profile.email],
         subject: emailContent.subject,
         html: emailContent.html,
@@ -271,7 +319,7 @@ serve(async (req) => {
 
     if (!emailResponse.ok) {
       const errorText = await emailResponse.text();
-      console.error("Email send error:", errorText);
+      console.error("[resend-initial-access] Email send error:", errorText);
       
       await supabase
         .from('companies')
@@ -282,9 +330,12 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify({ error: "Failed to send email", details: errorText }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...headers, "Content-Type": "application/json" } }
       );
     }
+
+    const emailResult = await emailResponse.json();
+    console.log("[resend-initial-access] Email sent successfully:", emailResult);
 
     // Update company status
     await supabase
@@ -310,6 +361,7 @@ serve(async (req) => {
           admin_name: profile.full_name,
           password_reset: reset_password,
           resent: true,
+          sent_from: 'suporte@miauchat.com.br',
         },
       });
 
@@ -331,14 +383,14 @@ serve(async (req) => {
         email_sent_to: profile.email,
         password_reset: reset_password,
       }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...headers, "Content-Type": "application/json" } }
     );
 
   } catch (error: any) {
-    console.error("Error in resend-initial-access:", error);
+    console.error("[resend-initial-access] Error:", error);
     return new Response(
       JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...headers, "Content-Type": "application/json" } }
     );
   }
 });
