@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import miauchatLogo from "@/assets/miauchat-logo.png";
+import { logAuthAttempt, logAuthError, checkSupabaseConfig } from "@/lib/authDebug";
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido").max(255),
@@ -59,11 +60,28 @@ export default function Auth() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("[Auth] handleLogin iniciado");
+    
+    // Debug: Check config before attempting login
+    const configCheck = checkSupabaseConfig();
+    logAuthAttempt("handleLogin START", { 
+      email: loginData.email,
+      configValid: configCheck.valid,
+      configIssues: configCheck.issues,
+    });
+    
+    if (!configCheck.valid) {
+      console.error("[Auth] Config issues:", configCheck.issues);
+      toast({
+        title: "Erro de configuração",
+        description: `Problema de configuração: ${configCheck.issues.join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
     
     const result = loginSchema.safeParse(loginData);
     if (!result.success) {
-      console.log("[Auth] Validação falhou:", result.error.errors[0].message);
+      logAuthAttempt("handleLogin VALIDATION_FAILED", { error: result.error.errors[0].message });
       toast({
         title: "Erro de validação",
         description: result.error.errors[0].message,
@@ -73,7 +91,13 @@ export default function Auth() {
     }
 
     setIsLoading(true);
-    console.log("[Auth] Chamando supabase.auth.signInWithPassword...");
+    
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    logAuthAttempt("handleLogin CALLING_SUPABASE", { 
+      supabaseUrl,
+      endpoint: `${supabaseUrl}/auth/v1/token?grant_type=password`,
+      method: 'POST',
+    });
     
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -82,24 +106,27 @@ export default function Auth() {
       });
 
       if (error) {
-        console.error("[Auth] Erro de login:", error.message, "| Código:", error.status);
+        logAuthError("handleLogin", error);
         toast({
           title: "Falha na autenticação",
-          description: "Email ou senha incorretos. Por favor, tente novamente.",
+          description: error.message || "Email ou senha incorretos.",
           variant: "destructive",
         });
       } else {
-        console.log("[Auth] Login bem-sucedido, sessão:", data.session ? "presente" : "ausente");
+        logAuthAttempt("handleLogin SUCCESS", { 
+          hasSession: !!data.session,
+          userId: data.user?.id,
+        });
         toast({
           title: "Bem-vindo!",
           description: "Login realizado com sucesso.",
         });
       }
     } catch (err: any) {
-      console.error("[Auth] Exceção no login:", err?.message || err);
+      logAuthError("handleLogin EXCEPTION", err);
       toast({
         title: "Erro de conexão",
-        description: "Não foi possível conectar ao servidor. Verifique sua conexão.",
+        description: `Falha na conexão: ${err?.message || 'Erro desconhecido'}. Verifique o console para detalhes.`,
         variant: "destructive",
       });
     }
