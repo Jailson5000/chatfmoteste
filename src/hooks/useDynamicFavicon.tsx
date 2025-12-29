@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-const DEFAULT_FAVICON = "/fmo-favicon.png";
+const DEFAULT_FAVICON = "/favicon.png";
 const UNREAD_COLOR = "#ef4444"; // red-500
 
 export function useDynamicFavicon(unreadCount: number) {

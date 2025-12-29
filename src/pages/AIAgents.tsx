@@ -205,7 +205,7 @@ export default function AIAgents() {
       const testPayload = {
         event: 'connection_test',
         timestamp: new Date().toISOString(),
-        message: 'Teste de conexão do FMO Inbox',
+        message: 'Teste de conexão do MiauChat',
       };
 
       const response = await fetch(webhookUrl, {

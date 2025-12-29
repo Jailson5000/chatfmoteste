@@ -285,7 +285,7 @@ export default function AIAgentEdit() {
         body: JSON.stringify({
           event: 'connection_test',
           timestamp: new Date().toISOString(),
-          message: 'Teste de conexão do FMO Inbox',
+          message: 'Teste de conexão do MiauChat',
         }),
       });
 
