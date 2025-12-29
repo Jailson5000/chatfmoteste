@@ -201,6 +201,11 @@ export default function Conversations() {
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
   
+  // Summary generation state
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
+  const [generatedSummary, setGeneratedSummary] = useState("");
+  
   // User profile for signature
   const [userProfile, setUserProfile] = useState<{ full_name: string; job_title: string | null } | null>(null);
   
@@ -765,7 +770,46 @@ export default function Conversations() {
     }
   };
 
-  // Handle retry for failed messages
+  // Generate conversation summary using AI
+  const handleGenerateSummary = async () => {
+    if (!selectedConversationId || isGeneratingSummary) return;
+    
+    setIsGeneratingSummary(true);
+    setGeneratedSummary("");
+    setSummaryDialogOpen(true);
+    
+    try {
+      const response = await supabase.functions.invoke("generate-summary", {
+        body: { conversationId: selectedConversationId },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao gerar resumo");
+      }
+
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      setGeneratedSummary(response.data?.summary || "Não foi possível gerar o resumo.");
+      
+      toast({
+        title: "Resumo gerado",
+        description: "O resumo da conversa foi gerado com sucesso.",
+      });
+    } catch (error) {
+      console.error("Error generating summary:", error);
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
+      setGeneratedSummary(`Erro: ${errorMessage}`);
+      toast({
+        title: "Erro ao gerar resumo",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
   const handleRetryMessage = useCallback(async (messageId: string, content: string) => {
     if (!content || !selectedConversationId || !selectedConversation || isSending) return;
 
@@ -2024,15 +2068,15 @@ export default function Conversations() {
                             variant="ghost"
                             size="sm"
                             className="w-full justify-start"
-                            onClick={() => {
-                              toast({
-                                title: "Gerar resumo",
-                                description: "Funcionalidade em desenvolvimento",
-                              });
-                            }}
+                            onClick={handleGenerateSummary}
+                            disabled={isGeneratingSummary}
                           >
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            Gerar resumo
+                            {isGeneratingSummary ? (
+                              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                            ) : (
+                              <Sparkles className="h-4 w-4 mr-2" />
+                            )}
+                            {isGeneratingSummary ? "Gerando..." : "Gerar resumo"}
                           </Button>
                           <div className="border-t my-1" />
                           <div className="flex items-center justify-between px-2 py-1.5">
@@ -2179,6 +2223,53 @@ export default function Conversations() {
                 Salvar
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Summary Dialog */}
+      <Dialog open={summaryDialogOpen} onOpenChange={setSummaryDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Resumo da Conversa
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-4">
+            {isGeneratingSummary ? (
+              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <p className="text-sm text-muted-foreground">Gerando resumo com IA...</p>
+              </div>
+            ) : (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <div className="whitespace-pre-wrap text-sm leading-relaxed bg-muted/50 p-4 rounded-lg max-h-80 overflow-y-auto">
+                  {generatedSummary}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setSummaryDialogOpen(false)}
+            >
+              Fechar
+            </Button>
+            {!isGeneratingSummary && generatedSummary && !generatedSummary.startsWith("Erro:") && (
+              <Button
+                onClick={() => {
+                  navigator.clipboard.writeText(generatedSummary);
+                  toast({
+                    title: "Copiado",
+                    description: "Resumo copiado para a área de transferência",
+                  });
+                }}
+              >
+                Copiar resumo
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
