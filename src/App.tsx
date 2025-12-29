@@ -4,7 +4,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { AdminRoute } from "@/components/auth/AdminRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { AdminLayout } from "@/components/layout/AdminLayout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -19,6 +21,7 @@ import AIAgentEdit from "./pages/AIAgentEdit";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 
 const queryClient = new QueryClient();
 
@@ -143,6 +146,21 @@ const App = () => (
             }
           >
             <Route index element={<Profile />} />
+          </Route>
+          
+          {/* Admin Routes - Protected by role */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute allowedRoles={["admin"]}>
+                <AdminLayout />
+              </AdminRoute>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="team" element={<AdminTeam />} />
+            <Route path="company" element={<AdminCompany />} />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
           
           {/* Catch-all route */}
