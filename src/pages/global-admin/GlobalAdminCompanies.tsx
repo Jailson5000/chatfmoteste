@@ -535,6 +535,7 @@ export default function GlobalAdminCompanies() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Empresa</TableHead>
+                      <TableHead>Subdomínio</TableHead>
                       <TableHead>Contato</TableHead>
                       <TableHead>Cadastrada em</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
@@ -548,6 +549,16 @@ export default function GlobalAdminCompanies() {
                             <p className="font-medium">{company.name}</p>
                             <p className="text-sm text-muted-foreground">{company.document || '-'}</p>
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          {company.law_firm?.subdomain ? (
+                            <div className="flex items-center gap-1 text-sm">
+                              <Globe className="h-3 w-3 text-muted-foreground" />
+                              <span className="font-mono">{company.law_firm.subdomain}.miauchat.com.br</span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">-</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div>
