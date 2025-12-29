@@ -146,7 +146,7 @@ export function AppSidebar() {
                 alt="MiauChat" 
                 className="w-12 h-12 rounded-lg object-contain"
               />
-              <span className="font-display font-semibold text-sidebar-foreground truncate max-w-[140px]">
+              <span className="font-brand text-xl text-sidebar-foreground tracking-wide">
                 MiauChat
               </span>
             </div>
