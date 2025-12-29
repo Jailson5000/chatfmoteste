@@ -34,7 +34,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
@@ -60,6 +61,50 @@ export default function GlobalAdminCompanies() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
+  const [resettingPassword, setResettingPassword] = useState<string | null>(null);
+
+  const handleResetPassword = async (company: typeof companies[0]) => {
+    if (!company.admin_user_id) {
+      toast.error("Esta empresa não possui um usuário administrador configurado");
+      return;
+    }
+    
+    const newPassword = "Teste@123";
+    const confirmReset = confirm(
+      `Resetar a senha do admin da empresa "${company.name}"?\n\nNova senha: ${newPassword}\n\nEmail: Verifique no perfil do usuário`
+    );
+    
+    if (!confirmReset) return;
+    
+    setResettingPassword(company.id);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        toast.error("Você precisa estar logado como admin global");
+        return;
+      }
+      
+      const response = await supabase.functions.invoke('reset-user-password', {
+        body: {
+          user_id: company.admin_user_id,
+          new_password: newPassword
+        }
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      toast.success(`Senha resetada com sucesso!\n\nNova senha: ${newPassword}`);
+    } catch (error: any) {
+      console.error("Error resetting password:", error);
+      toast.error(`Erro ao resetar senha: ${error.message}`);
+    } finally {
+      setResettingPassword(null);
+    }
+  };
   
   const [formData, setFormData] = useState({
     name: "",
@@ -664,6 +709,13 @@ export default function GlobalAdminCompanies() {
                             <DropdownMenuItem onClick={() => setDomainConfigCompany(company)}>
                               <Settings className="mr-2 h-4 w-4" />
                               Configurar Domínio
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              onClick={() => handleResetPassword(company)}
+                              disabled={resettingPassword === company.id || !company.admin_user_id}
+                            >
+                              <KeyRound className="mr-2 h-4 w-4" />
+                              {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
                             </DropdownMenuItem>
                             <DropdownMenuItem 
                               onClick={() => handleDelete(company)}
