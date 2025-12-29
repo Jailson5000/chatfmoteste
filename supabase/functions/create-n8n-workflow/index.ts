@@ -12,6 +12,7 @@ interface CreateWorkflowRequest {
   law_firm_id: string;
   subdomain: string;
   tenant_id?: string;
+  auto_activate?: boolean; // If true, activates workflow after creation
 }
 
 // Sanitize company name for workflow naming
@@ -128,7 +129,7 @@ serve(async (req) => {
 
     // Parse request body
     const body: CreateWorkflowRequest = await req.json();
-    const { company_id, company_name, law_firm_id, subdomain } = body;
+    const { company_id, company_name, law_firm_id, subdomain, auto_activate = true } = body;
     companyId = company_id;
 
     if (!company_id || !company_name) {
@@ -314,9 +315,46 @@ serve(async (req) => {
         }, adminUserId);
       }
 
-      // NOTE: Workflow starts INACTIVE by design
-      // Admin can activate manually after validation
-      console.log('Workflow created as INACTIVE (requires manual activation)');
+      // Auto-activate workflow if requested (default: true)
+      let isActive = false;
+      if (auto_activate) {
+        try {
+          console.log('Auto-activating workflow...');
+          const activateResponse = await fetch(`${n8nApiUrl}/api/v1/workflows/${workflowId}/activate`, {
+            method: 'POST',
+            headers: {
+              'X-N8N-API-KEY': n8nApiKey,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (activateResponse.ok) {
+            isActive = true;
+            console.log('Workflow activated successfully');
+            
+            await logAudit(supabase, 'N8N_WORKFLOW_ACTIVATE', company_id, 'success', {
+              workflow_id: workflowId,
+              workflow_name: workflowName,
+            }, adminUserId);
+          } else {
+            const errorText = await activateResponse.text();
+            console.warn('Failed to activate workflow:', errorText);
+            
+            await logAudit(supabase, 'N8N_WORKFLOW_ACTIVATE', company_id, 'failed', {
+              workflow_id: workflowId,
+              error: errorText,
+            }, adminUserId);
+          }
+        } catch (activateError) {
+          console.warn('Error activating workflow:', activateError);
+          await logAudit(supabase, 'N8N_WORKFLOW_ACTIVATE', company_id, 'failed', {
+            workflow_id: workflowId,
+            error: activateError instanceof Error ? activateError.message : 'Unknown error',
+          }, adminUserId);
+        }
+      } else {
+        console.log('Workflow created as INACTIVE (auto_activate=false)');
+      }
 
       // Update company with workflow info
       const { error: updateError } = await supabase
@@ -366,8 +404,8 @@ serve(async (req) => {
           success: true,
           workflow_id: workflowId,
           workflow_name: workflowName,
-          active: false, // Workflow is inactive by default
-          message: 'Workflow created successfully (inactive)',
+          active: isActive,
+          message: isActive ? 'Workflow created and activated successfully' : 'Workflow created successfully (inactive)',
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
