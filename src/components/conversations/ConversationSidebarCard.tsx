@@ -14,6 +14,7 @@ export interface ConversationSidebarCardConversation {
   tags: Array<{ name: string; color: string }>;
   assignedTo: string | null;
   whatsappPhone: string | null;
+  whatsappInstance: string | null;
   avatarUrl: string | null;
   clientStatus: { name: string; color: string } | null;
   aiAgentName: string;
@@ -33,10 +34,17 @@ function maskPhone(phone: string): string {
   return `•••${digits.slice(-4)}`;
 }
 
-function lastFour(phone: string | null): string {
+/** Returns connection identifier: last 4 digits of phone_number, or instance_name abbreviation */
+function getConnectionIdentifier(phone: string | null, instanceName: string | null): string {
   const digits = (phone || "").replace(/\D/g, "");
-  if (!digits) return "----";
-  return digits.slice(-4);
+  if (digits.length >= 4) {
+    return `•••${digits.slice(-4)}`;
+  }
+  // Fallback to instance name (first 4 chars or full name if shorter)
+  if (instanceName) {
+    return instanceName.length > 6 ? instanceName.slice(0, 4) : instanceName;
+  }
+  return "----";
 }
 
 interface ConversationSidebarCardProps {
@@ -50,6 +58,8 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
   const handlerLabel = isAI
     ? `IA ${conversation.aiAgentName || ""}`.trim()
     : conversation.assignedTo?.split(" ")[0] || "Atendente";
+
+  const connectionId = getConnectionIdentifier(conversation.whatsappPhone, conversation.whatsappInstance);
 
   return (
     <button
@@ -138,7 +148,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           <Tag className="h-3 w-3" />
           <div className="flex items-center gap-1">
             <Phone className="h-3 w-3" />
-            <span className="tabular-nums">{lastFour(conversation.whatsappPhone)}</span>
+            <span className="tabular-nums">{connectionId}</span>
           </div>
         </div>
 
