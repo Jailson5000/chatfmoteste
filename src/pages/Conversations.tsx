@@ -1193,7 +1193,7 @@ export default function Conversations() {
 
   return (
     <TooltipProvider delayDuration={300}>
-    <div className="h-[calc(100vh-64px)] flex overflow-hidden min-h-0">
+    <div className="h-full w-full flex overflow-hidden min-h-0 min-w-0">
       {/* Mobile: show list or chat */}
       <div className={cn("md:hidden w-full", showMobileChat && "hidden")}>
         <div className="h-full flex flex-col bg-card">
@@ -1441,7 +1441,7 @@ export default function Conversations() {
         </ChatDropZone>
       </div>
 
-      <div className="hidden md:flex h-full">
+      <div className="hidden md:flex h-full w-full min-w-0 overflow-hidden">
         {/* Conversations List Panel - Fixed width */}
         <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden">
         {/* Header */}
