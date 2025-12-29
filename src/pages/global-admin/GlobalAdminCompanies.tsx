@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
@@ -138,6 +138,27 @@ export default function GlobalAdminCompanies() {
     trial: "Trial",
     suspended: "Suspensa",
     cancelled: "Cancelada",
+  };
+
+  const provisioningStatusColors: Record<string, string> = {
+    active: "text-green-600 bg-green-50 border-green-200",
+    partial: "text-yellow-600 bg-yellow-50 border-yellow-200",
+    pending: "text-blue-600 bg-blue-50 border-blue-200",
+    error: "text-red-600 bg-red-50 border-red-200",
+  };
+
+  const provisioningStatusLabels: Record<string, string> = {
+    active: "Completo",
+    partial: "Parcial",
+    pending: "Pendente",
+    error: "Erro",
+  };
+
+  const componentStatusIcons: Record<string, React.ReactNode> = {
+    created: <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />,
+    creating: <Clock className="h-3.5 w-3.5 text-blue-600 animate-pulse" />,
+    pending: <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+    error: <AlertCircle className="h-3.5 w-3.5 text-red-600" />,
   };
 
   return (
@@ -324,7 +345,7 @@ export default function GlobalAdminCompanies() {
                   <TableHead>Subdomínio</TableHead>
                   <TableHead>Plano</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Workflow n8n</TableHead>
+                  <TableHead>Provisionamento</TableHead>
                   <TableHead>Usuários</TableHead>
                   <TableHead>Conexões</TableHead>
                   <TableHead>Criada em</TableHead>
@@ -373,131 +394,100 @@ export default function GlobalAdminCompanies() {
                       </TableCell>
                       <TableCell>
                         <TooltipProvider>
-                          <div className="flex items-center gap-2">
-                            {company.n8n_workflow_status === 'created' && company.n8n_workflow_id && (
-                              <>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-1 text-green-600 cursor-pointer">
-                                      <CheckCircle2 className="h-4 w-4" />
-                                      <span className="text-xs font-mono">{company.n8n_workflow_id?.slice(0, 8)}...</span>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-sm">
-                                    <div className="space-y-2">
-                                      <p className="font-medium">{company.n8n_workflow_name}</p>
-                                      <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
-                                      <div className="pt-2 border-t">
-                                        <p className="text-xs font-medium flex items-center gap-1">
-                                          <Link className="h-3 w-3" /> Webhook URL:
-                                        </p>
-                                        <code className="text-xs text-primary break-all">
-                                          {`https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`}
-                                        </code>
-                                      </div>
-                                      {company.n8n_created_at && (
-                                        <p className="text-xs text-muted-foreground">
-                                          Criado: {new Date(company.n8n_created_at).toLocaleString('pt-BR')}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                                
-                                {/* Copy Webhook URL */}
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0"
-                                      onClick={() => {
-                                        const webhookUrl = `https://n8n.fmoadv.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
-                                        navigator.clipboard.writeText(webhookUrl);
-                                        toast.success("Webhook URL copiado!");
-                                      }}
-                                    >
-                                      <Copy className="h-3 w-3" />
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Copiar Webhook URL</TooltipContent>
-                                </Tooltip>
-
-                                {/* Open in n8n */}
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0"
-                                      onClick={() => {
-                                        window.open(`https://n8n.fmoadv.com.br/workflow/${company.n8n_workflow_id}`, '_blank');
-                                      }}
-                                    >
-                                      <ExternalLink className="h-3 w-3" />
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Abrir no n8n</TooltipContent>
-                                </Tooltip>
-                              </>
-                            )}
-                            
-                            {company.n8n_workflow_status === 'pending' && (
-                              <div className="flex items-center gap-1 text-yellow-600">
-                                <Clock className="h-4 w-4 animate-pulse" />
-                                <span className="text-xs">Criando...</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-md border text-xs font-medium cursor-pointer ${provisioningStatusColors[company.provisioning_status] || provisioningStatusColors.pending}`}>
+                                {company.provisioning_status === 'active' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                                {company.provisioning_status === 'partial' && <AlertCircle className="h-3.5 w-3.5" />}
+                                {company.provisioning_status === 'pending' && <Clock className="h-3.5 w-3.5 animate-pulse" />}
+                                {company.provisioning_status === 'error' && <AlertCircle className="h-3.5 w-3.5" />}
+                                {provisioningStatusLabels[company.provisioning_status] || 'Pendente'}
                               </div>
-                            )}
-                            
-                            {company.n8n_workflow_status === 'failed' && (
-                              <>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-1 text-destructive cursor-pointer">
-                                      <AlertCircle className="h-4 w-4" />
-                                      <span className="text-xs">Falhou</span>
+                            </TooltipTrigger>
+                            <TooltipContent className="w-72 p-0" side="right">
+                              <div className="p-3 space-y-3">
+                                <p className="font-semibold text-sm border-b pb-2">Status de Provisionamento</p>
+                                
+                                {/* Client App Status */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Server className="h-4 w-4 text-muted-foreground" />
+                                    <span className="text-sm">Client App</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {componentStatusIcons[company.client_app_status] || componentStatusIcons.pending}
+                                    <span className="text-xs capitalize">{company.client_app_status || 'pending'}</span>
+                                  </div>
+                                </div>
+
+                                {/* n8n Workflow Status */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Zap className="h-4 w-4 text-muted-foreground" />
+                                    <span className="text-sm">Workflow n8n</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {componentStatusIcons[company.n8n_workflow_status || 'pending'] || componentStatusIcons.pending}
+                                    <span className="text-xs capitalize">{company.n8n_workflow_status || 'pending'}</span>
+                                  </div>
+                                </div>
+
+                                {/* n8n Details if created */}
+                                {company.n8n_workflow_status === 'created' && company.n8n_workflow_id && (
+                                  <div className="pt-2 border-t space-y-2">
+                                    <p className="text-xs font-medium">{company.n8n_workflow_name}</p>
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs"
+                                        onClick={() => {
+                                          const webhookUrl = `https://n8n.miauchat.com.br/webhook/${company.law_firm?.subdomain || company.id}`;
+                                          navigator.clipboard.writeText(webhookUrl);
+                                          toast.success("Webhook URL copiado!");
+                                        }}
+                                      >
+                                        <Copy className="h-3 w-3 mr-1" /> Copiar Webhook
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs"
+                                        onClick={() => {
+                                          window.open(`https://n8n.miauchat.com.br/workflow/${company.n8n_workflow_id}`, '_blank');
+                                        }}
+                                      >
+                                        <ExternalLink className="h-3 w-3 mr-1" /> Abrir n8n
+                                      </Button>
                                     </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    <p className="font-medium text-destructive">Erro ao criar workflow</p>
-                                    <p className="text-xs text-muted-foreground mt-1">{company.n8n_last_error}</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
+                                  </div>
+                                )}
+
+                                {/* Error message */}
+                                {company.n8n_last_error && (
+                                  <div className="pt-2 border-t">
+                                    <p className="text-xs text-destructive">{company.n8n_last_error}</p>
+                                  </div>
+                                )}
+
+                                {/* Retry buttons */}
+                                {(company.n8n_workflow_status === 'error' || company.n8n_workflow_status === 'failed' || !company.n8n_workflow_status) && (
+                                  <div className="pt-2 border-t">
                                     <Button
-                                      variant="ghost"
+                                      variant="outline"
                                       size="sm"
                                       onClick={() => retryN8nWorkflow.mutate(company)}
                                       disabled={retryN8nWorkflow.isPending}
-                                      className="h-6 px-2"
+                                      className="w-full h-7 text-xs"
                                     >
-                                      <RefreshCw className={`h-3 w-3 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                      <RefreshCw className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                      Recriar Workflow n8n
                                     </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Tentar novamente</TooltipContent>
-                                </Tooltip>
-                              </>
-                            )}
-                            
-                            {!company.n8n_workflow_status && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => retryN8nWorkflow.mutate(company)}
-                                    disabled={retryN8nWorkflow.isPending}
-                                    className="h-7 px-2"
-                                  >
-                                    <Play className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
-                                    <span className="text-xs">Criar</span>
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Criar workflow n8n</TooltipContent>
-                              </Tooltip>
-                            )}
-                          </div>
+                                  </div>
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
                         </TooltipProvider>
                       </TableCell>
                       <TableCell>{company.max_users}</TableCell>

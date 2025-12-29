@@ -450,6 +450,7 @@ export type Database = {
       }
       companies: {
         Row: {
+          client_app_status: string
           created_at: string
           document: string | null
           email: string | null
@@ -466,11 +467,13 @@ export type Database = {
           name: string
           phone: string | null
           plan_id: string | null
+          provisioning_status: string
           status: string
           trial_ends_at: string | null
           updated_at: string
         }
         Insert: {
+          client_app_status?: string
           created_at?: string
           document?: string | null
           email?: string | null
@@ -487,11 +490,13 @@ export type Database = {
           name: string
           phone?: string | null
           plan_id?: string | null
+          provisioning_status?: string
           status?: string
           trial_ends_at?: string | null
           updated_at?: string
         }
         Update: {
+          client_app_status?: string
           created_at?: string
           document?: string | null
           email?: string | null
@@ -508,6 +513,7 @@ export type Database = {
           name?: string
           phone?: string | null
           plan_id?: string | null
+          provisioning_status?: string
           status?: string
           trial_ends_at?: string | null
           updated_at?: string
