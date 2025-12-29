@@ -20,6 +20,9 @@ interface Company {
   // Provisioning status fields
   client_app_status: string;
   provisioning_status: string;
+  // Health check fields
+  health_status: string | null;
+  last_health_check_at: string | null;
   // n8n workflow fields
   n8n_workflow_id: string | null;
   n8n_workflow_name: string | null;
@@ -27,6 +30,8 @@ interface Company {
   n8n_last_error: string | null;
   n8n_created_at: string | null;
   n8n_updated_at: string | null;
+  n8n_retry_count: number;
+  n8n_next_retry_at: string | null;
   plan?: {
     id: string;
     name: string;
@@ -196,6 +201,67 @@ export function useCompanies() {
     },
   });
 
+  const runHealthCheck = useMutation({
+    mutationFn: async (companyId?: string) => {
+      const url = companyId 
+        ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tenant-health-check?company_id=${companyId}`
+        : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tenant-health-check`;
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to run health check');
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Health check executado com sucesso");
+    },
+    onError: (error) => {
+      toast.error("Erro ao executar health check: " + error.message);
+    },
+  });
+
+  const retryAllFailedWorkflows = useMutation({
+    mutationFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/retry-failed-workflows`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to retry workflows');
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success(`Retry executado: ${data.summary.success} sucesso, ${data.summary.failed} falha`);
+    },
+    onError: (error) => {
+      toast.error("Erro ao executar retry: " + error.message);
+    },
+  });
+
   return {
     companies,
     isLoading,
@@ -203,5 +269,7 @@ export function useCompanies() {
     updateCompany,
     deleteCompany,
     retryN8nWorkflow,
+    runHealthCheck,
+    retryAllFailedWorkflows,
   };
 }
