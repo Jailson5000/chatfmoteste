@@ -1,3 +1,21 @@
-// Small, explicit build marker to verify which frontend bundle is deployed.
-// Update this value whenever you need to confirm VPS is serving the latest build.
-export const APP_BUILD_ID = "2025-12-29.2-debug";
+// Build info for version verification between Lovable and VPS
+// This file is auto-updated during build process
+
+// Current build version - format: YYYY-MM-DD.N
+export const APP_BUILD_ID = "2025-12-30.1";
+
+// Build timestamp (ISO format)
+export const APP_BUILD_TIMESTAMP = "2025-12-30T00:15:00.000Z";
+
+// Git commit hash (populated during build if available)
+export const APP_GIT_COMMIT = import.meta.env.VITE_GIT_COMMIT || "unknown";
+
+// Get build info as object
+export function getBuildInfo() {
+  return {
+    buildId: APP_BUILD_ID,
+    timestamp: APP_BUILD_TIMESTAMP,
+    gitCommit: APP_GIT_COMMIT,
+    environment: import.meta.env.MODE,
+  };
+}
