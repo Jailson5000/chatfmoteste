@@ -4,11 +4,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Link2, Workflow, Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw, Key } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { toast } from "sonner";
 import { Json } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
+
+interface N8nWorkflow {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export default function GlobalAdminN8NSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
@@ -17,6 +32,8 @@ export default function GlobalAdminN8NSettings() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [workflows, setWorkflows] = useState<N8nWorkflow[]>([]);
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false);
 
   const [formData, setFormData] = useState({
     n8n_base_url: "",
@@ -106,8 +123,30 @@ export default function GlobalAdminN8NSettings() {
     }
   };
 
-  const handleRefreshTemplate = () => {
-    toast.info("Para atualizar, edite o ID e salve as configurações");
+  const fetchWorkflows = async () => {
+    setLoadingWorkflows(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('list-n8n-workflows', {
+        body: {
+          api_url: formData.n8n_base_url,
+          api_key: formData.n8n_api_key,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success && data.workflows) {
+        setWorkflows(data.workflows);
+        toast.success(`${data.workflows.length} workflows encontrados`);
+      } else {
+        throw new Error(data?.error || "Falha ao buscar workflows");
+      }
+    } catch (error: any) {
+      toast.error("Erro ao buscar workflows: " + error.message);
+      setWorkflows([]);
+    } finally {
+      setLoadingWorkflows(false);
+    }
   };
 
   if (isLoading) {
@@ -235,27 +274,48 @@ export default function GlobalAdminN8NSettings() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="n8n_template_workflow_id">ID do Workflow Template</Label>
+              <Label>Workflow Template</Label>
               <div className="flex gap-2">
-                <Input
-                  id="n8n_template_workflow_id"
+                <Select
                   value={formData.n8n_template_workflow_id}
-                  onChange={(e) => setFormData({ ...formData, n8n_template_workflow_id: e.target.value })}
-                  placeholder="9tPpeT6qH9y57cJV"
-                  className="bg-background flex-1"
-                />
+                  onValueChange={(value) => setFormData({ ...formData, n8n_template_workflow_id: value })}
+                >
+                  <SelectTrigger className="flex-1 bg-background">
+                    <SelectValue placeholder={workflows.length > 0 ? "Selecione um workflow" : "Clique em buscar workflows"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workflows.map((wf) => (
+                      <SelectItem key={wf.id} value={wf.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{wf.name}</span>
+                          {wf.active && (
+                            <Badge variant="secondary" className="text-xs">Ativo</Badge>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={handleRefreshTemplate}
+                  onClick={fetchWorkflows}
+                  disabled={loadingWorkflows || !formData.n8n_base_url || !formData.n8n_api_key}
                 >
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className={`h-4 w-4 ${loadingWorkflows ? 'animate-spin' : ''}`} />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Copie o ID da URL ao abrir o workflow no n8n (ex: .../#/workflow/abc123)
-              </p>
+              {formData.n8n_template_workflow_id && (
+                <p className="text-xs text-muted-foreground">
+                  ID selecionado: <code className="bg-muted px-1 rounded">{formData.n8n_template_workflow_id}</code>
+                </p>
+              )}
+              {workflows.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Clique no botão de refresh para buscar os workflows disponíveis no n8n
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
