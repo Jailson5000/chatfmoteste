@@ -46,6 +46,7 @@ import {
   Cloud,
   Zap,
   Music,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -77,6 +78,7 @@ interface ContactDetailsPanelProps {
     created_at: string;
     last_message_at: string | null;
     assigned_to?: string | null;
+    ai_summary?: string | null;
     client?: {
       id?: string;
       email?: string | null;
@@ -134,6 +136,7 @@ export function ContactDetailsPanel({
   const [statusOpen, setStatusOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [departmentOpen, setDepartmentOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   // Fetch media items when conversation changes
   useEffect(() => {
@@ -639,6 +642,34 @@ export function ContactDetailsPanel({
               </CollapsibleContent>
             </Collapsible>
           </div>
+
+          {/* AI Summary Section */}
+          {conversation.ai_summary && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Collapsible open={summaryOpen} onOpenChange={setSummaryOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-medium">Resumo IA</span>
+                      </div>
+                      {summaryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="bg-muted/50 rounded-lg p-3 text-sm leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+                      {conversation.ai_summary}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            </>
+          )}
 
           <Separator />
 
