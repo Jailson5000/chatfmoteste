@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Mail, Lock, User, ArrowRight, Building2, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -419,6 +419,16 @@ export default function Auth() {
                       {isLoading ? "Entrando..." : "Entrar"}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
+                    
+                    <div className="text-center pt-2">
+                      <span className="text-sm text-zinc-500">Não tem uma conta? </span>
+                      <Link 
+                        to="/register" 
+                        className="text-sm text-red-400 hover:text-red-300 transition-colors font-medium"
+                      >
+                        Cadastre-se
+                      </Link>
+                    </div>
                   </form>
                 </TabsContent>
                 
