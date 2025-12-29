@@ -60,35 +60,48 @@ export default function GlobalAdminAuth() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen flex items-center justify-center bg-[#030303]">
+        <Loader2 className="h-8 w-8 animate-spin text-red-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-[#030303] p-4 relative">
+      {/* Grid background */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div 
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+            backgroundSize: '60px 60px'
+          }}
+        />
+        <div className="absolute top-[-200px] left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-red-600/15 rounded-full blur-[150px]" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center mb-4 shadow-lg">
-            <Shield className="h-8 w-8 text-primary-foreground" />
+          <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center mb-4 shadow-lg shadow-red-600/20">
+            <Shield className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold">MiauChat Admin</h1>
-          <p className="text-muted-foreground">Painel de Administração Global</p>
+          <h1 className="text-2xl font-bold text-white">MiauChat Admin</h1>
+          <p className="text-white/50">Painel de Administração Global</p>
         </div>
 
-        <Card className="border-border/50 shadow-xl">
+        <Card className="border-white/[0.08] bg-white/[0.03] backdrop-blur-sm shadow-xl">
           <CardHeader className="text-center">
-            <CardTitle>Login</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-white">Login</CardTitle>
+            <CardDescription className="text-white/50">
               Acesse o painel administrativo com suas credenciais
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className="text-white/70">Email</Label>
                 <Input
                   id="email"
                   type="email"
@@ -97,11 +110,12 @@ export default function GlobalAdminAuth() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   disabled={isSubmitting}
+                  className="bg-white/[0.05] border-white/[0.1] text-white placeholder:text-white/30 focus:border-red-500/50 focus:ring-red-500/20"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Senha</Label>
+                <Label htmlFor="password" className="text-white/70">Senha</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -111,7 +125,7 @@ export default function GlobalAdminAuth() {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     disabled={isSubmitting}
-                    className="pr-10"
+                    className="pr-10 bg-white/[0.05] border-white/[0.1] text-white placeholder:text-white/30 focus:border-red-500/50 focus:ring-red-500/20"
                   />
                   <Button
                     type="button"
@@ -122,9 +136,9 @@ export default function GlobalAdminAuth() {
                     disabled={isSubmitting}
                   >
                     {showPassword ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      <EyeOff className="h-4 w-4 text-white/40" />
                     ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
+                      <Eye className="h-4 w-4 text-white/40" />
                     )}
                   </Button>
                 </div>
@@ -132,7 +146,7 @@ export default function GlobalAdminAuth() {
 
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full bg-red-600 hover:bg-red-500 text-white"
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
@@ -148,7 +162,7 @@ export default function GlobalAdminAuth() {
           </CardContent>
         </Card>
 
-        <p className="text-center text-sm text-muted-foreground mt-4">
+        <p className="text-center text-sm text-white/30 mt-4">
           Acesso restrito a administradores autorizados
         </p>
       </div>
