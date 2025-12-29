@@ -41,7 +41,7 @@ export default function AuthCallback() {
   const { toast } = useToast();
 
   useEffect(() => {
-    document.title = "Autenticação | MiauChat";
+    document.title = "Autenticando | MiauChat";
     console.log("[AuthCallback] Iniciando processamento de callback...");
     console.log("[AuthCallback] URL atual:", window.location.href);
 
