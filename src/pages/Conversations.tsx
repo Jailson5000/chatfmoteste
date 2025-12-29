@@ -2166,6 +2166,7 @@ export default function Conversations() {
                 tags={tags.map(t => ({ id: t.id, name: t.name, color: t.color }))}
                 statuses={statuses.map(s => ({ id: s.id, name: s.name, color: s.color }))}
                 members={teamMembers.map(m => ({ id: m.id, full_name: m.full_name }))}
+                automations={automations.map(a => ({ id: a.id, name: a.name, is_active: a.is_active }))}
                 onClose={() => setShowDetailsPanel(false)}
                 onEditName={openEditName}
                 onTransferHandler={handleTransferHandler}
