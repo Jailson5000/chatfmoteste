@@ -14,6 +14,8 @@ import {
   Calendar
 } from "lucide-react";
 import { useSystemMetrics } from "@/hooks/useSystemMetrics";
+import { exportDashboardToPDF, exportToExcel, getFormattedDate } from "@/lib/exportUtils";
+import { toast } from "sonner";
 import { 
   AreaChart, 
   Area, 
@@ -103,13 +105,49 @@ export default function GlobalAdminDashboard() {
   ];
 
   const handleExportPDF = () => {
-    // TODO: Implement PDF export
-    console.log("Exporting PDF...");
+    try {
+      exportDashboardToPDF(
+        {
+          metrics: {
+            empresas: dashboardMetrics?.totalCompanies || 0,
+            usuarios: dashboardMetrics?.totalUsers || 0,
+            conexoes: dashboardMetrics?.totalConnections || 0,
+            mensagens: dashboardMetrics?.totalMessages || 0,
+            conversas: dashboardMetrics?.totalConversations || 0,
+            mrr: dashboardMetrics?.revenue || 0,
+          },
+          chartData: areaChartData,
+          pieData: pieChartData.map(p => ({ name: p.name, value: p.value })),
+          barData: barChartData,
+        },
+        `miauchat-dashboard-${getFormattedDate()}`
+      );
+      toast.success("Relatório PDF exportado com sucesso!");
+    } catch (error) {
+      toast.error("Erro ao exportar PDF");
+      console.error(error);
+    }
   };
 
   const handleExportExcel = () => {
-    // TODO: Implement Excel export
-    console.log("Exporting Excel...");
+    try {
+      const metricsData = [
+        { Métrica: "Total de Empresas", Valor: dashboardMetrics?.totalCompanies || 0 },
+        { Métrica: "Empresas Ativas", Valor: dashboardMetrics?.activeCompanies || 0 },
+        { Métrica: "Usuários Totais", Valor: dashboardMetrics?.totalUsers || 0 },
+        { Métrica: "Conexões WhatsApp", Valor: dashboardMetrics?.totalConnections || 0 },
+        { Métrica: "Conexões Ativas", Valor: dashboardMetrics?.activeConnections || 0 },
+        { Métrica: "Total de Mensagens", Valor: dashboardMetrics?.totalMessages || 0 },
+        { Métrica: "Total de Conversas", Valor: dashboardMetrics?.totalConversations || 0 },
+        { Métrica: "MRR (R$)", Valor: dashboardMetrics?.revenue || 0 },
+      ];
+      
+      exportToExcel(metricsData, `miauchat-dashboard-${getFormattedDate()}`, "Métricas");
+      toast.success("Relatório Excel exportado com sucesso!");
+    } catch (error) {
+      toast.error("Erro ao exportar Excel");
+      console.error(error);
+    }
   };
 
   return (
