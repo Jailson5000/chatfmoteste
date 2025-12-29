@@ -17,6 +17,12 @@ interface Company {
   created_at: string;
   updated_at: string;
   subdomain?: string;
+  // n8n workflow fields
+  n8n_workflow_id: string | null;
+  n8n_workflow_name: string | null;
+  n8n_workflow_status: string | null;
+  n8n_last_error: string | null;
+  n8n_created_at: string | null;
   plan?: {
     id: string;
     name: string;
@@ -46,6 +52,8 @@ interface ProvisionResponse {
   subdomain: string;
   subdomain_url: string;
   automation_id?: string;
+  n8n_workflow_id?: string;
+  n8n_workflow_name?: string;
   message: string;
 }
 
@@ -135,11 +143,37 @@ export function useCompanies() {
     },
   });
 
+  const retryN8nWorkflow = useMutation({
+    mutationFn: async (company: Company) => {
+      const { data, error } = await supabase.functions.invoke('create-n8n-workflow', {
+        body: {
+          company_id: company.id,
+          company_name: company.name,
+          law_firm_id: company.law_firm_id,
+          subdomain: company.law_firm?.subdomain || '',
+        },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Falha ao criar workflow');
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Workflow n8n criado com sucesso");
+    },
+    onError: (error) => {
+      toast.error("Erro ao criar workflow: " + error.message);
+    },
+  });
+
   return {
     companies,
     isLoading,
     createCompany,
     updateCompany,
     deleteCompany,
+    retryN8nWorkflow,
   };
 }
