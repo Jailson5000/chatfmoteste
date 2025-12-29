@@ -8,3 +8,4 @@ export { default as GlobalAdminMonitoring } from "./GlobalAdminMonitoring";
 export { default as GlobalAdminSettings } from "./GlobalAdminSettings";
 export { default as GlobalAdminN8NSettings } from "./GlobalAdminN8NSettings";
 export { default as GlobalAdminAuditLogs } from "./GlobalAdminAuditLogs";
+export { default as GlobalAdminProvisioningDashboard } from "./GlobalAdminProvisioningDashboard";
