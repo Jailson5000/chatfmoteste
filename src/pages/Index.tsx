@@ -152,26 +152,26 @@ const Index = () => {
             <div className="flex items-center justify-center mb-12">
               <div className="relative">
                 {/* Cat logo center */}
-                <div className="w-20 h-20 rounded-xl border-2 border-primary/50 flex items-center justify-center bg-[#0d0d0d]">
-                  <img src={miauchatLogo} alt="MiauChat" className="h-12 w-12" />
+                <div className="w-28 h-28 rounded-xl border-2 border-primary/50 flex items-center justify-center bg-[#0d0d0d]">
+                  <img src={miauchatLogo} alt="MiauChat" className="h-20 w-20" />
                 </div>
                 {/* Monitor left */}
-                <div className="absolute -left-14 top-1/2 -translate-y-1/2">
-                  <Monitor className="h-9 w-9 text-primary/60" strokeWidth={1.2} />
+                <div className="absolute -left-16 top-1/2 -translate-y-1/2">
+                  <Monitor className="h-10 w-10 text-primary/60" strokeWidth={1.2} />
                 </div>
                 {/* Tablet right */}
-                <div className="absolute -right-12 top-1/2 -translate-y-1/2">
-                  <Tablet className="h-8 w-8 text-primary/60" strokeWidth={1.2} />
+                <div className="absolute -right-14 top-1/2 -translate-y-1/2">
+                  <Tablet className="h-9 w-9 text-primary/60" strokeWidth={1.2} />
                 </div>
                 {/* Phone bottom */}
-                <div className="absolute left-1/2 -translate-x-1/2 -bottom-10">
-                  <Smartphone className="h-7 w-7 text-primary/60" strokeWidth={1.2} />
+                <div className="absolute left-1/2 -translate-x-1/2 -bottom-12">
+                  <Smartphone className="h-8 w-8 text-primary/60" strokeWidth={1.2} />
                 </div>
               </div>
             </div>
 
             {/* Main Title */}
-            <h1 className="text-5xl md:text-6xl lg:text-7xl text-primary tracking-wider mb-6 italic" style={{ fontFamily: "'Righteous', cursive", fontWeight: 400 }}>
+            <h1 className="text-5xl md:text-6xl lg:text-7xl text-primary tracking-widest mb-6 font-bold uppercase" style={{ fontFamily: "'Poppins', sans-serif" }}>
               MIAUCHAT
             </h1>
 
