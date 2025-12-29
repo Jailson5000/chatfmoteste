@@ -55,6 +55,13 @@ export function useAuth() {
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
         console.error("[useAuth] Erro ao obter sessão:", error.message);
+        // Clear invalid session/token if there's an error
+        console.log("[useAuth] Limpando sessão inválida...");
+        supabase.auth.signOut().catch(() => {});
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+        return;
       }
       console.log("[useAuth] getSession resultado:", session ? "sessão encontrada" : "sem sessão");
       setSession(session);
