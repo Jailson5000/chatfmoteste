@@ -539,6 +539,7 @@ export default function Conversations() {
       whatsappPhone: conv.whatsapp_instance?.phone_number || null,
       avatarUrl: conv.client?.avatar_url || null,
       clientStatus: conv.client?.custom_status || null,
+      department: conv.department || null,
       aiAgentName: aiAgentName,
     }));
   }, [conversations, unreadCounts, tags, automations]);
