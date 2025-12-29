@@ -25,6 +25,7 @@ import AIAgents from "./pages/AIAgents";
 import AIAgentEdit from "./pages/AIAgentEdit";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
+import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
@@ -59,6 +60,7 @@ const App = () => (
           <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
           
