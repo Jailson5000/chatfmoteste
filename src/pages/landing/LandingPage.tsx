@@ -88,7 +88,10 @@ export function LandingPage() {
           </h1>
 
           {/* Subtitle */}
-          <p className="mt-8 text-xl md:text-2xl text-white/40 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-6 text-base md:text-lg text-white/50 font-normal tracking-wide">
+            Multiplataforma de Inteligência Artificial Unificada
+          </p>
+          <p className="mt-4 text-lg md:text-xl text-white/40 max-w-2xl mx-auto leading-relaxed font-normal">
             Plataforma de comunicação que centraliza canais, automatiza conversas e multiplica a produtividade da sua equipe.
           </p>
 
