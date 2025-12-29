@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search,
   Link2,
@@ -52,10 +53,116 @@ import {
   Loader2,
   Globe,
   FileText,
+  Filter,
+  History,
 } from "lucide-react";
 import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
-import { formatDistanceToNow } from "date-fns";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+type StatusFilter = "all" | "problems" | "connected" | "disconnected" | "awaiting_qr" | "suspended";
+
+interface WebhookLog {
+  id: string;
+  created_at: string;
+  direction: string;
+  payload: any;
+  response: any;
+  status_code: number | null;
+  error_message: string | null;
+}
+
+// Component for webhook logs
+function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
+  const { data: logs = [], isLoading } = useQuery({
+    queryKey: ["webhook-logs", instanceName],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("webhook_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      // Filter logs that contain this instance name in the payload
+      return (data as WebhookLog[]).filter((log) => {
+        const payloadStr = JSON.stringify(log.payload || {});
+        return payloadStr.includes(instanceName);
+      });
+    },
+    staleTime: 30000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (logs.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
+        <p>Nenhum log de webhook encontrado para esta instância</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {logs.map((log) => {
+        const eventType = log.payload?.event || log.payload?.data?.event || "unknown";
+        const isError = log.error_message || (log.status_code && log.status_code >= 400);
+
+        return (
+          <div
+            key={log.id}
+            className={`p-3 rounded-md border text-sm ${
+              isError ? "border-destructive/30 bg-destructive/5" : "border-border bg-muted/30"
+            }`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Badge variant={isError ? "destructive" : "secondary"} className="text-xs">
+                  {eventType}
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {log.direction}
+                </Badge>
+                {log.status_code && (
+                  <span className={`text-xs font-mono ${log.status_code >= 400 ? "text-destructive" : "text-green-600"}`}>
+                    {log.status_code}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+              </span>
+            </div>
+            {log.error_message && (
+              <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mt-2">
+                {log.error_message}
+              </div>
+            )}
+            <details className="mt-2">
+              <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                Ver payload
+              </summary>
+              <pre className="text-xs mt-2 p-2 bg-background rounded overflow-auto max-h-32">
+                {JSON.stringify(log.payload, null, 2)}
+              </pre>
+            </details>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function GlobalAdminConnections() {
   const {
@@ -69,20 +176,46 @@ export default function GlobalAdminConnections() {
     suspendInstance,
     reactivateInstance,
     refreshAllStatuses,
-    refetch,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedInstance, setSelectedInstance] = useState<InstanceWithCompany | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const filteredInstances = instances.filter(
-    (instance) =>
-      instance.instance_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      instance.phone_number?.includes(searchQuery) ||
-      instance.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      instance.law_firm_name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Apply filters
+  const filteredInstances = useMemo(() => {
+    return instances.filter((instance) => {
+      // Search filter
+      const matchesSearch =
+        instance.instance_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        instance.phone_number?.includes(searchQuery) ||
+        instance.company_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        instance.law_firm_name?.toLowerCase().includes(searchQuery.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      // Status filter
+      switch (statusFilter) {
+        case "problems":
+          return ["disconnected", "error", "suspended"].includes(instance.status);
+        case "connected":
+          return instance.status === "connected";
+        case "disconnected":
+          return instance.status === "disconnected";
+        case "awaiting_qr":
+          return instance.status === "awaiting_qr" || instance.status === "connecting";
+        case "suspended":
+          return instance.status === "suspended";
+        default:
+          return true;
+      }
+    });
+  }, [instances, searchQuery, statusFilter]);
+
+  const problemsCount = instances.filter((i) =>
+    ["disconnected", "error", "suspended"].includes(i.status)
+  ).length;
 
   const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
     connected: "default",
@@ -287,17 +420,64 @@ export default function GlobalAdminConnections() {
           </Card>
         </div>
 
-        {/* Search */}
+        {/* Search and Filters */}
         <Card>
           <CardContent className="pt-6">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nome, número, empresa ou escritório..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por nome, número, empresa ou escritório..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant={statusFilter === "all" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("all")}
+                >
+                  Todas
+                </Button>
+                <Button
+                  variant={statusFilter === "problems" ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("problems")}
+                  className="gap-1"
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  Problemas
+                  {problemsCount > 0 && (
+                    <Badge variant="secondary" className="ml-1 h-5 px-1.5">
+                      {problemsCount}
+                    </Badge>
+                  )}
+                </Button>
+                <Button
+                  variant={statusFilter === "connected" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("connected")}
+                >
+                  Conectadas
+                </Button>
+                <Button
+                  variant={statusFilter === "disconnected" ? "outline" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("disconnected")}
+                  className={statusFilter === "disconnected" ? "border-destructive text-destructive" : ""}
+                >
+                  Desconectadas
+                </Button>
+                <Button
+                  variant={statusFilter === "awaiting_qr" ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter("awaiting_qr")}
+                >
+                  Aguardando QR
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -308,6 +488,12 @@ export default function GlobalAdminConnections() {
             <CardTitle className="flex items-center gap-2">
               <Link2 className="h-5 w-5" />
               Instâncias do Evolution ({filteredInstances.length})
+              {statusFilter !== "all" && (
+                <Badge variant="outline" className="ml-2">
+                  <Filter className="h-3 w-3 mr-1" />
+                  {statusFilter === "problems" ? "Com problemas" : statusLabels[statusFilter] || statusFilter}
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -332,8 +518,8 @@ export default function GlobalAdminConnections() {
                   {filteredInstances.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        {searchQuery
-                          ? "Nenhuma instância encontrada para esta busca"
+                        {searchQuery || statusFilter !== "all"
+                          ? "Nenhuma instância encontrada para estes filtros"
                           : "Nenhuma instância cadastrada"}
                       </TableCell>
                     </TableRow>
@@ -468,131 +654,152 @@ export default function GlobalAdminConnections() {
           </CardContent>
         </Card>
 
-        {/* Instance Details Dialog */}
+        {/* Instance Details Dialog with Tabs */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-3xl max-h-[90vh]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Link2 className="h-5 w-5" />
-                Detalhes da Instância
+                {selectedInstance?.instance_name}
               </DialogTitle>
               <DialogDescription>
-                Informações completas e logs de erro da instância
+                Informações completas e histórico de eventos
               </DialogDescription>
             </DialogHeader>
             {selectedInstance && (
-              <ScrollArea className="max-h-[60vh]">
-                <div className="space-y-4">
-                  {/* Instance Info */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Empresa</label>
-                      <p className="font-medium">{selectedInstance.company_name}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Escritório</label>
-                      <p className="font-medium">{selectedInstance.law_firm_name}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Subdomínio</label>
-                      <p className="font-medium font-mono">
-                        {selectedInstance.subdomain || "-"}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Status</label>
-                      <Badge variant={statusColors[selectedInstance.status] || "outline"}>
-                        {statusLabels[selectedInstance.status] || selectedInstance.status}
-                      </Badge>
-                    </div>
-                  </div>
+              <Tabs defaultValue="details" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="details" className="gap-2">
+                    <FileText className="h-4 w-4" />
+                    Detalhes
+                  </TabsTrigger>
+                  <TabsTrigger value="logs" className="gap-2">
+                    <History className="h-4 w-4" />
+                    Logs de Webhook
+                  </TabsTrigger>
+                </TabsList>
 
-                  <div className="border-t pt-4">
-                    <h4 className="font-medium mb-2 flex items-center gap-2">
-                      <Activity className="h-4 w-4" />
-                      Dados da Instância
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Nome da Instância</label>
-                        <p className="font-mono">{selectedInstance.instance_name}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">ID da Instância</label>
-                        <p className="font-mono text-xs">
-                          {selectedInstance.instance_id || "-"}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Número</label>
-                        <p className="font-mono">{selectedInstance.phone_number || "-"}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">API URL</label>
-                        <p className="font-mono text-xs truncate">{selectedInstance.api_url}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border-t pt-4">
-                    <h4 className="font-medium mb-2 flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Atividade
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Último Evento</label>
-                        <p className="font-mono">
-                          {selectedInstance.last_webhook_event || "-"}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Data do Evento</label>
-                        <p>
-                          {selectedInstance.last_webhook_at
-                            ? new Date(selectedInstance.last_webhook_at).toLocaleString("pt-BR")
-                            : "-"}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Criada em</label>
-                        <p>
-                          {new Date(selectedInstance.created_at).toLocaleString("pt-BR")}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Atualizada em</label>
-                        <p>
-                          {new Date(selectedInstance.updated_at).toLocaleString("pt-BR")}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border-t pt-4">
-                    <h4 className="font-medium mb-2 flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      IDs de Referência
-                    </h4>
-                    <div className="grid gap-2 text-xs font-mono bg-muted p-3 rounded-md">
-                      <div>
-                        <span className="text-muted-foreground">instance_id: </span>
-                        {selectedInstance.id}
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">law_firm_id: </span>
-                        {selectedInstance.law_firm_id}
-                      </div>
-                      {selectedInstance.company_id && (
-                        <div>
-                          <span className="text-muted-foreground">company_id: </span>
-                          {selectedInstance.company_id}
+                <TabsContent value="details" className="mt-4">
+                  <ScrollArea className="max-h-[50vh]">
+                    <div className="space-y-4">
+                      {/* Instance Info */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Empresa</label>
+                          <p className="font-medium">{selectedInstance.company_name}</p>
                         </div>
-                      )}
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Escritório</label>
+                          <p className="font-medium">{selectedInstance.law_firm_name}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Subdomínio</label>
+                          <p className="font-medium font-mono">
+                            {selectedInstance.subdomain || "-"}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Status</label>
+                          <Badge variant={statusColors[selectedInstance.status] || "outline"}>
+                            {statusLabels[selectedInstance.status] || selectedInstance.status}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />
+                          Dados da Instância
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Nome da Instância</label>
+                            <p className="font-mono">{selectedInstance.instance_name}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">ID da Instância</label>
+                            <p className="font-mono text-xs">
+                              {selectedInstance.instance_id || "-"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Número</label>
+                            <p className="font-mono">{selectedInstance.phone_number || "-"}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">API URL</label>
+                            <p className="font-mono text-xs truncate">{selectedInstance.api_url}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <Clock className="h-4 w-4" />
+                          Atividade
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Último Evento</label>
+                            <p className="font-mono">
+                              {selectedInstance.last_webhook_event || "-"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Data do Evento</label>
+                            <p>
+                              {selectedInstance.last_webhook_at
+                                ? new Date(selectedInstance.last_webhook_at).toLocaleString("pt-BR")
+                                : "-"}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Criada em</label>
+                            <p>
+                              {new Date(selectedInstance.created_at).toLocaleString("pt-BR")}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Atualizada em</label>
+                            <p>
+                              {new Date(selectedInstance.updated_at).toLocaleString("pt-BR")}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <h4 className="font-medium mb-2 flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          IDs de Referência
+                        </h4>
+                        <div className="grid gap-2 text-xs font-mono bg-muted p-3 rounded-md">
+                          <div>
+                            <span className="text-muted-foreground">instance_id: </span>
+                            {selectedInstance.id}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">law_firm_id: </span>
+                            {selectedInstance.law_firm_id}
+                          </div>
+                          {selectedInstance.company_id && (
+                            <div>
+                              <span className="text-muted-foreground">company_id: </span>
+                              {selectedInstance.company_id}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </ScrollArea>
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="logs" className="mt-4">
+                  <ScrollArea className="max-h-[50vh]">
+                    <WebhookLogsViewer instanceName={selectedInstance.instance_name} />
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
             )}
           </DialogContent>
         </Dialog>
