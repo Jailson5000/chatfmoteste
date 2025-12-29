@@ -1,53 +1,56 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, ExternalLink, Save, TestTube, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { Link2, Workflow, Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw, Key } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { toast } from "sonner";
 import { Json } from "@/integrations/supabase/types";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function GlobalAdminN8NSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [formData, setFormData] = useState({
     n8n_base_url: "",
     n8n_api_key: "",
-    n8n_webhook_url: "",
-    n8n_enabled: true,
+    n8n_template_workflow_id: "",
   });
 
-  const getSetting = (key: string): Json => {
+  const getSetting = (key: string): string => {
     const setting = settings.find((s) => s.key === key);
-    return setting?.value ?? "";
+    if (!setting?.value) return "";
+    const val = setting.value;
+    if (typeof val === "string") {
+      return val.replace(/^"|"$/g, "");
+    }
+    return String(val);
   };
 
-  // Load settings on first render
-  useState(() => {
+  useEffect(() => {
     if (settings.length > 0) {
       setFormData({
-        n8n_base_url: String(getSetting("n8n_base_url") || "").replace(/"/g, ""),
-        n8n_api_key: String(getSetting("n8n_api_key") || "").replace(/"/g, ""),
-        n8n_webhook_url: String(getSetting("n8n_webhook_url") || "").replace(/"/g, ""),
-        n8n_enabled: getSetting("n8n_enabled") === "true" || getSetting("n8n_enabled") === true,
+        n8n_base_url: getSetting("n8n_base_url") || "https://n8n.fmoadv.com.br",
+        n8n_api_key: getSetting("n8n_api_key") || "",
+        n8n_template_workflow_id: getSetting("n8n_template_workflow_id") || "",
       });
     }
-  });
+  }, [settings]);
 
   const handleSave = async () => {
+    setIsSaving(true);
     try {
       const updates = [
-        { key: "n8n_base_url", value: `"${formData.n8n_base_url}"` },
-        { key: "n8n_api_key", value: `"${formData.n8n_api_key}"` },
-        { key: "n8n_webhook_url", value: `"${formData.n8n_webhook_url}"` },
-        { key: "n8n_enabled", value: formData.n8n_enabled.toString() },
+        { key: "n8n_base_url", value: formData.n8n_base_url, description: "URL base do n8n self-hosted" },
+        { key: "n8n_api_key", value: formData.n8n_api_key, description: "API Key do n8n" },
+        { key: "n8n_template_workflow_id", value: formData.n8n_template_workflow_id, description: "ID do workflow template" },
       ];
 
       for (const update of updates) {
@@ -59,34 +62,52 @@ export default function GlobalAdminN8NSettings() {
             key: update.key, 
             value: update.value as Json,
             category: "n8n",
-            description: `N8N ${update.key.replace("n8n_", "").replace("_", " ")}`
+            description: update.description
           });
         }
       }
 
-      toast.success("Configurações N8N salvas com sucesso");
+      toast.success("Configurações salvas com sucesso");
     } catch (error) {
       toast.error("Erro ao salvar configurações");
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleTestConnection = async () => {
     setTestingConnection(true);
     setConnectionStatus("idle");
+    setConnectionError(null);
 
     try {
-      // Simulate testing connection
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
-      // In a real implementation, you would call an edge function to test the connection
-      setConnectionStatus("success");
-      toast.success("Conexão com N8N estabelecida com sucesso");
-    } catch (error) {
+      // Call edge function to test n8n connection
+      const { data, error } = await supabase.functions.invoke('test-n8n-connection', {
+        body: {
+          api_url: formData.n8n_base_url,
+          api_key: formData.n8n_api_key,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        setConnectionStatus("success");
+        toast.success("Conexão com n8n estabelecida com sucesso");
+      } else {
+        throw new Error(data?.error || "Falha na conexão");
+      }
+    } catch (error: any) {
       setConnectionStatus("error");
-      toast.error("Falha ao conectar com N8N");
+      setConnectionError(error.message || "Falha ao conectar com n8n");
+      toast.error("Falha ao conectar com n8n");
     } finally {
       setTestingConnection(false);
     }
+  };
+
+  const handleRefreshTemplate = () => {
+    toast.info("Para atualizar, edite o ID e salve as configurações");
   };
 
   if (isLoading) {
@@ -100,162 +121,193 @@ export default function GlobalAdminN8NSettings() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Configurações N8N</h1>
-          <p className="text-muted-foreground">
-            Configure a integração com workflows N8N
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <a href="https://n8n.io/docs" target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              Documentação N8N
-            </a>
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Configurações n8n</h1>
+        <p className="text-muted-foreground">
+          Configure a integração com o n8n para automação de workflows
+        </p>
       </div>
 
-      {/* Connection Status */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
+      {/* Main Settings Grid */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Connection Card */}
+        <Card>
+          <CardHeader>
             <div className="flex items-center gap-2">
-              <Workflow className="h-5 w-5" />
-              <CardTitle>Status da Conexão</CardTitle>
+              <Link2 className="h-5 w-5 text-primary" />
+              <CardTitle>Conexão com n8n</CardTitle>
             </div>
-            <Badge variant={formData.n8n_enabled ? "default" : "secondary"}>
-              {formData.n8n_enabled ? "Habilitado" : "Desabilitado"}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
-            <Button 
-              variant="outline" 
-              onClick={handleTestConnection}
-              disabled={testingConnection || !formData.n8n_base_url}
-            >
-              {testingConnection ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <TestTube className="mr-2 h-4 w-4" />
-              )}
-              Testar Conexão
-            </Button>
-            {connectionStatus === "success" && (
-              <div className="flex items-center gap-2 text-green-600">
-                <CheckCircle className="h-5 w-5" />
-                <span>Conectado</span>
-              </div>
-            )}
-            {connectionStatus === "error" && (
-              <div className="flex items-center gap-2 text-destructive">
-                <XCircle className="h-5 w-5" />
-                <span>Falha na conexão</span>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Connection Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Configurações de Conexão</CardTitle>
-          <CardDescription>
-            Configure os parâmetros de conexão com sua instância N8N
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Habilitar Integração N8N</Label>
-              <p className="text-sm text-muted-foreground">
-                Ativa a integração com workflows N8N
-              </p>
-            </div>
-            <Switch
-              checked={formData.n8n_enabled}
-              onCheckedChange={(checked) => setFormData({ ...formData, n8n_enabled: checked })}
-            />
-          </div>
-          <Separator />
-          <div className="space-y-4">
+            <CardDescription>
+              Configure as credenciais de acesso à API do n8n
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* URL da API */}
             <div className="space-y-2">
-              <Label htmlFor="n8n_base_url">URL Base do N8N</Label>
+              <Label htmlFor="n8n_base_url">URL da API</Label>
               <Input
                 id="n8n_base_url"
                 value={formData.n8n_base_url}
                 onChange={(e) => setFormData({ ...formData, n8n_base_url: e.target.value })}
-                placeholder="https://seu-n8n.exemplo.com"
+                placeholder="https://n8n.seudominio.com.br"
+                className="bg-background"
               />
-              <p className="text-sm text-muted-foreground">
-                URL da sua instância N8N (sem barra no final)
+              <p className="text-xs text-muted-foreground">
+                URL base do seu n8n self-hosted
               </p>
             </div>
+
+            {/* API Key */}
             <div className="space-y-2">
               <Label htmlFor="n8n_api_key">API Key</Label>
-              <Input
-                id="n8n_api_key"
-                type="password"
-                value={formData.n8n_api_key}
-                onChange={(e) => setFormData({ ...formData, n8n_api_key: e.target.value })}
-                placeholder="••••••••••••••••"
-              />
-              <p className="text-sm text-muted-foreground">
-                Chave de API para autenticação com N8N
+              <div className="relative">
+                <Input
+                  id="n8n_api_key"
+                  type={showApiKey ? "text" : "password"}
+                  value={formData.n8n_api_key}
+                  onChange={(e) => setFormData({ ...formData, n8n_api_key: e.target.value })}
+                  placeholder="••••••••••••••••"
+                  className="bg-background pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Gere uma API Key em Settings → API do seu n8n
               </p>
             </div>
+
+            {/* Test Connection */}
+            <div className="flex items-center gap-3 pt-2">
+              <Button 
+                variant="outline" 
+                onClick={handleTestConnection}
+                disabled={testingConnection || !formData.n8n_base_url || !formData.n8n_api_key}
+              >
+                {testingConnection ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <TestTube className="mr-2 h-4 w-4" />
+                )}
+                Testar Conexão
+              </Button>
+              
+              {connectionStatus === "success" && (
+                <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                  <CheckCircle className="mr-1 h-3 w-3" />
+                  Conectado
+                </Badge>
+              )}
+              {connectionStatus === "error" && (
+                <Badge variant="destructive">
+                  <XCircle className="mr-1 h-3 w-3" />
+                  Desconectado
+                </Badge>
+              )}
+            </div>
+
+            {/* Error Message */}
+            {connectionStatus === "error" && connectionError && (
+              <p className="text-sm text-destructive">
+                {connectionError}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Workflow Template Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Workflow className="h-5 w-5 text-primary" />
+              <CardTitle>Workflow Template</CardTitle>
+            </div>
+            <CardDescription>
+              Selecione o workflow que será clonado para novas empresas
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="n8n_webhook_url">URL do Webhook</Label>
-              <Input
-                id="n8n_webhook_url"
-                value={formData.n8n_webhook_url}
-                onChange={(e) => setFormData({ ...formData, n8n_webhook_url: e.target.value })}
-                placeholder="https://seu-n8n.exemplo.com/webhook/..."
-              />
-              <p className="text-sm text-muted-foreground">
-                URL do webhook para receber eventos do MiauChat
+              <Label htmlFor="n8n_template_workflow_id">ID do Workflow Template</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="n8n_template_workflow_id"
+                  value={formData.n8n_template_workflow_id}
+                  onChange={(e) => setFormData({ ...formData, n8n_template_workflow_id: e.target.value })}
+                  placeholder="9tPpeT6qH9y57cJV"
+                  className="bg-background flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleRefreshTemplate}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Copie o ID da URL ao abrir o workflow no n8n (ex: .../#/workflow/abc123)
               </p>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Save Section */}
+      <Card className="border-primary/20">
+        <CardContent className="flex items-center justify-between py-4">
+          <div>
+            <h3 className="font-semibold">Salvar Configurações</h3>
+            <p className="text-sm text-muted-foreground">
+              As configurações serão salvas e usadas para criar workflows automaticamente
+            </p>
           </div>
-          <div className="flex justify-end">
-            <Button onClick={handleSave}>
+          <Button onClick={handleSave} disabled={isSaving} className="bg-primary hover:bg-primary/90">
+            {isSaving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
               <Save className="mr-2 h-4 w-4" />
-              Salvar Configurações
-            </Button>
-          </div>
+            )}
+            Salvar
+          </Button>
         </CardContent>
       </Card>
 
-      {/* Webhook Info */}
+      {/* Help Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Informações do Webhook</CardTitle>
-          <CardDescription>
-            URLs para configurar nos workflows N8N
-          </CardDescription>
+          <div className="flex items-center gap-2">
+            <Key className="h-5 w-5 text-primary" />
+            <CardTitle>Como obter as credenciais</CardTitle>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="p-4 bg-muted rounded-lg">
-            <Label className="text-xs text-muted-foreground">Webhook de Mensagens</Label>
-            <code className="block mt-1 text-sm break-all">
-              {window.location.origin}/api/n8n/messages
-            </code>
+          <div>
+            <h4 className="font-semibold">1. URL da API</h4>
+            <p className="text-sm text-muted-foreground">
+              É a URL base do seu n8n. Exemplo: <code className="bg-muted px-1.5 py-0.5 rounded text-xs">https://n8n.seudominio.com.br</code>
+            </p>
           </div>
-          <div className="p-4 bg-muted rounded-lg">
-            <Label className="text-xs text-muted-foreground">Webhook de Conversas</Label>
-            <code className="block mt-1 text-sm break-all">
-              {window.location.origin}/api/n8n/conversations
-            </code>
+          <div>
+            <h4 className="font-semibold">2. API Key</h4>
+            <p className="text-sm text-muted-foreground">
+              No n8n, vá em <strong>Settings → API</strong> e crie uma nova API Key. Copie a chave gerada (ela só será exibida uma vez).
+            </p>
           </div>
-          <div className="p-4 bg-muted rounded-lg">
-            <Label className="text-xs text-muted-foreground">Webhook de Status</Label>
-            <code className="block mt-1 text-sm break-all">
-              {window.location.origin}/api/n8n/status
-            </code>
+          <div>
+            <h4 className="font-semibold">3. Workflow Template</h4>
+            <p className="text-sm text-muted-foreground">
+              Crie um workflow no n8n que servirá como modelo. Ele será clonado para cada nova empresa. Você pode copiar o ID da URL quando abrir o workflow 
+              (ex: <code className="bg-muted px-1.5 py-0.5 rounded text-xs">.../#/workflow/abc123</code>).
+            </p>
           </div>
         </CardContent>
       </Card>
