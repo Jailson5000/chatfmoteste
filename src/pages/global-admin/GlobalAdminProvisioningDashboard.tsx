@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCompanies } from "@/hooks/useCompanies";
+import { useNotificationLogs, useNotificationStats } from "@/hooks/useNotificationLogs";
 import { 
   Activity, 
   CheckCircle2, 
@@ -15,11 +17,11 @@ import {
   Heart,
   TrendingUp,
   Building2,
-  XCircle
+  XCircle,
+  Mail,
+  Bell
 } from "lucide-react";
 import { 
-  AreaChart, 
-  Area, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -32,7 +34,7 @@ import {
   Bar,
   Legend
 } from "recharts";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const COLORS = {
@@ -48,8 +50,9 @@ const COLORS = {
 
 export default function GlobalAdminProvisioningDashboard() {
   const { companies, isLoading, runHealthCheck, retryAllFailedWorkflows } = useCompanies();
+  const { data: notificationLogs = [], isLoading: logsLoading } = useNotificationLogs(100);
+  const { data: notificationStats } = useNotificationStats();
   const [activeTab, setActiveTab] = useState("overview");
-
   // Calculate statistics
   const stats = {
     total: companies.length,
@@ -209,10 +212,11 @@ export default function GlobalAdminProvisioningDashboard() {
 
       {/* Charts Section */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
+        <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="health">Saúde</TabsTrigger>
           <TabsTrigger value="issues">Problemas</TabsTrigger>
+          <TabsTrigger value="notifications">Notificações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -455,6 +459,119 @@ export default function GlobalAdminProvisioningDashboard() {
                     </div>
                   ))}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Notifications Tab */}
+        <TabsContent value="notifications" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Enviados</CardTitle>
+                <Mail className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{notificationStats?.total || 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Últimas 24h</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{notificationStats?.last24h || 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Erros Notificados</CardTitle>
+                <XCircle className="h-4 w-4 text-red-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">{notificationStats?.byType.failed || 0}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Sucessos</CardTitle>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">{notificationStats?.byType.success || 0}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                Histórico de Notificações
+              </CardTitle>
+              <CardDescription>
+                Emails enviados aos administradores
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {notificationLogs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Mail className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="font-semibold text-lg">Nenhuma notificação</h3>
+                  <p className="text-muted-foreground">Notificações enviadas aparecerão aqui.</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[400px] pr-4">
+                  <div className="space-y-3">
+                    {notificationLogs.map((log) => (
+                      <div 
+                        key={log.id} 
+                        className="flex items-start justify-between p-4 rounded-lg border bg-card"
+                      >
+                        <div className="flex items-start gap-3">
+                          {log.event_type === 'COMPANY_PROVISIONING_SUCCESS' ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5" />
+                          ) : log.event_type === 'COMPANY_PROVISIONING_FAILED' ? (
+                            <XCircle className="h-5 w-5 text-red-500 mt-0.5" />
+                          ) : log.event_type === 'COMPANY_PROVISIONING_PARTIAL' ? (
+                            <AlertCircle className="h-5 w-5 text-yellow-500 mt-0.5" />
+                          ) : (
+                            <Bell className="h-5 w-5 text-orange-500 mt-0.5" />
+                          )}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{log.company_name || 'Sistema'}</span>
+                              <Badge 
+                                variant="outline"
+                                className={
+                                  log.event_type === 'COMPANY_PROVISIONING_SUCCESS'
+                                    ? 'border-green-500 text-green-600 text-xs'
+                                    : log.event_type === 'COMPANY_PROVISIONING_FAILED'
+                                    ? 'border-red-500 text-red-600 text-xs'
+                                    : log.event_type === 'COMPANY_PROVISIONING_PARTIAL'
+                                    ? 'border-yellow-500 text-yellow-600 text-xs'
+                                    : 'border-orange-500 text-orange-600 text-xs'
+                                }
+                              >
+                                {log.event_type.replace(/_/g, ' ')}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              Enviado para: {log.email_sent_to}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(log.sent_at), { addSuffix: true, locale: ptBR })}
+                              {' • '}
+                              {format(new Date(log.sent_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>

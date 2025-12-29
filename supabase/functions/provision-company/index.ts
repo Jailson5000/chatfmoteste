@@ -442,6 +442,53 @@ serve(async (req) => {
     console.log('=== ATOMIC PROVISIONING COMPLETED ===');
     console.log(`Client App: ${clientAppStatus} | n8n: ${n8nStatus} | Overall: ${finalStatus}`);
 
+    // ========================================
+    // STEP 3: SEND NOTIFICATION EMAIL
+    // ========================================
+    try {
+      let notificationType: string;
+      let notificationPayload: Record<string, any> = {
+        tenant_id: company.id,
+        company_name: name,
+        subdomain: subdomain,
+      };
+
+      if (finalStatus === 'active') {
+        notificationType = 'COMPANY_PROVISIONING_SUCCESS';
+      } else if (finalStatus === 'partial') {
+        notificationType = 'COMPANY_PROVISIONING_PARTIAL';
+        notificationPayload.failed_step = 'Workflow n8n';
+        notificationPayload.error_message = 'Workflow n8n não foi criado - retry automático agendado';
+      } else {
+        notificationType = 'COMPANY_PROVISIONING_FAILED';
+        notificationPayload.failed_step = 'Provisionamento';
+        notificationPayload.error_message = 'Falha ao provisionar empresa';
+      }
+
+      console.log(`Sending ${notificationType} notification...`);
+      
+      const notificationResponse = await fetch(`${supabaseUrl}/functions/v1/send-admin-notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          type: notificationType,
+          ...notificationPayload,
+        }),
+      });
+
+      if (notificationResponse.ok) {
+        console.log('Notification sent successfully');
+      } else {
+        console.warn('Failed to send notification:', await notificationResponse.text());
+      }
+    } catch (notificationError) {
+      console.error('Error sending notification:', notificationError);
+      // Don't fail the provisioning because of notification error
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

@@ -127,9 +127,19 @@ serve(async (req) => {
 
       // Check if max retries exceeded
       if (currentRetryCount >= BACKOFF_CONFIG.maxRetries) {
-        console.log(`  Max retries (${BACKOFF_CONFIG.maxRetries}) reached, skipping and sending notification`);
+        console.log(`  Max retries (${BACKOFF_CONFIG.maxRetries}) reached, marking as permanent failure`);
         
-        // Send notification email for max retries reached
+        // Update status to permanent failure
+        await supabase
+          .from('companies')
+          .update({
+            n8n_workflow_status: 'failed',
+            provisioning_status: 'error',
+            n8n_last_error: 'Máximo de tentativas de retry atingido',
+          })
+          .eq('id', company.id);
+        
+        // Send COMPANY_PROVISIONING_FAILED notification for max retries
         try {
           await fetch(`${supabaseUrl}/functions/v1/send-admin-notification`, {
             method: 'POST',
@@ -138,15 +148,15 @@ serve(async (req) => {
               'Authorization': `Bearer ${supabaseServiceKey}`,
             },
             body: JSON.stringify({
-              type: 'max_retries_reached',
-              company_id: company.id,
+              type: 'COMPANY_PROVISIONING_FAILED',
+              tenant_id: company.id,
               company_name: company.name,
               subdomain: subdomain,
-              retry_count: currentRetryCount,
-              error_message: 'Máximo de tentativas de retry atingido',
+              failed_step: 'Workflow n8n',
+              error_message: `Máximo de ${currentRetryCount} tentativas de retry atingido. Intervenção manual necessária.`,
             }),
           });
-          console.log('  Admin notification sent');
+          console.log('  Admin notification sent (COMPANY_PROVISIONING_FAILED)');
         } catch (notifyError) {
           console.warn('  Failed to send admin notification:', notifyError);
         }

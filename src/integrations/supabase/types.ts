@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_notification_logs: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          email_sent_to: string
+          event_key: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          sent_at: string
+          tenant_id: string | null
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          email_sent_to: string
+          event_key: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          sent_at?: string
+          tenant_id?: string | null
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          email_sent_to?: string
+          event_key?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          sent_at?: string
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_notification_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_profiles: {
         Row: {
           avatar_url: string | null
