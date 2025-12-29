@@ -1369,9 +1369,9 @@ export default function Conversations() {
         </ChatDropZone>
       </div>
 
-      <ResizablePanelGroup direction="horizontal" className="hidden md:flex h-full">
-        {/* Conversations List Panel */}
-        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="bg-card flex flex-col min-h-0">
+      <div className="hidden md:flex h-full">
+        {/* Conversations List Panel - Fixed width */}
+        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1496,12 +1496,10 @@ export default function Conversations() {
             )}
           </div>
         </ScrollArea>
-        </ResizablePanel>
+        </div>
 
-        <ResizableHandle withHandle />
-
-        {/* Chat Area Panel */}
-        <ResizablePanel defaultSize={showDetailsPanel ? 53 : 75} minSize={40} className="flex flex-col min-h-0 min-w-0">
+        {/* Chat Area Panel - Flexible */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -2076,13 +2074,11 @@ export default function Conversations() {
         )}
         </div>
           </ChatDropZone>
-        </ResizablePanel>
+        </div>
 
-        {/* Contact Details Panel */}
+        {/* Contact Details Panel - Fixed width */}
         {showDetailsPanel && selectedConversation && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={22} minSize={18} maxSize={30} className="bg-card">
+          <div className="w-80 flex-shrink-0 bg-card border-l border-border">
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
@@ -2103,10 +2099,9 @@ export default function Conversations() {
                 onChangeStatus={handleChangeStatus}
                 onChangeTags={handleChangeTags}
               />
-            </ResizablePanel>
-          </>
+          </div>
         )}
-      </ResizablePanelGroup>
+      </div>
 
       {/* Edit Name Dialog */}
       <Dialog open={editNameDialogOpen} onOpenChange={setEditNameDialogOpen}>
