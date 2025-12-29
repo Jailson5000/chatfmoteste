@@ -23,6 +23,7 @@ interface Company {
   n8n_workflow_status: string | null;
   n8n_last_error: string | null;
   n8n_created_at: string | null;
+  n8n_updated_at: string | null;
   plan?: {
     id: string;
     name: string;

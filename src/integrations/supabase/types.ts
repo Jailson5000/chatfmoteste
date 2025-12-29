@@ -459,6 +459,7 @@ export type Database = {
           max_users: number | null
           n8n_created_at: string | null
           n8n_last_error: string | null
+          n8n_updated_at: string | null
           n8n_workflow_id: string | null
           n8n_workflow_name: string | null
           n8n_workflow_status: string | null
@@ -479,6 +480,7 @@ export type Database = {
           max_users?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
+          n8n_updated_at?: string | null
           n8n_workflow_id?: string | null
           n8n_workflow_name?: string | null
           n8n_workflow_status?: string | null
@@ -499,6 +501,7 @@ export type Database = {
           max_users?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
+          n8n_updated_at?: string | null
           n8n_workflow_id?: string | null
           n8n_workflow_name?: string | null
           n8n_workflow_status?: string | null

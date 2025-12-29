@@ -11,6 +11,58 @@ interface CreateWorkflowRequest {
   company_name: string;
   law_firm_id: string;
   subdomain: string;
+  tenant_id?: string;
+}
+
+// Sanitize company name for workflow naming
+function sanitizeCompanyName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .replace(/[^a-zA-Z0-9\s-]/g, '') // Remove special chars except spaces and hyphens
+    .trim()
+    .substring(0, 50); // Limit length
+}
+
+// Generate workflow name following the pattern: MiauChat | {company_name} | {tenant_id}
+function generateWorkflowName(companyName: string, companyId: string): string {
+  const sanitizedName = sanitizeCompanyName(companyName);
+  const shortId = `tnt_${companyId.substring(0, 8)}`;
+  const fullName = `MiauChat | ${sanitizedName} | ${shortId}`;
+  
+  // Ensure max length of 100 chars
+  if (fullName.length > 100) {
+    const maxNameLen = 100 - 15 - shortId.length; // 15 = "MiauChat | " + " | "
+    return `MiauChat | ${sanitizedName.substring(0, maxNameLen)} | ${shortId}`;
+  }
+  
+  return fullName;
+}
+
+// Log audit event
+async function logAudit(
+  supabase: any,
+  action: string,
+  entityId: string,
+  status: 'success' | 'failed',
+  metadata: Record<string, any>,
+  adminUserId?: string
+) {
+  try {
+    await supabase.from('audit_logs').insert({
+      admin_user_id: adminUserId || null,
+      action,
+      entity_type: 'n8n_workflow',
+      entity_id: entityId,
+      new_values: {
+        status,
+        ...metadata,
+      },
+    });
+    console.log(`Audit logged: ${action} - ${status}`);
+  } catch (error) {
+    console.error('Failed to log audit:', error);
+  }
 }
 
 serve(async (req) => {
@@ -19,9 +71,14 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  let companyId = '';
+  let adminUserId: string | undefined;
+
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const n8nApiUrl = Deno.env.get('N8N_API_URL');
     const n8nApiKey = Deno.env.get('N8N_API_KEY');
     const n8nTemplateWorkflowId = Deno.env.get('N8N_TEMPLATE_WORKFLOW_ID');
@@ -37,9 +94,6 @@ serve(async (req) => {
     // Get authorization header
     const authHeader = req.headers.get('Authorization');
     
-    // Create Supabase client with service role for admin operations
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
     // Verify admin if auth header provided
     if (authHeader) {
       const { data: { user }, error: authError } = await supabase.auth.getUser(
@@ -53,6 +107,8 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      adminUserId = user.id;
 
       // Check if user is admin
       const { data: adminRole } = await supabase
@@ -73,6 +129,7 @@ serve(async (req) => {
     // Parse request body
     const body: CreateWorkflowRequest = await req.json();
     const { company_id, company_name, law_firm_id, subdomain } = body;
+    companyId = company_id;
 
     if (!company_id || !company_name) {
       return new Response(
@@ -92,6 +149,13 @@ serve(async (req) => {
 
     if (existingCompany?.n8n_workflow_id && existingCompany.n8n_workflow_status === 'created') {
       console.log('Workflow already exists for this company');
+      
+      await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'success', {
+        message: 'Workflow already exists',
+        workflow_id: existingCompany.n8n_workflow_id,
+        idempotent: true,
+      }, adminUserId);
+
       return new Response(
         JSON.stringify({ 
           success: true, 
@@ -106,18 +170,28 @@ serve(async (req) => {
     // Update status to pending
     await supabase
       .from('companies')
-      .update({ n8n_workflow_status: 'pending' })
+      .update({ 
+        n8n_workflow_status: 'pending',
+        n8n_updated_at: new Date().toISOString(),
+      })
       .eq('id', company_id);
 
+    // Generate workflow name following the standard pattern
+    const workflowName = generateWorkflowName(company_name, company_id);
     let workflowData;
     let workflowId: string;
-    let workflowName = `MiauChat - ${company_name}`;
 
     try {
       // Strategy 1: Clone from template if template ID is provided
       if (n8nTemplateWorkflowId) {
         console.log(`Cloning from template workflow: ${n8nTemplateWorkflowId}`);
         
+        // Log the fetch attempt
+        await logAudit(supabase, 'N8N_TEMPLATE_FETCH', company_id, 'success', {
+          template_id: n8nTemplateWorkflowId,
+          endpoint: `${n8nApiUrl}/api/v1/workflows/${n8nTemplateWorkflowId}`,
+        }, adminUserId);
+
         // Get template workflow
         const templateResponse = await fetch(`${n8nApiUrl}/api/v1/workflows/${n8nTemplateWorkflowId}`, {
           method: 'GET',
@@ -128,23 +202,25 @@ serve(async (req) => {
         });
 
         if (!templateResponse.ok) {
-          throw new Error(`Failed to fetch template workflow: ${templateResponse.status}`);
+          const errorText = await templateResponse.text();
+          throw new Error(`Failed to fetch template workflow: ${templateResponse.status} - ${errorText}`);
         }
 
         const templateWorkflow = await templateResponse.json();
         console.log('Template workflow fetched successfully');
 
-        // Create new workflow based on template
+        // Create new workflow based on template - starts INACTIVE
         const newWorkflowPayload = {
           name: workflowName,
           nodes: templateWorkflow.nodes,
           connections: templateWorkflow.connections,
           settings: templateWorkflow.settings,
           staticData: templateWorkflow.staticData || null,
-          // Add company metadata as tags/variables
+          // Add company metadata as tags
           tags: [
             { name: `company:${company_id}` },
             { name: `subdomain:${subdomain}` },
+            { name: 'auto-provisioned' },
           ],
         };
 
@@ -165,6 +241,13 @@ serve(async (req) => {
         workflowData = await createResponse.json();
         workflowId = workflowData.id;
         console.log(`Workflow created from template: ${workflowId}`);
+
+        await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'success', {
+          workflow_id: workflowId,
+          workflow_name: workflowName,
+          from_template: n8nTemplateWorkflowId,
+          active: false,
+        }, adminUserId);
 
       } else {
         // Strategy 2: Create empty workflow with basic structure
@@ -222,26 +305,18 @@ serve(async (req) => {
         workflowData = await createResponse.json();
         workflowId = workflowData.id;
         console.log(`Empty workflow created: ${workflowId}`);
+
+        await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'success', {
+          workflow_id: workflowId,
+          workflow_name: workflowName,
+          from_template: false,
+          active: false,
+        }, adminUserId);
       }
 
-      // Activate the workflow
-      try {
-        const activateResponse = await fetch(`${n8nApiUrl}/api/v1/workflows/${workflowId}/activate`, {
-          method: 'POST',
-          headers: {
-            'X-N8N-API-KEY': n8nApiKey,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (activateResponse.ok) {
-          console.log('Workflow activated successfully');
-        } else {
-          console.warn('Failed to activate workflow, but continuing...');
-        }
-      } catch (activateError) {
-        console.warn('Error activating workflow:', activateError);
-      }
+      // NOTE: Workflow starts INACTIVE by design
+      // Admin can activate manually after validation
+      console.log('Workflow created as INACTIVE (requires manual activation)');
 
       // Update company with workflow info
       const { error: updateError } = await supabase
@@ -252,6 +327,7 @@ serve(async (req) => {
           n8n_workflow_status: 'created',
           n8n_last_error: null,
           n8n_created_at: new Date().toISOString(),
+          n8n_updated_at: new Date().toISOString(),
         })
         .eq('id', company_id);
 
@@ -260,11 +336,19 @@ serve(async (req) => {
         throw new Error(`Database update failed: ${updateError.message}`);
       }
 
+      await logAudit(supabase, 'N8N_WORKFLOW_LINK', company_id, 'success', {
+        workflow_id: workflowId,
+        workflow_name: workflowName,
+        company_id,
+        law_firm_id,
+      }, adminUserId);
+
       // Also update the automation webhook URL if law_firm_id is provided
       if (law_firm_id && workflowData.nodes) {
         const webhookNode = workflowData.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
-        if (webhookNode && webhookNode.webhookId) {
-          const webhookUrl = `${n8nApiUrl}/webhook/${webhookNode.webhookId}`;
+        if (webhookNode) {
+          // Construct webhook URL using subdomain pattern
+          const webhookUrl = `${n8nApiUrl}/webhook/${subdomain || company_id}`;
           
           await supabase
             .from('automations')
@@ -282,27 +366,38 @@ serve(async (req) => {
           success: true,
           workflow_id: workflowId,
           workflow_name: workflowName,
-          message: 'Workflow created successfully',
+          active: false, // Workflow is inactive by default
+          message: 'Workflow created successfully (inactive)',
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
 
     } catch (n8nError) {
       console.error('Error creating n8n workflow:', n8nError);
+      
+      const errorMessage = n8nError instanceof Error ? n8nError.message : 'Unknown error';
+
+      // Log the failure
+      await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'failed', {
+        error: errorMessage,
+        company_name,
+        subdomain,
+      }, adminUserId);
 
       // Update company with error status
       await supabase
         .from('companies')
         .update({
           n8n_workflow_status: 'failed',
-          n8n_last_error: n8nError instanceof Error ? n8nError.message : 'Unknown error',
+          n8n_last_error: errorMessage,
+          n8n_updated_at: new Date().toISOString(),
         })
         .eq('id', company_id);
 
       return new Response(
         JSON.stringify({
           success: false,
-          error: n8nError instanceof Error ? n8nError.message : 'Failed to create workflow',
+          error: errorMessage,
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -310,9 +405,20 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in create-n8n-workflow:', error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    // Log critical failure
+    if (companyId) {
+      await logAudit(supabase, 'N8N_WORKFLOW_CREATE', companyId, 'failed', {
+        error: errorMessage,
+        critical: true,
+      }, adminUserId);
+    }
+
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
         success: false,
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
