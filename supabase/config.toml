@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.delete-n8n-workflow]
 verify_jwt = false
+
+[functions.test-n8n-connection]
+verify_jwt = false
