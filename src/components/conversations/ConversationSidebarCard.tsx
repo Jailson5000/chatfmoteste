@@ -99,7 +99,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
               <span className="tabular-nums">{conversation.time}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{maskPhone(conversation.phone)}</p>
+          <p className="text-xs text-muted-foreground">{conversation.phone || "Sem telefone"}</p>
         </div>
       </div>
 
