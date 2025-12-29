@@ -495,6 +495,9 @@ export type Database = {
       companies: {
         Row: {
           admin_user_id: string | null
+          approval_status: string
+          approved_at: string | null
+          approved_by: string | null
           client_app_status: string
           created_at: string
           document: string | null
@@ -520,12 +523,18 @@ export type Database = {
           phone: string | null
           plan_id: string | null
           provisioning_status: string
+          rejected_at: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
           status: string
           trial_ends_at: string | null
           updated_at: string
         }
         Insert: {
           admin_user_id?: string | null
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           client_app_status?: string
           created_at?: string
           document?: string | null
@@ -551,12 +560,18 @@ export type Database = {
           phone?: string | null
           plan_id?: string | null
           provisioning_status?: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
           status?: string
           trial_ends_at?: string | null
           updated_at?: string
         }
         Update: {
           admin_user_id?: string | null
+          approval_status?: string
+          approved_at?: string | null
+          approved_by?: string | null
           client_app_status?: string
           created_at?: string
           document?: string | null
@@ -582,6 +597,9 @@ export type Database = {
           phone?: string | null
           plan_id?: string | null
           provisioning_status?: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
           status?: string
           trial_ends_at?: string | null
           updated_at?: string

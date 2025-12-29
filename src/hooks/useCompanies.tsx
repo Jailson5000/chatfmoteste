@@ -46,6 +46,13 @@ interface Company {
   initial_access_email_sent: boolean;
   initial_access_email_sent_at: string | null;
   initial_access_email_error: string | null;
+  // Approval status fields
+  approval_status: 'pending_approval' | 'approved' | 'rejected';
+  rejection_reason: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  rejected_at: string | null;
+  rejected_by: string | null;
 }
 
 interface CreateCompanyData {
@@ -295,8 +302,81 @@ export function useCompanies() {
     },
   });
 
+  const approveCompany = useMutation({
+    mutationFn: async ({ 
+      companyId, 
+      planId, 
+      maxUsers = 5, 
+      maxInstances = 2 
+    }: { 
+      companyId: string; 
+      planId?: string; 
+      maxUsers?: number; 
+      maxInstances?: number; 
+    }) => {
+      const { data, error } = await supabase.functions.invoke('approve-company', {
+        body: {
+          company_id: companyId,
+          action: 'approve',
+          plan_id: planId,
+          max_users: maxUsers,
+          max_instances: maxInstances,
+          auto_activate_workflow: true,
+        },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Falha ao aprovar empresa');
+      
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Empresa aprovada com sucesso!", {
+        description: data.provisioning_status === 'active' 
+          ? "Provisionamento completo" 
+          : "Provisionamento parcial - verifique logs",
+      });
+    },
+    onError: (error) => {
+      toast.error("Erro ao aprovar empresa: " + error.message);
+    },
+  });
+
+  const rejectCompany = useMutation({
+    mutationFn: async ({ companyId, reason }: { companyId: string; reason?: string }) => {
+      const { data, error } = await supabase.functions.invoke('approve-company', {
+        body: {
+          company_id: companyId,
+          action: 'reject',
+          rejection_reason: reason || 'Não informado',
+        },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Falha ao rejeitar empresa');
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Empresa rejeitada");
+    },
+    onError: (error) => {
+      toast.error("Erro ao rejeitar empresa: " + error.message);
+    },
+  });
+
+  // Filter companies by approval status
+  const pendingApprovalCompanies = companies.filter(c => c.approval_status === 'pending_approval');
+  const approvedCompanies = companies.filter(c => c.approval_status === 'approved');
+  const rejectedCompanies = companies.filter(c => c.approval_status === 'rejected');
+
   return {
     companies,
+    pendingApprovalCompanies,
+    approvedCompanies,
+    rejectedCompanies,
     isLoading,
     createCompany,
     updateCompany,
@@ -305,5 +385,7 @@ export function useCompanies() {
     runHealthCheck,
     retryAllFailedWorkflows,
     resendInitialAccess,
+    approveCompany,
+    rejectCompany,
   };
 }
