@@ -182,12 +182,12 @@ export default function Auth() {
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-950 to-black">
         <div className="absolute inset-0">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-red-600/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-red-700/5 rounded-full blur-3xl" />
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-red-600/10 rounded-full blur-3xl animate-float" />
+          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-red-700/5 rounded-full blur-3xl animate-float" style={{ animationDelay: "1.5s" }} />
         </div>
         
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 opacity-0 animate-fade-in" style={{ animationDelay: "0.1s" }}>
             <img src={miauchatLogo} alt="MiauChat" className="w-24 h-24 object-contain bg-transparent" />
             <div>
               <span className="font-bold text-2xl text-white tracking-wide">
@@ -198,20 +198,20 @@ export default function Auth() {
           </div>
           
           <div className="space-y-8">
-            <h1 className="text-5xl font-bold text-white leading-tight">
+            <h1 className="text-5xl font-bold text-white leading-tight opacity-0 animate-fade-in-up" style={{ animationDelay: "0.2s" }}>
               Multiplataforma de
               <br />
               <span className="text-red-500">Inteligência Artificial</span>
               <br />
               Unificada
             </h1>
-            <p className="text-zinc-400 text-lg max-w-md leading-relaxed">
+            <p className="text-zinc-400 text-lg max-w-md leading-relaxed opacity-0 animate-fade-in-up" style={{ animationDelay: "0.4s" }}>
               Gerencie suas comunicações com automação inteligente, 
               integração multicanal e organização profissional.
             </p>
           </div>
           
-          <div className="flex items-center gap-6 text-zinc-500 text-sm">
+          <div className="flex items-center gap-6 text-zinc-500 text-sm opacity-0 animate-fade-in" style={{ animationDelay: "0.6s" }}>
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500" />
               Multi-Tenant
@@ -230,7 +230,7 @@ export default function Auth() {
 
       {/* Right Panel - Auth Forms */}
       <div className="flex-1 flex items-center justify-center p-8 bg-zinc-950">
-        <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl">
+        <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl opacity-0 animate-scale-in" style={{ animationDelay: "0.3s" }}>
           <CardHeader className="text-center pb-2">
             <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
               <img src={miauchatLogo} alt="MiauChat" className="w-20 h-20 object-contain bg-transparent" />
