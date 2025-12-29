@@ -2146,7 +2146,7 @@ export default function Conversations() {
 
         {/* Contact Details Panel - Fixed width */}
         {showDetailsPanel && selectedConversation && (
-          <div className="w-72 flex-shrink-0 bg-card border-l border-border overflow-hidden">
+          <div className="w-72 h-full flex-shrink-0 bg-card border-l border-border overflow-hidden">
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
