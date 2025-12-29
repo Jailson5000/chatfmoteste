@@ -6,6 +6,9 @@ verify_jwt = false
 [functions.evolution-webhook]
 verify_jwt = false
 
+[functions.evolution-health]
+verify_jwt = false
+
 [functions.sync-n8n-prompt]
 verify_jwt = false
 
@@ -31,4 +34,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.list-n8n-workflows]
+verify_jwt = false
+
+[functions.create-company-admin]
+verify_jwt = false
+
+[functions.resend-initial-access]
+verify_jwt = false
+
+[functions.tenant-health-check]
 verify_jwt = false
