@@ -1,10 +1,30 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Production CORS configuration
+const ALLOWED_ORIGINS = [
+  'https://miauchat.com.br',
+  'https://www.miauchat.com.br',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const isAllowed = origin && (
+    ALLOWED_ORIGINS.includes(origin) ||
+    origin.includes('.lovableproject.com') ||
+    origin.includes('.lovable.app') ||
+    origin.endsWith('.miauchat.com.br')
+  );
+  
+  return {
+    'Access-Control-Allow-Origin': isAllowed ? origin : ALLOWED_ORIGINS[0],
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-requested-with',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Max-Age': '86400',
+  };
+}
 
 interface EvolutionHealthResult {
   status: "online" | "unstable" | "offline";
@@ -47,8 +67,10 @@ async function fetchWithTimeout(
 }
 
 serve(async (req) => {
+  const origin = req.headers.get('origin');
+  
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(origin) });
   }
 
   try {
@@ -97,7 +119,7 @@ serve(async (req) => {
             checked_at: new Date().toISOString(),
           } as EvolutionHealthResult,
         }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { headers: { ...getCorsHeaders(origin), "Content-Type": "application/json" } }
       );
     }
 
@@ -173,7 +195,7 @@ serve(async (req) => {
         success: true,
         health: healthResult,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { headers: { ...getCorsHeaders(origin), "Content-Type": "application/json" } }
     );
   } catch (error: any) {
     console.error("[Evolution Health] Error:", error);
@@ -184,7 +206,7 @@ serve(async (req) => {
       }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...getCorsHeaders(origin), "Content-Type": "application/json" },
       }
     );
   }
