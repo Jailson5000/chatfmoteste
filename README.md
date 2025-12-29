@@ -1,73 +1,103 @@
-# Welcome to your Lovable project
+# MiauChat - Plataforma de Comunicação
 
-## Project info
+Multiplataforma de Inteligência Artificial Unificada para gestão de atendimento multicanal.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## 🚀 Sobre o Projeto
 
-## How can I edit this code?
+MiauChat é uma plataforma SaaS multi-tenant para centralizar comunicações, automatizar conversas com IA e gerenciar atendimentos de forma profissional.
 
-There are several ways of editing your application.
+## 🛠️ Tecnologias
 
-**Use Lovable**
+- **Frontend**: React + Vite + TypeScript
+- **Estilização**: Tailwind CSS + shadcn/ui
+- **Backend**: Supabase (Auth, Database, Edge Functions, Storage)
+- **Estado**: TanStack Query
+- **Roteamento**: React Router
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## 📦 Instalação Local
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
+```bash
+# Clone o repositório
 git clone <YOUR_GIT_URL>
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# Navegue até o diretório
+cd miauchat
 
-# Step 3: Install the necessary dependencies.
-npm i
+# Instale as dependências
+npm install
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## 🌐 Deploy em Produção
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### VPS (miauchat.com.br)
 
-**Use GitHub Codespaces**
+```bash
+# No servidor VPS
+cd /var/www/miauchat
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+# Atualizar código
+git pull origin main
 
-## What technologies are used for this project?
+# Instalar dependências
+npm install
 
-This project is built with:
+# Build de produção
+npm run build
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+# Recarregar Nginx
+sudo systemctl reload nginx
+```
 
-## How can I deploy this project?
+Veja `deploy.sh` para script automatizado de deploy.
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Configuração de Domínio
 
-## Can I connect a custom domain to my Lovable project?
+O projeto está configurado para:
+- `https://miauchat.com.br`
+- `https://www.miauchat.com.br`
+- Subdomínios de clientes: `*.miauchat.com.br`
 
-Yes, you can!
+## 🔐 Configuração de Autenticação
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Redirect URLs Necessárias no Supabase
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Para o login funcionar corretamente em produção, configure no Supabase Dashboard:
+
+**Site URL:**
+```
+https://www.miauchat.com.br
+```
+
+**Redirect URLs (adicionar todas):**
+```
+https://miauchat.com.br/**
+https://www.miauchat.com.br/**
+https://*.miauchat.com.br/**
+```
+
+## 📁 Estrutura do Projeto
+
+```
+├── public/              # Assets públicos (favicon, etc.)
+├── src/
+│   ├── assets/          # Imagens e recursos
+│   ├── components/      # Componentes React
+│   ├── hooks/           # Custom hooks
+│   ├── integrations/    # Integrações (Supabase)
+│   ├── pages/           # Páginas da aplicação
+│   └── lib/             # Utilitários
+├── supabase/
+│   └── functions/       # Edge Functions
+└── docs/                # Documentação
+```
+
+## 📞 Suporte
+
+Para dúvidas ou suporte, entre em contato com a equipe MiauChat.
+
+---
+
+© 2025 MiauChat. Todos os direitos reservados.
