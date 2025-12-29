@@ -494,12 +494,16 @@ export type Database = {
       }
       companies: {
         Row: {
+          admin_user_id: string | null
           client_app_status: string
           created_at: string
           document: string | null
           email: string | null
           health_status: string | null
           id: string
+          initial_access_email_error: string | null
+          initial_access_email_sent: boolean | null
+          initial_access_email_sent_at: string | null
           last_health_check_at: string | null
           law_firm_id: string | null
           max_instances: number | null
@@ -521,12 +525,16 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          admin_user_id?: string | null
           client_app_status?: string
           created_at?: string
           document?: string | null
           email?: string | null
           health_status?: string | null
           id?: string
+          initial_access_email_error?: string | null
+          initial_access_email_sent?: boolean | null
+          initial_access_email_sent_at?: string | null
           last_health_check_at?: string | null
           law_firm_id?: string | null
           max_instances?: number | null
@@ -548,12 +556,16 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          admin_user_id?: string | null
           client_app_status?: string
           created_at?: string
           document?: string | null
           email?: string | null
           health_status?: string | null
           id?: string
+          initial_access_email_error?: string | null
+          initial_access_email_sent?: boolean | null
+          initial_access_email_sent_at?: string | null
           last_health_check_at?: string | null
           law_firm_id?: string | null
           max_instances?: number | null
@@ -1243,6 +1255,7 @@ export type Database = {
           is_active: boolean
           job_title: string | null
           law_firm_id: string | null
+          must_change_password: boolean
           notification_browser_enabled: boolean
           notification_sound_enabled: boolean
           oab_number: string | null
@@ -1258,6 +1271,7 @@ export type Database = {
           is_active?: boolean
           job_title?: string | null
           law_firm_id?: string | null
+          must_change_password?: boolean
           notification_browser_enabled?: boolean
           notification_sound_enabled?: boolean
           oab_number?: string | null
@@ -1273,6 +1287,7 @@ export type Database = {
           is_active?: boolean
           job_title?: string | null
           law_firm_id?: string | null
+          must_change_password?: boolean
           notification_browser_enabled?: boolean
           notification_sound_enabled?: boolean
           oab_number?: string | null

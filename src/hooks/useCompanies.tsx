@@ -41,6 +41,11 @@ interface Company {
     id: string;
     subdomain: string | null;
   } | null;
+  // Initial access email tracking
+  admin_user_id: string | null;
+  initial_access_email_sent: boolean;
+  initial_access_email_sent_at: string | null;
+  initial_access_email_error: string | null;
 }
 
 interface CreateCompanyData {
@@ -53,6 +58,9 @@ interface CreateCompanyData {
   max_instances?: number;
   subdomain?: string;
   auto_activate_workflow?: boolean;
+  // Admin user creation
+  admin_email?: string;
+  admin_name?: string;
 }
 
 interface ProvisionResponse {
@@ -262,6 +270,31 @@ export function useCompanies() {
     },
   });
 
+  const resendInitialAccess = useMutation({
+    mutationFn: async ({ companyId, resetPassword = true }: { companyId: string; resetPassword?: boolean }) => {
+      const { data, error } = await supabase.functions.invoke('resend-initial-access', {
+        body: {
+          company_id: companyId,
+          reset_password: resetPassword,
+        },
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Falha ao reenviar acesso');
+      
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Email de acesso reenviado", {
+        description: `Enviado para: ${data.email_sent_to}`,
+      });
+    },
+    onError: (error) => {
+      toast.error("Erro ao reenviar acesso: " + error.message);
+    },
+  });
+
   return {
     companies,
     isLoading,
@@ -271,5 +304,6 @@ export function useCompanies() {
     retryN8nWorkflow,
     runHealthCheck,
     retryAllFailedWorkflows,
+    resendInitialAccess,
   };
 }
