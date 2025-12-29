@@ -189,11 +189,11 @@ export default function Auth() {
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <div className="flex items-center gap-5 animate-fade-in" style={{ animationDelay: "0.1s" }}>
             <div className="relative">
-              <div className="absolute inset-0 bg-red-500/30 blur-xl rounded-full scale-110" />
+              <div className="absolute inset-0 bg-red-500/15 blur-lg rounded-full scale-105" />
               <img 
                 src={miauchatLogo} 
                 alt="MiauChat" 
-                className="relative w-32 h-32 object-contain bg-transparent drop-shadow-[0_0_25px_rgba(239,68,68,0.5)]" 
+                className="relative w-32 h-32 object-contain bg-transparent drop-shadow-[0_0_12px_rgba(239,68,68,0.3)]" 
               />
             </div>
             <div>
