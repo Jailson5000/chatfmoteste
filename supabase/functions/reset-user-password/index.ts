@@ -31,11 +31,13 @@ serve(async (req: Request) => {
       },
     });
 
-    // Check for authorization - either internal token or admin user
+    // Check for authorization - either internal token, admin user, or service role
     const authHeader = req.headers.get("authorization");
+    const apiKeyHeader = req.headers.get("apikey");
     let isAuthorized = false;
 
-    if (authHeader) {
+    // If request comes from Supabase client with valid API key, check for admin role
+    if (apiKeyHeader && authHeader) {
       const token = authHeader.replace("Bearer ", "");
       
       // Check if it's the internal token
@@ -55,8 +57,16 @@ serve(async (req: Request) => {
           
           if (adminRole) {
             isAuthorized = true;
+            console.log("Authorized via admin role:", adminRole.role);
           }
         }
+      }
+    } else if (authHeader) {
+      const token = authHeader.replace("Bearer ", "");
+      
+      // Check if it's the internal token
+      if (INTERNAL_TOKEN && token === INTERNAL_TOKEN) {
+        isAuthorized = true;
       }
     }
 
