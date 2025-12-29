@@ -13,15 +13,9 @@ function sanitizeNext(next: string | null): string {
 }
 
 async function waitForSession(timeoutMs: number): Promise<boolean> {
-  let resolved = false;
-
   return await new Promise<boolean>((resolve) => {
-    const timeoutId = window.setTimeout(() => {
-      if (resolved) return;
-      resolved = true;
-      subscription.unsubscribe();
-      resolve(false);
-    }, timeoutMs);
+    let resolved = false;
+    let timeoutId = 0;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (resolved) return;
@@ -32,6 +26,13 @@ async function waitForSession(timeoutMs: number): Promise<boolean> {
         resolve(true);
       }
     });
+
+    timeoutId = window.setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      subscription.unsubscribe();
+      resolve(false);
+    }, timeoutMs);
   });
 }
 
