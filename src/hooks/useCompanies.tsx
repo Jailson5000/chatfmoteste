@@ -16,10 +16,15 @@ interface Company {
   trial_ends_at: string | null;
   created_at: string;
   updated_at: string;
+  subdomain?: string;
   plan?: {
     id: string;
     name: string;
     price: number;
+  } | null;
+  law_firm?: {
+    id: string;
+    subdomain: string | null;
   } | null;
 }
 
@@ -31,6 +36,17 @@ interface CreateCompanyData {
   plan_id?: string;
   max_users?: number;
   max_instances?: number;
+  subdomain?: string;
+}
+
+interface ProvisionResponse {
+  success: boolean;
+  company: Company;
+  law_firm: { id: string; subdomain: string };
+  subdomain: string;
+  subdomain_url: string;
+  automation_id?: string;
+  message: string;
 }
 
 export function useCompanies() {
@@ -43,7 +59,8 @@ export function useCompanies() {
         .from("companies")
         .select(`
           *,
-          plan:plans(id, name, price)
+          plan:plans(id, name, price),
+          law_firm:law_firms(id, subdomain)
         `)
         .order("created_at", { ascending: false });
 
@@ -53,32 +70,29 @@ export function useCompanies() {
   });
 
   const createCompany = useMutation({
-    mutationFn: async (companyData: CreateCompanyData) => {
-      // First create a law_firm
-      const { data: lawFirm, error: lawFirmError } = await supabase
-        .from("law_firms")
-        .insert({ name: companyData.name, email: companyData.email, phone: companyData.phone, document: companyData.document })
-        .select()
-        .single();
+    mutationFn: async (companyData: CreateCompanyData): Promise<ProvisionResponse> => {
+      // Get current session for authorization
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        throw new Error("Não autenticado");
+      }
 
-      if (lawFirmError) throw lawFirmError;
-
-      // Then create the company linked to the law_firm
-      const { data, error } = await supabase
-        .from("companies")
-        .insert({
-          ...companyData,
-          law_firm_id: lawFirm.id,
-        })
-        .select()
-        .single();
+      // Call the provision-company edge function
+      const { data, error } = await supabase.functions.invoke('provision-company', {
+        body: companyData,
+      });
 
       if (error) throw error;
-      return data;
+      if (!data.success) throw new Error(data.error || 'Falha ao criar empresa');
+      
+      return data as ProvisionResponse;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      toast.success("Empresa criada com sucesso");
+      toast.success("Empresa criada com sucesso", {
+        description: `Subdomínio: ${data.subdomain}.miauchat.com.br`,
+      });
     },
     onError: (error) => {
       toast.error("Erro ao criar empresa: " + error.message);

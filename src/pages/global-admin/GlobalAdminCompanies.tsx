@@ -34,9 +34,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2 } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe } from "lucide-react";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
+
+function generateSubdomainFromName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 30);
+}
 
 export default function GlobalAdminCompanies() {
   const { companies, isLoading, createCompany, updateCompany, deleteCompany } = useCompanies();
@@ -53,25 +64,36 @@ export default function GlobalAdminCompanies() {
     plan_id: "",
     max_users: 5,
     max_instances: 2,
+    subdomain: "",
   });
 
   const filteredCompanies = companies.filter(
     (company) =>
       company.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      company.email?.toLowerCase().includes(searchQuery.toLowerCase())
+      company.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      company.law_firm?.subdomain?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleNameChange = (value: string) => {
+    const newSubdomain = generateSubdomainFromName(value);
+    setFormData({ 
+      ...formData, 
+      name: value, 
+      subdomain: formData.subdomain || newSubdomain 
+    });
+  };
 
   const handleCreate = async () => {
     await createCompany.mutateAsync(formData);
     setIsCreateDialogOpen(false);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2 });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "" });
   };
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
     await updateCompany.mutateAsync({ id: editingCompany, ...formData });
     setEditingCompany(null);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2 });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "" });
   };
 
   const handleDelete = async (id: string) => {
@@ -89,6 +111,7 @@ export default function GlobalAdminCompanies() {
       plan_id: company.plan_id || "",
       max_users: company.max_users,
       max_instances: company.max_instances,
+      subdomain: company.law_firm?.subdomain || "",
     });
     setEditingCompany(company.id);
   };
@@ -137,9 +160,25 @@ export default function GlobalAdminCompanies() {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => handleNameChange(e.target.value)}
                   placeholder="Nome da empresa"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="subdomain">Subdomínio</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="subdomain"
+                    value={formData.subdomain}
+                    onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                    placeholder="empresa"
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Este será o endereço de acesso: https://{formData.subdomain || 'empresa'}.miauchat.com.br
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -214,8 +253,8 @@ export default function GlobalAdminCompanies() {
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleCreate} disabled={createCompany.isPending}>
-                {createCompany.isPending ? "Criando..." : "Criar Empresa"}
+              <Button onClick={handleCreate} disabled={createCompany.isPending || !formData.name || !formData.subdomain}>
+                {createCompany.isPending ? "Provisionando..." : "Criar Empresa"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -255,6 +294,7 @@ export default function GlobalAdminCompanies() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Empresa</TableHead>
+                  <TableHead>Subdomínio</TableHead>
                   <TableHead>Plano</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Usuários</TableHead>
@@ -266,7 +306,7 @@ export default function GlobalAdminCompanies() {
               <TableBody>
                 {filteredCompanies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       Nenhuma empresa encontrada
                     </TableCell>
                   </TableRow>
@@ -278,6 +318,22 @@ export default function GlobalAdminCompanies() {
                           <p className="font-medium">{company.name}</p>
                           <p className="text-sm text-muted-foreground">{company.email}</p>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {company.law_firm?.subdomain ? (
+                          <a 
+                            href={`https://${company.law_firm.subdomain}.miauchat.com.br`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <Globe className="h-3 w-3" />
+                            {company.law_firm.subdomain}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         {company.plan?.name || "-"}
