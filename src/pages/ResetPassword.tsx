@@ -28,7 +28,7 @@ export default function ResetPassword() {
   const [isValidSession, setIsValidSession] = useState(false);
 
   useEffect(() => {
-    document.title = "Redefinir senha | MiauChat";
+    document.title = "Redefinir Senha | MiauChat";
 
     let resolved = false;
 

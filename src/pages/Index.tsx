@@ -10,7 +10,7 @@ const Index = () => {
   useEffect(() => {
     // Basic page title hygiene when navigating back from other pages
     const previousTitle = document.title;
-    document.title = "MiauChat - Atendimento com IA";
+    document.title = "MiauChat | Multiplataforma de Inteligência Artificial Unificada";
 
     return () => {
       document.title = previousTitle || "MiauChat";

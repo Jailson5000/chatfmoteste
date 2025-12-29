@@ -290,7 +290,7 @@ export default function Conversations() {
 
   // Update browser tab title with unread count
   useEffect(() => {
-    const baseTitle = "Conversas";
+    const baseTitle = "Conversas | MiauChat";
     
     if (totalUnread > 0) {
       document.title = `(${totalUnread}) ${baseTitle}`;
@@ -300,7 +300,7 @@ export default function Conversations() {
 
     // Cleanup: reset title when leaving page
     return () => {
-      document.title = "MiauChat";
+      document.title = "MiauChat | Multiplataforma de Inteligência Artificial Unificada";
     };
   }, [totalUnread]);
 
