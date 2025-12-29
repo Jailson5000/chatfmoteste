@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { WhatsAppInstance } from "@/hooks/useWhatsAppInstances";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,8 +38,9 @@ import {
   Loader2,
   Building2,
   User,
+  TrendingUp,
 } from "lucide-react";
-import { formatDistanceToNow, format, subDays, eachDayOfInterval } from "date-fns";
+import { formatDistanceToNow, format, subDays, eachDayOfInterval, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -91,31 +94,77 @@ export function ConnectionDetailPanel({
 
   const isConnected = instance.status === "connected";
 
+  // Fetch real status history for this instance
+  const { data: statusHistory = [] } = useQuery({
+    queryKey: ["instance-status-history-detail", instance.id],
+    queryFn: async () => {
+      const startDate = subDays(new Date(), 30).toISOString();
+      const { data, error } = await supabase
+        .from("instance_status_history")
+        .select("*")
+        .eq("instance_id", instance.id)
+        .gte("changed_at", startDate)
+        .order("changed_at", { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: "Copiado", description: `${label} copiado para a área de transferência.` });
   };
 
-  // Generate uptime data for last 30 days (mock)
+  // Calculate real uptime data for last 30 days
   const uptimeData = eachDayOfInterval({
     start: subDays(new Date(), 29),
     end: new Date(),
-  }).map((date) => ({
-    date,
-    status: Math.random() > 0.1 ? "connected" : "disconnected",
-  }));
+  }).map((date) => {
+    // Check status history for this day
+    const dayChanges = statusHistory.filter((h) => {
+      const changeDate = new Date(h.changed_at);
+      return changeDate.toDateString() === date.toDateString();
+    });
+    
+    // If there's a disconnection event on this day, mark as disconnected
+    const hasDisconnection = dayChanges.some((h) => 
+      h.status === "disconnected" || h.status === "error" || h.status === "suspended"
+    );
+    
+    return {
+      date,
+      status: hasDisconnection ? "disconnected" : "connected",
+    };
+  });
 
   const uptimePercentage = (uptimeData.filter((d) => d.status === "connected").length / uptimeData.length) * 100;
 
-  // Mock logs data
-  const logs = [
-    {
-      status: "Conectado",
-      event: "WhatsApp conectado",
-      duration: "3d 11h 24min",
-      date: "24/12 13:47",
-    },
-  ];
+  // Format status history as logs
+  const logs = statusHistory.slice(0, 10).map((h) => {
+    const previousEntry = statusHistory.find(
+      (prev) => new Date(prev.changed_at) < new Date(h.changed_at)
+    );
+    const duration = previousEntry
+      ? differenceInMinutes(new Date(h.changed_at), new Date(previousEntry.changed_at))
+      : 0;
+    
+    const formatDuration = (mins: number) => {
+      if (mins < 60) return `${mins}min`;
+      if (mins < 1440) return `${Math.floor(mins / 60)}h ${mins % 60}min`;
+      return `${Math.floor(mins / 1440)}d ${Math.floor((mins % 1440) / 60)}h`;
+    };
+
+    return {
+      status: h.status === "connected" ? "Conectado" : "Desconectado",
+      event: h.status === "connected" 
+        ? "WhatsApp conectado" 
+        : `Status alterado para ${h.status}`,
+      duration: formatDuration(duration),
+      date: format(new Date(h.changed_at), "dd/MM HH:mm"),
+      rawStatus: h.status,
+    };
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -358,10 +407,18 @@ export function ConnectionDetailPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log, i) => (
+                  {logs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                        Sem histórico de status disponível
+                      </td>
+                    </tr>
+                  ) : logs.map((log, i) => (
                     <tr key={i} className="border-t">
                       <td className="px-4 py-3">
-                        <span className="text-emerald-400">{log.status}</span>
+                        <span className={log.rawStatus === "connected" ? "text-emerald-400" : "text-destructive"}>
+                          {log.status}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{log.event}</td>
                       <td className="px-4 py-3 text-right">
