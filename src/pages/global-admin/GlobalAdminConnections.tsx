@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
+import { InstanceHealthSummary } from "@/components/connections/InstanceHealthSummary";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -464,8 +465,11 @@ export default function GlobalAdminConnections() {
           </Card>
         </div>
 
-        {/* Uptime Chart */}
-        <InstanceUptimeChart />
+        {/* Health Summary & Uptime Chart */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <InstanceHealthSummary />
+          <InstanceUptimeChart />
+        </div>
 
         {/* Search and Filters */}
         <Card>
