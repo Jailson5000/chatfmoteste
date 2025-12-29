@@ -195,8 +195,6 @@ export default function Conversations() {
   // Internal chat mode (messages only visible to team, not sent to WhatsApp)
   const [isInternalMode, setIsInternalMode] = useState(false);
   
-  // Message filter (all, internal, external)
-  const [messageFilter, setMessageFilter] = useState<"all" | "internal" | "external">("all");
   
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
@@ -1361,14 +1359,7 @@ export default function Conversations() {
                         <p className="text-sm">Nenhuma mensagem ainda</p>
                       </div>
                     ) : (
-                      messages
-                        .filter((msg) => {
-                          if (messageFilter === "all") return true;
-                          if (messageFilter === "external") return !msg.is_internal;
-                          if (messageFilter === "internal") return msg.is_internal;
-                          return true;
-                        })
-                        .map((msg) => (
+                      messages.map((msg) => (
                           <MessageBubble
                             key={msg.id}
                             id={msg.id}
@@ -1700,6 +1691,20 @@ export default function Conversations() {
                     </ScrollArea>
                   </PopoverContent>
                 </Popover>
+                {/* Search Messages Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
+                      className="text-muted-foreground/60 hover:text-muted-foreground"
+                      onClick={() => setShowMessageSearch(true)}
+                    >
+                      <Search className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Buscar mensagens</TooltipContent>
+                </Tooltip>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon">
@@ -1710,10 +1715,6 @@ export default function Conversations() {
                     <DropdownMenuItem onClick={openEditName}>
                       <Pencil className="h-4 w-4 mr-2" />
                       Editar nome
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setShowMessageSearch(true)}>
-                      <Search className="h-4 w-4 mr-2" />
-                      Buscar mensagens
                     </DropdownMenuItem>
                     <DropdownMenuItem>
                       <Tag className="h-4 w-4 mr-2" />
@@ -1780,37 +1781,6 @@ export default function Conversations() {
               }}
             />
 
-            {/* Message Filter Tabs */}
-            <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Mostrar:</span>
-              <div className="flex gap-1">
-                <Button
-                  variant={messageFilter === "all" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 text-xs"
-                  onClick={() => setMessageFilter("all")}
-                >
-                  Todas
-                </Button>
-                <Button
-                  variant={messageFilter === "external" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 text-xs"
-                  onClick={() => setMessageFilter("external")}
-                >
-                  Cliente
-                </Button>
-                <Button
-                  variant={messageFilter === "internal" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 text-xs text-yellow-600"
-                  onClick={() => setMessageFilter("internal")}
-                >
-                  <Lock className="h-3 w-3 mr-1" />
-                  Interna
-                </Button>
-              </div>
-            </div>
 
             {/* Messages */}
             <div className="relative flex-1 min-h-0">
@@ -1820,25 +1790,13 @@ export default function Conversations() {
                     <div className="flex items-center justify-center py-8">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                     </div>
-                  ) : messages.filter(m => {
-                    if (messageFilter === "all") return true;
-                    if (messageFilter === "internal") return m.is_internal === true;
-                    if (messageFilter === "external") return !m.is_internal;
-                    return true;
-                  }).length === 0 ? (
+                  ) : messages.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">{messageFilter === "internal" ? "Nenhuma mensagem interna" : messageFilter === "external" ? "Nenhuma mensagem externa" : "Nenhuma mensagem ainda"}</p>
+                      <p className="text-sm">Nenhuma mensagem ainda</p>
                     </div>
                   ) : (
-                    messages
-                      .filter(m => {
-                        if (messageFilter === "all") return true;
-                        if (messageFilter === "internal") return m.is_internal === true;
-                        if (messageFilter === "external") return !m.is_internal;
-                        return true;
-                      })
-                      .map((msg) => (
+                    messages.map((msg) => (
                       <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
                         <MessageBubble
                           id={msg.id}
