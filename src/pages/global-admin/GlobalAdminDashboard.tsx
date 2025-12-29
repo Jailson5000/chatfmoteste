@@ -1,17 +1,13 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   Building2, 
-  Users, 
+  CheckCircle2,
+  Clock, 
   Link2, 
-  MessageSquare, 
-  TrendingUp,
-  DollarSign,
   ArrowUpRight,
   ArrowDownRight,
-  Download,
-  Calendar
+  FileText,
+  FileSpreadsheet
 } from "lucide-react";
 import { useSystemMetrics } from "@/hooks/useSystemMetrics";
 import { exportDashboardToPDF, exportToExcel, getFormattedDate } from "@/lib/exportUtils";
@@ -19,8 +15,6 @@ import { toast } from "sonner";
 import { 
   AreaChart, 
   Area, 
-  BarChart, 
-  Bar, 
   PieChart, 
   Pie, 
   Cell, 
@@ -32,26 +26,20 @@ import {
   Legend
 } from "recharts";
 
-// Mock data for charts (replace with real data when available)
+// Mock data for charts
 const areaChartData = [
-  { name: "Jan", empresas: 4, mensagens: 2400 },
-  { name: "Fev", empresas: 6, mensagens: 3200 },
-  { name: "Mar", empresas: 8, mensagens: 4100 },
-  { name: "Abr", empresas: 12, mensagens: 5800 },
-  { name: "Mai", empresas: 15, mensagens: 7200 },
-  { name: "Jun", empresas: 18, mensagens: 8900 },
-];
-
-const barChartData = [
-  { name: "Starter", value: 45 },
-  { name: "Professional", value: 30 },
-  { name: "Enterprise", value: 15 },
+  { name: "Jul", empresas: 30, conexoes: 25 },
+  { name: "Ago", empresas: 40, conexoes: 35 },
+  { name: "Set", empresas: 55, conexoes: 48 },
+  { name: "Out", empresas: 65, conexoes: 58 },
+  { name: "Nov", empresas: 90, conexoes: 78 },
+  { name: "Dez", empresas: 120, conexoes: 105 },
 ];
 
 const pieChartData = [
-  { name: "Ativas", value: 75, color: "hsl(var(--primary))" },
-  { name: "Trial", value: 15, color: "hsl(var(--chart-2))" },
-  { name: "Suspensas", value: 10, color: "hsl(var(--destructive))" },
+  { name: "Ativas", value: 75, color: "#dc2626" },
+  { name: "Pendentes", value: 15, color: "#22c55e" },
+  { name: "Suspensas", value: 10, color: "#f97316" },
 ];
 
 export default function GlobalAdminDashboard() {
@@ -59,46 +47,42 @@ export default function GlobalAdminDashboard() {
 
   const statCards = [
     {
-      title: "Empresas",
+      title: "Total de Empresas",
       value: dashboardMetrics?.totalCompanies || 0,
-      subValue: `${dashboardMetrics?.activeCompanies || 0} ativas`,
+      description: "vs. mês anterior",
       icon: Building2,
+      iconBg: "bg-red-500/10",
+      iconColor: "text-red-500",
       trend: "+12%",
       trendUp: true,
     },
     {
-      title: "Usuários Totais",
-      value: dashboardMetrics?.totalUsers || 0,
-      icon: Users,
+      title: "Empresas Ativas",
+      value: dashboardMetrics?.activeCompanies || 0,
+      description: "Em operação",
+      icon: CheckCircle2,
+      iconBg: "bg-green-500/10",
+      iconColor: "text-green-500",
       trend: "+8%",
       trendUp: true,
     },
     {
-      title: "Conexões WhatsApp",
-      value: dashboardMetrics?.totalConnections || 0,
-      subValue: `${dashboardMetrics?.activeConnections || 0} online`,
+      title: "Aguardando Ativação",
+      value: 0,
+      description: "Pendentes de aprovação",
+      icon: Clock,
+      iconBg: "bg-yellow-500/10",
+      iconColor: "text-yellow-500",
+      trend: "-5%",
+      trendUp: false,
+    },
+    {
+      title: "Conexões Ativas",
+      value: dashboardMetrics?.activeConnections || 0,
+      description: "Funcionando normalmente",
       icon: Link2,
-      trend: "+5%",
-      trendUp: true,
-    },
-    {
-      title: "Mensagens",
-      value: dashboardMetrics?.totalMessages || 0,
-      icon: MessageSquare,
-      trend: "+24%",
-      trendUp: true,
-    },
-    {
-      title: "Conversas",
-      value: dashboardMetrics?.totalConversations || 0,
-      icon: TrendingUp,
-      trend: "+18%",
-      trendUp: true,
-    },
-    {
-      title: "MRR",
-      value: `R$ ${(dashboardMetrics?.revenue || 0).toLocaleString("pt-BR")}`,
-      icon: DollarSign,
+      iconBg: "bg-green-500/10",
+      iconColor: "text-green-500",
       trend: "+15%",
       trendUp: true,
     },
@@ -118,7 +102,7 @@ export default function GlobalAdminDashboard() {
           },
           chartData: areaChartData,
           pieData: pieChartData.map(p => ({ name: p.name, value: p.value })),
-          barData: barChartData,
+          barData: [],
         },
         `miauchat-dashboard-${getFormattedDate()}`
       );
@@ -150,176 +134,189 @@ export default function GlobalAdminDashboard() {
     }
   };
 
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-3 shadow-xl">
+          <p className="text-white/60 text-sm mb-1">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} className="text-sm" style={{ color: entry.color }}>
+              {entry.name}: {entry.value}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight text-white">Dashboard</h1>
+          <p className="text-white/50">
             Visão geral do sistema MiauChat
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleExportPDF}>
-            <Download className="mr-2 h-4 w-4" />
-            PDF
+        <div className="flex gap-3">
+          <Button 
+            variant="outline" 
+            className="bg-white/[0.03] border-white/10 text-white hover:bg-white/[0.08] hover:text-white"
+            onClick={handleExportPDF}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Exportar PDF
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExportExcel}>
-            <Download className="mr-2 h-4 w-4" />
-            Excel
-          </Button>
-          <Button variant="outline" size="sm">
-            <Calendar className="mr-2 h-4 w-4" />
-            Últimos 30 dias
+          <Button 
+            variant="outline" 
+            className="bg-white/[0.03] border-white/10 text-white hover:bg-white/[0.08] hover:text-white"
+            onClick={handleExportExcel}
+          >
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Exportar Excel
           </Button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statCards.map((stat, index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
+          <div 
+            key={index}
+            className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:border-white/10 transition-colors"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <span className="text-sm text-white/60">{stat.title}</span>
+              <div className={`p-2 rounded-xl ${stat.iconBg}`}>
+                <stat.icon className={`h-5 w-5 ${stat.iconColor}`} />
+              </div>
+            </div>
+            <div className="flex items-end gap-3">
+              <span className="text-4xl font-bold text-white">
                 {isLoading ? "..." : stat.value}
-              </div>
-              <div className="flex items-center justify-between mt-1">
-                {stat.subValue && (
-                  <p className="text-xs text-muted-foreground">{stat.subValue}</p>
+              </span>
+              <span className={`flex items-center text-sm font-medium ${stat.trendUp ? 'text-green-400' : 'text-red-400'}`}>
+                {stat.trendUp ? (
+                  <ArrowUpRight className="h-4 w-4 mr-0.5" />
+                ) : (
+                  <ArrowDownRight className="h-4 w-4 mr-0.5" />
                 )}
-                <Badge 
-                  variant={stat.trendUp ? "default" : "destructive"} 
-                  className="text-xs"
-                >
-                  {stat.trendUp ? (
-                    <ArrowUpRight className="h-3 w-3 mr-1" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3 mr-1" />
-                  )}
-                  {stat.trend}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
+                {stat.trend}
+              </span>
+            </div>
+            <p className="text-sm text-white/40 mt-1">{stat.description}</p>
+          </div>
         ))}
       </div>
 
       {/* Charts */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Area Chart - Crescimento */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle>Crescimento</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={areaChartData}>
-                <defs>
-                  <linearGradient id="colorEmpresas" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorMensagens" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="name" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: "hsl(var(--card))", 
-                    borderColor: "hsl(var(--border))",
-                    borderRadius: "8px"
-                  }} 
-                />
-                <Legend />
-                <Area 
-                  type="monotone" 
-                  dataKey="empresas" 
-                  name="Empresas"
-                  stroke="hsl(var(--primary))" 
-                  fillOpacity={1} 
-                  fill="url(#colorEmpresas)" 
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="mensagens" 
-                  name="Mensagens (x100)"
-                  stroke="hsl(var(--chart-2))" 
-                  fillOpacity={1} 
-                  fill="url(#colorMensagens)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Area Chart - Crescimento Mensal */}
+        <div className="lg:col-span-2 p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-white">Crescimento Mensal</h2>
+            <p className="text-sm text-white/40">Evolução de empresas e conexões</p>
+          </div>
+          <ResponsiveContainer width="100%" height={350}>
+            <AreaChart data={areaChartData}>
+              <defs>
+                <linearGradient id="colorEmpresas" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="colorConexoes" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#dc2626" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#dc2626" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis 
+                dataKey="name" 
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 12 }}
+              />
+              <YAxis 
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 12 }}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Area 
+                type="monotone" 
+                dataKey="empresas" 
+                name="Empresas"
+                stroke="#22c55e" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorEmpresas)" 
+              />
+              <Area 
+                type="monotone" 
+                dataKey="conexoes" 
+                name="Conexões"
+                stroke="#dc2626" 
+                strokeWidth={2}
+                fillOpacity={1} 
+                fill="url(#colorConexoes)" 
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
 
-        {/* Bar Chart - Planos */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Distribuição por Plano</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={barChartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="name" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: "hsl(var(--card))", 
-                    borderColor: "hsl(var(--border))",
-                    borderRadius: "8px"
-                  }} 
+        {/* Pie Chart - Status das Empresas */}
+        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-white">Status das Empresas</h2>
+            <p className="text-sm text-white/40">Distribuição por status</p>
+          </div>
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie
+                data={pieChartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={70}
+                outerRadius={100}
+                paddingAngle={2}
+                dataKey="value"
+                stroke="none"
+              >
+                {pieChartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip 
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-3 shadow-xl">
+                        <p className="text-white text-sm">
+                          {payload[0].name}: {payload[0].value}%
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          {/* Legend */}
+          <div className="flex justify-center gap-6 mt-4">
+            {pieChartData.map((entry, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <div 
+                  className="w-3 h-3 rounded-full" 
+                  style={{ backgroundColor: entry.color }}
                 />
-                <Bar dataKey="value" name="Empresas" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Pie Chart - Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Status das Empresas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={pieChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {pieChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: "hsl(var(--card))", 
-                    borderColor: "hsl(var(--border))",
-                    borderRadius: "8px"
-                  }} 
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+                <span className="text-sm text-white/60">{entry.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
