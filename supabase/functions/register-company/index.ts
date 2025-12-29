@@ -176,6 +176,7 @@ serve(async (req) => {
     });
 
     // Send notification email to admin (suporte@miauchat.com.br)
+    // TEMPLATE: CADASTRO RECEBIDO (EM ANÁLISE)
     let emailSent = false;
     if (resendApiKey) {
       try {
@@ -184,55 +185,73 @@ serve(async (req) => {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Novo Cadastro Pendente</title>
+  <title>Cadastro recebido — MIAUCHAT</title>
 </head>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px;">
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; line-height: 1.6;">
   <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
     
     <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); padding: 30px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">🆕 Novo Cadastro Pendente</h1>
-      <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">Uma nova empresa se cadastrou e aguarda aprovação</p>
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">⏳ Cadastro recebido — MIAUCHAT</h1>
     </div>
     
     <div style="padding: 30px;">
-      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-        <p style="color: #991b1b; margin: 0; font-weight: 600;">
-          ⚠️ Esta empresa NÃO pode acessar o sistema até ser aprovada.
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Olá,
+      </p>
+      
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Recebemos o cadastro da empresa <strong>"${company_name}"</strong> no MIAUCHAT<br>
+        (Multiplataforma de Inteligência Artificial Unificada).
+      </p>
+      
+      <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #92400e; margin: 0; font-weight: 600; font-size: 18px;">
+          📋 Status atual: EM ANÁLISE
         </p>
       </div>
       
-      <h2 style="color: #1f2937; font-size: 18px; margin-bottom: 16px;">Dados do Cadastro</h2>
+      <h3 style="color: #1f2937; font-size: 16px; margin-top: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">
+        Dados do Cadastro
+      </h3>
       
-      <table style="width: 100%; border-collapse: collapse;">
+      <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; width: 140px;">Empresa</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 500;">${company_name}</td>
+          <td style="padding: 10px 0; color: #6b7280; width: 140px;">Empresa</td>
+          <td style="padding: 10px 0; color: #1f2937; font-weight: 500;">${company_name}</td>
         </tr>
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Administrador</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 500;">${admin_name}</td>
+          <td style="padding: 10px 0; color: #6b7280;">Administrador</td>
+          <td style="padding: 10px 0; color: #1f2937; font-weight: 500;">${admin_name}</td>
         </tr>
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Email</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937; font-weight: 500;">${admin_email}</td>
+          <td style="padding: 10px 0; color: #6b7280;">Email</td>
+          <td style="padding: 10px 0; color: #1f2937; font-weight: 500;">${admin_email}</td>
         </tr>
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Telefone</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${phone || 'Não informado'}</td>
+          <td style="padding: 10px 0; color: #6b7280;">Telefone</td>
+          <td style="padding: 10px 0; color: #1f2937;">${phone || 'Não informado'}</td>
         </tr>
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">CNPJ/CPF</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${document || 'Não informado'}</td>
+          <td style="padding: 10px 0; color: #6b7280;">CNPJ/CPF</td>
+          <td style="padding: 10px 0; color: #1f2937;">${document || 'Não informado'}</td>
         </tr>
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280;">Subdomínio</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #1f2937;">${subdomain}.miauchat.com.br</td>
+          <td style="padding: 10px 0; color: #6b7280;">Subdomínio</td>
+          <td style="padding: 10px 0; color: #1f2937;">${subdomain}.miauchat.com.br</td>
         </tr>
         <tr>
-          <td style="padding: 12px; color: #6b7280;">Data/Hora</td>
-          <td style="padding: 12px; color: #1f2937;">${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
+          <td style="padding: 10px 0; color: #6b7280;">Data/Hora</td>
+          <td style="padding: 10px 0; color: #1f2937;">${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</td>
         </tr>
       </table>
+      
+      <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
+        Nosso time irá revisar as informações e, após aprovação, o acesso será liberado automaticamente.
+      </p>
+      
+      <p style="color: #9ca3af; font-size: 14px; font-style: italic; margin-top: 16px;">
+        Não é necessário responder este email.
+      </p>
       
       <div style="margin-top: 30px; text-align: center;">
         <a href="https://www.miauchat.com.br/global-admin/companies" 
@@ -240,16 +259,14 @@ serve(async (req) => {
           Acessar Painel Admin
         </a>
       </div>
-      
-      <p style="color: #6b7280; font-size: 14px; margin-top: 24px; text-align: center;">
-        Acesse o painel administrativo para aprovar ou rejeitar este cadastro.
-      </p>
     </div>
     
     <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
+        — MIAUCHAT
+      </p>
       <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-        Este é um email automático do sistema MiauChat.<br>
-        © ${new Date().getFullYear()} MiauChat - Plataforma de Comunicação
+        Plataforma de Comunicação
       </p>
     </div>
   </div>
@@ -266,7 +283,7 @@ serve(async (req) => {
           body: JSON.stringify({
             from: 'MiauChat <suporte@miauchat.com.br>',
             to: [adminEmail],
-            subject: `🆕 Novo Cadastro Pendente: ${company_name}`,
+            subject: `⏳ Cadastro recebido — MIAUCHAT`,
             html: emailHtml,
           }),
         });
