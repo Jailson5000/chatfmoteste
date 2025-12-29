@@ -31,6 +31,11 @@ interface ConversationWithLastMessage extends Conversation {
       color: string;
     } | null;
   } | null;
+  department?: {
+    id: string;
+    name: string;
+    color: string;
+  } | null;
 }
 
 export function useConversations() {
@@ -46,7 +51,8 @@ export function useConversations() {
         .select(`
           *,
           whatsapp_instance:whatsapp_instances(instance_name, phone_number),
-          client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color))
+          client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
+          department:departments(id, name, color)
         `)
         .order("last_message_at", { ascending: false, nullsFirst: false });
 

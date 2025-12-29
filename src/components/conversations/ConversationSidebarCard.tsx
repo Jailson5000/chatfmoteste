@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, Phone, Tag, User } from "lucide-react";
+import { Bot, Folder, Phone, Tag, User } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -17,6 +17,7 @@ export interface ConversationSidebarCardConversation {
   whatsappInstance: string | null;
   avatarUrl: string | null;
   clientStatus: { name: string; color: string } | null;
+  department: { name: string; color: string } | null;
   aiAgentName: string;
 }
 
@@ -134,8 +135,8 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
         </p>
       </div>
 
-      {/* Status + Tags */}
-      {(conversation.clientStatus || conversation.tags.length > 0) && (
+      {/* Status + Department + Tags */}
+      {(conversation.clientStatus || conversation.department || conversation.tags.length > 0) && (
         <div className="mt-2 flex flex-wrap gap-1">
           {conversation.clientStatus && (
             <Badge
@@ -149,7 +150,20 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
             </Badge>
           )}
 
-          {conversation.tags.slice(0, 2).map((tag, idx) => (
+          {conversation.department && (
+            <Badge
+              className="text-xs h-5 px-2 border-0 gap-1"
+              style={{
+                backgroundColor: `${conversation.department.color}20`,
+                color: conversation.department.color,
+              }}
+            >
+              <Folder className="h-3 w-3" />
+              {conversation.department.name}
+            </Badge>
+          )}
+
+          {conversation.tags.slice(0, 1).map((tag, idx) => (
             <Badge
               key={`${tag.name}-${idx}`}
               className="text-xs h-5 px-2 border-0"
@@ -158,6 +172,11 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
               {tag.name}
             </Badge>
           ))}
+          {conversation.tags.length > 1 && (
+            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+              +{conversation.tags.length - 1}
+            </Badge>
+          )}
         </div>
       )}
 
