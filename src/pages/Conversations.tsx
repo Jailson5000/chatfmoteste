@@ -1189,58 +1189,47 @@ export default function Conversations() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-medium truncate">{conv.name}</span>
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="text-sm font-medium truncate">{conv.name}</span>
+                            {conv.whatsappPhone && (
+                              <span className="text-[10px] text-yellow-500 font-medium flex items-center gap-0.5 flex-shrink-0">
+                                <Phone className="h-2.5 w-2.5" />
+                                {conv.whatsappPhone.slice(-4)}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
-                        </div>
-                        {/* Phone and time info */}
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                          {conv.whatsappPhone && (
-                            <span className="flex items-center gap-0.5">
-                              <Phone className="h-2.5 w-2.5" />
-                              {conv.whatsappPhone.slice(-4)}
-                            </span>
-                          )}
                         </div>
                         <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
                         <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                          {/* Client Status Badge */}
+                          {conv.clientStatus && (
+                            <Badge 
+                              variant="outline" 
+                              className="text-[10px] h-5 px-1.5 font-medium"
+                              style={{ 
+                                borderColor: conv.clientStatus.color, 
+                                backgroundColor: `${conv.clientStatus.color}15`,
+                                color: conv.clientStatus.color 
+                              }}
+                            >
+                              {conv.clientStatus.name}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="mt-1">
                           <Badge
                             variant="outline"
                             className={cn(
-                              "text-[10px] h-5 px-1.5 gap-0.5 max-w-[100px]",
+                              "text-[10px] h-5 px-1.5 gap-0.5 max-w-[120px]",
                               conv.handler === "ai"
                                 ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                                : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
+                                : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
                             )}
                           >
                             {conv.handler === "ai" ? <Zap className="h-2.5 w-2.5 flex-shrink-0" /> : <User className="h-2.5 w-2.5 flex-shrink-0" />}
-                            <span className="truncate">{conv.handler === "ai" ? conv.aiAgentName : (conv.assignedTo?.split(" ")[0] || "Atendente")}</span>
+                            <span className="truncate">{conv.handler === "ai" ? `IA ${conv.aiAgentName}` : (conv.assignedTo?.split(" ")[0] || "Atendente")}</span>
                           </Badge>
-                          {conv.status && (
-                            <Badge variant="outline" className="text-[10px] h-5 px-1.5">
-                              {conv.status.replace(/_/g, ' ')}
-                            </Badge>
-                          )}
-                          {conv.tags.slice(0, 2).map((tag, i) => (
-                            <Tooltip key={i}>
-                              <TooltipTrigger asChild>
-                                <Badge 
-                                  variant="outline" 
-                                  className="text-[10px] h-5 px-1.5 truncate max-w-[60px] cursor-default"
-                                  style={{ 
-                                    borderColor: tag.color, 
-                                    backgroundColor: `${tag.color}20`,
-                                    color: tag.color 
-                                  }}
-                                >
-                                  {tag.name}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{tag.name}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          ))}
-                          {conv.unread > 0 && <UnreadBadge count={conv.unread} />}
                         </div>
                       </div>
                     </div>
@@ -1484,8 +1473,17 @@ export default function Conversations() {
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
-                        <span className="text-[11px] text-muted-foreground flex-shrink-0">{conv.time}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
+                          {/* Phone digits next to name */}
+                          {conv.whatsappPhone && (
+                            <span className="text-[10px] text-yellow-500 font-medium flex items-center gap-0.5 flex-shrink-0">
+                              <Phone className="h-2.5 w-2.5" />
+                              {conv.whatsappPhone.slice(-4)}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
                     </div>
                   </div>
@@ -1501,39 +1499,8 @@ export default function Conversations() {
                     </p>
                   </div>
                   
-                  {/* Row 3: Phone + Handler */}
+                  {/* Row 3: Status + Handler */}
                   <div className="mt-2 pl-[52px] flex items-center gap-2 flex-wrap">
-                    {/* Last 4 digits of WhatsApp phone */}
-                    {conv.whatsappPhone && (
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Phone className="h-3 w-3" />
-                        <span>{conv.whatsappPhone.slice(-4)}</span>
-                      </div>
-                    )}
-                    
-                    {/* Handler Badge with icon and name */}
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[10px] h-5 px-1.5 gap-1 max-w-[120px]",
-                        conv.handler === "ai"
-                          ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                          : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
-                      )}
-                    >
-                      {conv.handler === "ai" ? (
-                        <>
-                          <Zap className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">{conv.aiAgentName}</span>
-                        </>
-                      ) : (
-                        <>
-                          <User className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
-                        </>
-                      )}
-                    </Badge>
-                    
                     {/* Client Status Badge */}
                     {conv.clientStatus && (
                       <Badge 
@@ -1564,6 +1531,31 @@ export default function Conversations() {
                         {tag.name}
                       </Badge>
                     ))}
+                  </div>
+                  
+                  {/* Row 4: Handler Badge */}
+                  <div className="mt-1.5 pl-[52px]">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] h-5 px-1.5 gap-1 max-w-[140px]",
+                        conv.handler === "ai"
+                          ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                          : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                    >
+                      {conv.handler === "ai" ? (
+                        <>
+                          <Zap className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">IA {conv.aiAgentName}</span>
+                        </>
+                      ) : (
+                        <>
+                          <User className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
+                        </>
+                      )}
+                    </Badge>
                   </div>
                 </div>
               ))

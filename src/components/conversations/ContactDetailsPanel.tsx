@@ -42,10 +42,10 @@ import {
   Users,
   CircleDot,
   Image as ImageIcon,
-  Video,
   File,
   Cloud,
   Zap,
+  Music,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -125,9 +125,10 @@ export function ContactDetailsPanel({
   const [infoOpen, setInfoOpen] = useState(false);
   const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
   const [attendantSearch, setAttendantSearch] = useState("");
-  const [mediaTab, setMediaTab] = useState<"images" | "videos" | "docs">("images");
+  const [mediaTab, setMediaTab] = useState<"images" | "audio" | "docs" | "cloud">("images");
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [cloudFiles, setCloudFiles] = useState<Array<{ name: string; url: string; created_at: string }>>([]);
   
   // Collapsible states for properties
   const [statusOpen, setStatusOpen] = useState(false);
@@ -156,6 +157,31 @@ export function ContactDetailsPanel({
     fetchMedia();
   }, [conversation?.id]);
 
+  // Fetch cloud files from storage
+  useEffect(() => {
+    if (!conversation?.id || mediaTab !== "cloud") return;
+    
+    const fetchCloudFiles = async () => {
+      setMediaLoading(true);
+      const { data, error } = await supabase
+        .storage
+        .from("chat-media")
+        .list(conversation.id, { limit: 50, sortBy: { column: "created_at", order: "desc" } });
+      
+      if (!error && data) {
+        const files = data.map(file => ({
+          name: file.name,
+          url: supabase.storage.from("chat-media").getPublicUrl(`${conversation.id}/${file.name}`).data.publicUrl,
+          created_at: file.created_at || new Date().toISOString(),
+        }));
+        setCloudFiles(files);
+      }
+      setMediaLoading(false);
+    };
+    
+    fetchCloudFiles();
+  }, [conversation?.id, mediaTab]);
+
   // Filter media by type
   const filteredMedia = useMemo(() => {
     return mediaItems.filter(item => {
@@ -165,8 +191,8 @@ export function ContactDetailsPanel({
       if (mediaTab === "images") {
         return mimeType.includes("image") || msgType === "image";
       }
-      if (mediaTab === "videos") {
-        return mimeType.includes("video") || msgType === "video";
+      if (mediaTab === "audio") {
+        return mimeType.includes("audio") || msgType === "audio" || msgType === "ptt";
       }
       if (mediaTab === "docs") {
         return mimeType.includes("pdf") || mimeType.includes("document") || 
@@ -622,19 +648,23 @@ export function ContactDetailsPanel({
               Mídias
             </h5>
             
-            <Tabs value={mediaTab} onValueChange={(v) => setMediaTab(v as "images" | "videos" | "docs")}>
-              <TabsList className="grid w-full grid-cols-3 h-8">
-                <TabsTrigger value="images" className="text-xs h-7 gap-1">
+            <Tabs value={mediaTab} onValueChange={(v) => setMediaTab(v as "images" | "audio" | "docs" | "cloud")}>
+              <TabsList className="grid w-full grid-cols-4 h-8">
+                <TabsTrigger value="images" className="text-xs h-7 gap-1 px-1">
                   <ImageIcon className="h-3 w-3" />
                   Imagens
                 </TabsTrigger>
-                <TabsTrigger value="videos" className="text-xs h-7 gap-1">
-                  <Video className="h-3 w-3" />
-                  Vídeos
+                <TabsTrigger value="audio" className="text-xs h-7 gap-1 px-1">
+                  <Music className="h-3 w-3" />
+                  Áudio
                 </TabsTrigger>
-                <TabsTrigger value="docs" className="text-xs h-7 gap-1">
+                <TabsTrigger value="docs" className="text-xs h-7 gap-1 px-1">
                   <File className="h-3 w-3" />
                   Docs
+                </TabsTrigger>
+                <TabsTrigger value="cloud" className="text-xs h-7 gap-1 px-1">
+                  <Cloud className="h-3 w-3" />
+                  Nuvem
                 </TabsTrigger>
               </TabsList>
               
@@ -643,10 +673,37 @@ export function ContactDetailsPanel({
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
                   </div>
+                ) : mediaTab === "cloud" ? (
+                  cloudFiles.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                      <Cloud className="h-8 w-8 mb-2 opacity-50" />
+                      <span className="text-sm">Nenhum arquivo na nuvem</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {cloudFiles.map((file, index) => (
+                        <a 
+                          key={index}
+                          href={file.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
+                        >
+                          <Cloud className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs truncate">{file.name}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {formatDistanceToNow(new Date(file.created_at), { addSuffix: true, locale: ptBR })}
+                            </p>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  )
                 ) : filteredMedia.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     {mediaTab === "images" && <ImageIcon className="h-8 w-8 mb-2 opacity-50" />}
-                    {mediaTab === "videos" && <Video className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaTab === "audio" && <Music className="h-8 w-8 mb-2 opacity-50" />}
                     {mediaTab === "docs" && <File className="h-8 w-8 mb-2 opacity-50" />}
                     <span className="text-sm">Nenhuma mídia encontrada</span>
                   </div>
@@ -677,8 +734,8 @@ export function ContactDetailsPanel({
                             rel="noopener noreferrer"
                             className="flex items-center gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
                           >
-                            {mediaTab === "videos" ? (
-                              <Video className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            {mediaTab === "audio" ? (
+                              <Music className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                             ) : (
                               <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                             )}
