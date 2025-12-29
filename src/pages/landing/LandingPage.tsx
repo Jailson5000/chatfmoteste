@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   ArrowRight,
   Bot,
   Zap,
@@ -14,6 +20,7 @@ import {
   Brain,
   HeartHandshake,
   Phone,
+  HelpCircle,
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 
@@ -63,6 +70,49 @@ export function LandingPage() {
       ],
       cta: "Falar com vendas",
       ctaLink: "/auth?tab=signup",
+    },
+  ];
+
+  const faqs = [
+    {
+      question: "O que é o MiauChat?",
+      answer:
+        "O MiauChat é uma plataforma de atendimento com Inteligência Artificial que permite automatizar conversas no WhatsApp. Nossos Agentes IA qualificam leads, respondem dúvidas, agendam reuniões e direcionam clientes para vendas — tudo 24 horas por dia, 7 dias por semana.",
+    },
+    {
+      question: "Como funciona o Agente de IA?",
+      answer:
+        "O Agente IA é treinado com informações do seu negócio: produtos, serviços, tom de voz e objetivos. Ele conversa de forma natural e humanizada, entendendo o contexto das mensagens e respondendo de maneira precisa e empática.",
+    },
+    {
+      question: "Preciso de conhecimento técnico para usar?",
+      answer:
+        "Não! O MiauChat foi desenvolvido para ser simples e intuitivo. Nossa equipe configura o Agente IA para você, e o painel de controle é fácil de usar. Você não precisa programar nada.",
+    },
+    {
+      question: "Posso integrar com meu CRM ou outras ferramentas?",
+      answer:
+        "Sim! O plano Enterprise oferece API completa e integrações avançadas com CRMs, ERPs e outras ferramentas que sua empresa já utiliza.",
+    },
+    {
+      question: "Qual a diferença entre os planos?",
+      answer:
+        "O plano Start é ideal para começar com 1 WhatsApp e até 3 usuários. O Pro oferece mais recursos como IA avançada e relatórios. O Enterprise é para operações robustas com API completa, integrações avançadas e suporte prioritário.",
+    },
+    {
+      question: "Existe período de teste ou contrato mínimo?",
+      answer:
+        "Oferecemos demonstração gratuita para você conhecer a plataforma. Não há contrato mínimo de fidelidade — você pode cancelar quando quiser.",
+    },
+    {
+      question: "Como é o suporte ao cliente?",
+      answer:
+        "Todos os planos incluem suporte por chat e email. O plano Enterprise conta com suporte prioritário e SLA dedicada para garantir atendimento rápido.",
+    },
+    {
+      question: "O MiauChat funciona com grupos do WhatsApp?",
+      answer:
+        "Atualmente, o MiauChat é focado em conversas individuais (1:1) para atendimento e vendas. Funcionalidades para grupos estão em nosso roadmap.",
     },
   ];
 
@@ -400,6 +450,60 @@ export function LandingPage() {
                 </Button>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Seção FAQ */}
+      <section
+        id="faq"
+        className="relative z-10 py-24 md:py-32 border-t border-white/[0.06]"
+      >
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 mb-6">
+              <HelpCircle className="h-8 w-8 text-red-500" strokeWidth={1.5} />
+            </div>
+            <p className="text-red-500 text-sm font-medium tracking-widest uppercase mb-4">
+              Dúvidas Frequentes
+            </p>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold">
+              Perguntas e Respostas
+            </h2>
+            <p className="mt-4 text-white/40 text-lg">
+              Tudo o que você precisa saber sobre o MiauChat
+            </p>
+          </div>
+
+          <Accordion type="single" collapsible className="space-y-4">
+            {faqs.map((faq, index) => (
+              <AccordionItem
+                key={index}
+                value={`item-${index}`}
+                className="border border-white/[0.06] bg-white/[0.02] rounded-2xl px-6 data-[state=open]:border-red-500/20 data-[state=open]:bg-red-500/[0.02] transition-all"
+              >
+                <AccordionTrigger className="text-left text-base md:text-lg font-medium py-5 hover:no-underline hover:text-red-400 transition-colors [&[data-state=open]]:text-red-400">
+                  {faq.question}
+                </AccordionTrigger>
+                <AccordionContent className="text-white/50 text-base leading-relaxed pb-5">
+                  {faq.answer}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+
+          <div className="mt-12 text-center">
+            <p className="text-white/40 mb-4">Ainda tem dúvidas?</p>
+            <Button
+              asChild
+              variant="outline"
+              className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-12 px-8 rounded-xl"
+            >
+              <a href="#contato">
+                <MessageCircle className="mr-2 h-4 w-4" />
+                Fale com nossa equipe
+              </a>
+            </Button>
           </div>
         </div>
       </section>
