@@ -68,6 +68,7 @@ import { ConversationFilters } from "@/components/conversations/ConversationFilt
 import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
+import { ConversationSidebarCard } from "@/components/conversations/ConversationSidebarCard";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { useConversations } from "@/hooks/useConversations";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
@@ -494,30 +495,44 @@ export default function Conversations() {
 
   // Map conversations for display with tag colors
   const mappedConversations = useMemo(() => {
-    // Create a map of tag names to their colors
     const tagColorMap = tags.reduce((acc, tag) => {
       acc[tag.name] = tag.color;
       return acc;
     }, {} as Record<string, string>);
 
-    // Get the active AI agent name
-    const activeAutomation = automations.find(a => a.is_active);
-    const aiAgentName = activeAutomation?.name || 'IA';
+    const formatTimeAgoShort = (date: string | null) => {
+      if (!date) return "---";
+      try {
+        const result = formatDistanceToNow(new Date(date), { addSuffix: false, locale: ptBR });
+        return result
+          .replace(" minutos", "m")
+          .replace(" minuto", "m")
+          .replace(" horas", "h")
+          .replace(" hora", "h")
+          .replace(" dias", "d")
+          .replace(" dia", "d")
+          .replace("menos de um minuto", "<1m");
+      } catch {
+        return "---";
+      }
+    };
 
-    return conversations.map(conv => ({
+    // Get the active AI agent name
+    const activeAutomation = automations.find((a) => a.is_active);
+    const aiAgentName = activeAutomation?.name || "IA";
+
+    return conversations.map((conv) => ({
       id: conv.id,
       name: conv.contact_name || conv.contact_phone || "Sem nome",
       phone: conv.contact_phone || "",
       lastMessage: conv.last_message?.content || "Sem mensagens",
-      time: conv.last_message_at 
-        ? formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: ptBR })
-        : "---",
+      time: formatTimeAgoShort(conv.last_message_at),
       unread: unreadCounts[conv.id] || 0,
-      handler: conv.current_handler as 'ai' | 'human',
+      handler: conv.current_handler as "ai" | "human",
       status: conv.status,
-      tags: (conv.tags || []).map(tagName => ({
+      tags: (conv.tags || []).map((tagName) => ({
         name: tagName,
-        color: tagColorMap[tagName] || '#6366f1'
+        color: tagColorMap[tagName] || "#6366f1",
       })),
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.instance_name || null,
@@ -1435,108 +1450,12 @@ export default function Conversations() {
               </div>
             ) : (
               filteredConversations.map((conv) => (
-                <div
+                <ConversationSidebarCard
                   key={conv.id}
+                  conversation={conv}
+                  selected={selectedConversationId === conv.id}
                   onClick={() => handleSelectConversation(conv.id)}
-                  className={cn(
-                    "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted border border-transparent",
-                    selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20 border-primary/20"
-                  )}
-                >
-                  {/* Row 1: Avatar, Name, Time */}
-                  <div className="flex items-center gap-3">
-                    {/* Contact Avatar with unread badge */}
-                    <div className="relative flex-shrink-0">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden border-2 border-background shadow-sm">
-                        {conv.avatarUrl ? (
-                          <img 
-                            src={conv.avatarUrl} 
-                            alt={conv.name}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                            }}
-                          />
-                        ) : null}
-                        <span className={cn("text-xs font-bold text-primary", conv.avatarUrl && "hidden")}>
-                          {conv.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                        </span>
-                      </div>
-                      {/* Unread badge on avatar */}
-                      {conv.unread > 0 && (
-                        <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-red-500 flex items-center justify-center border-2 border-card">
-                          <span className="text-[10px] font-bold text-white px-1">{conv.unread > 99 ? '99+' : conv.unread}</span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
-                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Row 2: Last message preview */}
-                  <div className="mt-1.5 pl-[52px]">
-                    <p className={cn(
-                      "text-xs text-muted-foreground truncate flex items-center gap-1",
-                      conv.unread > 0 && "text-foreground font-medium"
-                    )}>
-                      <MessageCircle className="h-3 w-3 text-green-500 flex-shrink-0" />
-                      {conv.lastMessage}
-                    </p>
-                  </div>
-                  
-                  {/* Row 3: Status Badge */}
-                  {conv.clientStatus && (
-                    <div className="mt-1.5 pl-[52px]">
-                      <Badge 
-                        variant="outline" 
-                        className="text-[10px] h-5 px-1.5 font-medium"
-                        style={{ 
-                          borderColor: conv.clientStatus.color, 
-                          backgroundColor: `${conv.clientStatus.color}15`,
-                          color: conv.clientStatus.color 
-                        }}
-                      >
-                        {conv.clientStatus.name}
-                      </Badge>
-                    </div>
-                  )}
-                  
-                  {/* Row 4: Phone digits + Handler */}
-                  <div className="mt-1.5 pl-[52px] flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <MessageCircle className="h-3 w-3" />
-                      <Phone className="h-3 w-3" />
-                      {conv.whatsappPhone ? conv.whatsappPhone.slice(-4) : "----"}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[10px] h-5 px-1.5 gap-1",
-                        conv.handler === "ai"
-                          ? "border-purple-500/50 text-purple-400 bg-purple-900/20"
-                          : "border-blue-500/50 text-blue-400 bg-blue-900/20"
-                      )}
-                    >
-                      {conv.handler === "ai" ? (
-                        <>
-                          <Zap className="h-3 w-3 flex-shrink-0" />
-                          <span>IA {conv.aiAgentName}</span>
-                        </>
-                      ) : (
-                        <>
-                          <User className="h-3 w-3 flex-shrink-0" />
-                          <span>{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
-                        </>
-                      )}
-                    </Badge>
-                  </div>
-                </div>
+                />
               ))
             )}
           </div>
