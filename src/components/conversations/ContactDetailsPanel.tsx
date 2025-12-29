@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Collapsible,
   CollapsibleContent,
@@ -40,10 +41,30 @@ import {
   Check,
   Users,
   CircleDot,
+  Image as ImageIcon,
+  Video,
+  File,
+  Cloud,
+  Zap,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+
+interface Automation {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+interface MediaItem {
+  id: string;
+  media_url: string;
+  media_mime_type: string | null;
+  message_type: string;
+  created_at: string;
+}
 
 interface ContactDetailsPanelProps {
   conversation: {
@@ -71,6 +92,7 @@ interface ContactDetailsPanelProps {
   tags: Array<{ id: string; name: string; color: string }>;
   statuses: Array<{ id: string; name: string; color: string }>;
   members: Array<{ id: string; full_name: string }>;
+  automations: Automation[];
   onClose: () => void;
   onEditName: () => void;
   onTransferHandler: (handler: 'ai' | 'human', assignedTo?: string | null) => void;
@@ -92,6 +114,7 @@ export function ContactDetailsPanel({
   tags,
   statuses,
   members,
+  automations,
   onClose,
   onEditName,
   onTransferHandler,
@@ -102,11 +125,57 @@ export function ContactDetailsPanel({
   const [infoOpen, setInfoOpen] = useState(false);
   const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
   const [attendantSearch, setAttendantSearch] = useState("");
+  const [mediaTab, setMediaTab] = useState<"images" | "videos" | "docs">("images");
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
   
   // Collapsible states for properties
   const [statusOpen, setStatusOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [departmentOpen, setDepartmentOpen] = useState(false);
+
+  // Fetch media items when conversation changes
+  useEffect(() => {
+    if (!conversation?.id) return;
+    
+    const fetchMedia = async () => {
+      setMediaLoading(true);
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, media_url, media_mime_type, message_type, created_at")
+        .eq("conversation_id", conversation.id)
+        .not("media_url", "is", null)
+        .order("created_at", { ascending: false });
+      
+      if (!error && data) {
+        setMediaItems(data as MediaItem[]);
+      }
+      setMediaLoading(false);
+    };
+    
+    fetchMedia();
+  }, [conversation?.id]);
+
+  // Filter media by type
+  const filteredMedia = useMemo(() => {
+    return mediaItems.filter(item => {
+      const mimeType = item.media_mime_type?.toLowerCase() || "";
+      const msgType = item.message_type?.toLowerCase() || "";
+      
+      if (mediaTab === "images") {
+        return mimeType.includes("image") || msgType === "image";
+      }
+      if (mediaTab === "videos") {
+        return mimeType.includes("video") || msgType === "video";
+      }
+      if (mediaTab === "docs") {
+        return mimeType.includes("pdf") || mimeType.includes("document") || 
+               mimeType.includes("text") || mimeType.includes("application") ||
+               msgType === "document";
+      }
+      return false;
+    });
+  }, [mediaItems, mediaTab]);
 
   // Get current status
   const currentStatus = useMemo(() => {
@@ -128,13 +197,21 @@ export function ContactDetailsPanel({
       .filter(Boolean) as Array<{ id: string; name: string; color: string }>;
   }, [conversation?.tags, tags]);
 
-  // Filtered members
+  // Filtered members for search
   const filteredMembers = useMemo(() => {
     if (!attendantSearch) return members;
     return members.filter(m => 
       m.full_name.toLowerCase().includes(attendantSearch.toLowerCase())
     );
   }, [members, attendantSearch]);
+
+  // Filtered automations for search
+  const filteredAutomations = useMemo(() => {
+    if (!attendantSearch) return automations;
+    return automations.filter(a => 
+      a.name.toLowerCase().includes(attendantSearch.toLowerCase())
+    );
+  }, [automations, attendantSearch]);
 
   if (!conversation) {
     return (
@@ -257,30 +334,43 @@ export function ContactDetailsPanel({
                       onValueChange={setAttendantSearch}
                     />
                     <CommandList>
-                      <CommandEmpty>Nenhum atendente encontrado.</CommandEmpty>
-                      <CommandGroup>
-                        {/* AI Option */}
-                        <CommandItem
-                          value="ai"
-                          onSelect={() => {
-                            onTransferHandler("ai", null);
-                            setAttendantPopoverOpen(false);
-                            setAttendantSearch("");
-                          }}
-                          className="flex items-center justify-between"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                              <Bot className="h-4 w-4 text-purple-600" />
-                            </div>
-                            <span>Inteligência Artificial</span>
-                          </div>
-                          {conversation.current_handler === "ai" && (
-                            <Check className="h-4 w-4 text-primary" />
-                          )}
-                        </CommandItem>
+                      <CommandEmpty>Nenhum responsável encontrado.</CommandEmpty>
+                      
+                      {/* AI Agents Section */}
+                      {filteredAutomations.length > 0 && (
+                        <CommandGroup heading="Agentes IA">
+                          {filteredAutomations.map(automation => (
+                            <CommandItem
+                              key={automation.id}
+                              value={`ai-${automation.name}`}
+                              onSelect={() => {
+                                onTransferHandler("ai", null);
+                                setAttendantPopoverOpen(false);
+                                setAttendantSearch("");
+                              }}
+                              className="flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                                  <Zap className="h-4 w-4 text-purple-600" />
+                                </div>
+                                <div className="flex flex-col">
+                                  <span>{automation.name}</span>
+                                  {automation.is_active && (
+                                    <span className="text-[10px] text-green-600">Ativo</span>
+                                  )}
+                                </div>
+                              </div>
+                              {conversation.current_handler === "ai" && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      )}
 
-                        {/* Team Members */}
+                      {/* Team Members Section */}
+                      <CommandGroup heading="Atendentes">
                         {filteredMembers.map(member => (
                           <CommandItem
                             key={member.id}
@@ -294,7 +384,7 @@ export function ContactDetailsPanel({
                           >
                             <div className="flex items-center gap-2">
                               <Avatar className="h-8 w-8">
-                                <AvatarFallback className="text-xs">
+                                <AvatarFallback className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700">
                                   {getInitials(member.full_name)}
                                 </AvatarFallback>
                               </Avatar>
@@ -306,6 +396,11 @@ export function ContactDetailsPanel({
                             )}
                           </CommandItem>
                         ))}
+                        {filteredMembers.length === 0 && (
+                          <div className="py-2 px-4 text-xs text-muted-foreground">
+                            Nenhum atendente cadastrado
+                          </div>
+                        )}
                       </CommandGroup>
                     </CommandList>
                     <div className="p-2 border-t text-xs text-muted-foreground">
@@ -517,6 +612,92 @@ export function ContactDetailsPanel({
                 )}
               </CollapsibleContent>
             </Collapsible>
+          </div>
+
+          <Separator />
+
+          {/* Media Gallery Section */}
+          <div className="space-y-3">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Mídias
+            </h5>
+            
+            <Tabs value={mediaTab} onValueChange={(v) => setMediaTab(v as "images" | "videos" | "docs")}>
+              <TabsList className="grid w-full grid-cols-3 h-8">
+                <TabsTrigger value="images" className="text-xs h-7 gap-1">
+                  <ImageIcon className="h-3 w-3" />
+                  Imagens
+                </TabsTrigger>
+                <TabsTrigger value="videos" className="text-xs h-7 gap-1">
+                  <Video className="h-3 w-3" />
+                  Vídeos
+                </TabsTrigger>
+                <TabsTrigger value="docs" className="text-xs h-7 gap-1">
+                  <File className="h-3 w-3" />
+                  Docs
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value={mediaTab} className="mt-3">
+                {mediaLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+                  </div>
+                ) : filteredMedia.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    {mediaTab === "images" && <ImageIcon className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaTab === "videos" && <Video className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaTab === "docs" && <File className="h-8 w-8 mb-2 opacity-50" />}
+                    <span className="text-sm">Nenhuma mídia encontrada</span>
+                  </div>
+                ) : (
+                  <div className={cn(
+                    "gap-2",
+                    mediaTab === "images" ? "grid grid-cols-3" : "space-y-2"
+                  )}>
+                    {filteredMedia.map(item => (
+                      <div key={item.id}>
+                        {mediaTab === "images" ? (
+                          <a 
+                            href={item.media_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="block aspect-square rounded-md overflow-hidden bg-muted hover:opacity-80 transition-opacity"
+                          >
+                            <img 
+                              src={item.media_url} 
+                              alt="Media" 
+                              className="w-full h-full object-cover"
+                            />
+                          </a>
+                        ) : (
+                          <a 
+                            href={item.media_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
+                          >
+                            {mediaTab === "videos" ? (
+                              <Video className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            ) : (
+                              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs truncate">
+                                {item.media_mime_type?.split("/")[1]?.toUpperCase() || mediaTab.toUpperCase()}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: ptBR })}
+                              </p>
+                            </div>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
 
           <Separator />
