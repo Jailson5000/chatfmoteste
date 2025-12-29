@@ -515,6 +515,7 @@ export default function Conversations() {
       })),
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.instance_name || null,
+      whatsappPhone: conv.whatsapp_instance?.phone_number || null,
       avatarUrl: conv.client?.avatar_url || null,
       clientStatus: conv.client?.custom_status || null,
     }));
@@ -1373,7 +1374,7 @@ export default function Conversations() {
 
       <div className="hidden md:flex h-full">
         {/* Conversations List Panel - Fixed width */}
-        <div className="w-72 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
+        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1434,11 +1435,12 @@ export default function Conversations() {
                   key={conv.id}
                   onClick={() => handleSelectConversation(conv.id)}
                   className={cn(
-                    "p-2 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted",
-                    selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20"
+                    "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted border border-transparent",
+                    selectedConversationId === conv.id && "bg-muted ring-1 ring-primary/20 border-primary/20"
                   )}
                 >
-                  <div className="flex items-start gap-2">
+                  {/* Row 1: Avatar, Name, Time */}
+                  <div className="flex items-center gap-3">
                     {/* Contact Avatar with unread badge */}
                     <div className="relative flex-shrink-0">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden border-2 border-background shadow-sm">
@@ -1463,68 +1465,90 @@ export default function Conversations() {
                           <span className="text-[10px] font-bold text-white px-1">{conv.unread > 99 ? '99+' : conv.unread}</span>
                         </div>
                       )}
-                      {/* WhatsApp indicator */}
-                      <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full bg-green-500 flex items-center justify-center border-2 border-card">
-                        <MessageCircle className="h-2 w-2 text-white" />
-                      </div>
                     </div>
+                    
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className={cn("text-[13px] font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
-                        <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
-                      </div>
-                      <p className={cn(
-                        "text-[11px] text-muted-foreground truncate flex items-center gap-1",
-                        conv.unread > 0 && "text-foreground font-medium"
-                      )}>
-                        <MessageCircle className="h-3 w-3 text-green-500 flex-shrink-0" />
-                        {conv.lastMessage}
-                      </p>
-                      <div className="flex items-center gap-1 mt-1 flex-wrap">
-                        {/* Client Status Badge */}
-                        {conv.clientStatus && (
-                          <Badge 
-                            variant="outline" 
-                            className="text-[9px] h-4 px-1 font-medium"
-                            style={{ 
-                              borderColor: conv.clientStatus.color, 
-                              backgroundColor: `${conv.clientStatus.color}15`,
-                              color: conv.clientStatus.color 
-                            }}
-                          >
-                            {conv.clientStatus.name}
-                          </Badge>
-                        )}
-                        {/* Handler Badge */}
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[9px] h-4 px-1",
-                            conv.handler === "ai"
-                              ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                              : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
-                          )}
-                        >
-                          {conv.handler === "ai" ? <Bot className="h-2 w-2 mr-0.5" /> : <UserCheck className="h-2 w-2 mr-0.5" />}
-                          {conv.handler === "ai" ? "IA" : (conv.assignedTo?.split(" ")[0] || "Humano")}
-                        </Badge>
-                        {/* Tags */}
-                        {conv.tags.slice(0, 1).map((tag, i) => (
-                          <Badge 
-                            key={i}
-                            variant="outline" 
-                            className="text-[9px] h-4 px-1 truncate max-w-[50px]"
-                            style={{ 
-                              borderColor: tag.color, 
-                              backgroundColor: `${tag.color}15`,
-                              color: tag.color 
-                            }}
-                          >
-                            {tag.name}
-                          </Badge>
-                        ))}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn("text-sm font-medium truncate", conv.unread > 0 && "font-semibold")}>{conv.name}</span>
+                        <span className="text-[11px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                       </div>
                     </div>
+                  </div>
+                  
+                  {/* Row 2: Last message preview */}
+                  <div className="mt-1.5 pl-[52px]">
+                    <p className={cn(
+                      "text-xs text-muted-foreground truncate flex items-center gap-1",
+                      conv.unread > 0 && "text-foreground font-medium"
+                    )}>
+                      <MessageCircle className="h-3 w-3 text-green-500 flex-shrink-0" />
+                      {conv.lastMessage}
+                    </p>
+                  </div>
+                  
+                  {/* Row 3: Phone + Handler */}
+                  <div className="mt-2 pl-[52px] flex items-center gap-2 flex-wrap">
+                    {/* Last 4 digits of WhatsApp phone */}
+                    {conv.whatsappPhone && (
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Phone className="h-3 w-3" />
+                        <span>{conv.whatsappPhone.slice(-4)}</span>
+                      </div>
+                    )}
+                    
+                    {/* Handler Badge with icon and name */}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] h-5 px-1.5 gap-1",
+                        conv.handler === "ai"
+                          ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                          : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                    >
+                      {conv.handler === "ai" ? (
+                        <>
+                          <Zap className="h-3 w-3" />
+                          <span>IA</span>
+                        </>
+                      ) : (
+                        <>
+                          <User className="h-3 w-3" />
+                          <span>{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
+                        </>
+                      )}
+                    </Badge>
+                    
+                    {/* Client Status Badge */}
+                    {conv.clientStatus && (
+                      <Badge 
+                        variant="outline" 
+                        className="text-[10px] h-5 px-1.5 font-medium"
+                        style={{ 
+                          borderColor: conv.clientStatus.color, 
+                          backgroundColor: `${conv.clientStatus.color}15`,
+                          color: conv.clientStatus.color 
+                        }}
+                      >
+                        {conv.clientStatus.name}
+                      </Badge>
+                    )}
+                    
+                    {/* Tags */}
+                    {conv.tags.slice(0, 1).map((tag, i) => (
+                      <Badge 
+                        key={i}
+                        variant="outline" 
+                        className="text-[10px] h-5 px-1.5 truncate max-w-[60px]"
+                        style={{ 
+                          borderColor: tag.color, 
+                          backgroundColor: `${tag.color}15`,
+                          color: tag.color 
+                        }}
+                      >
+                        {tag.name}
+                      </Badge>
+                    ))}
                   </div>
                 </div>
               ))
