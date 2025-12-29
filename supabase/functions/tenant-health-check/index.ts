@@ -161,6 +161,31 @@ serve(async (req) => {
             last_health_check_at: new Date().toISOString(),
           })
           .eq('id', company.id);
+
+        // Send INTEGRATION_DOWN notification if unhealthy
+        if (healthStatus === 'unhealthy') {
+          try {
+            await fetch(`${supabaseUrl}/functions/v1/send-admin-notification`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({
+                type: 'INTEGRATION_DOWN',
+                tenant_id: company.id,
+                company_name: company.name,
+                subdomain: subdomain,
+                integration_name: issues.join(', '),
+                status: 'OFFLINE',
+                last_success: 'N/A',
+              }),
+            });
+            console.log(`  Notification sent for unhealthy tenant: ${company.name}`);
+          } catch (notifyError) {
+            console.warn('  Failed to send notification:', notifyError);
+          }
+        }
       }
 
       console.log(`  Status: ${healthStatus} | Issues: ${issues.length}`);
