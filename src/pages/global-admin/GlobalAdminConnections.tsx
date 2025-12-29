@@ -465,7 +465,7 @@ export default function GlobalAdminConnections() {
         </div>
 
         {/* Uptime Chart */}
-        <InstanceUptimeChart days={7} />
+        <InstanceUptimeChart />
 
         {/* Search and Filters */}
         <Card>

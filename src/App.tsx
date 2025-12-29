@@ -38,6 +38,7 @@ import {
   GlobalAdminN8NSettings,
   GlobalAdminAuditLogs,
   GlobalAdminProvisioningDashboard,
+  GlobalAdminAlertHistory,
 } from "./pages/global-admin";
 
 const queryClient = new QueryClient();
@@ -225,6 +226,7 @@ const App = () => (
             <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
             <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
             <Route path="provisioning" element={<GlobalAdminProvisioningDashboard />} />
+            <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
           </Route>
           
           {/* Catch-all route */}

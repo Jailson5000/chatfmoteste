@@ -1,8 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Loader2, Activity, TrendingUp } from "lucide-react";
 import {
   AreaChart,
@@ -36,10 +36,13 @@ interface UptimeDataPoint {
 
 interface InstanceUptimeChartProps {
   instanceId?: string;
-  days?: number;
 }
 
-export function InstanceUptimeChart({ instanceId, days = 7 }: InstanceUptimeChartProps) {
+type PeriodOption = "1" | "7" | "30";
+
+export function InstanceUptimeChart({ instanceId }: InstanceUptimeChartProps) {
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodOption>("7");
+  const days = parseInt(selectedPeriod);
   const { data: history = [], isLoading } = useQuery({
     queryKey: ["instance-status-history", instanceId, days],
     queryFn: async () => {
@@ -163,15 +166,28 @@ export function InstanceUptimeChart({ instanceId, days = 7 }: InstanceUptimeChar
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
             Uptime das Instâncias
-            <Badge variant="outline" className="ml-2">
-              Últimos {days} dias
-            </Badge>
           </CardTitle>
           <div className="flex items-center gap-4">
+            <ToggleGroup
+              type="single"
+              value={selectedPeriod}
+              onValueChange={(value) => value && setSelectedPeriod(value as PeriodOption)}
+              className="border rounded-lg"
+            >
+              <ToggleGroupItem value="1" aria-label="Últimas 24h" className="text-xs px-3">
+                24h
+              </ToggleGroupItem>
+              <ToggleGroupItem value="7" aria-label="Últimos 7 dias" className="text-xs px-3">
+                7 dias
+              </ToggleGroupItem>
+              <ToggleGroupItem value="30" aria-label="Últimos 30 dias" className="text-xs px-3">
+                30 dias
+              </ToggleGroupItem>
+            </ToggleGroup>
             <div className="text-right">
               <div className="text-xs text-muted-foreground">Uptime Atual</div>
               <div
