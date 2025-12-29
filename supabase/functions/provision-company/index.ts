@@ -185,42 +185,38 @@ serve(async (req) => {
       console.log('Automation created:', automation?.id);
     }
 
-    // Step 4: Notify N8N about new company provisioning (optional)
-    const n8nProvisionUrl = 'https://n8n.fmoadv.com.br/webhook/nova-empresa';
-    
+    // Step 5: Create n8n workflow for the company
+    let n8nWorkflowResult = null;
     try {
-      const n8nPayload = {
-        event: 'company_provisioned',
-        company_id: company.id,
-        law_firm_id: lawFirm.id,
-        company_name: name,
-        subdomain: subdomain,
-        subdomain_url: `https://${subdomain}.miauchat.com.br`,
-        email: email,
-        plan_id: plan_id,
-        created_by: user.id,
-        created_at: new Date().toISOString(),
-      };
-
-      console.log('Notifying N8N about new company:', n8nPayload);
-
-      const n8nResponse = await fetch(n8nProvisionUrl, {
+      console.log('Creating n8n workflow for company...');
+      
+      const n8nResponse = await fetch(`${supabaseUrl}/functions/v1/create-n8n-workflow`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(n8nPayload),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          company_id: company.id,
+          company_name: name,
+          law_firm_id: lawFirm.id,
+          subdomain: subdomain,
+        }),
       });
 
       if (n8nResponse.ok) {
-        console.log('N8N notified successfully');
+        n8nWorkflowResult = await n8nResponse.json();
+        console.log('N8N workflow created:', n8nWorkflowResult);
       } else {
-        console.warn('N8N notification failed:', n8nResponse.status);
+        const errorText = await n8nResponse.text();
+        console.warn('Failed to create n8n workflow:', errorText);
       }
     } catch (n8nError) {
-      console.warn('Failed to notify N8N:', n8nError);
-      // Continue - N8N notification is not critical
+      console.warn('Error creating n8n workflow:', n8nError);
+      // Continue - n8n workflow creation is not critical for provisioning
     }
 
-    // Step 5: Log the audit
+    // Step 6: Log the audit
     await supabase.from('audit_logs').insert({
       admin_user_id: user.id,
       action: 'create',
@@ -232,6 +228,7 @@ serve(async (req) => {
         name,
         subdomain,
         plan_id,
+        n8n_workflow_id: n8nWorkflowResult?.workflow_id,
       },
     });
 
@@ -245,6 +242,8 @@ serve(async (req) => {
         subdomain: subdomain,
         subdomain_url: `https://${subdomain}.miauchat.com.br`,
         automation_id: automation?.id,
+        n8n_workflow_id: n8nWorkflowResult?.workflow_id,
+        n8n_workflow_name: n8nWorkflowResult?.workflow_name,
         message: 'Company provisioned successfully',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

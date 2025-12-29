@@ -34,10 +34,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 function generateSubdomainFromName(name: string): string {
   return name
@@ -51,7 +52,7 @@ function generateSubdomainFromName(name: string): string {
 }
 
 export default function GlobalAdminCompanies() {
-  const { companies, isLoading, createCompany, updateCompany, deleteCompany } = useCompanies();
+  const { companies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow } = useCompanies();
   const { plans } = usePlans();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -299,6 +300,7 @@ export default function GlobalAdminCompanies() {
                   <TableHead>Subdomínio</TableHead>
                   <TableHead>Plano</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Workflow n8n</TableHead>
                   <TableHead>Usuários</TableHead>
                   <TableHead>Conexões</TableHead>
                   <TableHead>Criada em</TableHead>
@@ -308,7 +310,7 @@ export default function GlobalAdminCompanies() {
               <TableBody>
                 {filteredCompanies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       Nenhuma empresa encontrada
                     </TableCell>
                   </TableRow>
@@ -344,6 +346,58 @@ export default function GlobalAdminCompanies() {
                         <Badge variant={statusColors[company.status] || "outline"}>
                           {statusLabels[company.status] || company.status}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <TooltipProvider>
+                          <div className="flex items-center gap-2">
+                            {company.n8n_workflow_status === 'created' && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-1 text-green-600">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span className="text-xs">{company.n8n_workflow_id?.slice(0, 8)}...</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-medium">{company.n8n_workflow_name}</p>
+                                  <p className="text-xs text-muted-foreground">ID: {company.n8n_workflow_id}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {company.n8n_workflow_status === 'pending' && (
+                              <div className="flex items-center gap-1 text-yellow-600">
+                                <Clock className="h-4 w-4 animate-pulse" />
+                                <span className="text-xs">Criando...</span>
+                              </div>
+                            )}
+                            {company.n8n_workflow_status === 'failed' && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-1 text-destructive">
+                                    <AlertCircle className="h-4 w-4" />
+                                    <span className="text-xs">Falhou</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-medium">Erro ao criar workflow</p>
+                                  <p className="text-xs text-muted-foreground">{company.n8n_last_error}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {(!company.n8n_workflow_status || company.n8n_workflow_status === 'failed') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => retryN8nWorkflow.mutate(company)}
+                                disabled={retryN8nWorkflow.isPending}
+                                className="h-7 px-2"
+                              >
+                                <RefreshCw className={`h-3 w-3 mr-1 ${retryN8nWorkflow.isPending ? 'animate-spin' : ''}`} />
+                                <span className="text-xs">Criar</span>
+                              </Button>
+                            )}
+                          </div>
+                        </TooltipProvider>
                       </TableCell>
                       <TableCell>{company.max_users}</TableCell>
                       <TableCell>{company.max_instances}</TableCell>

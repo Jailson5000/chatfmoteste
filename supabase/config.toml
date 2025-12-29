@@ -17,3 +17,9 @@ verify_jwt = false
 
 [functions.generate-summary]
 verify_jwt = false
+
+[functions.provision-company]
+verify_jwt = false
+
+[functions.create-n8n-workflow]
+verify_jwt = false
