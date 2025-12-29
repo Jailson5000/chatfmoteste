@@ -127,7 +127,30 @@ serve(async (req) => {
 
       // Check if max retries exceeded
       if (currentRetryCount >= BACKOFF_CONFIG.maxRetries) {
-        console.log(`  Max retries (${BACKOFF_CONFIG.maxRetries}) reached, skipping`);
+        console.log(`  Max retries (${BACKOFF_CONFIG.maxRetries}) reached, skipping and sending notification`);
+        
+        // Send notification email for max retries reached
+        try {
+          await fetch(`${supabaseUrl}/functions/v1/send-admin-notification`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+            },
+            body: JSON.stringify({
+              type: 'max_retries_reached',
+              company_id: company.id,
+              company_name: company.name,
+              subdomain: subdomain,
+              retry_count: currentRetryCount,
+              error_message: 'Máximo de tentativas de retry atingido',
+            }),
+          });
+          console.log('  Admin notification sent');
+        } catch (notifyError) {
+          console.warn('  Failed to send admin notification:', notifyError);
+        }
+        
         results.push({
           company_id: company.id,
           company_name: company.name,
