@@ -233,155 +233,157 @@ export default function GlobalAdminCompanies() {
                 Nova Empresa
               </Button>
             </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
+            <DialogContent className="max-h-[85vh] flex flex-col p-0">
+              <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
                 <DialogTitle>Nova Empresa</DialogTitle>
                 <DialogDescription>
                   Preencha os dados para cadastrar uma nova empresa
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Nome da Empresa</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => handleNameChange(e.target.value)}
-                    placeholder="Nome da empresa"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="subdomain">Subdomínio</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="subdomain"
-                      value={formData.subdomain}
-                      onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
-                      placeholder="empresa"
-                      className="flex-1"
-                    />
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Este será o endereço de acesso: https://{formData.subdomain || 'empresa'}.miauchat.com.br
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+              <div className="flex-1 overflow-y-auto px-6 pb-4">
+                <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="document">CNPJ/CPF</Label>
+                    <Label htmlFor="name">Nome da Empresa</Label>
                     <Input
-                      id="document"
-                      value={formData.document}
-                      onChange={(e) => setFormData({ ...formData, document: e.target.value })}
-                      placeholder="00.000.000/0000-00"
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => handleNameChange(e.target.value)}
+                      placeholder="Nome da empresa"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="phone">Telefone</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="(00) 00000-0000"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="contato@empresa.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="plan">Plano</Label>
-                  <Select
-                    value={formData.plan_id}
-                    onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um plano" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {plans.map((plan) => (
-                        <SelectItem key={plan.id} value={plan.id}>
-                          {plan.name} - R$ {plan.price}/mês
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="max_users">Máx. Usuários</Label>
-                    <Input
-                      id="max_users"
-                      type="number"
-                      value={formData.max_users}
-                      onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="max_instances">Máx. Conexões</Label>
-                    <Input
-                      id="max_instances"
-                      type="number"
-                      value={formData.max_instances}
-                      onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
-                    />
-                  </div>
-                </div>
-                
-                {/* Admin User Section */}
-                <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
-                  <p className="text-sm font-medium">Administrador da Empresa</p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="admin_name">Nome do Admin</Label>
+                    <Label htmlFor="subdomain">Subdomínio</Label>
+                    <div className="flex items-center gap-2">
                       <Input
-                        id="admin_name"
-                        value={formData.admin_name}
-                        onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
-                        placeholder="Nome completo"
+                        id="subdomain"
+                        value={formData.subdomain}
+                        onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                        placeholder="empresa"
+                        className="flex-1"
                       />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="admin_email">Email do Admin</Label>
-                      <Input
-                        id="admin_email"
-                        type="email"
-                        value={formData.admin_email}
-                        onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
-                        placeholder="admin@empresa.com"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Um email de acesso inicial será enviado automaticamente para este administrador.
-                  </p>
-                </div>
-                
-                {/* n8n Workflow Settings */}
-                <div className="flex items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="auto_activate" className="text-base font-medium">
-                      Ativar Workflow n8n Automaticamente
-                    </Label>
-                    <p className="text-sm text-muted-foreground">
-                      Ativa o workflow após criação para receber mensagens imediatamente
+                    <p className="text-xs text-muted-foreground">
+                      Este será o endereço de acesso: https://{formData.subdomain || 'empresa'}.miauchat.com.br
                     </p>
                   </div>
-                  <Switch
-                    id="auto_activate"
-                    checked={formData.auto_activate_workflow}
-                    onCheckedChange={(checked) => setFormData({ ...formData, auto_activate_workflow: checked })}
-                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="document">CNPJ/CPF</Label>
+                      <Input
+                        id="document"
+                        value={formData.document}
+                        onChange={(e) => setFormData({ ...formData, document: e.target.value })}
+                        placeholder="00.000.000/0000-00"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Telefone</Label>
+                      <Input
+                        id="phone"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="(00) 00000-0000"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="contato@empresa.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="plan">Plano</Label>
+                    <Select
+                      value={formData.plan_id}
+                      onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um plano" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {plans.map((plan) => (
+                          <SelectItem key={plan.id} value={plan.id}>
+                            {plan.name} - R$ {plan.price}/mês
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="max_users">Máx. Usuários</Label>
+                      <Input
+                        id="max_users"
+                        type="number"
+                        value={formData.max_users}
+                        onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="max_instances">Máx. Conexões</Label>
+                      <Input
+                        id="max_instances"
+                        type="number"
+                        value={formData.max_instances}
+                        onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Admin User Section */}
+                  <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                    <p className="text-sm font-medium">Administrador da Empresa</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="admin_name">Nome do Admin</Label>
+                        <Input
+                          id="admin_name"
+                          value={formData.admin_name}
+                          onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
+                          placeholder="Nome completo"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="admin_email">Email do Admin</Label>
+                        <Input
+                          id="admin_email"
+                          type="email"
+                          value={formData.admin_email}
+                          onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                          placeholder="admin@empresa.com"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Um email de acesso inicial será enviado automaticamente para este administrador.
+                    </p>
+                  </div>
+                  
+                  {/* n8n Workflow Settings */}
+                  <div className="flex items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="auto_activate" className="text-base font-medium">
+                        Ativar Workflow n8n Automaticamente
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Ativa o workflow após criação para receber mensagens imediatamente
+                      </p>
+                    </div>
+                    <Switch
+                      id="auto_activate"
+                      checked={formData.auto_activate_workflow}
+                      onCheckedChange={(checked) => setFormData({ ...formData, auto_activate_workflow: checked })}
+                    />
+                  </div>
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="px-6 py-4 border-t shrink-0 bg-background">
                 <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                   Cancelar
                 </Button>
@@ -684,86 +686,88 @@ export default function GlobalAdminCompanies() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editingCompany} onOpenChange={(open) => !open && setEditingCompany(null)}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="max-h-[85vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
             <DialogTitle>Editar Empresa</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">Nome da Empresa</Label>
-              <Input
-                id="edit-name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+          <div className="flex-1 overflow-y-auto px-6 pb-4">
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-document">CNPJ/CPF</Label>
+                <Label htmlFor="edit-name">Nome da Empresa</Label>
                 <Input
-                  id="edit-document"
-                  value={formData.document}
-                  onChange={(e) => setFormData({ ...formData, document: e.target.value })}
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-document">CNPJ/CPF</Label>
+                  <Input
+                    id="edit-document"
+                    value={formData.document}
+                    onChange={(e) => setFormData({ ...formData, document: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-phone">Telefone</Label>
+                  <Input
+                    id="edit-phone"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-phone">Telefone</Label>
-                <Input
-                  id="edit-phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
+                <Label htmlFor="edit-plan">Plano</Label>
+                <Select
+                  value={formData.plan_id}
+                  onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um plano" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {plans.map((plan) => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        {plan.name} - R$ {plan.price}/mês
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-email">Email</Label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-plan">Plano</Label>
-              <Select
-                value={formData.plan_id}
-                onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um plano" />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.map((plan) => (
-                    <SelectItem key={plan.id} value={plan.id}>
-                      {plan.name} - R$ {plan.price}/mês
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-max_users">Máx. Usuários</Label>
-                <Input
-                  id="edit-max_users"
-                  type="number"
-                  value={formData.max_users}
-                  onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-max_instances">Máx. Conexões</Label>
-                <Input
-                  id="edit-max_instances"
-                  type="number"
-                  value={formData.max_instances}
-                  onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-max_users">Máx. Usuários</Label>
+                  <Input
+                    id="edit-max_users"
+                    type="number"
+                    value={formData.max_users}
+                    onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-max_instances">Máx. Conexões</Label>
+                  <Input
+                    id="edit-max_instances"
+                    type="number"
+                    value={formData.max_instances}
+                    onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
+                  />
+                </div>
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="px-6 py-4 border-t shrink-0 bg-background">
             <Button variant="outline" onClick={() => setEditingCompany(null)}>
               Cancelar
             </Button>
