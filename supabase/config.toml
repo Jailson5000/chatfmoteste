@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.create-n8n-workflow]
 verify_jwt = false
+
+[functions.delete-n8n-workflow]
+verify_jwt = false
