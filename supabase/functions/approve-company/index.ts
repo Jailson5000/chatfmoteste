@@ -20,7 +20,7 @@ interface ApproveRequest {
   company_id: string;
   action: 'approve' | 'reject';
   rejection_reason?: string;
-  admin_name?: string; // Optional: Override admin name from original registration
+  admin_name?: string;
   plan_id?: string;
   max_users?: number;
   max_instances?: number;
@@ -150,7 +150,7 @@ serve(async (req) => {
         },
       });
 
-      // Send rejection email (optional)
+      // TEMPLATE: CADASTRO REJEITADO
       if (resendApiKey && company.email) {
         try {
           const rejectionHtml = `
@@ -158,42 +158,39 @@ serve(async (req) => {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Cadastro Não Aprovado</title>
+  <title>Cadastro não aprovado — MIAUCHAT</title>
 </head>
-<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px;">
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; line-height: 1.6;">
   <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
     
     <div style="background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); padding: 30px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Cadastro Não Aprovado</h1>
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">❌ Cadastro não aprovado — MIAUCHAT</h1>
     </div>
     
     <div style="padding: 30px;">
-      <p style="color: #1f2937; font-size: 16px; line-height: 1.6;">
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
         Olá,
       </p>
-      <p style="color: #1f2937; font-size: 16px; line-height: 1.6;">
-        Infelizmente, após análise, não foi possível aprovar o cadastro da empresa <strong>${company.name}</strong> neste momento.
+      
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Após análise, o cadastro da empresa <strong>"${company.name}"</strong> não foi aprovado no MIAUCHAT.
       </p>
       
-      ${rejection_reason ? `
-      <div style="background: #f3f4f6; border-radius: 8px; padding: 16px; margin: 20px 0;">
-        <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;">Motivo:</p>
-        <p style="color: #1f2937; margin: 0;">${rejection_reason}</p>
-      </div>
-      ` : ''}
-      
-      <p style="color: #1f2937; font-size: 16px; line-height: 1.6;">
-        Se você acredita que houve um engano ou deseja mais informações, entre em contato conosco:
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Caso precise de mais informações, entre em contato conosco pelo canal oficial:
       </p>
       
       <p style="color: #1f2937; font-size: 16px;">
-        📧 <a href="mailto:suporte@miauchat.com.br" style="color: #dc2626;">suporte@miauchat.com.br</a>
+        📧 <a href="mailto:suporte@miauchat.com.br" style="color: #dc2626; text-decoration: none;">suporte@miauchat.com.br</a>
       </p>
     </div>
     
     <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
+        — MIAUCHAT
+      </p>
       <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-        © ${new Date().getFullYear()} MiauChat - Plataforma de Comunicação
+        Plataforma de Comunicação
       </p>
     </div>
   </div>
@@ -210,7 +207,7 @@ serve(async (req) => {
             body: JSON.stringify({
               from: 'MiauChat <suporte@miauchat.com.br>',
               to: [company.email],
-              subject: `Cadastro ${company.name} - Status da Solicitação`,
+              subject: `❌ Cadastro não aprovado — MIAUCHAT`,
               html: rejectionHtml,
             }),
           });
@@ -369,6 +366,7 @@ serve(async (req) => {
     console.log('[approve-company] Creating admin user...');
 
     let adminUserResult = null;
+    let temporaryPassword = '';
 
     if (adminEmail) {
       try {
@@ -390,6 +388,7 @@ serve(async (req) => {
 
         if (adminResponse.ok) {
           adminUserResult = await adminResponse.json();
+          temporaryPassword = adminUserResult.temporary_password || '';
           console.log('[approve-company] Admin user created:', adminUserResult);
         } else {
           const errorText = await adminResponse.text();
@@ -397,6 +396,112 @@ serve(async (req) => {
         }
       } catch (adminError) {
         console.error('[approve-company] Admin creation exception:', adminError);
+      }
+    }
+
+    // ========================================
+    // SEND APPROVAL EMAIL WITH CREDENTIALS
+    // TEMPLATE: CADASTRO APROVADO
+    // ========================================
+    if (resendApiKey && adminEmail && temporaryPassword) {
+      try {
+        const subdomainUrl = `https://${subdomain}.miauchat.com.br`;
+        
+        const approvalHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Cadastro aprovado — Acesso liberado ao MIAUCHAT</title>
+</head>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; line-height: 1.6;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    
+    <div style="background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); padding: 30px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">✅ Cadastro aprovado — Acesso liberado ao MIAUCHAT</h1>
+    </div>
+    
+    <div style="padding: 30px;">
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Olá,
+      </p>
+      
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        O cadastro da empresa <strong>"${company.name}"</strong> foi <strong>APROVADO</strong> no MIAUCHAT<br>
+        (Multiplataforma de Inteligência Artificial Unificada).
+      </p>
+      
+      <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 20px; margin: 24px 0;">
+        <h3 style="color: #166534; margin: 0 0 16px 0; font-size: 16px;">📌 Dados de acesso:</h3>
+        
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #166534; font-weight: 500;">Acesso (subdomínio):</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0 12px 0;">
+              <a href="${subdomainUrl}" style="color: #dc2626; font-weight: 600; text-decoration: none;">${subdomainUrl}</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #166534; font-weight: 500;">Login:</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0 12px 0; color: #1f2937;">${adminEmail}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #166534; font-weight: 500;">Senha provisória:</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0; color: #1f2937; font-family: monospace; font-size: 18px; background: #ffffff; padding: 8px; border-radius: 4px; display: inline-block;">${temporaryPassword}</td>
+          </tr>
+        </table>
+      </div>
+      
+      <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #92400e; margin: 0; font-weight: 600;">
+          ⚠️ Importante:<br>
+          <span style="font-weight: normal;">No primeiro acesso, será obrigatório criar uma nova senha.</span>
+        </p>
+      </div>
+      
+      <div style="margin-top: 30px; text-align: center;">
+        <a href="${subdomainUrl}" 
+           style="display: inline-block; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+          Acessar Minha Conta
+        </a>
+      </div>
+    </div>
+    
+    <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
+        — MIAUCHAT
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+        Plataforma de Comunicação
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+        `;
+
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'MiauChat <suporte@miauchat.com.br>',
+            to: [adminEmail],
+            subject: `✅ Cadastro aprovado — Acesso liberado ao MIAUCHAT`,
+            html: approvalHtml,
+          }),
+        });
+        console.log('[approve-company] Approval email sent with credentials');
+      } catch (emailError) {
+        console.error('[approve-company] Approval email error:', emailError);
       }
     }
 
