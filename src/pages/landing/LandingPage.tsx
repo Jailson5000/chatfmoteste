@@ -84,7 +84,7 @@ export function LandingPage() {
             </div>
 
             {/* Title */}
-            <h1 className="text-6xl md:text-8xl font-black leading-[0.9] tracking-tight">
+            <h1 className="text-4xl md:text-6xl font-black leading-[0.9] tracking-tight">
               <span className="text-red-500">MIAU</span> CHAT
             </h1>
 
