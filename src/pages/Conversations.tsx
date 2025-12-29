@@ -75,6 +75,7 @@ import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
+import { useAutomations } from "@/hooks/useAutomations";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -133,6 +134,7 @@ export default function Conversations() {
   const { statuses } = useCustomStatuses();
   const { templates } = useTemplates();
   const { instances: whatsappInstances } = useWhatsAppInstances();
+  const { automations } = useAutomations();
   const { toast } = useToast();
   const { playNotification } = useNotificationSound();
   const queryClient = useQueryClient();
@@ -498,6 +500,10 @@ export default function Conversations() {
       return acc;
     }, {} as Record<string, string>);
 
+    // Get the active AI agent name
+    const activeAutomation = automations.find(a => a.is_active);
+    const aiAgentName = activeAutomation?.name || 'IA';
+
     return conversations.map(conv => ({
       id: conv.id,
       name: conv.contact_name || conv.contact_phone || "Sem nome",
@@ -518,8 +524,9 @@ export default function Conversations() {
       whatsappPhone: conv.whatsapp_instance?.phone_number || null,
       avatarUrl: conv.client?.avatar_url || null,
       clientStatus: conv.client?.custom_status || null,
+      aiAgentName: aiAgentName,
     }));
-  }, [conversations, unreadCounts, tags]);
+  }, [conversations, unreadCounts, tags, automations]);
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
@@ -1185,20 +1192,28 @@ export default function Conversations() {
                           <span className="text-sm font-medium truncate">{conv.name}</span>
                           <span className="text-[10px] text-muted-foreground flex-shrink-0">{conv.time}</span>
                         </div>
-                        <p className="text-[11px] text-muted-foreground truncate">{conv.phone}</p>
+                        {/* Phone and time info */}
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                          {conv.whatsappPhone && (
+                            <span className="flex items-center gap-0.5">
+                              <Phone className="h-2.5 w-2.5" />
+                              {conv.whatsappPhone.slice(-4)}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
                         <div className="flex items-center gap-1 mt-1.5 flex-wrap">
                           <Badge
                             variant="outline"
                             className={cn(
-                              "text-[10px] h-5 px-1.5",
+                              "text-[10px] h-5 px-1.5 gap-0.5 max-w-[100px]",
                               conv.handler === "ai"
                                 ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
                                 : "border-green-500/50 text-green-600 bg-green-50 dark:bg-green-900/20"
                             )}
                           >
-                            {conv.handler === "ai" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <UserCheck className="h-2.5 w-2.5 mr-0.5" />}
-                            {conv.handler === "ai" ? "IA" : (conv.assignedTo?.split(" ")[0] || "Humano")}
+                            {conv.handler === "ai" ? <Zap className="h-2.5 w-2.5 flex-shrink-0" /> : <User className="h-2.5 w-2.5 flex-shrink-0" />}
+                            <span className="truncate">{conv.handler === "ai" ? conv.aiAgentName : (conv.assignedTo?.split(" ")[0] || "Atendente")}</span>
                           </Badge>
                           {conv.status && (
                             <Badge variant="outline" className="text-[10px] h-5 px-1.5">
@@ -1374,7 +1389,7 @@ export default function Conversations() {
 
       <div className="hidden md:flex h-full">
         {/* Conversations List Panel - Fixed width */}
-        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border">
+        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden">
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1500,7 +1515,7 @@ export default function Conversations() {
                     <Badge
                       variant="outline"
                       className={cn(
-                        "text-[10px] h-5 px-1.5 gap-1",
+                        "text-[10px] h-5 px-1.5 gap-1 max-w-[120px]",
                         conv.handler === "ai"
                           ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
                           : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
@@ -1508,13 +1523,13 @@ export default function Conversations() {
                     >
                       {conv.handler === "ai" ? (
                         <>
-                          <Zap className="h-3 w-3" />
-                          <span>IA</span>
+                          <Zap className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">{conv.aiAgentName}</span>
                         </>
                       ) : (
                         <>
-                          <User className="h-3 w-3" />
-                          <span>{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
+                          <User className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">{conv.assignedTo?.split(" ")[0] || "Atendente"}</span>
                         </>
                       )}
                     </Badge>
