@@ -16,6 +16,9 @@ interface ProvisionRequest {
   max_instances?: number;
   subdomain: string;
   auto_activate_workflow?: boolean;
+  // Admin user creation
+  admin_name?: string;
+  admin_email?: string;
 }
 
 // Provisioning status enum
@@ -167,7 +170,7 @@ serve(async (req) => {
 
     // Parse request body
     const body: ProvisionRequest = await req.json();
-    const { name, document, email, phone, plan_id, max_users = 5, max_instances = 2, auto_activate_workflow = true } = body;
+    const { name, document, email, phone, plan_id, max_users = 5, max_instances = 2, auto_activate_workflow = true, admin_name, admin_email } = body;
 
     if (!name) {
       return new Response(
@@ -489,6 +492,58 @@ serve(async (req) => {
       // Don't fail the provisioning because of notification error
     }
 
+    // ========================================
+    // STEP 4: CREATE ADMIN USER (if admin_email provided)
+    // ========================================
+    let adminUserResult = null;
+    if (admin_email) {
+      console.log('=== STEP 4: Creating Admin User ===');
+      try {
+        const createAdminResponse = await fetch(`${supabaseUrl}/functions/v1/create-company-admin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+          },
+          body: JSON.stringify({
+            company_id: company.id,
+            company_name: name,
+            law_firm_id: lawFirm.id,
+            admin_email: admin_email,
+            admin_name: admin_name || name,
+            subdomain: subdomain,
+          }),
+        });
+
+        if (createAdminResponse.ok) {
+          adminUserResult = await createAdminResponse.json();
+          console.log('Admin user created successfully:', adminUserResult.user_id);
+          
+          await logAudit(supabase, 'ADMIN_USER_CREATED', 'user', adminUserResult.user_id, 'success', {
+            company_id: company.id,
+            email: admin_email,
+            email_sent: adminUserResult.email_sent,
+          }, adminUserId);
+        } else {
+          const errorText = await createAdminResponse.text();
+          console.warn('Failed to create admin user:', errorText);
+          
+          await logAudit(supabase, 'ADMIN_USER_CREATE_FAIL', 'user', null, 'failed', {
+            company_id: company.id,
+            email: admin_email,
+            error: errorText,
+          }, adminUserId);
+        }
+      } catch (adminError) {
+        console.error('Error creating admin user:', adminError);
+        await logAudit(supabase, 'ADMIN_USER_CREATE_FAIL', 'user', null, 'failed', {
+          company_id: company.id,
+          email: admin_email,
+          error: adminError instanceof Error ? adminError.message : 'Unknown error',
+        }, adminUserId);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -505,6 +560,9 @@ serve(async (req) => {
         // n8n details
         n8n_workflow_id: n8nWorkflowResult?.workflow_id,
         n8n_workflow_name: n8nWorkflowResult?.workflow_name,
+        // Admin user details
+        admin_user_id: adminUserResult?.user_id || null,
+        admin_email_sent: adminUserResult?.email_sent || false,
         message: finalStatus === 'active' 
           ? 'Company fully provisioned' 
           : `Company provisioned with status: ${finalStatus}`,

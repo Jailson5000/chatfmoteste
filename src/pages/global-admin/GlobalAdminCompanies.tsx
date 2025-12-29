@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
@@ -54,7 +54,7 @@ function generateSubdomainFromName(name: string): string {
 }
 
 export default function GlobalAdminCompanies() {
-  const { companies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows } = useCompanies();
+  const { companies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess } = useCompanies();
   const { plans } = usePlans();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -71,6 +71,8 @@ export default function GlobalAdminCompanies() {
     max_instances: 2,
     subdomain: "",
     auto_activate_workflow: true,
+    admin_name: "",
+    admin_email: "",
   });
 
   const filteredCompanies = companies.filter(
@@ -93,16 +95,18 @@ export default function GlobalAdminCompanies() {
     await createCompany.mutateAsync({
       ...formData,
       auto_activate_workflow: formData.auto_activate_workflow,
+      admin_name: formData.admin_name || undefined,
+      admin_email: formData.admin_email || undefined,
     });
     setIsCreateDialogOpen(false);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true, admin_name: "", admin_email: "" });
   };
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
     await updateCompany.mutateAsync({ id: editingCompany, ...formData });
     setEditingCompany(null);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true });
+    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true, admin_name: "", admin_email: "" });
   };
 
   const handleDelete = async (company: typeof companies[0]) => {
@@ -122,6 +126,8 @@ export default function GlobalAdminCompanies() {
       max_instances: company.max_instances,
       subdomain: company.law_firm?.subdomain || "",
       auto_activate_workflow: true,
+      admin_name: "",
+      admin_email: "",
     });
     setEditingCompany(company.id);
   };
@@ -329,6 +335,35 @@ export default function GlobalAdminCompanies() {
                   </div>
                 </div>
                 
+                {/* Admin User Section */}
+                <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                  <p className="text-sm font-medium">Administrador da Empresa</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="admin_name">Nome do Admin</Label>
+                      <Input
+                        id="admin_name"
+                        value={formData.admin_name}
+                        onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
+                        placeholder="Nome completo"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="admin_email">Email do Admin</Label>
+                      <Input
+                        id="admin_email"
+                        type="email"
+                        value={formData.admin_email}
+                        onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                        placeholder="admin@empresa.com"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Um email de acesso inicial será enviado automaticamente para este administrador.
+                  </p>
+                </div>
+                
                 {/* n8n Workflow Settings */}
                 <div className="flex items-center justify-between rounded-lg border p-4">
                   <div className="space-y-0.5">
@@ -396,6 +431,7 @@ export default function GlobalAdminCompanies() {
                   <TableHead>Plano</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Provisionamento</TableHead>
+                  <TableHead>Email Acesso</TableHead>
                   <TableHead>Usuários</TableHead>
                   <TableHead>Conexões</TableHead>
                   <TableHead>Criada em</TableHead>
@@ -405,7 +441,7 @@ export default function GlobalAdminCompanies() {
               <TableBody>
                 {filteredCompanies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       Nenhuma empresa encontrada
                     </TableCell>
                   </TableRow>
@@ -539,6 +575,72 @@ export default function GlobalAdminCompanies() {
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
+                      </TableCell>
+                      {/* Email de Acesso Inicial */}
+                      <TableCell>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center gap-2">
+                                {company.initial_access_email_sent ? (
+                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-green-600 bg-green-50 border-green-200">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Enviado
+                                  </div>
+                                ) : company.initial_access_email_error ? (
+                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-red-600 bg-red-50 border-red-200">
+                                    <MailX className="h-3.5 w-3.5" />
+                                    Erro
+                                  </div>
+                                ) : company.admin_user_id ? (
+                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-yellow-600 bg-yellow-50 border-yellow-200">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    Pendente
+                                  </div>
+                                ) : (
+                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs font-medium text-muted-foreground bg-muted/50">
+                                    <Mail className="h-3.5 w-3.5" />
+                                    Sem Admin
+                                  </div>
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs p-3" side="top">
+                              {company.initial_access_email_sent ? (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-sm">Email enviado com sucesso</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {company.initial_access_email_sent_at 
+                                      ? new Date(company.initial_access_email_sent_at).toLocaleString("pt-BR")
+                                      : "Data não registrada"}
+                                  </p>
+                                </div>
+                              ) : company.initial_access_email_error ? (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-sm text-destructive">Falha no envio</p>
+                                  <p className="text-xs">{company.initial_access_email_error}</p>
+                                </div>
+                              ) : company.admin_user_id ? (
+                                <p className="text-sm">Email de acesso ainda não enviado</p>
+                              ) : (
+                                <p className="text-sm">Nenhum administrador configurado</p>
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        {/* Botão de reenvio */}
+                        {company.admin_user_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 mt-1"
+                            onClick={() => resendInitialAccess.mutate({ companyId: company.id, resetPassword: true })}
+                            disabled={resendInitialAccess.isPending}
+                          >
+                            <Send className={`h-3 w-3 mr-1 ${resendInitialAccess.isPending ? 'animate-pulse' : ''}`} />
+                            <span className="text-xs">Reenviar</span>
+                          </Button>
+                        )}
                       </TableCell>
                       <TableCell>{company.max_users}</TableCell>
                       <TableCell>{company.max_instances}</TableCell>
