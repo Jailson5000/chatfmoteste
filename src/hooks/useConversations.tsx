@@ -22,7 +22,14 @@ interface ConversationWithLastMessage extends Conversation {
   } | null;
   unread_count?: number;
   client?: {
+    id?: string;
     custom_status_id?: string | null;
+    avatar_url?: string | null;
+    custom_status?: {
+      id: string;
+      name: string;
+      color: string;
+    } | null;
   } | null;
 }
 
@@ -39,7 +46,7 @@ export function useConversations() {
         .select(`
           *,
           whatsapp_instance:whatsapp_instances(instance_name, phone_number),
-          client:clients(custom_status_id)
+          client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color))
         `)
         .order("last_message_at", { ascending: false, nullsFirst: false });
 
@@ -88,7 +95,12 @@ export function useConversations() {
             whatsapp_instance: conv.whatsapp_instance as { instance_name: string; phone_number?: string | null } | null,
             assigned_profile: conv.assigned_to ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" } : null,
             unread_count: unreadResult.count || 0,
-            client: conv.client as { custom_status_id?: string | null } | null,
+            client: conv.client as { 
+              id?: string;
+              custom_status_id?: string | null; 
+              avatar_url?: string | null;
+              custom_status?: { id: string; name: string; color: string } | null;
+            } | null,
           };
         })
       );
