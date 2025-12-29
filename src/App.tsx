@@ -5,8 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminRoute } from "@/components/auth/AdminRoute";
+import { GlobalAdminRoute } from "@/components/auth/GlobalAdminRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AdminLayout } from "@/components/layout/AdminLayout";
+import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
+import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -22,6 +25,17 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
+import {
+  GlobalAdminAuth,
+  GlobalAdminDashboard,
+  GlobalAdminCompanies,
+  GlobalAdminConnections,
+  GlobalAdminPlans,
+  GlobalAdminUsers,
+  GlobalAdminMonitoring,
+  GlobalAdminSettings,
+  GlobalAdminN8NSettings,
+} from "./pages/global-admin";
 
 const queryClient = new QueryClient();
 
@@ -148,7 +162,7 @@ const App = () => (
             <Route index element={<Profile />} />
           </Route>
           
-          {/* Admin Routes - Protected by role */}
+          {/* Client Admin Routes - Protected by role (admin of law firm) */}
           <Route
             path="/admin"
             element={
@@ -161,6 +175,50 @@ const App = () => (
             <Route path="team" element={<AdminTeam />} />
             <Route path="company" element={<AdminCompany />} />
             <Route path="settings" element={<AdminSettings />} />
+          </Route>
+          
+          {/* Global Admin Routes - MiauChat SaaS Administration */}
+          <Route
+            path="/global-admin/auth"
+            element={
+              <AdminAuthProvider>
+                <GlobalAdminAuth />
+              </AdminAuthProvider>
+            }
+          />
+          
+          <Route
+            path="/global-admin"
+            element={
+              <AdminAuthProvider>
+                <GlobalAdminRoute>
+                  <GlobalAdminLayout />
+                </GlobalAdminRoute>
+              </AdminAuthProvider>
+            }
+          >
+            <Route index element={<GlobalAdminDashboard />} />
+            <Route path="companies" element={<GlobalAdminCompanies />} />
+            <Route path="connections" element={<GlobalAdminConnections />} />
+            <Route path="plans" element={<GlobalAdminPlans />} />
+            <Route
+              path="users"
+              element={
+                <GlobalAdminRoute allowedRoles={["super_admin"]}>
+                  <GlobalAdminUsers />
+                </GlobalAdminRoute>
+              }
+            />
+            <Route path="monitoring" element={<GlobalAdminMonitoring />} />
+            <Route
+              path="settings"
+              element={
+                <GlobalAdminRoute allowedRoles={["super_admin"]}>
+                  <GlobalAdminSettings />
+                </GlobalAdminRoute>
+              }
+            />
+            <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
           </Route>
           
           {/* Catch-all route */}
