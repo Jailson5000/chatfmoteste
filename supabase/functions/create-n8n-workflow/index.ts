@@ -211,18 +211,13 @@ serve(async (req) => {
         console.log('Template workflow fetched successfully');
 
         // Create new workflow based on template - starts INACTIVE
+        // Note: n8n API does not accept tags on workflow creation (read-only field)
         const newWorkflowPayload = {
           name: workflowName,
           nodes: templateWorkflow.nodes,
           connections: templateWorkflow.connections,
           settings: templateWorkflow.settings,
           staticData: templateWorkflow.staticData || null,
-          // Add company metadata as tags
-          tags: [
-            { name: `company:${company_id}` },
-            { name: `subdomain:${subdomain}` },
-            { name: 'auto-provisioned' },
-          ],
         };
 
         const createResponse = await fetch(`${n8nApiUrl}/api/v1/workflows`, {
