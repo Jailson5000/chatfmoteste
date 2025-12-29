@@ -55,10 +55,13 @@ import {
   FileText,
   Filter,
   History,
+  Bell,
 } from "lucide-react";
 import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
-import { useQuery } from "@tanstack/react-query";
+import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -165,6 +168,7 @@ function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
 }
 
 export default function GlobalAdminConnections() {
+  const { toast } = useToast();
   const {
     instances,
     isLoading,
@@ -182,6 +186,30 @@ export default function GlobalAdminConnections() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedInstance, setSelectedInstance] = useState<InstanceWithCompany | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // Manual alert trigger mutation
+  const triggerAlertCheck = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("check-instance-alerts");
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Verificação concluída",
+          description: data.message || "Alertas verificados com sucesso",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro na verificação",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Apply filters
   const filteredInstances = useMemo(() => {
@@ -294,6 +322,22 @@ export default function GlobalAdminConnections() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => triggerAlertCheck.mutate()}
+                  disabled={triggerAlertCheck.isPending}
+                >
+                  <Bell className={`h-4 w-4 mr-2 ${triggerAlertCheck.isPending ? "animate-pulse" : ""}`} />
+                  Verificar Alertas
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Enviar alertas para instâncias desconectadas há mais de 30 minutos</p>
+              </TooltipContent>
+            </Tooltip>
             <Button
               variant="outline"
               size="sm"
@@ -419,6 +463,9 @@ export default function GlobalAdminConnections() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Uptime Chart */}
+        <InstanceUptimeChart days={7} />
 
         {/* Search and Filters */}
         <Card>
