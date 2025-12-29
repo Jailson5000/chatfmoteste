@@ -82,6 +82,14 @@ export function LandingPage() {
             <span className="text-sm text-red-400">Multiplataforma de Inteligência Artificial Unificada</span>
           </div>
 
+          {/* Logo */}
+          <div className="mb-8">
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-red-500/20 rounded-3xl blur-2xl" />
+              <img src={miauchatLogo} alt="MiauChat" className="relative h-24 w-24 md:h-32 md:w-32" />
+            </div>
+          </div>
+
           {/* Title */}
           <h1 className="text-4xl md:text-6xl font-black leading-[0.9] tracking-tight">
             <span className="text-red-500">MIAU</span> CHAT
