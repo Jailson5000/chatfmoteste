@@ -2182,6 +2182,7 @@ export default function Conversations() {
                 conversation={{
                   ...selectedConversation,
                   assigned_to: selectedConversation.assigned_to,
+                  ai_summary: selectedConversation.ai_summary,
                   client: selectedConversation.client_id ? {
                     id: selectedConversation.client_id,
                     custom_status_id: (selectedConversation as any).client?.custom_status_id,
