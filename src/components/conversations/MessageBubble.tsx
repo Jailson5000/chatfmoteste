@@ -1190,11 +1190,15 @@ export function MessageBubble({
 
   const displayContent = (() => {
     if (!content) return "";
-    // Remove placeholder lines that are used to represent audio-only messages
-    return content
-      .split("\n")
-      .filter((line) => line.trim() !== "[Mensagem de áudio]")
-      .join("\n")
+
+    // Strip the WhatsApp placeholder used for AI audio messages, even when it comes
+    // appended to a normal text message (common on mobile due to line wrapping).
+    const withoutPlaceholder = content
+      .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
+      .replace(/\r\n/g, "\n");
+
+    return withoutPlaceholder
+      .replace(/\n{3,}/g, "\n\n")
       .trim();
   })();
 
