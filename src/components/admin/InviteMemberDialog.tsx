@@ -7,14 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Shield, Users, Headphones, AlertCircle } from "lucide-react";
+import { Shield, Users, Headphones, AlertCircle, Mail, CheckCircle2 } from "lucide-react";
 import { useDepartments } from "@/hooks/useDepartments";
 import type { AppRole } from "@/hooks/useUserRole";
 
 interface InviteMemberDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onInvite: (data: { email: string; fullName: string; role: AppRole; departmentIds: string[] }) => Promise<void>;
+  onInvite: (data: { email: string; fullName: string; role: AppRole; departmentIds: string[] }) => Promise<any>;
   isLoading?: boolean;
 }
 
@@ -107,11 +107,25 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Convidar Membro</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5 text-primary" />
+            Convidar Membro
+          </DialogTitle>
           <DialogDescription>
-            Adicione um novo membro à sua equipe. Um email será enviado com as credenciais de acesso.
+            Adicione um novo membro à sua equipe. Um email será enviado automaticamente com as credenciais de acesso.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Email notice */}
+        <div className="flex items-start gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+          <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-foreground">Envio automático de credenciais</p>
+            <p className="text-muted-foreground mt-0.5">
+              O novo membro receberá um email com login e senha temporária para acessar o sistema.
+            </p>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">

@@ -986,20 +986,34 @@ export function MessageBubble({
           </div>
         )}
         
-        {/* Render text content */}
-        {content && (
-          !content.trim().startsWith("[") ||
-          /^\[áudio transcrito\]/i.test(content.trim())
-        ) && (
+        {/* Render text content - don't show [Mensagem de áudio] placeholder text */}
+        {content && 
+          !content.includes('[Mensagem de áudio]') && (
+            !content.trim().startsWith("[") ||
+            /^\[áudio transcrito\]/i.test(content.trim())
+          ) && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {highlightText ? highlightText(content) : content}
           </p>
         )}
 
-        {/* Show placeholder for media without preview */}
-        {!hasMedia && !content && (
+        {/* Show placeholder for audio/media without URL */}
+        {!hasMedia && messageType === "audio" && (
+          <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
+            <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
+              <Mic className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium">Mensagem de áudio</p>
+              <p className="text-xs text-muted-foreground">Áudio enviado via WhatsApp</p>
+            </div>
+          </div>
+        )}
+
+        {/* Show placeholder for other media without preview */}
+        {!hasMedia && !content && messageType !== "audio" && (
           <p className="text-sm leading-relaxed text-muted-foreground italic">
-            {messageType === "audio" ? "🎵 Áudio" : messageType === "image" ? "📷 Imagem" : "📎 Mídia"}
+            {messageType === "image" ? "📷 Imagem" : "📎 Mídia"}
           </p>
         )}
         
