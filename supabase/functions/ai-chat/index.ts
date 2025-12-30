@@ -255,60 +255,84 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Default system prompt
-    let systemPrompt = `Você é um assistente virtual de atendimento jurídico chamado MiauChat.
-    
-Suas responsabilidades:
-- Receber clientes de forma cordial e profissional
-- Coletar informações iniciais sobre o caso
-- Identificar a área jurídica relevante
-- Avaliar a urgência do caso
-- Encaminhar para um advogado humano quando necessário
-
-Regras importantes:
-- Nunca forneça aconselhamento jurídico específico
-- Sempre informe que um advogado revisará o caso
-- Seja empático e profissional
-- Colete informações como: nome completo, documento, descrição do problema
-- Pergunte sobre prazos e urgências
-- Mantenha respostas concisas (máximo 3 parágrafos)
-
-Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advogado será acionado imediatamente.`;
-
+    // CRITICAL: Agent prompt is the SINGLE SOURCE OF TRUTH
+    // No default/fallback prompts - must have automationId with valid prompt
+    let systemPrompt: string | null = null;
     let temperature = 0.7;
+    let automationName = "";
+    let knowledgeText = "";
 
-    // If automationId provided, fetch custom prompt
-    if (automationId) {
-      const { data: automation, error: automationError } = await supabase
-        .from("automations")
-        .select("ai_prompt, ai_temperature, name")
-        .eq("id", automationId)
-        .eq("is_active", true)
-        .single();
-
-      if (automation && !automationError) {
-        if ((automation as any).ai_prompt) {
-          systemPrompt = (automation as any).ai_prompt;
-        }
-        if ((automation as any).ai_temperature !== null) {
-          temperature = (automation as any).ai_temperature;
-        }
-        console.log(`[AI Chat] Using custom prompt from automation: ${(automation as any).name}`);
-      }
+    // automationId is REQUIRED for proper agent behavior
+    if (!automationId) {
+      console.error("[AI Chat] CRITICAL: automationId is required for proper AI behavior");
+      return new Response(
+        JSON.stringify({ error: "automationId is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Build messages array
+    // Fetch agent configuration - the ONLY source of behavior
+    const { data: automation, error: automationError } = await supabase
+      .from("automations")
+      .select("ai_prompt, ai_temperature, name, law_firm_id")
+      .eq("id", automationId)
+      .eq("is_active", true)
+      .single();
+
+    if (automationError || !automation) {
+      console.error("[AI Chat] Agent not found or inactive", { automationId, error: automationError });
+      return new Response(
+        JSON.stringify({ error: "Agent not found or inactive" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Use ONLY the agent's configured prompt
+    systemPrompt = (automation as any).ai_prompt;
+    if ((automation as any).ai_temperature !== null) {
+      temperature = (automation as any).ai_temperature;
+    }
+    automationName = (automation as any).name;
+
+    if (!systemPrompt) {
+      console.error("[AI Chat] Agent has no prompt configured", { automationId });
+      return new Response(
+        JSON.stringify({ error: "Agent has no prompt configured" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`[AI Chat] Using EXCLUSIVE prompt from agent: ${automationName}`);
+
+    // ONLY load knowledge bases that are EXPLICITLY LINKED to this agent
+    // This ensures complete tenant and agent isolation
+    knowledgeText = await getAgentKnowledge(supabase, automationId);
+    if (knowledgeText) {
+      console.log(`[AI Chat] Loaded knowledge base ONLY for agent ${automationId}`);
+    } else {
+      console.log(`[AI Chat] No knowledge base linked to agent ${automationId}`);
+    }
+
+    // Build messages array - agent prompt is the ONLY system instruction
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: systemPrompt }
     ];
 
-    // Add agent knowledge base if automationId is provided
-    let knowledgeText = "";
-    if (automationId) {
-      knowledgeText = await getAgentKnowledge(supabase, automationId);
-      if (knowledgeText) {
-        messages.push({ role: "system", content: knowledgeText });
-      }
+    // Add behavioral instruction for human-like responses (appended, not replacing)
+    messages.push({ 
+      role: "system", 
+      content: `REGRA CRÍTICA DE COMUNICAÇÃO:
+- Responda como uma pessoa real em atendimento
+- Envie mensagens CURTAS e OBJETIVAS (máximo 2-3 frases por vez)
+- Faça UMA pergunta ou informação por mensagem
+- NÃO envie textos longos ou explicações extensas
+- Use linguagem natural e profissional
+- Aguarde a resposta do cliente antes de continuar` 
+    });
+
+    // Add knowledge base as context (if linked to this agent)
+    if (knowledgeText) {
+      messages.push({ role: "system", content: knowledgeText });
     }
 
     // Add client memories if clientId is provided
