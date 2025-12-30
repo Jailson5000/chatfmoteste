@@ -385,16 +385,18 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     
                     <div className="space-y-2">
                       <Label className="text-white/70 text-sm">Modelo</Label>
-                      <Select value={openaiModel} onValueChange={setOpenaiModel}>
-                        <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#1a1a1a] border-white/10">
-                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                          <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div>
+                        <Select value={openaiModel} onValueChange={setOpenaiModel}>
+                          <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#1a1a1a] border-white/10">
+                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                            <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   </div>
                 )}
