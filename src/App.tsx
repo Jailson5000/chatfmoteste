@@ -28,7 +28,7 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
-import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings, AdminAIConfig } from "./pages/admin";
+import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
   GlobalAdminAuth,
   GlobalAdminDashboard,
@@ -190,7 +190,6 @@ const App = () => (
             <Route index element={<AdminDashboard />} />
             <Route path="team" element={<AdminTeam />} />
             <Route path="company" element={<AdminCompany />} />
-            <Route path="ai-config" element={<AdminAIConfig />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
           

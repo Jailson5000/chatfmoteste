@@ -16,7 +16,6 @@ const adminNavItems = [
   { icon: LayoutDashboard, label: "Visão Geral", path: "/admin" },
   { icon: Users, label: "Equipe", path: "/admin/team" },
   { icon: Building2, label: "Empresa", path: "/admin/company" },
-  { icon: Bot, label: "IA do Site", path: "/admin/ai-config" },
   { icon: Settings, label: "Configurações", path: "/admin/settings" },
 ];
 
