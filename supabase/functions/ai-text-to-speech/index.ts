@@ -1,15 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
+// Helper function to encode ArrayBuffer to base64
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000; // Process in chunks to avoid stack overflow
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Available voices for TTS
-const VOICES = {
+// Available voices for TTS (OpenAI valid voices)
+const VOICES: Record<string, { name: string; gender: string; description: string }> = {
   // Female voices
-  'camila': { name: 'Camila', gender: 'female', description: 'Voz feminina brasileira, profissional e acolhedora' },
   'nova': { name: 'Nova', gender: 'female', description: 'Voz feminina suave e elegante' },
+  'shimmer': { name: 'Shimmer', gender: 'female', description: 'Voz feminina clara e expressiva' },
   // Male voices  
   'onyx': { name: 'Onyx', gender: 'male', description: 'Voz masculina grave e profissional' },
   'echo': { name: 'Echo', gender: 'male', description: 'Voz masculina clara e amigável' },
@@ -21,7 +32,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text, voiceId = 'camila' } = await req.json();
+    const { text, voiceId = 'nova' } = await req.json();
 
     if (!text) {
       return new Response(
@@ -30,8 +41,8 @@ serve(async (req) => {
       );
     }
 
-    // Validate voice
-    const voice = voiceId in VOICES ? voiceId : 'camila';
+    // Validate voice - use nova as default if invalid
+    const voice = voiceId in VOICES ? voiceId : 'nova';
 
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
@@ -68,11 +79,9 @@ serve(async (req) => {
       );
     }
 
-    // Return audio as base64
+    // Return audio as base64 using chunked encoding to avoid stack overflow
     const audioBuffer = await response.arrayBuffer();
-    const base64Audio = btoa(
-      String.fromCharCode(...new Uint8Array(audioBuffer))
-    );
+    const base64Audio = arrayBufferToBase64(audioBuffer);
 
     console.log(`[TTS] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
 
