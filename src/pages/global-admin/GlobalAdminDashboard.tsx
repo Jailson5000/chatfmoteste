@@ -7,7 +7,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   FileText,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle
 } from "lucide-react";
 import { useSystemMetrics } from "@/hooks/useSystemMetrics";
 import { exportDashboardToPDF, exportToExcel, getFormattedDate } from "@/lib/exportUtils";
@@ -23,8 +24,10 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  Legend
 } from "recharts";
+import { CompanyUsageTable } from "@/components/global-admin/CompanyUsageTable";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 // Mock data for charts
 const areaChartData = [
@@ -36,14 +39,46 @@ const areaChartData = [
   { name: "Dez", empresas: 120, conexoes: 105 },
 ];
 
-const pieChartData = [
-  { name: "Ativas", value: 75, color: "#dc2626" },
-  { name: "Pendentes", value: 15, color: "#22c55e" },
-  { name: "Suspensas", value: 10, color: "#f97316" },
-];
-
 export default function GlobalAdminDashboard() {
   const { dashboardMetrics, isLoading } = useSystemMetrics();
+
+  // Fetch companies with alerts (80%+ usage)
+  const { data: alertsData } = useQuery({
+    queryKey: ["company-alerts-summary"],
+    queryFn: async () => {
+      const { data } = await supabase.from("company_usage_summary").select("*");
+      
+      if (!data) return { warning: 0, critical: 0 };
+
+      let warning = 0;
+      let critical = 0;
+
+      data.forEach((company: any) => {
+        const metrics = [
+          { current: company.current_users || 0, max: company.effective_max_users || 1 },
+          { current: company.current_instances || 0, max: company.effective_max_instances || 1 },
+          { current: company.current_agents || 0, max: company.effective_max_agents || 1 },
+          { current: company.current_ai_conversations || 0, max: company.effective_max_ai_conversations || 1 },
+          { current: company.current_tts_minutes || 0, max: company.effective_max_tts_minutes || 1 },
+        ];
+
+        const hasCritical = metrics.some((m) => m.max > 0 && (m.current / m.max) >= 1);
+        const hasWarning = metrics.some((m) => m.max > 0 && (m.current / m.max) >= 0.8 && (m.current / m.max) < 1);
+
+        if (hasCritical) critical++;
+        else if (hasWarning) warning++;
+      });
+
+      return { warning, critical };
+    },
+  });
+
+  // Calculate pie chart data from real metrics
+  const pieChartData = [
+    { name: "Ativas", value: dashboardMetrics?.activeCompanies || 0, color: "#22c55e" },
+    { name: "Pendentes", value: (dashboardMetrics?.totalCompanies || 0) - (dashboardMetrics?.activeCompanies || 0), color: "#f59e0b" },
+    { name: "Com Alertas", value: (alertsData?.warning || 0) + (alertsData?.critical || 0), color: "#ef4444" },
+  ].filter(item => item.value > 0);
 
   const statCards = [
     {
@@ -67,13 +102,13 @@ export default function GlobalAdminDashboard() {
       trendUp: true,
     },
     {
-      title: "Aguardando Ativação",
-      value: 0,
-      description: "Pendentes de aprovação",
-      icon: Clock,
-      iconBg: "bg-yellow-500/10",
-      iconColor: "text-yellow-500",
-      trend: "-5%",
+      title: "Alertas de Limite",
+      value: (alertsData?.warning || 0) + (alertsData?.critical || 0),
+      description: `${alertsData?.critical || 0} críticos, ${alertsData?.warning || 0} avisos`,
+      icon: AlertTriangle,
+      iconBg: alertsData?.critical ? "bg-red-500/10" : "bg-yellow-500/10",
+      iconColor: alertsData?.critical ? "text-red-500" : "text-yellow-500",
+      trend: alertsData?.critical ? "Ação necessária" : "Monitorando",
       trendUp: false,
     },
     {
@@ -197,7 +232,7 @@ export default function GlobalAdminDashboard() {
               <span className="text-4xl font-bold text-white">
                 {isLoading ? "..." : stat.value}
               </span>
-              <span className={`flex items-center text-sm font-medium ${stat.trendUp ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`flex items-center text-sm font-medium ${stat.trendUp ? 'text-green-400' : 'text-yellow-400'}`}>
                 {stat.trendUp ? (
                   <ArrowUpRight className="h-4 w-4 mr-0.5" />
                 ) : (
@@ -219,7 +254,7 @@ export default function GlobalAdminDashboard() {
             <h2 className="text-xl font-semibold text-white">Crescimento Mensal</h2>
             <p className="text-sm text-white/40">Evolução de empresas e conexões</p>
           </div>
-          <ResponsiveContainer width="100%" height={350}>
+          <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={areaChartData}>
               <defs>
                 <linearGradient id="colorEmpresas" x1="0" y1="0" x2="0" y2="1">
@@ -272,14 +307,14 @@ export default function GlobalAdminDashboard() {
             <h2 className="text-xl font-semibold text-white">Status das Empresas</h2>
             <p className="text-sm text-white/40">Distribuição por status</p>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie
                 data={pieChartData}
                 cx="50%"
                 cy="50%"
-                innerRadius={70}
-                outerRadius={100}
+                innerRadius={60}
+                outerRadius={85}
                 paddingAngle={2}
                 dataKey="value"
                 stroke="none"
@@ -294,7 +329,7 @@ export default function GlobalAdminDashboard() {
                     return (
                       <div className="bg-[#1a1a1a] border border-white/10 rounded-lg p-3 shadow-xl">
                         <p className="text-white text-sm">
-                          {payload[0].name}: {payload[0].value}%
+                          {payload[0].name}: {payload[0].value}
                         </p>
                       </div>
                     );
@@ -305,18 +340,23 @@ export default function GlobalAdminDashboard() {
             </PieChart>
           </ResponsiveContainer>
           {/* Legend */}
-          <div className="flex justify-center gap-6 mt-4">
+          <div className="flex justify-center gap-4 mt-2">
             {pieChartData.map((entry, index) => (
               <div key={index} className="flex items-center gap-2">
                 <div 
                   className="w-3 h-3 rounded-full" 
                   style={{ backgroundColor: entry.color }}
                 />
-                <span className="text-sm text-white/60">{entry.name}</span>
+                <span className="text-xs text-white/60">{entry.name}</span>
               </div>
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Companies Usage Table */}
+      <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+        <CompanyUsageTable />
       </div>
     </div>
   );
