@@ -89,7 +89,7 @@ async function getClientMemories(
 async function getConversationContext(
   supabase: any,
   conversationId: string,
-  maxMessages: number = 10
+  maxMessages: number = 25 // Increased from 10 to maintain better context
 ): Promise<{ messages: Array<{ role: string; content: string }>; needsSummary: boolean }> {
   // Get total message count
   const { count } = await supabase
@@ -98,7 +98,8 @@ async function getConversationContext(
     .eq("conversation_id", conversationId);
 
   const totalMessages = count || 0;
-  const needsSummary = totalMessages > 20;
+  // Generate summary earlier (after 15 messages instead of 20)
+  const needsSummary = totalMessages > 15;
 
   // Get recent messages
   const { data: recentMessages } = await supabase
@@ -145,11 +146,12 @@ async function generateAndSaveSummary(
   const conv = conversation as any;
 
   // If we have a recent summary and not many new messages, use existing
+  // Reduced threshold from 15 to 8 new messages to update summary more frequently
   if (
     conv?.ai_summary &&
     conv?.summary_message_count &&
     currentCount &&
-    currentCount - conv.summary_message_count < 15
+    currentCount - conv.summary_message_count < 8
   ) {
     return conv.ai_summary;
   }

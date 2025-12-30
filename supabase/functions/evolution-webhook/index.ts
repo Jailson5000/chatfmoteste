@@ -135,6 +135,7 @@ interface AutomationContext {
   remoteJid: string;
   instanceId: string;
   instanceName: string;
+  clientId?: string; // Added for client memory support
 }
 
 // =============================================================================
@@ -611,6 +612,7 @@ async function processWithGemini(
           clientName: context.contactName,
           clientPhone: context.contactPhone,
           lawFirmId: context.lawFirmId,
+          clientId: context.clientId, // Pass clientId for memory support
         },
       }),
     });
@@ -711,13 +713,40 @@ async function processWithGPT(
 
     logDebug('AI_MATRIX', `Using agent: ${automation.name}`, { automationId: automation.id });
 
-    // Get recent messages for context
+    // Get recent messages for context - increased to 25 for better context retention
     const { data: recentMessages } = await supabaseClient
       .from('messages')
       .select('content, is_from_me, message_type, created_at')
       .eq('conversation_id', context.conversationId)
       .order('created_at', { ascending: false })
-      .limit(10);
+      .limit(25);
+
+    // Get client memories if clientId is available
+    let clientMemoriesText = '';
+    if (context.clientId) {
+      const { data: memories } = await supabaseClient
+        .from('client_memories')
+        .select('fact_type, content, importance')
+        .eq('client_id', context.clientId)
+        .eq('is_active', true)
+        .order('importance', { ascending: false })
+        .limit(15);
+      
+      if (memories && memories.length > 0) {
+        clientMemoriesText = `\n\n📝 MEMÓRIA DO CLIENTE (fatos importantes já conhecidos):\n` +
+          memories.map((m: any) => `- [${m.fact_type}] ${m.content}`).join('\n');
+      }
+    }
+
+    // Get conversation summary if available
+    const { data: convData } = await supabaseClient
+      .from('conversations')
+      .select('ai_summary')
+      .eq('id', context.conversationId)
+      .single();
+    
+    const summaryText = convData?.ai_summary ? 
+      `\n\n📋 RESUMO DA CONVERSA ANTERIOR:\n${convData.ai_summary}` : '';
 
     // Agent prompt is the SINGLE SOURCE OF TRUTH - no fallbacks
     const systemPrompt = automation.ai_prompt;
@@ -733,7 +762,7 @@ async function processWithGPT(
 - Faça UMA pergunta ou informação por mensagem
 - NÃO envie textos longos ou explicações extensas
 - Use linguagem natural e profissional
-- Aguarde a resposta do cliente antes de continuar` 
+- Aguarde a resposta do cliente antes de continuar${clientMemoriesText}${summaryText}` 
       },
       ...(recentMessages?.reverse() || []).map((msg: any) => ({
         role: msg.is_from_me ? 'assistant' : 'user',
@@ -1416,6 +1445,7 @@ serve(async (req) => {
               remoteJid,
               instanceId: instance.id,
               instanceName: instance.instance_name,
+              clientId: conversation.client_id || undefined, // Pass clientId for memory support
             });
           } else {
             logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
