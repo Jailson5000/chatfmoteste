@@ -259,6 +259,24 @@ interface VoiceConfig {
   voiceId: string;
 }
 
+// Only respond with audio when the CLIENT explicitly requests it.
+// (voiceConfig.enabled is just a permission toggle)
+function isAudioRequested(userText: string): boolean {
+  if (!userText) return false;
+  const t = userText.toLowerCase();
+
+  // Common PT-BR ways users ask for voice notes
+  const patterns: RegExp[] = [
+    /(manda|envia|responde|responda|responder).{0,40}(áudio|audio|mensagem de voz|voz)/i,
+    /(áudio|audio|mensagem de voz|voz).{0,40}(manda|envia|responde|responda|responder)/i,
+    /por\s+(áudio|audio)/i,
+    /em\s+(áudio|audio)/i,
+    /em\s+voz/i,
+  ];
+
+  return patterns.some((p) => p.test(t));
+}
+
 // Helper function to generate TTS audio using OpenAI
 async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
   try {
@@ -331,16 +349,12 @@ async function sendAudioToWhatsApp(
         'Content-Type': 'application/json',
         'apikey': apiKey,
       },
+      // Evolution API expects "audio" at the root level (url or base64)
       body: JSON.stringify({
         number: remoteJid,
-        options: {
-          delay: 1200,
-          presence: 'recording',
-          encoding: true,
-        },
-        audioMessage: {
-          audio: `data:audio/mp3;base64,${audioBase64}`,
-        },
+        audio: audioBase64,
+        delay: 1200,
+        encoding: true,
       }),
     });
 
@@ -491,14 +505,16 @@ async function sendAIResponseToWhatsApp(
       }
     }
 
-    // If voice is enabled, generate and send audio response
-    if (voiceConfig?.enabled && allMessageContents.length > 0) {
-      logDebug('SEND_RESPONSE', 'Voice enabled, generating TTS audio', { voiceId: voiceConfig.voiceId });
-      
+    const audioRequested = isAudioRequested(context.messageContent);
+
+    // If voice is enabled AND the client requested audio, generate and send audio response
+    if (voiceConfig?.enabled && audioRequested && allMessageContents.length > 0) {
+      logDebug('SEND_RESPONSE', 'Client requested audio, generating TTS', { voiceId: voiceConfig.voiceId });
+
       // Combine all text parts for audio
       const fullText = allMessageContents.join(' ');
       const audioBase64 = await generateTTSAudio(fullText, voiceConfig.voiceId);
-      
+
       if (audioBase64) {
         const audioResult = await sendAudioToWhatsApp(
           apiUrl,
@@ -507,7 +523,7 @@ async function sendAIResponseToWhatsApp(
           context.remoteJid,
           audioBase64
         );
-        
+
         if (audioResult.success && audioResult.messageId) {
           // Save audio message to database
           await supabaseClient
@@ -522,10 +538,12 @@ async function sendAIResponseToWhatsApp(
               ai_generated: true,
               media_mime_type: 'audio/mpeg',
             });
-          
+
           logDebug('SEND_RESPONSE', 'Audio message sent and saved');
         }
       }
+    } else if (voiceConfig?.enabled && !audioRequested) {
+      logDebug('SEND_RESPONSE', 'Voice enabled but client did not request audio; skipping audio');
     }
 
     // Update conversation last_message_at
