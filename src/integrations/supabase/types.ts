@@ -1140,6 +1140,51 @@ export type Database = {
           },
         ]
       }
+      evolution_api_connections: {
+        Row: {
+          api_key: string
+          api_url: string
+          created_at: string
+          description: string | null
+          health_latency_ms: number | null
+          health_status: string | null
+          id: string
+          is_active: boolean
+          is_default: boolean
+          last_health_check_at: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          api_key: string
+          api_url: string
+          created_at?: string
+          description?: string | null
+          health_latency_ms?: number | null
+          health_status?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          last_health_check_at?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string
+          api_url?: string
+          created_at?: string
+          description?: string | null
+          health_latency_ms?: number | null
+          health_status?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          last_health_check_at?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       instance_status_history: {
         Row: {
           changed_at: string
