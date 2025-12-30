@@ -298,13 +298,6 @@ export function AIVoiceSettings() {
           </div>
         </div>
 
-        {/* Info Note */}
-        <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-          <p className="text-sm text-blue-700 dark:text-blue-300">
-            <strong>Nota:</strong> As respostas por áudio utilizam tecnologia de síntese de voz da OpenAI. 
-            Para funcionar, é necessário ter uma chave API da OpenAI configurada no sistema.
-          </p>
-        </div>
       </CardContent>
     </Card>
   );
