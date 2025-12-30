@@ -23,7 +23,8 @@ import {
   FolderPlus,
   Folder,
   FolderOpen,
-  Pencil
+  Pencil,
+  Volume2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -276,6 +277,17 @@ export default function AIAgents() {
   const [hasChanges, setHasChanges] = useState(false);
   const [promptVersion, setPromptVersion] = useState(1);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  
+  // Voice settings
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceId, setVoiceId] = useState("shimmer");
+
+// Available voices
+const AVAILABLE_VOICES = [
+  { id: "shimmer", name: "Shimmer", description: "Feminina" },
+  { id: "onyx", name: "Onyx", description: "Masculina grave" },
+  { id: "echo", name: "Echo", description: "Masculina clara" },
+];
 
   // Load agent data when selected
   useEffect(() => {
@@ -290,6 +302,10 @@ export default function AIAgents() {
       } else {
         setKeywords("");
       }
+      
+      // Load voice settings
+      setVoiceEnabled(Boolean(config?.voice_enabled));
+      setVoiceId((config?.voice_id as string) || "shimmer");
       
       setPromptVersion(1);
       setHasChanges(false);
@@ -676,6 +692,8 @@ export default function AIAgents() {
         selected_instance: channelType === "instance" ? selectedInstance : null,
         selected_department: channelType === "department" ? selectedDepartment : null,
         knowledge_base_ids: selectedKnowledge,
+        voice_enabled: voiceEnabled,
+        voice_id: voiceId,
       };
 
       await updateAutomation.mutateAsync({
@@ -1733,6 +1751,50 @@ Regras:
                       {departments.map((dept) => (
                         <SelectItem key={dept.id} value={dept.id}>
                           {dept.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Voice Settings */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Volume2 className="h-4 w-4" />
+                  Resposta por Áudio
+                </Label>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium">Ativar voz</p>
+                    <p className="text-xs text-muted-foreground">
+                      Responde por áudio quando solicitado
+                    </p>
+                  </div>
+                  <Switch
+                    checked={voiceEnabled}
+                    onCheckedChange={(checked) => {
+                      setVoiceEnabled(checked);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
+                
+                {voiceEnabled && (
+                  <Select 
+                    value={voiceId} 
+                    onValueChange={(value) => {
+                      setVoiceId(value);
+                      setHasChanges(true);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione a voz" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AVAILABLE_VOICES.map((voice) => (
+                        <SelectItem key={voice.id} value={voice.id}>
+                          {voice.name} ({voice.description})
                         </SelectItem>
                       ))}
                     </SelectContent>
