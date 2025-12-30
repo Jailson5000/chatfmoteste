@@ -1582,9 +1582,13 @@ export type Database = {
           features: Json | null
           id: string
           is_active: boolean
+          max_agents: number | null
+          max_ai_conversations: number | null
           max_instances: number | null
           max_messages: number | null
+          max_tts_minutes: number | null
           max_users: number | null
+          max_workspaces: number | null
           name: string
           price: number
           updated_at: string
@@ -1596,9 +1600,13 @@ export type Database = {
           features?: Json | null
           id?: string
           is_active?: boolean
+          max_agents?: number | null
+          max_ai_conversations?: number | null
           max_instances?: number | null
           max_messages?: number | null
+          max_tts_minutes?: number | null
           max_users?: number | null
+          max_workspaces?: number | null
           name: string
           price?: number
           updated_at?: string
@@ -1610,9 +1618,13 @@ export type Database = {
           features?: Json | null
           id?: string
           is_active?: boolean
+          max_agents?: number | null
+          max_ai_conversations?: number | null
           max_instances?: number | null
           max_messages?: number | null
+          max_tts_minutes?: number | null
           max_users?: number | null
+          max_workspaces?: number | null
           name?: string
           price?: number
           updated_at?: string
@@ -1872,6 +1884,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "templates_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      usage_records: {
+        Row: {
+          billing_period: string
+          count: number
+          created_at: string
+          duration_seconds: number | null
+          id: string
+          law_firm_id: string
+          metadata: Json | null
+          usage_type: string
+        }
+        Insert: {
+          billing_period: string
+          count?: number
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          law_firm_id: string
+          metadata?: Json | null
+          usage_type: string
+        }
+        Update: {
+          billing_period?: string
+          count?: number
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          law_firm_id?: string
+          metadata?: Json | null
+          usage_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_records_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
