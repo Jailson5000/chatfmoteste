@@ -7,16 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { z } from "zod";
 import miauchatLogo from "@/assets/miauchat-logo.png";
-
-const registerSchema = z.object({
-  companyName: z.string().min(2, "Nome da empresa deve ter no mínimo 2 caracteres").max(100),
-  adminName: z.string().min(2, "Nome do administrador deve ter no mínimo 2 caracteres").max(100),
-  email: z.string().email("Email inválido").max(255),
-  phone: z.string().optional(),
-  document: z.string().optional(),
-});
+import { publicRegistrationSchema, companyFieldConfig } from "@/lib/schemas/companySchema";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -35,7 +27,7 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const result = registerSchema.safeParse(formData);
+    const result = publicRegistrationSchema.safeParse(formData);
     if (!result.success) {
       toast({
         title: "Erro de validação",
@@ -213,13 +205,16 @@ export default function Register() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="company" className="text-zinc-300">Nome da Empresa *</Label>
+                <Label htmlFor="company" className="text-zinc-300">
+                  {companyFieldConfig.companyName.label} *
+                </Label>
                 <div className="relative">
                   <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                   <Input
                     id="company"
                     type="text"
-                    placeholder="Sua empresa"
+                    placeholder={companyFieldConfig.companyName.placeholder}
+                    maxLength={companyFieldConfig.companyName.maxLength}
                     className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                     value={formData.companyName}
                     onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
@@ -229,13 +224,16 @@ export default function Register() {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="admin" className="text-zinc-300">Nome do Responsável *</Label>
+                <Label htmlFor="admin" className="text-zinc-300">
+                  {companyFieldConfig.adminName.label} *
+                </Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                   <Input
                     id="admin"
                     type="text"
-                    placeholder="Seu nome"
+                    placeholder={companyFieldConfig.adminName.placeholder}
+                    maxLength={companyFieldConfig.adminName.maxLength}
                     className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                     value={formData.adminName}
                     onChange={(e) => setFormData({ ...formData, adminName: e.target.value })}
@@ -245,13 +243,16 @@ export default function Register() {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-zinc-300">Email *</Label>
+                <Label htmlFor="email" className="text-zinc-300">
+                  {companyFieldConfig.email.label} *
+                </Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                   <Input
                     id="email"
-                    type="email"
-                    placeholder="seu@email.com"
+                    type={companyFieldConfig.email.type}
+                    placeholder={companyFieldConfig.email.placeholder}
+                    maxLength={companyFieldConfig.email.maxLength}
                     className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -262,13 +263,16 @@ export default function Register() {
               
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-zinc-300">Telefone</Label>
+                  <Label htmlFor="phone" className="text-zinc-300">
+                    {companyFieldConfig.phone.label}
+                  </Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <Input
                       id="phone"
-                      type="tel"
-                      placeholder="(00) 00000-0000"
+                      type={companyFieldConfig.phone.type}
+                      placeholder={companyFieldConfig.phone.placeholder}
+                      maxLength={companyFieldConfig.phone.maxLength}
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
@@ -277,13 +281,16 @@ export default function Register() {
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="document" className="text-zinc-300">CNPJ/CPF</Label>
+                  <Label htmlFor="document" className="text-zinc-300">
+                    {companyFieldConfig.document.label}
+                  </Label>
                   <div className="relative">
                     <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <Input
                       id="document"
                       type="text"
-                      placeholder="00.000.000/0000-00"
+                      placeholder={companyFieldConfig.document.placeholder}
+                      maxLength={companyFieldConfig.document.maxLength}
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.document}
                       onChange={(e) => setFormData({ ...formData, document: e.target.value })}
