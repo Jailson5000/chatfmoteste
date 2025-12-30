@@ -975,13 +975,23 @@ export default function AIAgents() {
                     );
                   })}
 
+                  {/* Drop zone to remove from folder - shown when dragging agent from folder */}
+                  {activeAgent && (activeAgent as any).folder_id && (
+                    <DroppableFolder folder={null}>
+                      <div className="mx-6 my-3 p-4 border-2 border-dashed border-muted-foreground/30 rounded-lg flex items-center justify-center gap-2 text-muted-foreground transition-all hover:border-primary hover:text-primary">
+                        <FolderOpen className="h-5 w-5" />
+                        <span className="text-sm font-medium">Solte aqui para remover da pasta</span>
+                      </div>
+                    </DroppableFolder>
+                  )}
+
                   {/* Agents without folder */}
                   <DroppableFolder folder={null}>
                     <SortableContext 
                       items={agentsWithoutFolder.map(a => a.id)} 
                       strategy={verticalListSortingStrategy}
                     >
-                      {agentsWithoutFolder.length > 0 && (
+                      {agentsWithoutFolder.length > 0 ? (
                         <div className="divide-y divide-border">
                           {agentsWithoutFolder.map((agent) => (
                             <div key={agent.id} className="px-6">
@@ -991,6 +1001,13 @@ export default function AIAgents() {
                             </div>
                           ))}
                         </div>
+                      ) : (
+                        !activeAgent && folders.length > 0 && (
+                          <div className="px-6 py-8 text-center text-muted-foreground text-sm">
+                            <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p>Todos os agentes estão em pastas</p>
+                          </div>
+                        )
                       )}
                     </SortableContext>
                   </DroppableFolder>
