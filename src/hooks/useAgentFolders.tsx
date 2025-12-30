@@ -141,10 +141,15 @@ export function useAgentFolders() {
   });
 
   const moveAgentToFolder = useMutation({
-    mutationFn: async ({ agentId, folderId }: { agentId: string; folderId: string | null }) => {
+    mutationFn: async ({ agentId, folderId, position }: { agentId: string; folderId: string | null; position?: number }) => {
+      const updates: { folder_id: string | null; position?: number } = { folder_id: folderId };
+      if (position !== undefined) {
+        updates.position = position;
+      }
+      
       const { error } = await supabase
         .from("automations")
-        .update({ folder_id: folderId })
+        .update(updates)
         .eq("id", agentId);
       
       if (error) throw error;
@@ -161,6 +166,30 @@ export function useAgentFolders() {
     },
   });
 
+  const reorderAgents = useMutation({
+    mutationFn: async (updates: { id: string; position: number; folder_id: string | null }[]) => {
+      // Update each agent's position
+      for (const update of updates) {
+        const { error } = await supabase
+          .from("automations")
+          .update({ position: update.position, folder_id: update.folder_id })
+          .eq("id", update.id);
+        
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["automations"] });
+    },
+    onError: () => {
+      toast({
+        title: "Erro ao reordenar",
+        description: "Não foi possível reordenar os agentes.",
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     folders,
     isLoading,
@@ -170,5 +199,6 @@ export function useAgentFolders() {
     updateFolder,
     deleteFolder,
     moveAgentToFolder,
+    reorderAgents,
   };
 }

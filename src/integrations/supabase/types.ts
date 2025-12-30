@@ -240,6 +240,7 @@ export type Database = {
           last_prompt: string | null
           law_firm_id: string
           name: string
+          position: number
           trigger_config: Json | null
           trigger_type: string
           updated_at: string
@@ -256,6 +257,7 @@ export type Database = {
           last_prompt?: string | null
           law_firm_id: string
           name: string
+          position?: number
           trigger_config?: Json | null
           trigger_type: string
           updated_at?: string
@@ -272,6 +274,7 @@ export type Database = {
           last_prompt?: string | null
           law_firm_id?: string
           name?: string
+          position?: number
           trigger_config?: Json | null
           trigger_type?: string
           updated_at?: string
