@@ -132,6 +132,13 @@ export function useCompanyLimits() {
   };
 
   /**
+   * Check if at 95% or more of limit (critical threshold)
+   */
+  const isCritical = (current: number, max: number): boolean => {
+    return getPercentUsed(current, max) >= 95;
+  };
+
+  /**
    * Check if at or over limit
    */
   const isAtLimit = (current: number, max: number): boolean => {
@@ -145,6 +152,7 @@ export function useCompanyLimits() {
       max: usageSummary.effective_max_users,
       percent: getPercentUsed(usageSummary.current_users, usageSummary.effective_max_users),
       nearLimit: isNearLimit(usageSummary.current_users, usageSummary.effective_max_users),
+      critical: isCritical(usageSummary.current_users, usageSummary.effective_max_users),
       atLimit: isAtLimit(usageSummary.current_users, usageSummary.effective_max_users),
     },
     instances: {
@@ -152,6 +160,7 @@ export function useCompanyLimits() {
       max: usageSummary.effective_max_instances,
       percent: getPercentUsed(usageSummary.current_instances, usageSummary.effective_max_instances),
       nearLimit: isNearLimit(usageSummary.current_instances, usageSummary.effective_max_instances),
+      critical: isCritical(usageSummary.current_instances, usageSummary.effective_max_instances),
       atLimit: isAtLimit(usageSummary.current_instances, usageSummary.effective_max_instances),
     },
     agents: {
@@ -159,6 +168,7 @@ export function useCompanyLimits() {
       max: usageSummary.effective_max_agents,
       percent: getPercentUsed(usageSummary.current_agents, usageSummary.effective_max_agents),
       nearLimit: isNearLimit(usageSummary.current_agents, usageSummary.effective_max_agents),
+      critical: isCritical(usageSummary.current_agents, usageSummary.effective_max_agents),
       atLimit: isAtLimit(usageSummary.current_agents, usageSummary.effective_max_agents),
     },
     ai_conversations: {
@@ -166,6 +176,7 @@ export function useCompanyLimits() {
       max: usageSummary.effective_max_ai_conversations,
       percent: getPercentUsed(usageSummary.current_ai_conversations, usageSummary.effective_max_ai_conversations),
       nearLimit: isNearLimit(usageSummary.current_ai_conversations, usageSummary.effective_max_ai_conversations),
+      critical: isCritical(usageSummary.current_ai_conversations, usageSummary.effective_max_ai_conversations),
       atLimit: isAtLimit(usageSummary.current_ai_conversations, usageSummary.effective_max_ai_conversations),
     },
     tts_minutes: {
@@ -173,6 +184,7 @@ export function useCompanyLimits() {
       max: usageSummary.effective_max_tts_minutes,
       percent: getPercentUsed(usageSummary.current_tts_minutes, usageSummary.effective_max_tts_minutes),
       nearLimit: isNearLimit(usageSummary.current_tts_minutes, usageSummary.effective_max_tts_minutes),
+      critical: isCritical(usageSummary.current_tts_minutes, usageSummary.effective_max_tts_minutes),
       atLimit: isAtLimit(usageSummary.current_tts_minutes, usageSummary.effective_max_tts_minutes),
     },
   } : null;
@@ -184,6 +196,7 @@ export function useCompanyLimits() {
     checkLimit,
     getPercentUsed,
     isNearLimit,
+    isCritical,
     isAtLimit,
     refetch,
   };
