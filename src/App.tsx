@@ -25,6 +25,7 @@ import Connections from "./pages/Connections";
 import AIAgents from "./pages/AIAgents";
 import AIAgentEdit from "./pages/AIAgentEdit";
 import KnowledgeBase from "./pages/KnowledgeBase";
+import AIVoice from "./pages/AIVoice";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
@@ -166,6 +167,17 @@ const App = () => (
             }
           >
             <Route index element={<KnowledgeBase />} />
+          </Route>
+          
+          <Route
+            path="/ai-voice"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<AIVoice />} />
           </Route>
           
           <Route

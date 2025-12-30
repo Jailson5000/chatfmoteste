@@ -17,6 +17,7 @@ import {
   Link2,
   Bot,
   BookOpen,
+  Volume2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,7 @@ const adminOnlyItems = [
 const aiItems = [
   { icon: Bot, label: "Agentes de IA", path: "/ai-agents" },
   { icon: BookOpen, label: "Base de Conhecimento", path: "/knowledge-base" },
+  { icon: Volume2, label: "Voz IA", path: "/ai-voice" },
 ];
 
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };

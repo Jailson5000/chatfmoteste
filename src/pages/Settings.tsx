@@ -20,7 +20,6 @@ import {
   Mic,
   Pencil,
   Zap,
-  Volume2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -63,7 +62,6 @@ import { ColorPicker } from "@/components/ui/color-picker";
 import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
 import { AutomationsSettings } from "@/components/settings/AutomationsSettings";
-import { AIVoiceSettings } from "@/components/settings/AIVoiceSettings";
 import { supabase } from "@/integrations/supabase/client";
 
 const teamMembers = [
@@ -298,7 +296,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="status">
-        <TabsList className="grid w-full max-w-6xl grid-cols-11">
+        <TabsList className="grid w-full max-w-5xl grid-cols-10">
           <TabsTrigger value="status">
             <Layers className="h-4 w-4 mr-2" />
             Status
@@ -318,10 +316,6 @@ export default function Settings() {
           <TabsTrigger value="automations">
             <Zap className="h-4 w-4 mr-2" />
             Automações
-          </TabsTrigger>
-          <TabsTrigger value="voice">
-            <Volume2 className="h-4 w-4 mr-2" />
-            Voz IA
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
@@ -787,12 +781,6 @@ export default function Settings() {
         <TabsContent value="automations" className="space-y-6 mt-6">
           <AutomationsSettings />
         </TabsContent>
-
-        {/* AI Voice Settings */}
-        <TabsContent value="voice" className="space-y-6 mt-6">
-          <AIVoiceSettings />
-        </TabsContent>
-
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">
           <Card>
