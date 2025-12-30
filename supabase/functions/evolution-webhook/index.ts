@@ -252,12 +252,122 @@ async function getAIProviderConfig(
   }
 }
 
+// Voice configuration interface
+interface VoiceConfig {
+  enabled: boolean;
+  voiceId: string;
+}
+
+// Helper function to generate TTS audio using OpenAI
+async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
+  try {
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      logDebug('TTS', 'OPENAI_API_KEY not configured');
+      return null;
+    }
+
+    // Limit text length for TTS (OpenAI has 4096 char limit)
+    const trimmedText = text.substring(0, 4000);
+    
+    logDebug('TTS', `Generating audio with voice: ${voiceId}`, { textLength: trimmedText.length });
+
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'tts-1',
+        input: trimmedText,
+        voice: voiceId,
+        response_format: 'mp3',
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logDebug('TTS', 'OpenAI TTS API error', { status: response.status, error: errorText });
+      return null;
+    }
+
+    // Convert to base64
+    const audioBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(audioBuffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    const base64Audio = btoa(binary);
+
+    logDebug('TTS', `Audio generated successfully`, { size: audioBuffer.byteLength });
+    return base64Audio;
+  } catch (error) {
+    logDebug('TTS', 'Error generating TTS audio', { error: error instanceof Error ? error.message : error });
+    return null;
+  }
+}
+
+// Helper function to send audio message to WhatsApp
+async function sendAudioToWhatsApp(
+  apiUrl: string,
+  instanceName: string,
+  apiKey: string,
+  remoteJid: string,
+  audioBase64: string
+): Promise<{ success: boolean; messageId?: string }> {
+  try {
+    const sendUrl = `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`;
+    
+    logDebug('SEND_AUDIO', 'Sending audio to WhatsApp', { remoteJid });
+
+    const response = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify({
+        number: remoteJid,
+        options: {
+          delay: 1200,
+          presence: 'recording',
+          encoding: true,
+        },
+        audioMessage: {
+          audio: `data:audio/mp3;base64,${audioBase64}`,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logDebug('SEND_AUDIO', 'Evolution API audio send failed', { status: response.status, error: errorText });
+      return { success: false };
+    }
+
+    const result = await response.json();
+    const messageId = result?.key?.id;
+    
+    logDebug('SEND_AUDIO', 'Audio sent successfully', { messageId });
+    return { success: true, messageId };
+  } catch (error) {
+    logDebug('SEND_AUDIO', 'Error sending audio', { error: error instanceof Error ? error.message : error });
+    return { success: false };
+  }
+}
+
 // Helper function to send AI response back to WhatsApp and save to database
 // Splits response into paragraphs and sends them separately for natural feel
+// If voice is enabled, also sends audio response
 async function sendAIResponseToWhatsApp(
   supabaseClient: any,
   context: AutomationContext,
-  aiResponse: string
+  aiResponse: string,
+  voiceConfig?: VoiceConfig
 ): Promise<boolean> {
   try {
     logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', { 
@@ -380,6 +490,43 @@ async function sendAIResponseToWhatsApp(
       }
     }
 
+    // If voice is enabled, generate and send audio response
+    if (voiceConfig?.enabled && allMessageContents.length > 0) {
+      logDebug('SEND_RESPONSE', 'Voice enabled, generating TTS audio', { voiceId: voiceConfig.voiceId });
+      
+      // Combine all text parts for audio
+      const fullText = allMessageContents.join(' ');
+      const audioBase64 = await generateTTSAudio(fullText, voiceConfig.voiceId);
+      
+      if (audioBase64) {
+        const audioResult = await sendAudioToWhatsApp(
+          apiUrl,
+          instance.instance_name,
+          instance.api_key || '',
+          context.remoteJid,
+          audioBase64
+        );
+        
+        if (audioResult.success && audioResult.messageId) {
+          // Save audio message to database
+          await supabaseClient
+            .from('messages')
+            .insert({
+              conversation_id: context.conversationId,
+              whatsapp_message_id: audioResult.messageId,
+              content: '[Mensagem de áudio]',
+              message_type: 'audio',
+              is_from_me: true,
+              sender_type: 'system',
+              ai_generated: true,
+              media_mime_type: 'audio/mpeg',
+            });
+          
+          logDebug('SEND_RESPONSE', 'Audio message sent and saved');
+        }
+      }
+    }
+
     // Update conversation last_message_at
     await supabaseClient
       .from('conversations')
@@ -421,7 +568,7 @@ async function processWithGemini(
     // 3. Have a configured ai_prompt (required!)
     const { data: automations, error: autoError } = await supabaseClient
       .from('automations')
-      .select('id, ai_prompt, ai_temperature, name')
+      .select('id, ai_prompt, ai_temperature, name, trigger_config')
       .eq('law_firm_id', context.lawFirmId)
       .eq('is_active', true)
       .not('ai_prompt', 'is', null)
@@ -487,8 +634,17 @@ async function processWithGemini(
     });
 
     if (aiResponse) {
-      // Send the response back to WhatsApp
-      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse);
+      // Get voice configuration from automation trigger_config
+      const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
+      const voiceConfig: VoiceConfig = {
+        enabled: Boolean(triggerConfig?.voice_enabled),
+        voiceId: (triggerConfig?.voice_id as string) || 'shimmer',
+      };
+
+      logDebug('AI_PROVIDER', 'Voice config', { voiceConfig });
+
+      // Send the response back to WhatsApp (with optional voice)
+      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
     }
 
     // Log the AI processing
@@ -535,7 +691,7 @@ async function processWithGPT(
     // CRITICAL: Get the CORRECT automation for this tenant
     const { data: automations, error: autoError } = await supabaseClient
       .from('automations')
-      .select('id, ai_prompt, ai_temperature, name')
+      .select('id, ai_prompt, ai_temperature, name, trigger_config')
       .eq('law_firm_id', context.lawFirmId)
       .eq('is_active', true)
       .not('ai_prompt', 'is', null)
@@ -616,8 +772,17 @@ async function processWithGPT(
         automationId: automation.id 
       });
 
-      // Send the response back to WhatsApp
-      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse);
+      // Get voice configuration from automation trigger_config
+      const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
+      const voiceConfig: VoiceConfig = {
+        enabled: Boolean(triggerConfig?.voice_enabled),
+        voiceId: (triggerConfig?.voice_id as string) || 'shimmer',
+      };
+
+      logDebug('AI_MATRIX', 'Voice config', { voiceConfig });
+
+      // Send the response back to WhatsApp (with optional voice)
+      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
 
       // Log the AI processing
       await supabaseClient
