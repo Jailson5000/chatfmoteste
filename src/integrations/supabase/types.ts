@@ -2076,6 +2076,7 @@ export type Database = {
           default_department_id: string | null
           default_status_id: string | null
           disconnected_since: string | null
+          display_name: string | null
           id: string
           instance_id: string | null
           instance_name: string
@@ -2096,6 +2097,7 @@ export type Database = {
           default_department_id?: string | null
           default_status_id?: string | null
           disconnected_since?: string | null
+          display_name?: string | null
           id?: string
           instance_id?: string | null
           instance_name: string
@@ -2116,6 +2118,7 @@ export type Database = {
           default_department_id?: string | null
           default_status_id?: string | null
           disconnected_since?: string | null
+          display_name?: string | null
           id?: string
           instance_id?: string | null
           instance_name?: string

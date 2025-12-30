@@ -2,10 +2,10 @@
 // This file is auto-updated during build process
 
 // Current build version - format: YYYY-MM-DD.N
-export const APP_BUILD_ID = "2025-12-30.2";
+export const APP_BUILD_ID = "2025-12-30.3";
 
 // Build timestamp (ISO format)
-export const APP_BUILD_TIMESTAMP = "2025-12-30T22:45:00.000Z";
+export const APP_BUILD_TIMESTAMP = "2025-12-30T23:30:00.000Z";
 
 // Git commit hash (populated during build if available)
 export const APP_GIT_COMMIT = import.meta.env.VITE_GIT_COMMIT || "unknown";

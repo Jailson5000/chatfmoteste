@@ -92,9 +92,10 @@ export default function Connections() {
     }
 
     try {
-      // Use the random instanceName for backend, but we'll update display later
+      // Use the random instanceName for Evolution API, displayName for user display
       const result = await createInstance.mutateAsync({
-        instanceName, // Random unique name for Evolution API
+        instanceName, // Technical ID for Evolution API
+        displayName,  // User-friendly name
         apiUrl: evolutionApiUrl,
         apiKey: evolutionApiKey,
       });
@@ -278,12 +279,12 @@ export default function Connections() {
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
                             <AvatarFallback className="bg-primary/10 text-primary">
-                              {instance.instance_name.slice(0, 2).toUpperCase()}
+                              {(instance.display_name || instance.instance_name).slice(0, 2).toUpperCase()}
                             </AvatarFallback>
                           </Avatar>
                           <div>
                             <p className="font-medium text-primary">
-                              {instance.instance_name}
+                              {instance.display_name || instance.instance_name}
                             </p>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <span>{instance.phone_number || "Sem número"}</span>

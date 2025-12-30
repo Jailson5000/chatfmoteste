@@ -63,6 +63,7 @@ type EvolutionAction =
 interface EvolutionRequest {
   action: EvolutionAction;
   instanceName?: string;
+  displayName?: string;
   apiUrl?: string;
   apiKey?: string;
   instanceId?: string;
@@ -352,6 +353,7 @@ serve(async (req) => {
           .insert({
             law_firm_id: lawFirmId,
             instance_name: body.instanceName,
+            display_name: body.displayName || body.instanceName,
             instance_id: instanceId,
             api_url: apiUrl,
             api_key: body.apiKey,

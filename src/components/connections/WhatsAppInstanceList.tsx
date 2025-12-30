@@ -123,7 +123,7 @@ export function WhatsAppInstanceList({
 
             return (
               <TableRow key={instance.id}>
-                <TableCell className="font-medium">{instance.instance_name}</TableCell>
+                <TableCell className="font-medium">{instance.display_name || instance.instance_name}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm">

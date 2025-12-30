@@ -21,7 +21,7 @@ interface KanbanCardProps {
       message_type?: string;
       is_from_me?: boolean;
     } | null;
-    whatsapp_instance?: { instance_name: string; phone_number?: string | null } | null;
+    whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
     assigned_profile?: { full_name: string } | null;
     unread_count?: number;
     client?: { custom_status_id?: string | null } | null;

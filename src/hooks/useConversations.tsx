@@ -15,6 +15,7 @@ interface ConversationWithLastMessage extends Conversation {
   } | null;
   whatsapp_instance?: {
     instance_name: string;
+    display_name?: string | null;
     phone_number?: string | null;
   } | null;
   assigned_profile?: {
@@ -50,7 +51,7 @@ export function useConversations() {
         .from("conversations")
         .select(`
           *,
-          whatsapp_instance:whatsapp_instances(instance_name, phone_number),
+          whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
           client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
           department:departments(id, name, color)
         `)
@@ -98,7 +99,7 @@ export function useConversations() {
           return {
             ...conv,
             last_message: lastMsgResult.data,
-            whatsapp_instance: conv.whatsapp_instance as { instance_name: string; phone_number?: string | null } | null,
+            whatsapp_instance: conv.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
             assigned_profile: conv.assigned_to ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" } : null,
             unread_count: unreadResult.count || 0,
             client: conv.client as { 
