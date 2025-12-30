@@ -43,6 +43,7 @@ import {
   GlobalAdminAuditLogs,
   GlobalAdminProvisioningDashboard,
   GlobalAdminAlertHistory,
+  GlobalAdminTemplateBase,
 } from "./pages/global-admin";
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
@@ -239,6 +240,14 @@ const App = () => (
             <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
             <Route path="provisioning" element={<GlobalAdminProvisioningDashboard />} />
             <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
+            <Route 
+              path="template-base" 
+              element={
+                <GlobalAdminRoute allowedRoles={["super_admin"]}>
+                  <GlobalAdminTemplateBase />
+                </GlobalAdminRoute>
+              }
+            />
           </Route>
           
             {/* Catch-all route */}
