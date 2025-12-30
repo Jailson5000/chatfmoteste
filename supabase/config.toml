@@ -77,3 +77,9 @@ verify_jwt = false
 
 [functions.ai-classify]
 verify_jwt = false
+
+[functions.test-n8n-webhook]
+verify_jwt = false
+
+[functions.test-openai-key]
+verify_jwt = false
