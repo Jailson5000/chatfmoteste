@@ -41,6 +41,17 @@ import { useDepartments } from "@/hooks/useDepartments";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+} from "@dnd-kit/core";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -100,6 +111,67 @@ const FOLDER_COLORS = [
   "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9",
 ];
 
+// Draggable Agent Component
+function DraggableAgent({ 
+  agent, 
+  children 
+}: { 
+  agent: Automation; 
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: agent.id,
+    data: { type: 'agent', agent },
+  });
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      className={cn(isDragging && "opacity-50")}
+    >
+      <div className="flex items-center">
+        <div 
+          {...listeners} 
+          {...attributes}
+          className="cursor-grab active:cursor-grabbing p-1 hover:bg-muted/50 rounded"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="h-4 w-4 text-muted-foreground" />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Droppable Folder Component
+function DroppableFolder({ 
+  folder, 
+  children,
+  isOver 
+}: { 
+  folder: AgentFolder | null;
+  children: React.ReactNode;
+  isOver?: boolean;
+}) {
+  const { setNodeRef } = useDroppable({
+    id: folder ? folder.id : 'no-folder',
+    data: { type: 'folder', folder },
+  });
+
+  return (
+    <div 
+      ref={setNodeRef}
+      className={cn(
+        "transition-colors",
+        isOver && "bg-primary/10 ring-2 ring-primary/30 rounded-lg"
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function AIAgents() {
   const { toast } = useToast();
   const { automations, isLoading: automationsLoading, updateAutomation, createAutomation, deleteAutomation } = useAutomations();
@@ -107,6 +179,16 @@ export default function AIAgents() {
   const { knowledgeItems, isLoading: knowledgeLoading } = useKnowledgeItems();
   const { instances, isLoading: instancesLoading } = useWhatsAppInstances();
   const { departments, isLoading: departmentsLoading } = useDepartments();
+
+  // DnD state
+  const [activeAgent, setActiveAgent] = useState<Automation | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -129,6 +211,11 @@ export default function AIAgents() {
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
   const [newAgentFolderId, setNewAgentFolderId] = useState<string | null>(null);
+
+  // Edit agent state
+  const [agentToEditInfo, setAgentToEditInfo] = useState<Automation | null>(null);
+  const [editAgentName, setEditAgentName] = useState("");
+  const [editAgentDescription, setEditAgentDescription] = useState("");
 
   // Editor state
   const [prompt, setPrompt] = useState("");
@@ -170,6 +257,57 @@ export default function AIAgents() {
       setHasChanges(prompt !== currentPrompt || isActive !== selectedAgent.is_active);
     }
   }, [prompt, isActive, selectedAgent]);
+
+  // DnD handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    const agent = automations.find(a => a.id === active.id);
+    if (agent) {
+      setActiveAgent(agent);
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveAgent(null);
+
+    if (!over) return;
+
+    const agentId = active.id as string;
+    const targetId = over.id as string;
+
+    // Determine target folder
+    let targetFolderId: string | null = null;
+    if (targetId === 'no-folder') {
+      targetFolderId = null;
+    } else {
+      targetFolderId = targetId;
+    }
+
+    // Get current folder of agent
+    const agent = automations.find(a => a.id === agentId) as any;
+    const currentFolderId = agent?.folder_id || null;
+
+    // Only move if target is different
+    if (currentFolderId !== targetFolderId) {
+      try {
+        await moveAgentToFolder.mutateAsync({ agentId, folderId: targetFolderId });
+        toast({
+          title: targetFolderId ? "Agente movido" : "Agente removido da pasta",
+          description: targetFolderId 
+            ? "O agente foi movido para a pasta." 
+            : "O agente foi removido da pasta.",
+        });
+        
+        // Expand target folder if moving into one
+        if (targetFolderId) {
+          setExpandedFolders(prev => new Set([...prev, targetFolderId]));
+        }
+      } catch (error) {
+        // Error handled in hook
+      }
+    }
+  };
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
@@ -289,6 +427,30 @@ export default function AIAgents() {
       toast({
         title: "Erro ao criar agente",
         description: "Não foi possível criar o agente.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditAgentInfo = async () => {
+    if (!agentToEditInfo || !editAgentName.trim()) return;
+    
+    try {
+      await updateAutomation.mutateAsync({
+        id: agentToEditInfo.id,
+        name: editAgentName,
+        description: editAgentDescription,
+      });
+      
+      setAgentToEditInfo(null);
+      toast({
+        title: "Agente atualizado",
+        description: "O nome e descrição foram atualizados.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao atualizar",
+        description: "Não foi possível atualizar o agente.",
         variant: "destructive",
       });
     }
@@ -432,22 +594,15 @@ export default function AIAgents() {
     );
   }
 
-  // Agent Row Component
-  const AgentRow = ({ agent, inFolder = false }: { agent: Automation; inFolder?: boolean }) => (
+  // Agent Row Component (without drag handle, used inside DraggableAgent)
+  const AgentRowContent = ({ agent, inFolder = false }: { agent: Automation; inFolder?: boolean }) => (
     <div
       className={cn(
-        "grid gap-4 px-6 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group",
-        inFolder ? "grid-cols-[1fr_100px_150px_80px] pl-12" : "grid-cols-[auto_1fr_100px_150px_80px]"
+        "flex-1 grid gap-4 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group",
+        inFolder ? "grid-cols-[1fr_100px_150px_80px]" : "grid-cols-[1fr_100px_150px_80px]"
       )}
       onClick={() => handleSelectAgent(agent)}
     >
-      {!inFolder && (
-        <div className="flex items-center gap-2 w-8" onClick={(e) => e.stopPropagation()}>
-          <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
-          <Checkbox />
-        </div>
-      )}
-      
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium">{agent.name}</span>
@@ -484,6 +639,14 @@ export default function AIAgents() {
             <DropdownMenuItem onClick={() => handleSelectAgent(agent)}>
               <Settings2 className="h-4 w-4 mr-2" />
               Configurar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              setAgentToEditInfo(agent);
+              setEditAgentName(agent.name);
+              setEditAgentDescription(agent.description || "");
+            }}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Editar nome/descrição
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleDuplicateAgent(agent)}>
               <Copy className="h-4 w-4 mr-2" />
@@ -535,394 +698,468 @@ export default function AIAgents() {
   // Render List View
   if (viewMode === "list") {
     return (
-      <div className="flex flex-col h-full bg-background">
-        {/* Tabs Header */}
-        <div className="border-b border-border px-6 pt-4">
-          <Tabs defaultValue="agents">
-            <TabsList className="bg-transparent p-0 h-auto gap-6">
-              <TabsTrigger 
-                value="agents" 
-                className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
-              >
-                Meus Agentes
-              </TabsTrigger>
-              <TabsTrigger 
-                value="templates" 
-                className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
-              >
-                Templates
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Search and Actions */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar agentes..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
+      <DndContext 
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex flex-col h-full bg-background">
+          {/* Tabs Header */}
+          <div className="border-b border-border px-6 pt-4">
+            <Tabs defaultValue="agents">
+              <TabsList className="bg-transparent p-0 h-auto gap-6">
+                <TabsTrigger 
+                  value="agents" 
+                  className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
+                >
+                  Meus Agentes
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="templates" 
+                  className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
+                >
+                  Templates
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setIsCreateFolderDialogOpen(true)} 
-              className="gap-2"
-            >
-              <FolderPlus className="h-4 w-4" />
-              Nova Pasta
-            </Button>
-            <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Criar Agente
-            </Button>
-          </div>
-        </div>
 
-        {/* Agents Table */}
-        <div className="flex-1 overflow-auto">
-          {/* Table Header */}
-          <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 border-b border-border bg-muted/30 text-sm font-medium text-muted-foreground">
-            <div className="w-8">
-              <Checkbox />
+          {/* Search and Actions */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Pesquisar agentes..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
             </div>
-            <div>Agente</div>
-            <div className="text-center">Delay</div>
-            <div>Palavra-chave</div>
-            <div className="text-center">Ações</div>
-          </div>
-
-          {/* Table Body */}
-          <div className="divide-y divide-border">
-            {filteredAgents.length === 0 && folders.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Bot className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="font-medium text-lg mb-1">Nenhum agente criado</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Crie seu primeiro agente de IA para automatizar atendimentos
-                </p>
-                <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Criar Agente
-                </Button>
-              </div>
-            ) : (
-              <>
-                {/* Folders */}
-                {folders.map((folder) => {
-                  const folderAgents = getAgentsInFolder(folder.id);
-                  const isExpanded = expandedFolders.has(folder.id);
-                  
-                  return (
-                    <Collapsible
-                      key={folder.id}
-                      open={isExpanded}
-                      onOpenChange={() => toggleFolder(folder.id)}
-                    >
-                      <div className="border-b border-border">
-                        <CollapsibleTrigger asChild>
-                          <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 items-center hover:bg-muted/30 cursor-pointer transition-colors group bg-muted/10">
-                            <div className="flex items-center gap-2 w-8">
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </div>
-                            
-                            <div className="flex items-center gap-3">
-                              <Folder 
-                                className="h-5 w-5" 
-                                style={{ color: folder.color }}
-                              />
-                              <span className="font-medium">{folder.name}</span>
-                              <Badge variant="secondary" className="text-xs">
-                                {folderAgents.length} agente{folderAgents.length !== 1 ? "s" : ""}
-                              </Badge>
-                            </div>
-                            
-                            <div></div>
-                            <div></div>
-                            
-                            <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => {
-                                    setFolderToEdit(folder);
-                                    setEditFolderName(folder.name);
-                                    setEditFolderColor(folder.color);
-                                  }}>
-                                    <Pencil className="h-4 w-4 mr-2" />
-                                    Editar pasta
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    className="text-destructive"
-                                    onClick={() => setFolderToDelete(folder)}
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Excluir pasta
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </div>
-                        </CollapsibleTrigger>
-                        
-                        <CollapsibleContent>
-                          <div className="divide-y divide-border bg-muted/5">
-                            {folderAgents.length === 0 ? (
-                              <div className="pl-12 py-4 text-sm text-muted-foreground">
-                                Nenhum agente nesta pasta
-                              </div>
-                            ) : (
-                              folderAgents.map((agent) => (
-                                <AgentRow key={agent.id} agent={agent} inFolder />
-                              ))
-                            )}
-                          </div>
-                        </CollapsibleContent>
-                      </div>
-                    </Collapsible>
-                  );
-                })}
-
-                {/* Agents without folder */}
-                {agentsWithoutFolder.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Create Folder Dialog */}
-        <Dialog open={isCreateFolderDialogOpen} onOpenChange={setIsCreateFolderDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nova Pasta</DialogTitle>
-              <DialogDescription>
-                Crie uma pasta para organizar seus agentes de IA.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="folder-name">Nome da Pasta</Label>
-                <Input
-                  id="folder-name"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="Ex: Atendimento, Vendas, Suporte..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Cor da Pasta</Label>
-                <div className="flex flex-wrap gap-2">
-                  {FOLDER_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setNewFolderColor(color)}
-                      className={cn(
-                        "h-8 w-8 rounded-full border-2 transition-all",
-                        newFolderColor === color 
-                          ? "border-foreground scale-110" 
-                          : "border-transparent hover:scale-105"
-                      )}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateFolderDialogOpen(false)}>
-                Cancelar
-              </Button>
+            <div className="flex items-center gap-2">
               <Button 
-                onClick={handleCreateFolder}
-                disabled={!newFolderName.trim() || createFolder.isPending}
+                variant="outline" 
+                onClick={() => setIsCreateFolderDialogOpen(true)} 
+                className="gap-2"
               >
-                {createFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Criar Pasta
+                <FolderPlus className="h-4 w-4" />
+                Nova Pasta
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Folder Dialog */}
-        <Dialog open={!!folderToEdit} onOpenChange={() => setFolderToEdit(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Editar Pasta</DialogTitle>
-              <DialogDescription>
-                Altere o nome ou a cor da pasta.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-folder-name">Nome da Pasta</Label>
-                <Input
-                  id="edit-folder-name"
-                  value={editFolderName}
-                  onChange={(e) => setEditFolderName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Cor da Pasta</Label>
-                <div className="flex flex-wrap gap-2">
-                  {FOLDER_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setEditFolderColor(color)}
-                      className={cn(
-                        "h-8 w-8 rounded-full border-2 transition-all",
-                        editFolderColor === color 
-                          ? "border-foreground scale-110" 
-                          : "border-transparent hover:scale-105"
-                      )}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setFolderToEdit(null)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleEditFolder}
-                disabled={!editFolderName.trim() || updateFolder.isPending}
-              >
-                {updateFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Delete Folder Confirmation */}
-        <AlertDialog open={!!folderToDelete} onOpenChange={() => setFolderToDelete(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Excluir Pasta</AlertDialogTitle>
-              <AlertDialogDescription>
-                Tem certeza que deseja excluir a pasta "{folderToDelete?.name}"? 
-                Os agentes dentro dela serão movidos para fora da pasta, não serão excluídos.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteFolder}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Excluir
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {/* Create Agent Dialog */}
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Criar Novo Agente</DialogTitle>
-              <DialogDescription>
-                Crie um novo agente de IA para automatizar seus atendimentos.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nome do Agente</Label>
-                <Input
-                  id="name"
-                  value={newAgentName}
-                  onChange={(e) => setNewAgentName(e.target.value)}
-                  placeholder="Ex: Laura, Davi, Atendimento Inicial..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Descrição</Label>
-                <Textarea
-                  id="description"
-                  value={newAgentDescription}
-                  onChange={(e) => setNewAgentDescription(e.target.value)}
-                  placeholder="Descreva o que este agente faz..."
-                  rows={3}
-                />
-              </div>
-              {folders.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Pasta (opcional)</Label>
-                  <Select 
-                    value={newAgentFolderId || "none"} 
-                    onValueChange={(value) => setNewAgentFolderId(value === "none" ? null : value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione uma pasta" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sem pasta</SelectItem>
-                      {folders.map((folder) => (
-                        <SelectItem key={folder.id} value={folder.id}>
-                          <div className="flex items-center gap-2">
-                            <Folder className="h-4 w-4" style={{ color: folder.color }} />
-                            {folder.name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleCreateAgent}
-                disabled={!newAgentName.trim() || createAutomation.isPending}
-              >
-                {createAutomation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+                <Plus className="h-4 w-4" />
                 Criar Agente
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </div>
+          </div>
 
-        {/* Delete Agent Confirmation */}
-        <AlertDialog open={!!agentToDelete} onOpenChange={() => setAgentToDelete(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Excluir Agente</AlertDialogTitle>
-              <AlertDialogDescription>
-                Tem certeza que deseja excluir "{agentToDelete?.name}"? Esta ação não pode ser desfeita.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteAgent}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Excluir
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+          {/* Agents Table */}
+          <div className="flex-1 overflow-auto">
+            {/* Table Header */}
+            <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 border-b border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+              <div className="w-6"></div>
+              <div>Agente</div>
+              <div className="text-center">Delay</div>
+              <div>Palavra-chave</div>
+              <div className="text-center">Ações</div>
+            </div>
+
+            {/* Table Body */}
+            <div className="divide-y divide-border">
+              {filteredAgents.length === 0 && folders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="font-medium text-lg mb-1">Nenhum agente criado</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Crie seu primeiro agente de IA para automatizar atendimentos
+                  </p>
+                  <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Criar Agente
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {/* Folders */}
+                  {folders.map((folder) => {
+                    const folderAgents = getAgentsInFolder(folder.id);
+                    const isExpanded = expandedFolders.has(folder.id);
+                    
+                    return (
+                      <DroppableFolder key={folder.id} folder={folder}>
+                        <Collapsible
+                          open={isExpanded}
+                          onOpenChange={() => toggleFolder(folder.id)}
+                        >
+                          <div className="border-b border-border">
+                            <CollapsibleTrigger asChild>
+                              <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 items-center hover:bg-muted/30 cursor-pointer transition-colors group bg-muted/10">
+                                <div className="flex items-center gap-2 w-6">
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                                
+                                <div className="flex items-center gap-3">
+                                  <Folder 
+                                    className="h-5 w-5" 
+                                    style={{ color: folder.color }}
+                                  />
+                                  <span className="font-medium">{folder.name}</span>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {folderAgents.length} agente{folderAgents.length !== 1 ? "s" : ""}
+                                  </Badge>
+                                </div>
+                                
+                                <div></div>
+                                <div></div>
+                                
+                                <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => {
+                                        setFolderToEdit(folder);
+                                        setEditFolderName(folder.name);
+                                        setEditFolderColor(folder.color);
+                                      }}>
+                                        <Pencil className="h-4 w-4 mr-2" />
+                                        Editar pasta
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem 
+                                        className="text-destructive"
+                                        onClick={() => setFolderToDelete(folder)}
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Excluir pasta
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              </div>
+                            </CollapsibleTrigger>
+                            
+                            <CollapsibleContent>
+                              <div className="divide-y divide-border bg-muted/5">
+                                {folderAgents.length === 0 ? (
+                                  <div className="pl-12 py-4 text-sm text-muted-foreground italic">
+                                    Arraste um agente para esta pasta
+                                  </div>
+                                ) : (
+                                  folderAgents.map((agent) => (
+                                    <div key={agent.id} className="px-6 pl-10">
+                                      <DraggableAgent agent={agent}>
+                                        <AgentRowContent agent={agent} inFolder />
+                                      </DraggableAgent>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </CollapsibleContent>
+                          </div>
+                        </Collapsible>
+                      </DroppableFolder>
+                    );
+                  })}
+
+                  {/* Agents without folder */}
+                  <DroppableFolder folder={null}>
+                    {agentsWithoutFolder.length > 0 && (
+                      <div className="divide-y divide-border">
+                        {agentsWithoutFolder.map((agent) => (
+                          <div key={agent.id} className="px-6">
+                            <DraggableAgent agent={agent}>
+                              <AgentRowContent agent={agent} />
+                            </DraggableAgent>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </DroppableFolder>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Drag Overlay */}
+          <DragOverlay>
+            {activeAgent ? (
+              <div className="bg-card border border-border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3">
+                <Bot className="h-5 w-5 text-primary" />
+                <span className="font-medium">{activeAgent.name}</span>
+              </div>
+            ) : null}
+          </DragOverlay>
+
+          {/* Create Folder Dialog */}
+          <Dialog open={isCreateFolderDialogOpen} onOpenChange={setIsCreateFolderDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nova Pasta</DialogTitle>
+                <DialogDescription>
+                  Crie uma pasta para organizar seus agentes de IA.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="folder-name">Nome da Pasta</Label>
+                  <Input
+                    id="folder-name"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="Ex: Atendimento, Vendas, Suporte..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cor da Pasta</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {FOLDER_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setNewFolderColor(color)}
+                        className={cn(
+                          "h-8 w-8 rounded-full border-2 transition-all",
+                          newFolderColor === color 
+                            ? "border-foreground scale-110" 
+                            : "border-transparent hover:scale-105"
+                        )}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateFolderDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleCreateFolder}
+                  disabled={!newFolderName.trim() || createFolder.isPending}
+                >
+                  {createFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Criar Pasta
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Folder Dialog */}
+          <Dialog open={!!folderToEdit} onOpenChange={() => setFolderToEdit(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Editar Pasta</DialogTitle>
+                <DialogDescription>
+                  Altere o nome ou a cor da pasta.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-folder-name">Nome da Pasta</Label>
+                  <Input
+                    id="edit-folder-name"
+                    value={editFolderName}
+                    onChange={(e) => setEditFolderName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cor da Pasta</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {FOLDER_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setEditFolderColor(color)}
+                        className={cn(
+                          "h-8 w-8 rounded-full border-2 transition-all",
+                          editFolderColor === color 
+                            ? "border-foreground scale-110" 
+                            : "border-transparent hover:scale-105"
+                        )}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setFolderToEdit(null)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleEditFolder}
+                  disabled={!editFolderName.trim() || updateFolder.isPending}
+                >
+                  {updateFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Agent Info Dialog */}
+          <Dialog open={!!agentToEditInfo} onOpenChange={() => setAgentToEditInfo(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Editar Agente</DialogTitle>
+                <DialogDescription>
+                  Altere o nome e descrição do agente.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-agent-name">Nome do Agente</Label>
+                  <Input
+                    id="edit-agent-name"
+                    value={editAgentName}
+                    onChange={(e) => setEditAgentName(e.target.value)}
+                    placeholder="Ex: Laura, Davi..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-agent-description">Descrição</Label>
+                  <Textarea
+                    id="edit-agent-description"
+                    value={editAgentDescription}
+                    onChange={(e) => setEditAgentDescription(e.target.value)}
+                    placeholder="Ex: Secretaria, Atendimento inicial..."
+                    rows={3}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAgentToEditInfo(null)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleEditAgentInfo}
+                  disabled={!editAgentName.trim() || updateAutomation.isPending}
+                >
+                  {updateAutomation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete Folder Confirmation */}
+          <AlertDialog open={!!folderToDelete} onOpenChange={() => setFolderToDelete(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Excluir Pasta</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Tem certeza que deseja excluir a pasta "{folderToDelete?.name}"? 
+                  Os agentes dentro dela serão movidos para fora da pasta, não serão excluídos.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeleteFolder}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Excluir
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Create Agent Dialog */}
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Criar Novo Agente</DialogTitle>
+                <DialogDescription>
+                  Crie um novo agente de IA para automatizar seus atendimentos.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nome do Agente</Label>
+                  <Input
+                    id="name"
+                    value={newAgentName}
+                    onChange={(e) => setNewAgentName(e.target.value)}
+                    placeholder="Ex: Laura, Davi, Atendimento Inicial..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Descrição</Label>
+                  <Textarea
+                    id="description"
+                    value={newAgentDescription}
+                    onChange={(e) => setNewAgentDescription(e.target.value)}
+                    placeholder="Descreva o que este agente faz..."
+                    rows={3}
+                  />
+                </div>
+                {folders.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Pasta (opcional)</Label>
+                    <Select 
+                      value={newAgentFolderId || "none"} 
+                      onValueChange={(value) => setNewAgentFolderId(value === "none" ? null : value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione uma pasta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sem pasta</SelectItem>
+                        {folders.map((folder) => (
+                          <SelectItem key={folder.id} value={folder.id}>
+                            <div className="flex items-center gap-2">
+                              <Folder className="h-4 w-4" style={{ color: folder.color }} />
+                              {folder.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleCreateAgent}
+                  disabled={!newAgentName.trim() || createAutomation.isPending}
+                >
+                  {createAutomation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Criar Agente
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete Agent Confirmation */}
+          <AlertDialog open={!!agentToDelete} onOpenChange={() => setAgentToDelete(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Excluir Agente</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Tem certeza que deseja excluir "{agentToDelete?.name}"? Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeleteAgent}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Excluir
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </DndContext>
     );
   }
 
