@@ -351,10 +351,14 @@ export default function Register() {
                           {plan.description && (
                             <p className="text-zinc-400 text-xs mt-1">{plan.description}</p>
                           )}
-                          <div className="flex gap-3 mt-2 text-xs text-zinc-500">
-                            <span>{plan.max_users} usuários</span>
+                          <div className="flex flex-wrap gap-2 mt-2 text-xs text-zinc-500">
+                            <span>{plan.max_users >= 999 ? "∞" : plan.max_users} membros</span>
                             <span>•</span>
-                            <span>{plan.max_instances} instâncias</span>
+                            <span>{plan.max_instances} WhatsApp</span>
+                            <span>•</span>
+                            <span>{plan.max_ai_conversations} conv. IA</span>
+                            <span>•</span>
+                            <span>{plan.max_tts_minutes} min áudio</span>
                           </div>
                         </div>
                       </label>

@@ -8,6 +8,10 @@ interface PlanInfo {
   features: string[];
   maxUsers: number;
   maxInstances: number;
+  maxAiConversations: number;
+  maxTtsMinutes: number;
+  maxAgents: number;
+  maxWorkspaces: number;
 }
 
 interface CompanyPlanResult {
@@ -61,6 +65,10 @@ export function useCompanyPlan(): CompanyPlanResult {
         features: Array.isArray(plan.features) ? plan.features as string[] : [],
         maxUsers: plan.max_users ?? 5,
         maxInstances: plan.max_instances ?? 2,
+        maxAiConversations: (plan as any).max_ai_conversations ?? 250,
+        maxTtsMinutes: (plan as any).max_tts_minutes ?? 40,
+        maxAgents: (plan as any).max_agents ?? 1,
+        maxWorkspaces: (plan as any).max_workspaces ?? 1,
       };
     },
     enabled: !!lawFirm?.id,

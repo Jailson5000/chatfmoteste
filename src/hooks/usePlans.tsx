@@ -11,6 +11,10 @@ interface Plan {
   max_users: number;
   max_instances: number;
   max_messages: number | null;
+  max_ai_conversations: number;
+  max_tts_minutes: number;
+  max_agents: number;
+  max_workspaces: number;
   features: string[];
   is_active: boolean;
   created_at: string;
@@ -25,6 +29,10 @@ interface CreatePlanData {
   max_users?: number;
   max_instances?: number;
   max_messages?: number;
+  max_ai_conversations?: number;
+  max_tts_minutes?: number;
+  max_agents?: number;
+  max_workspaces?: number;
   features?: string[];
   is_active?: boolean;
 }
