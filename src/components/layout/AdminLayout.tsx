@@ -5,7 +5,8 @@ import {
   Building2, 
   Settings, 
   ArrowLeft,
-  Shield
+  Shield,
+  Brain
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ const adminNavItems = [
   { icon: LayoutDashboard, label: "Visão Geral", path: "/admin" },
   { icon: Users, label: "Equipe", path: "/admin/team" },
   { icon: Building2, label: "Empresa", path: "/admin/company" },
+  { icon: Brain, label: "Configurações de IA", path: "/admin/ai-settings" },
   { icon: Settings, label: "Configurações", path: "/admin/settings" },
 ];
 
