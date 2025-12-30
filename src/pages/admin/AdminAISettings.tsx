@@ -27,13 +27,18 @@ import {
   Crown,
   Shield,
   Loader2,
-  TestTube
+  TestTube,
+  Clock,
+  User,
+  Activity
 } from "lucide-react";
 import { useCompanyPlan } from "@/hooks/useCompanyPlan";
 import { useTenantAISettings, TenantAIProvider } from "@/hooks/useTenantAISettings";
 import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 interface AICapability {
   id: string;
@@ -90,6 +95,8 @@ export default function AdminAISettings() {
     settings: aiSettings, 
     updateSettings, 
     maskedApiKey,
+    maskedWebhookSecret,
+    hasN8nWebhook,
     isLoading: aiLoading 
   } = useTenantAISettings();
   const { settings: lawFirmSettings } = useLawFirmSettings();
@@ -101,18 +108,34 @@ export default function AdminAISettings() {
     transcription: true,
     classification: true
   });
+  
+  // OpenAI fields
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  
+  // N8N fields
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState("");
+  const [n8nWebhookSecret, setN8nWebhookSecret] = useState("");
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  
+  // Loading states
   const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTestingOpenai, setIsTestingOpenai] = useState(false);
+  const [isTestingN8n, setIsTestingN8n] = useState(false);
+  
+  // Test results
+  const [openaiTestResult, setOpenaiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Load settings from tenant AI settings
   useEffect(() => {
     if (aiSettings) {
       setProvider(aiSettings.aiProvider);
       setCapabilities(aiSettings.aiCapabilities);
-      // Don't load actual API key for security, just show if it exists
+      // Load N8N URL if exists
+      if (aiSettings.n8nWebhookUrl) {
+        setN8nWebhookUrl(aiSettings.n8nWebhookUrl);
+      }
     }
   }, [aiSettings]);
 
@@ -123,18 +146,29 @@ export default function AdminAISettings() {
         aiProvider: TenantAIProvider;
         aiCapabilities: Record<string, boolean>;
         openaiApiKey?: string | null;
+        n8nWebhookUrl?: string | null;
+        n8nWebhookSecret?: string | null;
       } = {
         aiProvider: provider,
         aiCapabilities: capabilities,
       };
 
-      // Only update API key if user entered a new one
+      // Only update OpenAI API key if user entered a new one
       if (openaiApiKey.trim()) {
         updateData.openaiApiKey = openaiApiKey.trim();
       }
 
+      // Update N8N settings
+      if (provider === "n8n") {
+        updateData.n8nWebhookUrl = n8nWebhookUrl.trim() || null;
+        if (n8nWebhookSecret.trim()) {
+          updateData.n8nWebhookSecret = n8nWebhookSecret.trim();
+        }
+      }
+
       await updateSettings.mutateAsync(updateData);
       setOpenaiApiKey(""); // Clear input after save
+      setN8nWebhookSecret(""); // Clear secret after save
       toast.success("Configurações de IA salvas com sucesso!");
     } catch (error) {
       console.error("Error saving AI settings:", error);
@@ -156,15 +190,15 @@ export default function AdminAISettings() {
     }
   };
 
-  const handleTestApiKey = async () => {
+  const handleTestOpenaiKey = async () => {
     const keyToTest = openaiApiKey.trim();
     if (!keyToTest) {
       toast.error("Digite uma API Key para testar");
       return;
     }
 
-    setIsTesting(true);
-    setTestResult(null);
+    setIsTestingOpenai(true);
+    setOpenaiTestResult(null);
 
     try {
       const { data, error } = await supabase.functions.invoke("test-openai-key", {
@@ -173,23 +207,79 @@ export default function AdminAISettings() {
 
       if (error) throw error;
 
+      const now = new Date().toISOString();
+      
       if (data.success) {
-        setTestResult({ success: true, message: data.message || "Conexão validada com sucesso!" });
+        setOpenaiTestResult({ success: true, message: data.message || "Conexão validada com sucesso!" });
         toast.success("API Key válida!");
+        // Update test status
+        await updateSettings.mutateAsync({ 
+          openaiLastTestAt: now, 
+          openaiLastTestStatus: "success" 
+        });
       } else {
-        setTestResult({ success: false, message: data.error || "API Key inválida" });
+        setOpenaiTestResult({ success: false, message: data.error || "API Key inválida" });
         toast.error("API Key inválida");
+        await updateSettings.mutateAsync({ 
+          openaiLastTestAt: now, 
+          openaiLastTestStatus: "error" 
+        });
       }
     } catch (error) {
       console.error("Error testing API key:", error);
-      setTestResult({ success: false, message: "Erro ao testar conexão" });
+      setOpenaiTestResult({ success: false, message: "Erro ao testar conexão" });
       toast.error("Erro ao testar conexão");
     } finally {
-      setIsTesting(false);
+      setIsTestingOpenai(false);
     }
   };
 
-  const hasN8nConfigured = Boolean(lawFirmSettings?.evolution_api_url);
+  const handleTestN8nWebhook = async () => {
+    const urlToTest = n8nWebhookUrl.trim();
+    if (!urlToTest) {
+      toast.error("Digite a URL do webhook para testar");
+      return;
+    }
+
+    setIsTestingN8n(true);
+    setN8nTestResult(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("test-n8n-webhook", {
+        body: { 
+          webhookUrl: urlToTest, 
+          secret: n8nWebhookSecret.trim() || aiSettings?.n8nWebhookSecret || undefined 
+        },
+      });
+
+      if (error) throw error;
+
+      const now = new Date().toISOString();
+      
+      if (data.success) {
+        setN8nTestResult({ success: true, message: data.message || "Conexão bem-sucedida!" });
+        toast.success("Webhook N8N conectado!");
+        await updateSettings.mutateAsync({ 
+          n8nLastTestAt: now, 
+          n8nLastTestStatus: "success" 
+        });
+      } else {
+        setN8nTestResult({ success: false, message: data.error || "Erro na conexão" });
+        toast.error("Erro na conexão com N8N");
+        await updateSettings.mutateAsync({ 
+          n8nLastTestAt: now, 
+          n8nLastTestStatus: "error" 
+        });
+      }
+    } catch (error) {
+      console.error("Error testing N8N webhook:", error);
+      setN8nTestResult({ success: false, message: "Erro ao testar conexão" });
+      toast.error("Erro ao testar conexão");
+    } finally {
+      setIsTestingN8n(false);
+    }
+  };
+
   const isLoading = planLoading || aiLoading;
 
   if (isLoading) {
@@ -317,6 +407,34 @@ export default function AdminAISettings() {
   }
 
   // Enterprise users: Full configuration
+  const getProviderLabel = () => {
+    switch (provider) {
+      case "internal": return "MiauChat AI";
+      case "n8n": return "N8N (Webhook)";
+      case "openai": return "OpenAI (API Key Própria)";
+      default: return "Desconhecido";
+    }
+  };
+
+  const getProviderStatus = () => {
+    switch (provider) {
+      case "internal": 
+        return { color: "emerald", status: "Ativo" };
+      case "n8n": 
+        if (!hasN8nWebhook) return { color: "amber", status: "Não Configurado" };
+        if (aiSettings?.n8nLastTestStatus === "success") return { color: "emerald", status: "Conectado" };
+        if (aiSettings?.n8nLastTestStatus === "error") return { color: "red", status: "Erro" };
+        return { color: "amber", status: "Pendente Teste" };
+      case "openai":
+        if (!aiSettings?.hasOpenAIKey) return { color: "amber", status: "Sem API Key" };
+        if (aiSettings?.openaiLastTestStatus === "success") return { color: "emerald", status: "Validado" };
+        if (aiSettings?.openaiLastTestStatus === "error") return { color: "red", status: "Inválido" };
+        return { color: "amber", status: "Pendente Teste" };
+      default:
+        return { color: "gray", status: "Desconhecido" };
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -333,12 +451,97 @@ export default function AdminAISettings() {
         </p>
       </div>
 
+      {/* Current Status Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Status Atual
+          </CardTitle>
+          <CardDescription>
+            Informações sobre a configuração de IA ativa
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Active Provider */}
+            <div className="p-4 rounded-lg border bg-muted/50">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <Bot className="h-4 w-4" />
+                Provedor Ativo
+              </div>
+              <p className="font-semibold">{getProviderLabel()}</p>
+              <Badge 
+                variant="secondary" 
+                className={`mt-2 ${
+                  getProviderStatus().color === "emerald" ? "bg-emerald-500/10 text-emerald-600" :
+                  getProviderStatus().color === "amber" ? "bg-amber-500/10 text-amber-600" :
+                  getProviderStatus().color === "red" ? "bg-red-500/10 text-red-600" :
+                  "bg-gray-500/10 text-gray-600"
+                }`}
+              >
+                {getProviderStatus().status}
+              </Badge>
+            </div>
+
+            {/* Last Update */}
+            <div className="p-4 rounded-lg border bg-muted/50">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <Clock className="h-4 w-4" />
+                Última Alteração
+              </div>
+              <p className="font-semibold">
+                {aiSettings?.aiSettingsUpdatedAt 
+                  ? format(new Date(aiSettings.aiSettingsUpdatedAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+                  : "Nunca alterado"
+                }
+              </p>
+            </div>
+
+            {/* Last Test */}
+            <div className="p-4 rounded-lg border bg-muted/50">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <TestTube className="h-4 w-4" />
+                Último Teste
+              </div>
+              {provider === "n8n" && aiSettings?.n8nLastTestAt ? (
+                <div>
+                  <p className="font-semibold">
+                    {format(new Date(aiSettings.n8nLastTestAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  </p>
+                  <Badge 
+                    variant="secondary" 
+                    className={`mt-1 ${aiSettings.n8nLastTestStatus === "success" ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"}`}
+                  >
+                    {aiSettings.n8nLastTestStatus === "success" ? "Sucesso" : "Erro"}
+                  </Badge>
+                </div>
+              ) : provider === "openai" && aiSettings?.openaiLastTestAt ? (
+                <div>
+                  <p className="font-semibold">
+                    {format(new Date(aiSettings.openaiLastTestAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                  </p>
+                  <Badge 
+                    variant="secondary" 
+                    className={`mt-1 ${aiSettings.openaiLastTestStatus === "success" ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"}`}
+                  >
+                    {aiSettings.openaiLastTestStatus === "success" ? "Sucesso" : "Erro"}
+                  </Badge>
+                </div>
+              ) : (
+                <p className="font-semibold text-muted-foreground">Nenhum teste</p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Provider Selection */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bot className="h-5 w-5" />
-            Provedor de IA
+            Provedor de IA Ativo
           </CardTitle>
           <CardDescription>
             Selecione qual sistema de IA será usado para processar as mensagens
@@ -356,11 +559,11 @@ export default function AdminAISettings() {
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="internal" className="font-semibold text-base cursor-pointer">
-                    MiauChat AI
+                    IA do Site (Padrão)
                   </Label>
                   <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
                     <Sparkles className="h-3 w-3 mr-1" />
-                    Padrão
+                    Recomendado
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -385,17 +588,17 @@ export default function AdminAISettings() {
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="n8n" className="font-semibold text-base cursor-pointer">
-                    N8N + Workflows
+                    N8N (Webhook)
                   </Label>
-                  {!hasN8nConfigured && (
-                    <Badge variant="destructive" className="text-xs">
+                  {!hasN8nWebhook && provider !== "n8n" && (
+                    <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
                       <AlertCircle className="h-3 w-3 mr-1" />
-                      Não configurado
+                      Requer Configuração
                     </Badge>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Automação via workflows N8N. Requer configuração do webhook N8N.
+                  Automação via workflows N8N. Todas as mensagens passam pelo webhook configurado.
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Badge variant="outline" className="text-xs">
@@ -418,7 +621,7 @@ export default function AdminAISettings() {
                   <Label htmlFor="openai" className="font-semibold text-base cursor-pointer">
                     OpenAI (API Key Própria)
                   </Label>
-                  {!aiSettings?.hasOpenAIKey && (
+                  {!aiSettings?.hasOpenAIKey && provider !== "openai" && (
                     <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
                       <Key className="h-3 w-3 mr-1" />
                       Requer API Key
@@ -443,6 +646,116 @@ export default function AdminAISettings() {
           </RadioGroup>
         </CardContent>
       </Card>
+
+      {/* N8N Configuration */}
+      {provider === "n8n" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Workflow className="h-5 w-5" />
+              Configuração N8N
+            </CardTitle>
+            <CardDescription>
+              Configure o webhook do N8N para processar mensagens
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Webhook URL */}
+            <div className="space-y-2">
+              <Label htmlFor="webhookUrl">Webhook URL *</Label>
+              <Input
+                id="webhookUrl"
+                type="url"
+                placeholder="https://seu-n8n.com/webhook/..."
+                value={n8nWebhookUrl}
+                onChange={(e) => setN8nWebhookUrl(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                URL do webhook de produção do seu workflow N8N
+              </p>
+            </div>
+
+            {/* Webhook Secret */}
+            <div className="space-y-2">
+              <Label htmlFor="webhookSecret">
+                Secret/Token (opcional)
+              </Label>
+              {aiSettings?.n8nWebhookSecret && !n8nWebhookSecret && (
+                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50 mb-2">
+                  <Lock className="h-4 w-4 text-emerald-500" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Secret configurado</p>
+                    <p className="text-xs text-muted-foreground font-mono">{maskedWebhookSecret}</p>
+                  </div>
+                </div>
+              )}
+              <div className="relative">
+                <Input
+                  id="webhookSecret"
+                  type={showWebhookSecret ? "text" : "password"}
+                  placeholder={aiSettings?.n8nWebhookSecret ? "Novo secret (deixe vazio para manter)" : "Bearer token ou secret"}
+                  value={n8nWebhookSecret}
+                  onChange={(e) => setN8nWebhookSecret(e.target.value)}
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                  onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                >
+                  {showWebhookSecret ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Será enviado como header Authorization: Bearer [token]
+              </p>
+            </div>
+
+            {/* Test Connection Button */}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={handleTestN8nWebhook}
+                disabled={isTestingN8n || !n8nWebhookUrl.trim()}
+                className="gap-2"
+              >
+                {isTestingN8n ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <TestTube className="h-4 w-4" />
+                )}
+                {isTestingN8n ? "Testando..." : "Testar Conexão"}
+              </Button>
+
+              {n8nTestResult && (
+                <div className={`flex items-center gap-2 text-sm ${n8nTestResult.success ? "text-emerald-600" : "text-destructive"}`}>
+                  {n8nTestResult.success ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  {n8nTestResult.message}
+                </div>
+              )}
+            </div>
+
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Importante</AlertTitle>
+              <AlertDescription>
+                Quando N8N estiver ativo, todas as mensagens recebidas passarão pelo webhook configurado.
+                Certifique-se de que o workflow está ativo e funcionando.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+      )}
 
       {/* OpenAI API Key Configuration */}
       {provider === "openai" && (
@@ -479,7 +792,7 @@ export default function AdminAISettings() {
             {/* New key input */}
             <div className="space-y-2">
               <Label htmlFor="apiKey">
-                {aiSettings?.hasOpenAIKey ? "Nova API Key (substituir)" : "API Key"}
+                {aiSettings?.hasOpenAIKey ? "Nova API Key (substituir)" : "API Key *"}
               </Label>
               <div className="relative">
                 <Input
@@ -513,26 +826,26 @@ export default function AdminAISettings() {
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
-                onClick={handleTestApiKey}
-                disabled={isTesting || !openaiApiKey.trim()}
+                onClick={handleTestOpenaiKey}
+                disabled={isTestingOpenai || !openaiApiKey.trim()}
                 className="gap-2"
               >
-                {isTesting ? (
+                {isTestingOpenai ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <TestTube className="h-4 w-4" />
                 )}
-                {isTesting ? "Testando..." : "Testar Conexão"}
+                {isTestingOpenai ? "Testando..." : "Testar Chave"}
               </Button>
 
-              {testResult && (
-                <div className={`flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}>
-                  {testResult.success ? (
+              {openaiTestResult && (
+                <div className={`flex items-center gap-2 text-sm ${openaiTestResult.success ? "text-emerald-600" : "text-destructive"}`}>
+                  {openaiTestResult.success ? (
                     <CheckCircle2 className="h-4 w-4" />
                   ) : (
                     <AlertCircle className="h-4 w-4" />
                   )}
-                  {testResult.message}
+                  {openaiTestResult.message}
                 </div>
               )}
             </div>
@@ -545,6 +858,40 @@ export default function AdminAISettings() {
                 Nenhuma requisição passará pela infraestrutura do MiauChat.
               </AlertDescription>
             </Alert>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* MiauChat AI Info */}
+      {provider === "internal" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              MiauChat AI
+            </CardTitle>
+            <CardDescription>
+              Informações sobre a IA integrada do sistema
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-3 p-4 rounded-lg border bg-emerald-500/5 border-emerald-500/20">
+              <div className="p-2 rounded-full bg-emerald-500/10">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              </div>
+              <div>
+                <p className="font-semibold">Ativo e Funcionando</p>
+                <p className="text-sm text-muted-foreground">
+                  A IA do MiauChat está processando suas mensagens automaticamente
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              A IA do MiauChat é a opção padrão e mais simples. Ela já vem configurada e 
+              não requer nenhuma ação adicional. As mensagens são processadas internamente 
+              com alta velocidade e segurança.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -607,107 +954,17 @@ export default function AdminAISettings() {
         </CardContent>
       </Card>
 
-      {/* Comparison Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Comparação de Provedores</CardTitle>
-          <CardDescription>
-            Veja as diferenças entre os provedores de IA disponíveis
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 font-medium">Recurso</th>
-                  <th className="text-center py-3 px-4 font-medium">
-                    <div className="flex items-center justify-center gap-1">
-                      <Sparkles className="h-4 w-4 text-emerald-500" />
-                      MiauChat
-                    </div>
-                  </th>
-                  <th className="text-center py-3 px-4 font-medium">
-                    <div className="flex items-center justify-center gap-1">
-                      <Workflow className="h-4 w-4 text-blue-500" />
-                      N8N
-                    </div>
-                  </th>
-                  <th className="text-center py-3 px-4 font-medium">
-                    <div className="flex items-center justify-center gap-1">
-                      <Key className="h-4 w-4 text-purple-500" />
-                      OpenAI
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b">
-                  <td className="py-3 px-4">Configuração</td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600">
-                      Automática
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="outline">Webhook</Badge>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="outline">API Key</Badge>
-                  </td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-3 px-4">Custo</td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600">
-                      Incluído
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="outline">Externo</Badge>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="outline">Por uso</Badge>
-                  </td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-3 px-4">Controle</td>
-                  <td className="py-3 px-4 text-center">Básico</td>
-                  <td className="py-3 px-4 text-center">Total</td>
-                  <td className="py-3 px-4 text-center">Total</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="py-3 px-4">Dados</td>
-                  <td className="py-3 px-4 text-center">MiauChat</td>
-                  <td className="py-3 px-4 text-center">Seu N8N</td>
-                  <td className="py-3 px-4 text-center">
-                    <Badge variant="secondary" className="bg-purple-500/10 text-purple-600">
-                      Isolados
-                    </Badge>
-                  </td>
-                </tr>
-                <tr>
-                  <td className="py-3 px-4">Workflows</td>
-                  <td className="py-3 px-4 text-center">
-                    <AlertCircle className="h-4 w-4 text-muted-foreground mx-auto" />
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <AlertCircle className="h-4 w-4 text-muted-foreground mx-auto" />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Save Button */}
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={isSaving}>
-          {isSaving ? "Salvando..." : "Salvar Configurações"}
+        <Button onClick={handleSave} disabled={isSaving} size="lg">
+          {isSaving ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Salvando...
+            </>
+          ) : (
+            "Salvar Configurações"
+          )}
         </Button>
       </div>
     </div>

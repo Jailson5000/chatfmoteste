@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "./useLawFirm";
+import { useAuth } from "./useAuth";
 
 export type TenantAIProvider = "internal" | "n8n" | "openai";
 
@@ -17,12 +18,29 @@ export interface TenantAISettings {
     classification: boolean;
   };
   hasOpenAIKey: boolean;
+  // N8N settings
+  n8nWebhookUrl: string | null;
+  n8nWebhookSecret: string | null;
+  n8nLastTestAt: string | null;
+  n8nLastTestStatus: string | null;
+  // OpenAI test status
+  openaiLastTestAt: string | null;
+  openaiLastTestStatus: string | null;
+  // Audit
+  aiSettingsUpdatedBy: string | null;
+  aiSettingsUpdatedAt: string | null;
 }
 
 interface UpdateTenantAIParams {
   aiProvider?: TenantAIProvider;
   openaiApiKey?: string | null;
   aiCapabilities?: Record<string, boolean>;
+  n8nWebhookUrl?: string | null;
+  n8nWebhookSecret?: string | null;
+  n8nLastTestAt?: string | null;
+  n8nLastTestStatus?: string | null;
+  openaiLastTestAt?: string | null;
+  openaiLastTestStatus?: string | null;
 }
 
 /**
@@ -33,6 +51,7 @@ export function useTenantAISettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  const { user } = useAuth();
 
   const {
     data: settings,
@@ -46,7 +65,12 @@ export function useTenantAISettings() {
 
       const { data, error } = await supabase
         .from("law_firm_settings")
-        .select("id, law_firm_id, ai_provider, openai_api_key, ai_capabilities")
+        .select(`
+          id, law_firm_id, ai_provider, openai_api_key, ai_capabilities,
+          n8n_webhook_url, n8n_webhook_secret, n8n_last_test_at, n8n_last_test_status,
+          openai_last_test_at, openai_last_test_status,
+          ai_settings_updated_by, ai_settings_updated_at
+        `)
         .eq("law_firm_id", lawFirm.id)
         .maybeSingle();
 
@@ -72,6 +96,17 @@ export function useTenantAISettings() {
         openaiApiKey: data.openai_api_key,
         aiCapabilities: capabilities,
         hasOpenAIKey: Boolean(data.openai_api_key && data.openai_api_key.length > 0),
+        // N8N
+        n8nWebhookUrl: data.n8n_webhook_url,
+        n8nWebhookSecret: data.n8n_webhook_secret,
+        n8nLastTestAt: data.n8n_last_test_at,
+        n8nLastTestStatus: data.n8n_last_test_status,
+        // OpenAI test
+        openaiLastTestAt: data.openai_last_test_at,
+        openaiLastTestStatus: data.openai_last_test_status,
+        // Audit
+        aiSettingsUpdatedBy: data.ai_settings_updated_by,
+        aiSettingsUpdatedAt: data.ai_settings_updated_at,
       };
     },
     enabled: Boolean(lawFirm?.id),
@@ -84,7 +119,13 @@ export function useTenantAISettings() {
       // Build update object
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
+        ai_settings_updated_at: new Date().toISOString(),
       };
+
+      // Add user ID for audit if available
+      if (user?.id) {
+        updateData.ai_settings_updated_by = user.id;
+      }
 
       if (params.aiProvider !== undefined) {
         updateData.ai_provider = params.aiProvider;
@@ -94,6 +135,24 @@ export function useTenantAISettings() {
       }
       if (params.aiCapabilities !== undefined) {
         updateData.ai_capabilities = params.aiCapabilities;
+      }
+      if (params.n8nWebhookUrl !== undefined) {
+        updateData.n8n_webhook_url = params.n8nWebhookUrl;
+      }
+      if (params.n8nWebhookSecret !== undefined) {
+        updateData.n8n_webhook_secret = params.n8nWebhookSecret;
+      }
+      if (params.n8nLastTestAt !== undefined) {
+        updateData.n8n_last_test_at = params.n8nLastTestAt;
+      }
+      if (params.n8nLastTestStatus !== undefined) {
+        updateData.n8n_last_test_status = params.n8nLastTestStatus;
+      }
+      if (params.openaiLastTestAt !== undefined) {
+        updateData.openai_last_test_at = params.openaiLastTestAt;
+      }
+      if (params.openaiLastTestStatus !== undefined) {
+        updateData.openai_last_test_status = params.openaiLastTestStatus;
       }
 
       // Check if settings exist
@@ -152,6 +211,14 @@ export function useTenantAISettings() {
     return `${key.substring(0, 4)}••••••••${key.substring(key.length - 4)}`;
   };
 
+  // Helper to mask webhook secret
+  const getMaskedWebhookSecret = () => {
+    if (!settings?.n8nWebhookSecret) return "";
+    const secret = settings.n8nWebhookSecret;
+    if (secret.length <= 8) return "••••••••";
+    return `${secret.substring(0, 4)}••••••••${secret.substring(secret.length - 4)}`;
+  };
+
   return {
     settings,
     isLoading,
@@ -162,6 +229,8 @@ export function useTenantAISettings() {
     aiProvider: settings?.aiProvider || "internal",
     hasOpenAIKey: settings?.hasOpenAIKey || false,
     maskedApiKey: getMaskedApiKey(),
+    maskedWebhookSecret: getMaskedWebhookSecret(),
+    hasN8nWebhook: Boolean(settings?.n8nWebhookUrl),
     aiCapabilities: settings?.aiCapabilities || {
       auto_reply: true,
       summary: true,

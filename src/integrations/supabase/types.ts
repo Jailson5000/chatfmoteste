@@ -1033,34 +1033,58 @@ export type Database = {
         Row: {
           ai_capabilities: Json | null
           ai_provider: string
+          ai_settings_updated_at: string | null
+          ai_settings_updated_by: string | null
           created_at: string
           evolution_api_key: string | null
           evolution_api_url: string | null
           id: string
           law_firm_id: string
+          n8n_last_test_at: string | null
+          n8n_last_test_status: string | null
+          n8n_webhook_secret: string | null
+          n8n_webhook_url: string | null
           openai_api_key: string | null
+          openai_last_test_at: string | null
+          openai_last_test_status: string | null
           updated_at: string
         }
         Insert: {
           ai_capabilities?: Json | null
           ai_provider?: string
+          ai_settings_updated_at?: string | null
+          ai_settings_updated_by?: string | null
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
           law_firm_id: string
+          n8n_last_test_at?: string | null
+          n8n_last_test_status?: string | null
+          n8n_webhook_secret?: string | null
+          n8n_webhook_url?: string | null
           openai_api_key?: string | null
+          openai_last_test_at?: string | null
+          openai_last_test_status?: string | null
           updated_at?: string
         }
         Update: {
           ai_capabilities?: Json | null
           ai_provider?: string
+          ai_settings_updated_at?: string | null
+          ai_settings_updated_by?: string | null
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
           law_firm_id?: string
+          n8n_last_test_at?: string | null
+          n8n_last_test_status?: string | null
+          n8n_webhook_secret?: string | null
+          n8n_webhook_url?: string | null
           openai_api_key?: string | null
+          openai_last_test_at?: string | null
+          openai_last_test_status?: string | null
           updated_at?: string
         }
         Relationships: [
