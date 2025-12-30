@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ArrowLeft, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,8 @@ const forgotPasswordSchema = z.object({
 });
 
 export default function Auth() {
+  const AUTH_LOADING_TIMEOUT_MS = 10000;
+
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const { toast } = useToast();
@@ -29,6 +31,7 @@ export default function Auth() {
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [authInitTimedOut, setAuthInitTimedOut] = useState(false);
   
   const [loginData, setLoginData] = useState({ email: "", password: "" });
 
@@ -39,6 +42,20 @@ export default function Auth() {
       navigate("/dashboard", { replace: true });
     }
   }, [user, loading, navigate]);
+
+  // Timeout de segurança para evitar loading infinito na tela de login
+  useEffect(() => {
+    if (!loading) {
+      setAuthInitTimedOut(false);
+      return;
+    }
+
+    const t = setTimeout(() => {
+      setAuthInitTimedOut(true);
+    }, AUTH_LOADING_TIMEOUT_MS);
+
+    return () => clearTimeout(t);
+  }, [loading]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,10 +182,40 @@ export default function Auth() {
   };
 
   if (loading) {
+    if (authInitTimedOut) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-zinc-950">
+          <div className="flex flex-col items-center gap-6 text-center max-w-md px-6">
+            <img src={miauchatLogo} alt="MiauChat" className="w-24 h-24 object-contain bg-transparent opacity-80" />
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertTriangle className="h-6 w-6" />
+              <h1 className="text-xl font-semibold text-white">Problema ao carregar</h1>
+            </div>
+            <p className="text-zinc-400">
+              Não foi possível verificar sua sessão. Tente recarregar a página.
+            </p>
+            <div className="flex flex-col gap-3 w-full">
+              <Button onClick={() => window.location.reload()} className="w-full bg-red-600 hover:bg-red-700 text-white gap-2">
+                <RefreshCw className="h-4 w-4" />
+                Tentar novamente
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/auth", { replace: true })} className="w-full border-zinc-700 text-white hover:bg-zinc-900">
+                Ir para login
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-950">
-        <div className="animate-pulse">
-          <img src={miauchatLogo} alt="MiauChat" className="w-32 h-32 object-contain bg-transparent" />
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-pulse">
+            <img src={miauchatLogo} alt="MiauChat" className="w-32 h-32 object-contain bg-transparent" />
+          </div>
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-red-500 border-t-transparent" />
+          <p className="text-zinc-500 text-sm">Carregando autenticação...</p>
         </div>
       </div>
     );

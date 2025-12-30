@@ -5,6 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 // Token refresh margin: refresh 5 minutes before expiry
 const TOKEN_REFRESH_MARGIN_SECONDS = 300;
 
+// Timeout de segurança: evita loading infinito caso o SDK trave na inicialização
+const AUTH_INIT_TIMEOUT_MS = 10000;
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -169,12 +172,35 @@ export function useAuth() {
 
   useEffect(() => {
     console.log("[useAuth] Inicializando listener de auth...");
-    
+
+    let finished = false;
+    let initTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const finishLoading = () => {
+      if (finished) return;
+      finished = true;
+      if (initTimeout) {
+        clearTimeout(initTimeout);
+        initTimeout = null;
+      }
+      setLoading(false);
+    };
+
+    // Timeout de segurança: se nada responder, destrava a UI
+    initTimeout = setTimeout(() => {
+      if (finished) return;
+      console.warn("[useAuth] Timeout na inicialização de auth - liberando UI");
+      setSession(null);
+      setUser(null);
+      setMustChangePassword(false);
+      finishLoading();
+    }, AUTH_INIT_TIMEOUT_MS);
+
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         console.log("[useAuth] onAuthStateChange:", event, "| Sessão:", currentSession ? "presente" : "ausente");
-        
+
         // Handle specific events
         switch (event) {
           case 'SIGNED_OUT':
@@ -187,7 +213,7 @@ export function useAuth() {
               refreshTimeoutRef.current = null;
             }
             break;
-            
+
           case 'TOKEN_REFRESHED':
             console.log("[useAuth] Token foi refreshed automaticamente");
             if (currentSession) {
@@ -197,7 +223,7 @@ export function useAuth() {
               scheduleTokenRefresh(currentSession);
             }
             break;
-            
+
           case 'SIGNED_IN':
           case 'INITIAL_SESSION':
             if (currentSession) {
@@ -205,7 +231,7 @@ export function useAuth() {
               setUser(currentSession.user);
               setSessionExpired(false);
               scheduleTokenRefresh(currentSession);
-              
+
               // Check must_change_password flag (deferred to avoid deadlock)
               setTimeout(async () => {
                 console.log("[useAuth] Buscando profile para must_change_password...");
@@ -214,12 +240,12 @@ export function useAuth() {
                   .select('must_change_password')
                   .eq('id', currentSession.user.id)
                   .maybeSingle();
-                
+
                 if (error) {
                   console.error("[useAuth] Erro ao buscar profile:", error.message);
                   return;
                 }
-                
+
                 if (profile?.must_change_password) {
                   console.log("[useAuth] Usuário precisa trocar senha");
                   setMustChangePassword(true);
@@ -232,67 +258,74 @@ export function useAuth() {
               setUser(null);
             }
             break;
-            
+
           default:
             setSession(currentSession);
             setUser(currentSession?.user ?? null);
         }
-        
-        setLoading(false);
+
+        finishLoading();
       }
     );
 
     // THEN check for existing session
     console.log("[useAuth] Verificando sessão existente...");
-    supabase.auth.getSession().then(async ({ data: { session: existingSession }, error }) => {
-      if (error) {
-        console.error("[useAuth] Erro ao obter sessão:", error.message);
-        // Clear invalid session/token if there's an error
-        console.log("[useAuth] Limpando sessão inválida...");
-        
-        // Force clear localStorage tokens
-        try {
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.includes('supabase') || key.includes('sb-')) {
-              localStorage.removeItem(key);
-            }
-          });
-        } catch (e) {
-          console.error("[useAuth] Erro ao limpar localStorage:", e);
-        }
-        
-        await supabase.auth.signOut().catch(() => {});
-        setSession(null);
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-      
-      console.log("[useAuth] getSession resultado:", existingSession ? "sessão encontrada" : "sem sessão");
-      
-      if (existingSession) {
-        // Validate the session has required fields
-        if (!existingSession.user?.id || !existingSession.access_token) {
-          console.log("[useAuth] Sessão incompleta, limpando...");
-          await supabase.auth.signOut().catch(() => {});
+    supabase.auth.getSession()
+      .then(({ data: { session: existingSession }, error }) => {
+        if (error) {
+          console.error("[useAuth] Erro ao obter sessão:", error.message);
+          console.log("[useAuth] Limpando sessão inválida...");
+
+          // Force clear localStorage tokens
+          try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.includes('supabase') || key.includes('sb-')) {
+                localStorage.removeItem(key);
+              }
+            });
+          } catch (e) {
+            console.error("[useAuth] Erro ao limpar localStorage:", e);
+          }
+
+          // Não aguardar signOut aqui (pode travar em redes instáveis)
+          supabase.auth.signOut().catch(() => {});
           setSession(null);
           setUser(null);
-          setLoading(false);
+          finishLoading();
           return;
         }
-        
-        setSession(existingSession);
-        setUser(existingSession.user);
-        setSessionExpired(false);
-        scheduleTokenRefresh(existingSession);
-      } else {
+
+        console.log("[useAuth] getSession resultado:", existingSession ? "sessão encontrada" : "sem sessão");
+
+        if (existingSession) {
+          // Validate the session has required fields
+          if (!existingSession.user?.id || !existingSession.access_token) {
+            console.log("[useAuth] Sessão incompleta, limpando...");
+            supabase.auth.signOut().catch(() => {});
+            setSession(null);
+            setUser(null);
+            finishLoading();
+            return;
+          }
+
+          setSession(existingSession);
+          setUser(existingSession.user);
+          setSessionExpired(false);
+          scheduleTokenRefresh(existingSession);
+        } else {
+          setSession(null);
+          setUser(null);
+        }
+
+        finishLoading();
+      })
+      .catch((err) => {
+        console.error("[useAuth] Exceção ao obter sessão:", err);
         setSession(null);
         setUser(null);
-      }
-      
-      setLoading(false);
-    });
+        finishLoading();
+      });
 
     // Cleanup on unmount
     return () => {
@@ -300,9 +333,11 @@ export function useAuth() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+      if (initTimeout) {
+        clearTimeout(initTimeout);
+      }
     };
   }, [scheduleTokenRefresh]);
-
   const clearMustChangePassword = async () => {
     if (user) {
       const { error } = await supabase
