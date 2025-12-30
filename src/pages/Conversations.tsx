@@ -78,6 +78,7 @@ import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { AIProviderBadge } from "@/components/ai/AIProviderBadge";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useAutomations } from "@/hooks/useAutomations";
 import { supabase } from "@/integrations/supabase/client";
@@ -1608,6 +1609,9 @@ export default function Conversations() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* AI Provider Indicator */}
+                <AIProviderBadge size="sm" />
+                
                 {/* Transfer Handler - Categorized */}
                 <Popover>
                   <PopoverTrigger asChild>

@@ -137,13 +137,133 @@ interface AutomationContext {
   instanceName: string;
 }
 
-// Process automations and forward to N8N if rules match
+// Get AI provider configuration from system_settings
+async function getAIProviderConfig(supabaseClient: any): Promise<{ provider: string; capabilities: Record<string, boolean> }> {
+  try {
+    const { data: providerSetting } = await supabaseClient
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'ai_provider')
+      .single();
+
+    const { data: capabilitiesSetting } = await supabaseClient
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'ai_capabilities')
+      .single();
+
+    return {
+      provider: (providerSetting?.value as string) || 'n8n',
+      capabilities: (capabilitiesSetting?.value as Record<string, boolean>) || {
+        auto_reply: true,
+        summary: true,
+        transcription: true,
+        classification: true,
+      },
+    };
+  } catch (error) {
+    logDebug('AI_PROVIDER', 'Error fetching AI provider config, defaulting to n8n', { error });
+    return { provider: 'n8n', capabilities: { auto_reply: true, summary: true, transcription: true, classification: true } };
+  }
+}
+
+// Process messages with internal MiauChat AI (calls ai-chat edge function)
+async function processWithInternalAI(
+  supabaseClient: any, 
+  context: AutomationContext, 
+  aiConfig: { provider: string; capabilities: Record<string, boolean> }
+) {
+  if (!aiConfig.capabilities.auto_reply) {
+    logDebug('AI_PROVIDER', 'auto_reply capability disabled, skipping internal AI');
+    return;
+  }
+
+  logDebug('AI_PROVIDER', 'Processing with MiauChat AI (internal)', { conversationId: context.conversationId });
+
+  try {
+    // Get automation prompt if available
+    const { data: automations } = await supabaseClient
+      .from('automations')
+      .select('ai_prompt, ai_temperature')
+      .eq('law_firm_id', context.lawFirmId)
+      .eq('is_active', true)
+      .limit(1);
+
+    const automation = automations?.[0];
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+    // Call internal ai-chat edge function
+    const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify({
+        conversationId: context.conversationId,
+        message: context.messageContent,
+        customPrompt: automation?.ai_prompt,
+        temperature: automation?.ai_temperature,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logDebug('AI_PROVIDER', 'Internal AI call failed', { status: response.status, error: errorText });
+      return;
+    }
+
+    const result = await response.json();
+    logDebug('AI_PROVIDER', 'Internal AI response received', { hasResponse: !!result.response });
+
+    // Log the AI processing
+    await supabaseClient
+      .from('webhook_logs')
+      .insert({
+        direction: 'internal',
+        payload: {
+          provider: 'miauchat_ai',
+          conversation_id: context.conversationId,
+          message: context.messageContent,
+        },
+        status_code: 200,
+      });
+
+  } catch (error) {
+    logDebug('AI_PROVIDER', 'Error processing with internal AI', { error: error instanceof Error ? error.message : error });
+  }
+}
+
+// Process automations - respects AI_PROVIDER setting
 async function processAutomations(supabaseClient: any, context: AutomationContext) {
+  // Check AI provider configuration first
+  const aiConfig = await getAIProviderConfig(supabaseClient);
+  
+  // If provider is 'internal', skip n8n entirely
+  if (aiConfig.provider === 'internal') {
+    logDebug('AI_PROVIDER', 'Provider is INTERNAL - skipping n8n, will use MiauChat AI');
+    await processWithInternalAI(supabaseClient, context, aiConfig);
+    return;
+  }
+  
+  // If provider is 'n8n' or 'hybrid', proceed with n8n
+  logDebug('AI_PROVIDER', `Provider is ${aiConfig.provider.toUpperCase()} - routing to n8n`);
+  
   const n8nWebhookUrl = Deno.env.get("N8N_WEBHOOK_URL");
   const n8nToken = Deno.env.get("N8N_INTERNAL_TOKEN");
 
   if (!n8nWebhookUrl) {
-    logDebug('AUTOMATION', 'N8N_WEBHOOK_URL not configured, skipping automation');
+    logDebug('AUTOMATION', 'N8N_WEBHOOK_URL not configured');
+    
+    // If hybrid mode, fallback to internal AI
+    if (aiConfig.provider === 'hybrid') {
+      logDebug('AI_PROVIDER', 'Hybrid mode - falling back to internal AI');
+      await processWithInternalAI(supabaseClient, context, aiConfig);
+    } else {
+      // N8N mode but not configured - log warning, don't fallback
+      logDebug('AI_PROVIDER', 'N8N mode but not configured - NO FALLBACK (by design)');
+    }
     return;
   }
 

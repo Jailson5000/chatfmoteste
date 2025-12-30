@@ -23,14 +23,14 @@ import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { toast } from "sonner";
 
-type AIProvider = "lovable" | "n8n" | "hybrid";
+type AIProvider = "internal" | "n8n" | "hybrid";
 
 interface AICapability {
   id: string;
   name: string;
   description: string;
   icon: React.ReactNode;
-  lovableSupport: boolean;
+  internalSupport: boolean;
   n8nSupport: boolean;
 }
 
@@ -40,7 +40,7 @@ const AI_CAPABILITIES: AICapability[] = [
     name: "Respostas Automáticas",
     description: "Responder mensagens automaticamente via WhatsApp",
     icon: <MessageSquare className="h-4 w-4" />,
-    lovableSupport: true,
+    internalSupport: true,
     n8nSupport: true
   },
   {
@@ -48,7 +48,7 @@ const AI_CAPABILITIES: AICapability[] = [
     name: "Resumo de Conversas",
     description: "Gerar resumos automáticos das conversas",
     icon: <FileText className="h-4 w-4" />,
-    lovableSupport: true,
+    internalSupport: true,
     n8nSupport: true
   },
   {
@@ -56,7 +56,7 @@ const AI_CAPABILITIES: AICapability[] = [
     name: "Transcrição de Áudio",
     description: "Transcrever mensagens de áudio para texto",
     icon: <Mic className="h-4 w-4" />,
-    lovableSupport: true,
+    internalSupport: true,
     n8nSupport: false
   },
   {
@@ -64,7 +64,7 @@ const AI_CAPABILITIES: AICapability[] = [
     name: "Classificação de Casos",
     description: "Classificar área jurídica e prioridade automaticamente",
     icon: <Tags className="h-4 w-4" />,
-    lovableSupport: true,
+    internalSupport: true,
     n8nSupport: true
   }
 ];
@@ -72,7 +72,7 @@ const AI_CAPABILITIES: AICapability[] = [
 export default function AdminAISettings() {
   const { settings, updateSetting, createSetting, isLoading } = useSystemSettings();
   const { settings: lawFirmSettings } = useLawFirmSettings();
-  const [provider, setProvider] = useState<AIProvider>("lovable");
+  const [provider, setProvider] = useState<AIProvider>("n8n");
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({
     auto_reply: true,
     summary: true,
@@ -171,13 +171,13 @@ export default function AdminAISettings() {
             onValueChange={(value) => setProvider(value as AIProvider)}
             className="space-y-4"
           >
-            {/* Lovable AI Option */}
-            <div className={`relative flex items-start space-x-4 rounded-lg border p-4 transition-colors ${provider === "lovable" ? "border-primary bg-primary/5" : "border-border"}`}>
-              <RadioGroupItem value="lovable" id="lovable" className="mt-1" />
+            {/* MiauChat AI (Internal) Option */}
+            <div className={`relative flex items-start space-x-4 rounded-lg border p-4 transition-colors ${provider === "internal" ? "border-primary bg-primary/5" : "border-border"}`}>
+              <RadioGroupItem value="internal" id="internal" className="mt-1" />
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="lovable" className="font-semibold text-base cursor-pointer">
-                    Lovable AI
+                  <Label htmlFor="internal" className="font-semibold text-base cursor-pointer">
+                    MiauChat AI
                   </Label>
                   <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
                     <Sparkles className="h-3 w-3 mr-1" />
@@ -185,12 +185,12 @@ export default function AdminAISettings() {
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  IA integrada com modelos GPT-5 e Gemini. Sem necessidade de API key externa.
+                  IA integrada do MiauChat. Processamento interno sem dependências externas.
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Badge variant="outline" className="text-xs">
                     <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-500" />
-                    Gratuito incluso
+                    Incluído no plano
                   </Badge>
                   <Badge variant="outline" className="text-xs">
                     <Zap className="h-3 w-3 mr-1 text-amber-500" />
@@ -246,12 +246,12 @@ export default function AdminAISettings() {
                   <Badge variant="outline" className="text-xs">Avançado</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Use Lovable AI para funcionalidades básicas e N8N para automações avançadas.
+                  Use MiauChat AI para funcionalidades básicas e N8N para automações avançadas.
                 </p>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Badge variant="outline" className="text-xs">
                     <Sparkles className="h-3 w-3 mr-1 text-emerald-500" />
-                    Lovable para chat
+                    MiauChat para chat
                   </Badge>
                   <Badge variant="outline" className="text-xs">
                     <Workflow className="h-3 w-3 mr-1 text-blue-500" />
@@ -277,11 +277,11 @@ export default function AdminAISettings() {
         </CardHeader>
         <CardContent className="space-y-4">
           {AI_CAPABILITIES.map((capability, index) => {
-            const isSupported = provider === "lovable" 
-              ? capability.lovableSupport 
+            const isSupported = provider === "internal" 
+              ? capability.internalSupport 
               : provider === "n8n" 
                 ? capability.n8nSupport 
-                : capability.lovableSupport || capability.n8nSupport;
+                : capability.internalSupport || capability.n8nSupport;
 
             return (
               <div key={capability.id}>
@@ -327,7 +327,7 @@ export default function AdminAISettings() {
         <CardHeader>
           <CardTitle>Comparação de Provedores</CardTitle>
           <CardDescription>
-            Veja as diferenças entre Lovable AI e N8N
+            Veja as diferenças entre MiauChat AI e N8N
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -339,7 +339,7 @@ export default function AdminAISettings() {
                   <th className="text-center py-3 px-4 font-medium">
                     <div className="flex items-center justify-center gap-1">
                       <Sparkles className="h-4 w-4 text-emerald-500" />
-                      Lovable AI
+                      MiauChat AI
                     </div>
                   </th>
                   <th className="text-center py-3 px-4 font-medium">
