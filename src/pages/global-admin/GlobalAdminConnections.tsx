@@ -60,6 +60,7 @@ import {
 import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
 import { InstanceHealthSummary } from "@/components/connections/InstanceHealthSummary";
+import { EvolutionApiConnectionsCard } from "@/components/global-admin/EvolutionApiConnectionsCard";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -464,6 +465,9 @@ export default function GlobalAdminConnections() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Evolution API Connections */}
+        <EvolutionApiConnectionsCard />
 
         {/* Health Summary & Uptime Chart */}
         <div className="grid gap-6 lg:grid-cols-2">
