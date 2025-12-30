@@ -88,7 +88,7 @@ interface ContactDetailsPanelProps {
       custom_status_id?: string | null;
     } | null;
     assigned_profile?: { full_name: string } | null;
-    whatsapp_instance?: { instance_name: string; phone_number?: string | null } | null;
+    whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
   } | null;
   departments: Array<{ id: string; name: string; color: string }>;
   tags: Array<{ id: string; name: string; color: string }>;
@@ -843,7 +843,7 @@ export function ContactDetailsPanel({
                 <div className="flex items-center gap-2 text-sm">
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <span>
-                    {conversation.whatsapp_instance.instance_name}
+                    {conversation.whatsapp_instance.display_name || conversation.whatsapp_instance.instance_name}
                     {conversation.whatsapp_instance.phone_number && (
                       <span className="text-muted-foreground ml-1">
                         ({conversation.whatsapp_instance.phone_number.slice(-4)})

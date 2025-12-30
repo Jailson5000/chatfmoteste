@@ -1632,7 +1632,7 @@ export default function Conversations() {
                               <SelectItem key={inst.id} value={inst.id} className="text-xs">
                                 <span className="flex items-center gap-2">
                                   <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                                  {inst.instance_name}
+                                  {inst.display_name || inst.instance_name}
                                   {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
                                 </span>
                               </SelectItem>
@@ -1642,7 +1642,7 @@ export default function Conversations() {
                       </Select>
                     ) : (
                       <span className="text-xs text-muted-foreground">
-                        Canal: {selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.instance_name || "Não vinculado"}
+                        Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
                       </span>
                     )}
                   </div>

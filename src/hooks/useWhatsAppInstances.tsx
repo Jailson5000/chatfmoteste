@@ -8,6 +8,7 @@ export type WhatsAppInstance = Tables<"whatsapp_instances">;
 
 interface CreateInstanceParams {
   instanceName: string;
+  displayName: string;
   apiUrl: string;
   apiKey: string;
 }
@@ -98,14 +99,14 @@ export function useWhatsAppInstances() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async ({ instanceName, apiUrl, apiKey }: CreateInstanceParams): Promise<EvolutionResponse> => {
+    mutationFn: async ({ instanceName, displayName, apiUrl, apiKey }: CreateInstanceParams): Promise<EvolutionResponse> => {
       // Check limit before creating
       const limitCheck = await checkLimit('instances', 1, true);
       if (!limitCheck.allowed) {
         throw new Error(limitCheck.message || "Limite de conexões WhatsApp atingido. Considere fazer um upgrade do seu plano.");
       }
 
-      console.log("[useWhatsAppInstances] Creating instance:", instanceName);
+      console.log("[useWhatsAppInstances] Creating instance:", instanceName, "Display:", displayName);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -113,6 +114,7 @@ export function useWhatsAppInstances() {
         body: {
           action: "create_instance",
           instanceName,
+          displayName,
           apiUrl: normalizeApiUrl(apiUrl),
           apiKey,
         },
