@@ -11,3 +11,4 @@ export { default as GlobalAdminAIAPIs } from "./GlobalAdminAIAPIs";
 export { default as GlobalAdminAuditLogs } from "./GlobalAdminAuditLogs";
 export { default as GlobalAdminProvisioningDashboard } from "./GlobalAdminProvisioningDashboard";
 export { default as GlobalAdminAlertHistory } from "./GlobalAdminAlertHistory";
+export { default as GlobalAdminTemplateBase } from "./GlobalAdminTemplateBase";
