@@ -208,6 +208,7 @@ async function getAIProviderConfig(
 }
 
 // Helper function to send AI response back to WhatsApp and save to database
+// Splits response into paragraphs and sends them separately for natural feel
 async function sendAIResponseToWhatsApp(
   supabaseClient: any,
   context: AutomationContext,
@@ -233,53 +234,105 @@ async function sendAIResponseToWhatsApp(
 
     // Normalize API URL
     const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
-    
-    // Send message via Evolution API
     const sendUrl = `${apiUrl}/message/sendText/${instance.instance_name}`;
-    logDebug('SEND_RESPONSE', 'Calling Evolution API', { url: sendUrl });
 
-    const sendResponse = await fetch(sendUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': instance.api_key || '',
-      },
-      body: JSON.stringify({
-        number: context.remoteJid,
-        text: aiResponse,
-      }),
-    });
+    // Split response into paragraphs (by double newline or single newline with meaningful content)
+    const paragraphs = aiResponse
+      .split(/\n\n+/)
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
 
-    if (!sendResponse.ok) {
-      const errorText = await sendResponse.text();
-      logDebug('SEND_RESPONSE', 'Evolution API send failed', { 
-        status: sendResponse.status, 
-        error: errorText 
-      });
-      return false;
+    // If only one paragraph but it's very long, try to split by single newlines
+    let messageParts: string[] = [];
+    if (paragraphs.length === 1 && paragraphs[0].length > 300) {
+      messageParts = paragraphs[0]
+        .split(/\n/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+    } else {
+      messageParts = paragraphs;
     }
 
-    const sendResult = await sendResponse.json();
-    const whatsappMessageId = sendResult?.key?.id;
-    logDebug('SEND_RESPONSE', 'Message sent successfully', { whatsappMessageId });
+    // Ensure we don't send more than 5 messages (combine if needed)
+    if (messageParts.length > 5) {
+      const combined: string[] = [];
+      const chunkSize = Math.ceil(messageParts.length / 5);
+      for (let i = 0; i < messageParts.length; i += chunkSize) {
+        combined.push(messageParts.slice(i, i + chunkSize).join('\n\n'));
+      }
+      messageParts = combined;
+    }
 
-    // Save the AI response to the database
-    const { error: saveError } = await supabaseClient
-      .from('messages')
-      .insert({
-        conversation_id: context.conversationId,
-        whatsapp_message_id: whatsappMessageId,
-        content: aiResponse,
-        message_type: 'text',
-        is_from_me: true,
-        sender_type: 'system',
-        ai_generated: true,
+    // If still just one part, use as-is
+    if (messageParts.length === 0) {
+      messageParts = [aiResponse];
+    }
+
+    logDebug('SEND_RESPONSE', `Splitting into ${messageParts.length} messages`, { 
+      conversationId: context.conversationId 
+    });
+
+    let lastWhatsappMessageId: string | null = null;
+    const allMessageContents: string[] = [];
+
+    for (let i = 0; i < messageParts.length; i++) {
+      const part = messageParts[i];
+      
+      // Add delay between messages (simulate typing)
+      if (i > 0) {
+        const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
+        await new Promise(resolve => setTimeout(resolve, typingDelay));
+      }
+
+      logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, { 
+        partLength: part.length 
       });
 
-    if (saveError) {
-      logDebug('SEND_RESPONSE', 'Failed to save AI message to DB', { error: saveError });
-    } else {
-      logDebug('SEND_RESPONSE', 'AI message saved to DB');
+      const sendResponse = await fetch(sendUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': instance.api_key || '',
+        },
+        body: JSON.stringify({
+          number: context.remoteJid,
+          text: part,
+        }),
+      });
+
+      if (!sendResponse.ok) {
+        const errorText = await sendResponse.text();
+        logDebug('SEND_RESPONSE', `Evolution API send failed for part ${i + 1}`, { 
+          status: sendResponse.status, 
+          error: errorText 
+        });
+        continue; // Try to send remaining parts
+      }
+
+      const sendResult = await sendResponse.json();
+      lastWhatsappMessageId = sendResult?.key?.id;
+      allMessageContents.push(part);
+
+      logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, { 
+        whatsappMessageId: lastWhatsappMessageId 
+      });
+
+      // Save each message part to the database
+      const { error: saveError } = await supabaseClient
+        .from('messages')
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: lastWhatsappMessageId,
+          content: part,
+          message_type: 'text',
+          is_from_me: true,
+          sender_type: 'system',
+          ai_generated: true,
+        });
+
+      if (saveError) {
+        logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
+      }
     }
 
     // Update conversation last_message_at
@@ -291,7 +344,8 @@ async function sendAIResponseToWhatsApp(
       })
       .eq('id', context.conversationId);
 
-    return true;
+    logDebug('SEND_RESPONSE', `All ${allMessageContents.length} message parts sent and saved`);
+    return allMessageContents.length > 0;
   } catch (error) {
     logDebug('SEND_RESPONSE', 'Error sending AI response', { 
       error: error instanceof Error ? error.message : error 
