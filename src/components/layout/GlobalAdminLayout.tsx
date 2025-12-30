@@ -16,7 +16,8 @@ import {
   Menu,
   X,
   FileText,
-  HeartPulse
+  HeartPulse,
+  Bot
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,7 @@ const principalNavItems = [
   { icon: Building2, label: "Empresas", path: "/global-admin/companies", roles: ["super_admin", "admin_operacional", "admin_financeiro"] },
   { icon: Link2, label: "Conexões", path: "/global-admin/connections", roles: ["super_admin", "admin_operacional"] },
   { icon: Workflow, label: "Configuração n8n", path: "/global-admin/n8n-settings", roles: ["super_admin", "admin_operacional"] },
+  { icon: Bot, label: "IAs APIs", path: "/global-admin/ai-apis", roles: ["super_admin", "admin_operacional"] },
   { icon: HeartPulse, label: "Provisionamento", path: "/global-admin/provisioning", roles: ["super_admin", "admin_operacional"] },
   { icon: Activity, label: "Monitoramento", path: "/global-admin/monitoring", roles: ["super_admin", "admin_operacional"] },
 ];
@@ -75,6 +77,7 @@ const breadcrumbMap: Record<string, string> = {
   provisioning: "Provisionamento",
   settings: "Configurações",
   "n8n-settings": "Configuração n8n",
+  "ai-apis": "IAs APIs",
   "audit-logs": "Logs de Auditoria",
   "alert-history": "Histórico de Alertas",
 };

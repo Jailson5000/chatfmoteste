@@ -28,7 +28,7 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
-import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings, AdminAISettings } from "./pages/admin";
+import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
   GlobalAdminAuth,
   GlobalAdminDashboard,
@@ -39,6 +39,7 @@ import {
   GlobalAdminMonitoring,
   GlobalAdminSettings,
   GlobalAdminN8NSettings,
+  GlobalAdminAIAPIs,
   GlobalAdminAuditLogs,
   GlobalAdminProvisioningDashboard,
   GlobalAdminAlertHistory,
@@ -190,7 +191,6 @@ const App = () => (
             <Route path="team" element={<AdminTeam />} />
             <Route path="company" element={<AdminCompany />} />
             <Route path="settings" element={<AdminSettings />} />
-            <Route path="ai-settings" element={<AdminAISettings />} />
           </Route>
           
           {/* Global Admin Routes - MiauChat SaaS Administration */}
@@ -235,6 +235,7 @@ const App = () => (
               }
             />
             <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
+            <Route path="ai-apis" element={<GlobalAdminAIAPIs />} />
             <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
             <Route path="provisioning" element={<GlobalAdminProvisioningDashboard />} />
             <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
