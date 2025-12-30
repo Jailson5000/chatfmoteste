@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
@@ -46,6 +46,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { companyFieldConfig, adminCreateCompanySchema } from "@/lib/schemas/companySchema";
 import { generateSubdomainFromName } from "@/hooks/useTenant";
+import { formatPhone, formatDocument } from "@/lib/inputMasks";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
@@ -60,6 +61,11 @@ export default function GlobalAdminCompanies() {
   const [activeTab, setActiveTab] = useState("pending");
   // State to track plan changes for pending companies
   const [pendingPlanChanges, setPendingPlanChanges] = useState<Record<string, string>>({});
+  // Advanced filters state
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterPlan, setFilterPlan] = useState<string>("all");
+  const [filterDateFrom, setFilterDateFrom] = useState<string>("");
+  const [filterDateTo, setFilterDateTo] = useState<string>("");
 
   const handleResetPassword = async (company: typeof companies[0]) => {
     if (!company.admin_user_id) {
@@ -118,12 +124,43 @@ export default function GlobalAdminCompanies() {
     admin_email: "",
   });
 
-  const filteredCompanies = companies.filter(
-    (company) =>
+  // Apply all filters
+  const filteredCompanies = companies.filter((company) => {
+    // Text search filter
+    const matchesSearch = 
       company.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       company.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      company.law_firm?.subdomain?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      company.law_firm?.subdomain?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    // Status filter
+    const matchesStatus = filterStatus === "all" || company.status === filterStatus;
+    
+    // Plan filter
+    const matchesPlan = filterPlan === "all" || company.plan_id === filterPlan;
+    
+    // Date filter
+    let matchesDate = true;
+    if (filterDateFrom) {
+      matchesDate = matchesDate && new Date(company.created_at) >= new Date(filterDateFrom);
+    }
+    if (filterDateTo) {
+      const toDate = new Date(filterDateTo);
+      toDate.setHours(23, 59, 59, 999);
+      matchesDate = matchesDate && new Date(company.created_at) <= toDate;
+    }
+    
+    return matchesSearch && matchesStatus && matchesPlan && matchesDate;
+  });
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterStatus("all");
+    setFilterPlan("all");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+  };
+
+  const hasActiveFilters = filterStatus !== "all" || filterPlan !== "all" || filterDateFrom || filterDateTo;
 
   const handleNameChange = (value: string) => {
     const newSubdomain = generateSubdomainFromName(value);
@@ -371,20 +408,18 @@ export default function GlobalAdminCompanies() {
                       <Input
                         id="document"
                         value={formData.document}
-                        onChange={(e) => setFormData({ ...formData, document: e.target.value })}
-                        placeholder={companyFieldConfig.document.placeholder}
-                        maxLength={companyFieldConfig.document.maxLength}
+                        onChange={(e) => setFormData({ ...formData, document: formatDocument(e.target.value) })}
+                        placeholder="000.000.000-00 ou 00.000.000/0000-00"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="phone">{companyFieldConfig.phone.label}</Label>
                       <Input
                         id="phone"
-                        type={companyFieldConfig.phone.type}
+                        type="tel"
                         value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder={companyFieldConfig.phone.placeholder}
-                        maxLength={companyFieldConfig.phone.maxLength}
+                        onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
+                        placeholder="(00) 00000-0000"
                       />
                     </div>
                   </div>
@@ -500,18 +535,89 @@ export default function GlobalAdminCompanies() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search and Filters */}
       <Card>
-        <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar empresas..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+        <CardContent className="pt-6 space-y-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            {/* Search input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar empresas..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            {/* Status filter */}
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-full md:w-[160px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos Status</SelectItem>
+                <SelectItem value="active">Ativa</SelectItem>
+                <SelectItem value="trial">Trial</SelectItem>
+                <SelectItem value="suspended">Suspensa</SelectItem>
+                <SelectItem value="cancelled">Cancelada</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {/* Plan filter */}
+            <Select value={filterPlan} onValueChange={setFilterPlan}>
+              <SelectTrigger className="w-full md:w-[160px]">
+                <SelectValue placeholder="Plano" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos Planos</SelectItem>
+                {plans.filter(p => p.is_active).map((plan) => (
+                  <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          
+          {/* Date filters */}
+          <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1 flex gap-4">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" />
+                  Data início
+                </Label>
+                <Input
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-muted-foreground">Data fim</Label>
+                <Input
+                  type="date"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+            </div>
+            
+            {hasActiveFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters} className="text-muted-foreground">
+                <X className="h-4 w-4 mr-1" />
+                Limpar filtros
+              </Button>
+            )}
+          </div>
+          
+          {hasActiveFilters && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Filter className="h-4 w-4" />
+              <span>{filteredCompanies.length} empresa(s) encontrada(s)</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -729,7 +835,47 @@ export default function GlobalAdminCompanies() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {company.plan?.name || "-"}
+                            {company.plan ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="space-y-1 cursor-pointer">
+                                      <Badge variant="secondary" className="font-medium">
+                                        {company.plan.name}
+                                      </Badge>
+                                      <p className="text-xs text-muted-foreground">
+                                        R$ {company.plan.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês
+                                      </p>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="w-52 p-0">
+                                    <div className="p-3 space-y-2">
+                                      <p className="font-semibold text-sm border-b pb-2">
+                                        Plano {company.plan.name}
+                                      </p>
+                                      <div className="space-y-1.5 text-sm">
+                                        <div className="flex items-center gap-2">
+                                          <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                                          <span>{company.max_users} usuários</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <Wifi className="h-3.5 w-3.5 text-muted-foreground" />
+                                          <span>{company.max_instances} conexões</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 pt-1 border-t">
+                                          <CreditCard className="h-3.5 w-3.5 text-green-600" />
+                                          <span className="font-medium text-green-600">
+                                            R$ {company.plan.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Badge variant={statusColors[company.status] || "outline"}>
