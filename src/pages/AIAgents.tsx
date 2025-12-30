@@ -45,12 +45,21 @@ import {
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
+  DragOverEvent,
   PointerSensor,
   useSensor,
   useSensors,
   useDroppable,
-  useDraggable,
+  closestCenter,
+  rectIntersection,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Select,
   SelectContent,
@@ -111,29 +120,53 @@ const FOLDER_COLORS = [
   "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9",
 ];
 
-// Draggable Agent Component
-function DraggableAgent({ 
+// Sortable Agent Component with visual indicator
+function SortableAgent({ 
   agent, 
-  children 
+  children,
+  isOverlay = false,
 }: { 
   agent: Automation; 
   children: React.ReactNode;
+  isOverlay?: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({
     id: agent.id,
     data: { type: 'agent', agent },
   });
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
     <div 
       ref={setNodeRef} 
-      className={cn(isDragging && "opacity-50")}
+      style={style}
+      className={cn(
+        "relative",
+        isDragging && "opacity-40 z-50",
+        isOverlay && "shadow-2xl bg-card border border-primary rounded-lg"
+      )}
     >
+      {/* Drop indicator line */}
+      {isOver && !isDragging && (
+        <div className="absolute -top-[2px] left-0 right-0 h-1 bg-primary rounded-full animate-pulse z-10" />
+      )}
       <div className="flex items-center">
         <div 
           {...listeners} 
           {...attributes}
-          className="cursor-grab active:cursor-grabbing p-1 hover:bg-muted/50 rounded"
+          className="cursor-grab active:cursor-grabbing p-1 hover:bg-muted/50 rounded transition-colors"
           onClick={(e) => e.stopPropagation()}
         >
           <GripVertical className="h-4 w-4 text-muted-foreground" />
@@ -144,27 +177,38 @@ function DraggableAgent({
   );
 }
 
-// Droppable Folder Component
+// Droppable Folder Component with animated indicator
 function DroppableFolder({ 
   folder, 
   children,
+  isDraggingOver,
 }: { 
   folder: AgentFolder | null;
   children: React.ReactNode;
+  isDraggingOver?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: folder ? folder.id : 'no-folder',
+    id: folder ? `folder-${folder.id}` : 'no-folder',
     data: { type: 'folder', folder },
   });
+
+  const showIndicator = isOver || isDraggingOver;
 
   return (
     <div 
       ref={setNodeRef}
       className={cn(
-        "transition-all duration-200",
-        isOver && "bg-primary/10 ring-2 ring-primary ring-inset rounded-lg"
+        "transition-all duration-300 relative",
+        showIndicator && "bg-primary/5"
       )}
     >
+      {/* Animated border indicator */}
+      {showIndicator && (
+        <div className="absolute inset-0 rounded-lg pointer-events-none z-10">
+          <div className="absolute inset-0 rounded-lg border-2 border-primary border-dashed animate-pulse" />
+          <div className="absolute inset-0 rounded-lg bg-primary/10 animate-fade-in" />
+        </div>
+      )}
       {children}
     </div>
   );
@@ -173,7 +217,7 @@ function DroppableFolder({
 export default function AIAgents() {
   const { toast } = useToast();
   const { automations, isLoading: automationsLoading, updateAutomation, createAutomation, deleteAutomation } = useAutomations();
-  const { folders, isLoading: foldersLoading, createFolder, updateFolder, deleteFolder, moveAgentToFolder } = useAgentFolders();
+  const { folders, isLoading: foldersLoading, createFolder, updateFolder, deleteFolder, moveAgentToFolder, reorderAgents } = useAgentFolders();
   const { knowledgeItems, isLoading: knowledgeLoading } = useKnowledgeItems();
   const { instances, isLoading: instancesLoading } = useWhatsAppInstances();
   const { departments, isLoading: departmentsLoading } = useDepartments();
@@ -273,36 +317,94 @@ export default function AIAgents() {
 
     const agentId = active.id as string;
     const targetId = over.id as string;
+    const overData = over.data.current;
 
-    // Determine target folder
-    let targetFolderId: string | null = null;
-    if (targetId === 'no-folder') {
-      targetFolderId = null;
-    } else {
-      targetFolderId = targetId;
+    // Get current agent info
+    const agent = automations.find(a => a.id === agentId) as any;
+    if (!agent) return;
+    
+    const currentFolderId = agent.folder_id || null;
+
+    // Check if dropping on a folder
+    if (targetId.startsWith('folder-')) {
+      const targetFolderId = targetId.replace('folder-', '');
+      
+      if (currentFolderId !== targetFolderId) {
+        try {
+          await moveAgentToFolder.mutateAsync({ agentId, folderId: targetFolderId });
+          toast({
+            title: "Agente movido",
+            description: "O agente foi movido para a pasta.",
+          });
+          setExpandedFolders(prev => new Set([...prev, targetFolderId]));
+        } catch (error) {
+          // Error handled in hook
+        }
+      }
+      return;
     }
 
-    // Get current folder of agent
-    const agent = automations.find(a => a.id === agentId) as any;
-    const currentFolderId = agent?.folder_id || null;
-
-    // Only move if target is different
-    if (currentFolderId !== targetFolderId) {
-      try {
-        await moveAgentToFolder.mutateAsync({ agentId, folderId: targetFolderId });
-        toast({
-          title: targetFolderId ? "Agente movido" : "Agente removido da pasta",
-          description: targetFolderId 
-            ? "O agente foi movido para a pasta." 
-            : "O agente foi removido da pasta.",
-        });
-        
-        // Expand target folder if moving into one
-        if (targetFolderId) {
-          setExpandedFolders(prev => new Set([...prev, targetFolderId]));
+    // Check if dropping on "no-folder"
+    if (targetId === 'no-folder') {
+      if (currentFolderId !== null) {
+        try {
+          await moveAgentToFolder.mutateAsync({ agentId, folderId: null });
+          toast({
+            title: "Agente removido da pasta",
+            description: "O agente foi removido da pasta.",
+          });
+        } catch (error) {
+          // Error handled in hook
         }
-      } catch (error) {
-        // Error handled in hook
+      }
+      return;
+    }
+
+    // If dropping on another agent, reorder within the same folder
+    const targetAgent = automations.find(a => a.id === targetId) as any;
+    if (targetAgent) {
+      const targetFolderId = targetAgent.folder_id || null;
+      
+      // Get all agents in the target folder
+      const agentsInFolder = automations
+        .filter((a: any) => (a.folder_id || null) === targetFolderId)
+        .sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+      
+      const oldIndex = agentsInFolder.findIndex(a => a.id === agentId);
+      const newIndex = agentsInFolder.findIndex(a => a.id === targetId);
+      
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        // Same folder reorder
+        const reorderedAgents = arrayMove(agentsInFolder, oldIndex, newIndex);
+        const updates = reorderedAgents.map((a, index) => ({
+          id: a.id,
+          position: index,
+          folder_id: targetFolderId,
+        }));
+        
+        try {
+          await reorderAgents.mutateAsync(updates);
+        } catch (error) {
+          // Error handled in hook
+        }
+      } else if (oldIndex === -1 && currentFolderId !== targetFolderId) {
+        // Moving to a different folder at specific position
+        try {
+          await moveAgentToFolder.mutateAsync({ 
+            agentId, 
+            folderId: targetFolderId,
+            position: newIndex 
+          });
+          toast({
+            title: "Agente movido",
+            description: "O agente foi movido e reordenado.",
+          });
+          if (targetFolderId) {
+            setExpandedFolders(prev => new Set([...prev, targetFolderId]));
+          }
+        } catch (error) {
+          // Error handled in hook
+        }
       }
     }
   };
@@ -553,16 +655,20 @@ export default function AIAgents() {
     agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const agentsWithoutFolder = filteredAgents.filter(agent => {
-    const agentAny = agent as any;
-    return !agentAny.folder_id;
-  });
+  const agentsWithoutFolder = filteredAgents
+    .filter(agent => {
+      const agentAny = agent as any;
+      return !agentAny.folder_id;
+    })
+    .sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
 
   const getAgentsInFolder = (folderId: string) => {
-    return filteredAgents.filter(agent => {
-      const agentAny = agent as any;
-      return agentAny.folder_id === folderId;
-    });
+    return filteredAgents
+      .filter(agent => {
+        const agentAny = agent as any;
+        return agentAny.folder_id === folderId;
+      })
+      .sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
   };
 
   const getAgentKeywords = (agent: Automation) => {
@@ -842,21 +948,26 @@ export default function AIAgents() {
                             </CollapsibleTrigger>
                             
                             <CollapsibleContent>
-                              <div className="divide-y divide-border bg-muted/5">
-                                {folderAgents.length === 0 ? (
-                                  <div className="pl-12 py-4 text-sm text-muted-foreground italic">
-                                    Arraste um agente para esta pasta
-                                  </div>
-                                ) : (
-                                  folderAgents.map((agent) => (
-                                    <div key={agent.id} className="px-6 pl-10">
-                                      <DraggableAgent agent={agent}>
-                                        <AgentRowContent agent={agent} inFolder />
-                                      </DraggableAgent>
+                              <SortableContext 
+                                items={folderAgents.map(a => a.id)} 
+                                strategy={verticalListSortingStrategy}
+                              >
+                                <div className="divide-y divide-border bg-muted/5">
+                                  {folderAgents.length === 0 ? (
+                                    <div className="pl-12 py-4 text-sm text-muted-foreground italic">
+                                      Arraste um agente para esta pasta
                                     </div>
-                                  ))
-                                )}
-                              </div>
+                                  ) : (
+                                    folderAgents.map((agent) => (
+                                      <div key={agent.id} className="px-6 pl-10">
+                                        <SortableAgent agent={agent}>
+                                          <AgentRowContent agent={agent} inFolder />
+                                        </SortableAgent>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </SortableContext>
                             </CollapsibleContent>
                           </div>
                         </Collapsible>
@@ -866,29 +977,42 @@ export default function AIAgents() {
 
                   {/* Agents without folder */}
                   <DroppableFolder folder={null}>
-                    {agentsWithoutFolder.length > 0 && (
-                      <div className="divide-y divide-border">
-                        {agentsWithoutFolder.map((agent) => (
-                          <div key={agent.id} className="px-6">
-                            <DraggableAgent agent={agent}>
-                              <AgentRowContent agent={agent} />
-                            </DraggableAgent>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <SortableContext 
+                      items={agentsWithoutFolder.map(a => a.id)} 
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {agentsWithoutFolder.length > 0 && (
+                        <div className="divide-y divide-border">
+                          {agentsWithoutFolder.map((agent) => (
+                            <div key={agent.id} className="px-6">
+                              <SortableAgent agent={agent}>
+                                <AgentRowContent agent={agent} />
+                              </SortableAgent>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </SortableContext>
                   </DroppableFolder>
                 </>
               )}
             </div>
           </div>
 
-          {/* Drag Overlay */}
-          <DragOverlay>
+          {/* Drag Overlay with animation */}
+          <DragOverlay dropAnimation={{
+            duration: 250,
+            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+          }}>
             {activeAgent ? (
-              <div className="bg-card border border-border rounded-lg shadow-lg px-4 py-3 flex items-center gap-3">
-                <Bot className="h-5 w-5 text-primary" />
-                <span className="font-medium">{activeAgent.name}</span>
+              <div className="bg-card border-2 border-primary rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3 animate-scale-in">
+                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10">
+                  <Bot className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <span className="font-medium block">{activeAgent.name}</span>
+                  <span className="text-xs text-muted-foreground">Arraste para reordenar</span>
+                </div>
               </div>
             ) : null}
           </DragOverlay>
