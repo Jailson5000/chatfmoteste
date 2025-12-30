@@ -10,7 +10,14 @@ import {
   ChevronDown,
   Check,
   AlertCircle,
-  Loader2
+  Loader2,
+  Plus,
+  ArrowLeft,
+  Search,
+  MoreHorizontal,
+  GripVertical,
+  Trash2,
+  Bot
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useAutomations } from "@/hooks/useAutomations";
+import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useKnowledgeItems } from "@/hooks/useKnowledgeItems";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -38,6 +45,31 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,18 +77,27 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 const MAX_PROMPT_LENGTH = 5000;
 
 type ChannelType = "all" | "instance" | "department";
+type ViewMode = "list" | "editor";
 
 export default function AIAgents() {
   const { toast } = useToast();
-  const { automations, isLoading: automationsLoading, updateAutomation, createAutomation } = useAutomations();
+  const { automations, isLoading: automationsLoading, updateAutomation, createAutomation, deleteAutomation } = useAutomations();
   const { knowledgeItems, isLoading: knowledgeLoading } = useKnowledgeItems();
   const { instances, isLoading: instancesLoading } = useWhatsAppInstances();
   const { departments, isLoading: departmentsLoading } = useDepartments();
 
-  // Find primary AI agent or first automation
-  const primaryAgent = automations.find(a => a.trigger_type === "ai_agent") || automations[0];
+  // View state
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [selectedAgent, setSelectedAgent] = useState<Automation | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [agentToDelete, setAgentToDelete] = useState<Automation | null>(null);
 
-  // State
+  // New agent form
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentDescription, setNewAgentDescription] = useState("");
+
+  // Editor state
   const [prompt, setPrompt] = useState("");
   const [responseDelay, setResponseDelay] = useState(10);
   const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
@@ -70,33 +111,99 @@ export default function AIAgents() {
   const [promptVersion, setPromptVersion] = useState(1);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Load existing agent data
+  // Load agent data when selected
   useEffect(() => {
-    if (primaryAgent) {
-      setPrompt(primaryAgent.ai_prompt || "");
-      setIsActive(primaryAgent.is_active);
-      setLastUpdated(new Date(primaryAgent.updated_at));
+    if (selectedAgent) {
+      setPrompt(selectedAgent.ai_prompt || "");
+      setIsActive(selectedAgent.is_active);
+      setLastUpdated(new Date(selectedAgent.updated_at));
       
-      // Parse trigger config
-      const config = primaryAgent.trigger_config;
+      const config = selectedAgent.trigger_config;
       if (config?.keywords && config.keywords.length > 0) {
         setKeywords(config.keywords.join(", "));
+      } else {
+        setKeywords("");
       }
       
-      // Calculate version based on update history (simplified)
       setPromptVersion(1);
+      setHasChanges(false);
     }
-  }, [primaryAgent]);
+  }, [selectedAgent]);
 
   // Track changes
   useEffect(() => {
-    if (primaryAgent) {
-      const currentPrompt = primaryAgent.ai_prompt || "";
-      setHasChanges(prompt !== currentPrompt || isActive !== primaryAgent.is_active);
+    if (selectedAgent) {
+      const currentPrompt = selectedAgent.ai_prompt || "";
+      setHasChanges(prompt !== currentPrompt || isActive !== selectedAgent.is_active);
     }
-  }, [prompt, isActive, primaryAgent]);
+  }, [prompt, isActive, selectedAgent]);
+
+  const handleSelectAgent = (agent: Automation) => {
+    setSelectedAgent(agent);
+    setViewMode("editor");
+  };
+
+  const handleBackToList = () => {
+    if (hasChanges) {
+      // Could add confirmation dialog here
+    }
+    setViewMode("list");
+    setSelectedAgent(null);
+  };
+
+  const handleCreateAgent = async () => {
+    if (!newAgentName.trim()) return;
+    
+    try {
+      await createAutomation.mutateAsync({
+        name: newAgentName,
+        description: newAgentDescription,
+        webhook_url: "",
+        trigger_type: "ai_agent",
+        ai_prompt: "",
+        is_active: true,
+      });
+      
+      setIsCreateDialogOpen(false);
+      setNewAgentName("");
+      setNewAgentDescription("");
+      
+      toast({
+        title: "Agente criado",
+        description: "O novo agente foi criado com sucesso.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao criar agente",
+        description: "Não foi possível criar o agente.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!agentToDelete) return;
+    
+    try {
+      await deleteAutomation.mutateAsync(agentToDelete.id);
+      setAgentToDelete(null);
+      
+      if (selectedAgent?.id === agentToDelete.id) {
+        setViewMode("list");
+        setSelectedAgent(null);
+      }
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o agente.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleSave = async () => {
+    if (!selectedAgent) return;
+    
     setIsSaving(true);
     try {
       const triggerConfig = {
@@ -108,32 +215,28 @@ export default function AIAgents() {
         knowledge_base_ids: selectedKnowledge,
       };
 
-      if (primaryAgent) {
-        await updateAutomation.mutateAsync({
-          id: primaryAgent.id,
-          ai_prompt: prompt,
-          is_active: isActive,
-          trigger_config: triggerConfig,
-        });
-      } else {
-        await createAutomation.mutateAsync({
-          name: "Agente IA Principal",
-          description: "Agente de atendimento configurado pelo painel",
-          webhook_url: "",
-          trigger_type: "ai_agent",
-          trigger_config: triggerConfig,
-          ai_prompt: prompt,
-          is_active: isActive,
-        });
-      }
+      await updateAutomation.mutateAsync({
+        id: selectedAgent.id,
+        ai_prompt: prompt,
+        is_active: isActive,
+        trigger_config: triggerConfig,
+      });
 
       setHasChanges(false);
       setLastUpdated(new Date());
       setPromptVersion(prev => prev + 1);
       
+      // Update local state
+      setSelectedAgent({
+        ...selectedAgent,
+        ai_prompt: prompt,
+        is_active: isActive,
+        trigger_config: triggerConfig,
+      });
+      
       toast({
         title: "Configuração salva",
-        description: "As configurações da IA foram atualizadas com sucesso.",
+        description: "As configurações do agente foram atualizadas.",
       });
     } catch (error) {
       toast({
@@ -146,6 +249,28 @@ export default function AIAgents() {
     }
   };
 
+  const filteredAgents = automations.filter(agent => 
+    agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getAgentKeywords = (agent: Automation) => {
+    const config = agent.trigger_config;
+    if (config?.keywords && config.keywords.length > 0) {
+      return config.keywords.join(", ");
+    }
+    return "Sem palavras-chave";
+  };
+
+  const getAgentDelay = (agent: Automation) => {
+    const config = agent.trigger_config as any;
+    return config?.response_delay || 10;
+  };
+
+  const isPrimaryAgent = (agent: Automation) => {
+    return automations.indexOf(agent) === 0;
+  };
+
   const isLoading = automationsLoading || knowledgeLoading || instancesLoading || departmentsLoading;
 
   if (isLoading) {
@@ -156,20 +281,234 @@ export default function AIAgents() {
     );
   }
 
+  // Render List View
+  if (viewMode === "list") {
+    return (
+      <div className="flex flex-col h-full bg-background">
+        {/* Tabs Header */}
+        <div className="border-b border-border px-6 pt-4">
+          <Tabs defaultValue="agents">
+            <TabsList className="bg-transparent p-0 h-auto gap-6">
+              <TabsTrigger 
+                value="agents" 
+                className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
+              >
+                Meus Agentes
+              </TabsTrigger>
+              <TabsTrigger 
+                value="templates" 
+                className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
+              >
+                Templates
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        {/* Search and Actions */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar agentes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Criar Agente
+          </Button>
+        </div>
+
+        {/* Agents Table */}
+        <div className="flex-1 overflow-auto">
+          {/* Table Header */}
+          <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 border-b border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+            <div className="w-8">
+              <Checkbox />
+            </div>
+            <div>Agente</div>
+            <div className="text-center">Delay</div>
+            <div>Palavra-chave</div>
+            <div className="text-center">Ações</div>
+          </div>
+
+          {/* Table Body */}
+          <div className="divide-y divide-border">
+            {filteredAgents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="font-medium text-lg mb-1">Nenhum agente criado</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Crie seu primeiro agente de IA para automatizar atendimentos
+                </p>
+                <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Criar Agente
+                </Button>
+              </div>
+            ) : (
+              filteredAgents.map((agent) => (
+                <div
+                  key={agent.id}
+                  className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group"
+                  onClick={() => handleSelectAgent(agent)}
+                >
+                  <div className="flex items-center gap-2 w-8" onClick={(e) => e.stopPropagation()}>
+                    <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
+                    <Checkbox />
+                  </div>
+                  
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{agent.name}</span>
+                      {isPrimaryAgent(agent) && (
+                        <Badge variant="secondary" className="text-xs">
+                          Primário
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">
+                      {agent.description || "Sem descrição"}
+                    </p>
+                  </div>
+                  
+                  <div className="text-center">
+                    <Badge variant="outline" className="gap-1">
+                      <Clock className="h-3 w-3" />
+                      {getAgentDelay(agent)}s
+                    </Badge>
+                  </div>
+                  
+                  <div className="text-sm text-muted-foreground truncate">
+                    {getAgentKeywords(agent)}
+                  </div>
+                  
+                  <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleSelectAgent(agent)}>
+                          <Settings2 className="h-4 w-4 mr-2" />
+                          Configurar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => setAgentToDelete(agent)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Create Agent Dialog */}
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Criar Novo Agente</DialogTitle>
+              <DialogDescription>
+                Crie um novo agente de IA para automatizar seus atendimentos.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome do Agente</Label>
+                <Input
+                  id="name"
+                  value={newAgentName}
+                  onChange={(e) => setNewAgentName(e.target.value)}
+                  placeholder="Ex: Laura, Davi, Atendimento Inicial..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Descrição</Label>
+                <Textarea
+                  id="description"
+                  value={newAgentDescription}
+                  onChange={(e) => setNewAgentDescription(e.target.value)}
+                  placeholder="Descreva o que este agente faz..."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleCreateAgent}
+                disabled={!newAgentName.trim() || createAutomation.isPending}
+              >
+                {createAutomation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Criar Agente
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation */}
+        <AlertDialog open={!!agentToDelete} onOpenChange={() => setAgentToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir Agente</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem certeza que deseja excluir "{agentToDelete?.name}"? Esta ação não pode ser desfeita.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteAgent}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    );
+  }
+
+  // Render Editor View
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4 shrink-0">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <Settings2 className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-lg">IA do Site</h1>
-              <p className="text-sm text-muted-foreground">
-                Configure o comportamento da IA de atendimento
-              </p>
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleBackToList}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
+            </Button>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Bot className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="font-semibold text-lg">{selectedAgent?.name}</h1>
+                <p className="text-sm text-muted-foreground">
+                  {selectedAgent?.description || "Configure o comportamento da IA"}
+                </p>
+              </div>
             </div>
           </div>
           
@@ -464,14 +803,16 @@ Regras:
               </div>
 
               {/* Primary Agent Indicator */}
-              <div className="p-3 rounded-lg bg-muted/50 border border-border">
-                <div className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-primary" />
-                  <span className="text-muted-foreground">
-                    {primaryAgent ? "Agente primário configurado" : "Este será o agente primário"}
-                  </span>
+              {selectedAgent && isPrimaryAgent(selectedAgent) && (
+                <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="h-4 w-4 text-primary" />
+                    <span className="text-muted-foreground">
+                      Este é o agente primário
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </ScrollArea>
         </div>
