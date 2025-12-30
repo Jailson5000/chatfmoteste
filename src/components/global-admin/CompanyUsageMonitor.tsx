@@ -82,14 +82,34 @@ export function CompanyUsageMonitor({
 
   const getStatusColor = (percent: number) => {
     if (percent >= 100) return "text-red-600";
+    if (percent >= 95) return "text-orange-600";
     if (percent >= 80) return "text-yellow-600";
     return "text-green-600";
   };
 
   const getProgressColor = (percent: number) => {
     if (percent >= 100) return "bg-red-500";
+    if (percent >= 95) return "bg-orange-500";
     if (percent >= 80) return "bg-yellow-500";
     return "bg-green-500";
+  };
+
+  const getAlertBadge = (percent: number) => {
+    if (percent >= 100) {
+      return (
+        <Badge variant="destructive" className="text-xs animate-pulse">
+          Limite atingido
+        </Badge>
+      );
+    }
+    if (percent >= 95) {
+      return (
+        <Badge className="text-xs bg-orange-500 hover:bg-orange-600">
+          95% - Quase no limite
+        </Badge>
+      );
+    }
+    return null;
   };
 
   if (compact) {
@@ -102,7 +122,8 @@ export function CompanyUsageMonitor({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-xs ${
-                    percent >= 100 ? 'bg-red-50 border-red-200 text-red-700' :
+                    percent >= 100 ? 'bg-red-50 border-red-200 text-red-700 animate-pulse' :
+                    percent >= 95 ? 'bg-orange-50 border-orange-200 text-orange-700' :
                     percent >= 80 ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
                     'bg-green-50 border-green-200 text-green-700'
                   }`}>
@@ -113,6 +134,12 @@ export function CompanyUsageMonitor({
                 <TooltipContent>
                   <p>{metric.label}: {metric.current} de {metric.max}{metric.unit || ''}</p>
                   <p className={getStatusColor(percent)}>{percent}% utilizado</p>
+                  {percent >= 95 && percent < 100 && (
+                    <p className="text-orange-600 font-medium">⚠️ Quase no limite!</p>
+                  )}
+                  {percent >= 100 && (
+                    <p className="text-red-600 font-medium">🚫 Limite atingido!</p>
+                  )}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -147,21 +174,30 @@ export function CompanyUsageMonitor({
       <CardContent className="space-y-4">
         {metrics.map((metric) => {
           const percent = getPercentage(metric.current, metric.max);
+          const alertBadge = getAlertBadge(percent);
           return (
-            <div key={metric.label} className="space-y-1">
+            <div key={metric.label} className={`space-y-1 p-2 rounded-lg ${
+              percent >= 100 ? 'bg-red-50/50 border border-red-200' :
+              percent >= 95 ? 'bg-orange-50/50 border border-orange-200' :
+              ''
+            }`}>
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   {metric.icon}
                   <span>{metric.label}</span>
+                  {alertBadge}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`font-medium ${getStatusColor(percent)}`}>
                     {metric.current} / {metric.max}{metric.unit || ''}
                   </span>
                   {percent >= 100 && (
-                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    <AlertTriangle className="h-4 w-4 text-red-600 animate-pulse" />
                   )}
-                  {percent >= 80 && percent < 100 && (
+                  {percent >= 95 && percent < 100 && (
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
+                  )}
+                  {percent >= 80 && percent < 95 && (
                     <AlertTriangle className="h-4 w-4 text-yellow-600" />
                   )}
                   {percent < 80 && (
@@ -173,12 +209,19 @@ export function CompanyUsageMonitor({
                 <Progress value={percent} className="h-2" />
                 <div 
                   className={`absolute inset-0 h-2 rounded-full ${getProgressColor(percent)}`}
-                  style={{ width: `${percent}%` }}
+                  style={{ width: `${Math.min(100, percent)}%` }}
                 />
               </div>
-              <p className="text-xs text-muted-foreground text-right">
-                {percent}% utilizado
-              </p>
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-muted-foreground">
+                  {percent}% utilizado
+                </p>
+                {percent >= 100 && (
+                  <p className="text-xs text-red-600 font-medium">
+                    Novas ações bloqueadas
+                  </p>
+                )}
+              </div>
             </div>
           );
         })}

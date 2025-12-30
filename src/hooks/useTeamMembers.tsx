@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "./useAuth";
+import { useCompanyLimits } from "./useCompanyLimits";
 import type { AppRole } from "./useUserRole";
 
 export interface TeamMember {
@@ -25,6 +26,7 @@ export interface MemberDepartment {
 export function useTeamMembers() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { checkLimit, refetch: refetchLimits } = useCompanyLimits();
   const queryClient = useQueryClient();
 
   // Fetch all team members with their roles
@@ -156,6 +158,12 @@ export function useTeamMembers() {
   // Invite new member
   const inviteMember = useMutation({
     mutationFn: async ({ email, fullName, role }: { email: string; fullName: string; role: AppRole }) => {
+      // Check limit before creating
+      const limitCheck = await checkLimit('users', 1, true);
+      if (!limitCheck.allowed) {
+        throw new Error(limitCheck.message || "Limite de usuários atingido. Considere fazer um upgrade do seu plano.");
+      }
+
       // Get the user's law firm id
       const { data: profile } = await supabase
         .from("profiles")
@@ -196,6 +204,7 @@ export function useTeamMembers() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["team-members"] });
+      refetchLimits();
       toast({
         title: "Convite enviado",
         description: "Um email de convite foi enviado para o novo membro.",

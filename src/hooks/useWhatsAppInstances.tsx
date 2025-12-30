@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
+import { useCompanyLimits } from "./useCompanyLimits";
 
 export type WhatsAppInstance = Tables<"whatsapp_instances">;
 
@@ -39,6 +40,7 @@ function normalizeApiUrl(url: string): string {
 export function useWhatsAppInstances() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { checkLimit, refetch: refetchLimits } = useCompanyLimits();
 
   const { data: instances = [], isLoading, error, refetch } = useQuery({
     queryKey: ["whatsapp-instances"],
@@ -97,6 +99,12 @@ export function useWhatsAppInstances() {
 
   const createInstance = useMutation({
     mutationFn: async ({ instanceName, apiUrl, apiKey }: CreateInstanceParams): Promise<EvolutionResponse> => {
+      // Check limit before creating
+      const limitCheck = await checkLimit('instances', 1, true);
+      if (!limitCheck.allowed) {
+        throw new Error(limitCheck.message || "Limite de conexões WhatsApp atingido. Considere fazer um upgrade do seu plano.");
+      }
+
       console.log("[useWhatsAppInstances] Creating instance:", instanceName);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
@@ -121,6 +129,7 @@ export function useWhatsAppInstances() {
       console.log("[useWhatsAppInstances] Instance created successfully:", data.instance?.id);
       await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
       await refetch();
+      refetchLimits();
 
       toast({
         title: "Instância criada",

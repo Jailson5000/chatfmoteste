@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "./useLawFirm";
 import { useToast } from "./use-toast";
+import { useCompanyLimits } from "./useCompanyLimits";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface TriggerConfig {
@@ -47,6 +48,7 @@ export interface UpdateAutomationParams extends Partial<CreateAutomationParams> 
 export function useAutomations() {
   const { lawFirm } = useLawFirm();
   const { toast } = useToast();
+  const { checkLimit, refetch: refetchLimits } = useCompanyLimits();
   const queryClient = useQueryClient();
 
   const {
@@ -79,6 +81,12 @@ export function useAutomations() {
     mutationFn: async (params: CreateAutomationParams) => {
       if (!lawFirm?.id) throw new Error("Law firm not found");
 
+      // Check limit before creating
+      const limitCheck = await checkLimit('agents', 1, true);
+      if (!limitCheck.allowed) {
+        throw new Error(limitCheck.message || "Limite de agentes de IA atingido. Considere fazer um upgrade do seu plano.");
+      }
+
       const { data, error } = await supabase
         .from("automations")
         .insert({
@@ -100,6 +108,7 @@ export function useAutomations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["automations"] });
+      refetchLimits();
       toast({
         title: "Automação criada",
         description: "A automação foi criada com sucesso.",
