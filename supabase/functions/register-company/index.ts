@@ -23,6 +23,7 @@ interface RegisterRequest {
   admin_email: string;
   phone?: string;
   document?: string;
+  plan_id?: string;
 }
 
 function generateSubdomain(companyName: string): string {
@@ -52,7 +53,7 @@ serve(async (req) => {
   try {
     // Parse request body
     const body: RegisterRequest = await req.json();
-    const { company_name, admin_name, admin_email, phone, document } = body;
+    const { company_name, admin_name, admin_email, phone, document, plan_id } = body;
 
     // Validate required fields
     if (!company_name || !admin_name || !admin_email) {
@@ -136,6 +137,8 @@ serve(async (req) => {
         phone: phone || null,
         document: document || null,
         law_firm_id: lawFirm.id,
+        // Plan selected by user (pending activation)
+        plan_id: plan_id || null,
         // Critical: Set to pending_approval
         approval_status: 'pending_approval',
         status: 'active', // Company is active, but not approved
@@ -160,6 +163,19 @@ serve(async (req) => {
 
     console.log(`[register-company] Company created with pending_approval: ${company.id}`);
 
+    // Fetch plan name if plan was selected
+    let planName = 'Não selecionado';
+    if (plan_id) {
+      const { data: planData } = await supabase
+        .from('plans')
+        .select('name')
+        .eq('id', plan_id)
+        .single();
+      if (planData) {
+        planName = planData.name;
+      }
+    }
+
     // Log audit event
     await supabase.from('audit_logs').insert({
       action: 'COMPANY_SELF_REGISTRATION',
@@ -170,6 +186,8 @@ serve(async (req) => {
         admin_name,
         admin_email,
         subdomain,
+        plan_id,
+        plan_name: planName,
         approval_status: 'pending_approval',
         timestamp: new Date().toISOString(),
       },
@@ -330,6 +348,10 @@ serve(async (req) => {
         <tr>
           <td style="padding: 10px 0; color: #6b7280;">Subdomínio</td>
           <td style="padding: 10px 0; color: #1f2937;">${subdomain}.miauchat.com.br</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 0; color: #6b7280; font-weight: 600;">Plano Escolhido</td>
+          <td style="padding: 10px 0; color: #dc2626; font-weight: 600;">${planName}</td>
         </tr>
         <tr>
           <td style="padding: 10px 0; color: #6b7280;">Data/Hora</td>

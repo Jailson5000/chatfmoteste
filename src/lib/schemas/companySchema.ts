@@ -114,7 +114,7 @@ export const subdomainSchema = z.object({
  * PUBLIC REGISTRATION SCHEMA
  * Used by: /register page
  * 
- * Requires: Company name, Admin name, Admin email
+ * Requires: Company name, Admin name, Admin email, Plan
  * Optional: Document, Phone
  */
 export const publicRegistrationSchema = z.object({
@@ -147,6 +147,12 @@ export const publicRegistrationSchema = z.object({
     .max(20, "Documento deve ter no máximo 20 caracteres")
     .optional()
     .transform((val) => val?.trim() || undefined),
+
+  // Plan selection - Required
+  planId: z
+    .string()
+    .uuid("Selecione um plano válido")
+    .min(1, "Selecione um plano"),
 });
 
 /**
@@ -212,5 +218,10 @@ export const companyFieldConfig = {
     placeholder: "00.000.000/0000-00",
     required: false,
     maxLength: 20,
+  },
+  planId: {
+    label: "Plano Desejado",
+    placeholder: "Selecione um plano",
+    required: true,
   },
 } as const;
