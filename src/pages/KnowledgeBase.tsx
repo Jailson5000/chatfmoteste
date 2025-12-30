@@ -1,22 +1,27 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useKnowledgeItems, KnowledgeItem } from "@/hooks/useKnowledgeItems";
 import { useAutomations } from "@/hooks/useAutomations";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Trash2, Edit, BookOpen, FileText, Search, Database, Upload, Bot, Link2 } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Loader2, Plus, Trash2, Edit, Search, Upload, MoreVertical, GripVertical, Bot, Link2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
 const CATEGORIES = [
   { value: 'legal', label: 'Informações Legais' },
   { value: 'procedures', label: 'Procedimentos' },
@@ -37,9 +42,11 @@ export default function KnowledgeBase() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [newItem, setNewItem] = useState({
     title: '',
@@ -54,7 +61,32 @@ export default function KnowledgeBase() {
     category: 'other',
   });
 
-  // Fetch which agents this item is linked to
+  // Fetch all agent links for all items
+  const { data: allAgentLinks = {} } = useQuery({
+    queryKey: ['all-agent-links'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('agent_knowledge')
+        .select('knowledge_item_id, automation_id, automations(id, name)');
+      if (error) throw error;
+      
+      const linksMap: Record<string, Array<{ id: string; name: string }>> = {};
+      data?.forEach((link: any) => {
+        if (!linksMap[link.knowledge_item_id]) {
+          linksMap[link.knowledge_item_id] = [];
+        }
+        if (link.automations) {
+          linksMap[link.knowledge_item_id].push({
+            id: link.automations.id,
+            name: link.automations.name,
+          });
+        }
+      });
+      return linksMap;
+    },
+  });
+
+  // Fetch which agents this item is linked to (for link dialog)
   const { data: itemAgentLinks = [] } = useQuery({
     queryKey: ['item-agent-links', selectedItem?.id],
     queryFn: async () => {
@@ -66,7 +98,7 @@ export default function KnowledgeBase() {
       if (error) throw error;
       return data.map(d => d.automation_id);
     },
-    enabled: !!selectedItem?.id,
+    enabled: !!selectedItem?.id && isLinkDialogOpen,
   });
 
   const linkToAgent = useMutation({
@@ -78,11 +110,8 @@ export default function KnowledgeBase() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['item-agent-links'] });
+      queryClient.invalidateQueries({ queryKey: ['all-agent-links'] });
       queryClient.invalidateQueries({ queryKey: ['agent-knowledge'] });
-      toast({ title: 'Vinculado', description: 'Conhecimento vinculado ao agente.' });
-    },
-    onError: () => {
-      toast({ title: 'Erro', description: 'Não foi possível vincular.', variant: 'destructive' });
     },
   });
 
@@ -97,11 +126,8 @@ export default function KnowledgeBase() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['item-agent-links'] });
+      queryClient.invalidateQueries({ queryKey: ['all-agent-links'] });
       queryClient.invalidateQueries({ queryKey: ['agent-knowledge'] });
-      toast({ title: 'Desvinculado', description: 'Conhecimento removido do agente.' });
-    },
-    onError: () => {
-      toast({ title: 'Erro', description: 'Não foi possível desvincular.', variant: 'destructive' });
     },
   });
 
@@ -117,14 +143,10 @@ export default function KnowledgeBase() {
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Acesso Restrito</CardTitle>
-            <CardDescription>
-              Você não tem permissão para acessar esta página.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <div className="text-center">
+          <h2 className="text-xl font-semibold">Acesso Restrito</h2>
+          <p className="text-muted-foreground">Você não tem permissão para acessar esta página.</p>
+        </div>
       </div>
     );
   }
@@ -160,16 +182,13 @@ export default function KnowledgeBase() {
       category: editItem.category,
     });
     setIsEditDialogOpen(false);
-    if (selectedItem?.id === editItem.id) {
-      setSelectedItem({ ...selectedItem, title: editItem.title, content: editItem.content, category: editItem.category });
-    }
   };
 
-  const handleDeleteItem = async (id: string) => {
-    await deleteItem.mutateAsync(id);
-    if (selectedItem?.id === id) {
-      setSelectedItem(null);
-    }
+  const handleDeleteItem = async () => {
+    if (!selectedItem) return;
+    await deleteItem.mutateAsync(selectedItem.id);
+    setIsDeleteDialogOpen(false);
+    setSelectedItem(null);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -220,6 +239,7 @@ export default function KnowledgeBase() {
   };
 
   const openEditDialog = (item: KnowledgeItem) => {
+    setSelectedItem(item);
     setEditItem({
       id: item.id,
       title: item.title,
@@ -229,22 +249,65 @@ export default function KnowledgeBase() {
     setIsEditDialogOpen(true);
   };
 
-  const getCategoryLabel = (value: string) => {
-    return CATEGORIES.find(c => c.value === value)?.label || value;
+  const openLinkDialog = (item: KnowledgeItem) => {
+    setSelectedItem(item);
+    setIsLinkDialogOpen(true);
+  };
+
+  const openDeleteDialog = (item: KnowledgeItem) => {
+    setSelectedItem(item);
+    setIsDeleteDialogOpen(true);
   };
 
   const filteredItems = knowledgeItems.filter(item =>
     item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (item.content?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+    (item.content?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+    item.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredItems.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredItems.map(i => i.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedIds(newSet);
+  };
+
+  const getAgentInitial = (name: string) => {
+    return name.charAt(0).toUpperCase();
+  };
+
+  const getAgentColor = (name: string) => {
+    const colors = [
+      'bg-emerald-500',
+      'bg-blue-500',
+      'bg-purple-500',
+      'bg-amber-500',
+      'bg-rose-500',
+      'bg-cyan-500',
+    ];
+    const index = name.charCodeAt(0) % colors.length;
+    return colors[index];
+  };
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Base de Conhecimento</h1>
           <p className="text-muted-foreground">
-            Gerencie o conhecimento que a IA utiliza para responder perguntas
+            Centralize e gerencie todo o conhecimento da sua organização
           </p>
         </div>
         
@@ -273,7 +336,7 @@ export default function KnowledgeBase() {
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
-                Novo Conhecimento
+                Nova Base
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[625px]">
@@ -290,7 +353,7 @@ export default function KnowledgeBase() {
                     id="title"
                     value={newItem.title}
                     onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
-                    placeholder="Ex: Prazo para Recurso"
+                    placeholder="Ex: Lista de doenças IRRF"
                   />
                 </div>
                 <div className="grid gap-2">
@@ -340,250 +403,178 @@ export default function KnowledgeBase() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar na base de conhecimento..."
+          placeholder="Busque por nome, conteúdo, tipo ou ID..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10"
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Lista de Conhecimentos */}
-        <div className="lg:col-span-1 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Database className="h-5 w-5" />
-                Itens ({filteredItems.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
-              {filteredItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
+      {/* Table */}
+      <div className="rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={selectedIds.size === filteredItems.length && filteredItems.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                />
+              </TableHead>
+              <TableHead className="w-10"></TableHead>
+              <TableHead>Nome</TableHead>
+              <TableHead className="text-center w-48">Agentes</TableHead>
+              <TableHead className="text-center w-20">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredItems.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
                   {searchQuery ? 'Nenhum resultado encontrado' : 'Nenhum conhecimento cadastrado'}
-                </p>
-              ) : (
-                filteredItems.map((item) => (
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredItems.map((item) => {
+                const linkedAgents = allAgentLinks[item.id] || [];
+                const timeAgo = formatDistanceToNow(new Date(item.created_at), { 
+                  addSuffix: false, 
+                  locale: ptBR 
+                });
+                
+                return (
+                  <TableRow key={item.id} className="group">
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(item.id)}
+                        onCheckedChange={() => toggleSelect(item.id)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <GripVertical className="h-4 w-4 text-muted-foreground/50 cursor-grab" />
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium">{item.title}</p>
+                        <p className="text-sm text-muted-foreground">há {timeAgo}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1">
+                        {linkedAgents.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        ) : (
+                          linkedAgents.slice(0, 3).map((agent) => (
+                            <Badge
+                              key={agent.id}
+                              variant="secondary"
+                              className="flex items-center gap-1.5 px-2 py-1"
+                            >
+                              <Avatar className={`h-5 w-5 ${getAgentColor(agent.name)}`}>
+                                <AvatarFallback className="text-[10px] text-white bg-transparent">
+                                  {getAgentInitial(agent.name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-xs">{agent.name}</span>
+                            </Badge>
+                          ))
+                        )}
+                        {linkedAgents.length > 3 && (
+                          <Badge variant="outline" className="text-xs">
+                            +{linkedAgents.length - 3}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEditDialog(item)}>
+                              <Edit className="h-4 w-4 mr-2" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openLinkDialog(item)}>
+                              <Link2 className="h-4 w-4 mr-2" />
+                              Vincular Agentes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              onClick={() => openDeleteDialog(item)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Link Dialog */}
+      <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vincular a Agentes de IA</DialogTitle>
+            <DialogDescription>
+              Selecione os agentes que terão acesso a "{selectedItem?.title}".
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-64">
+            {automations && automations.length > 0 ? (
+              <div className="space-y-2 pr-2">
+                {automations.map((automation) => (
                   <div
-                    key={item.id}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedItem?.id === item.id
+                    key={automation.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      itemAgentLinks.includes(automation.id)
                         ? 'border-primary bg-primary/5'
                         : 'hover:bg-muted/50'
                     }`}
-                    onClick={() => setSelectedItem(item)}
+                    onClick={() => handleToggleAgentLink(automation.id)}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-2 flex-1 min-w-0">
-                        {item.item_type === 'document' ? (
-                          <Upload className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                        ) : (
-                          <FileText className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                    <Checkbox
+                      checked={itemAgentLinks.includes(automation.id)}
+                      onCheckedChange={() => handleToggleAgentLink(automation.id)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium text-sm truncate">
+                          {automation.name}
+                        </span>
+                        {automation.is_active && (
+                          <Badge variant="outline" className="text-xs">Ativo</Badge>
                         )}
-                        <div className="min-w-0">
-                          <span className="font-medium text-sm block truncate">{item.title}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              {getCategoryLabel(item.category)}
-                            </span>
-                            {item.item_type === 'document' && (
-                              <Badge variant="outline" className="text-[10px]">
-                                Documento
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditDialog(item);
-                          }}
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Excluir Conhecimento</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Tem certeza que deseja excluir "{item.title}"? Esta ação não pode ser desfeita.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDeleteItem(item.id)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Excluir
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                      {automation.description && (
+                        <span className="text-xs text-muted-foreground line-clamp-1">
+                          {automation.description}
+                        </span>
+                      )}
                     </div>
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Visualização do Conteúdo */}
-        <div className="lg:col-span-2">
-          {selectedItem ? (
-            <Card>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      {selectedItem.item_type === 'document' ? (
-                        <Upload className="h-5 w-5" />
-                      ) : (
-                        <BookOpen className="h-5 w-5" />
-                      )}
-                      {selectedItem.title}
-                    </CardTitle>
-                    <CardDescription className="mt-1 flex items-center gap-2">
-                      {getCategoryLabel(selectedItem.category)}
-                      {selectedItem.item_type === 'document' && (
-                        <Badge variant="secondary">Documento</Badge>
-                      )}
-                    </CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <Bot className="h-4 w-4 mr-2" />
-                          Vincular IA
-                          {itemAgentLinks.length > 0 && (
-                            <Badge variant="secondary" className="ml-2">
-                              {itemAgentLinks.length}
-                            </Badge>
-                          )}
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Vincular a Agentes de IA</DialogTitle>
-                          <DialogDescription>
-                            Selecione os agentes que terão acesso a este conhecimento.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <ScrollArea className="h-64">
-                          {automations && automations.length > 0 ? (
-                            <div className="space-y-2 pr-2">
-                              {automations.map((automation) => (
-                                <div
-                                  key={automation.id}
-                                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                                    itemAgentLinks.includes(automation.id)
-                                      ? 'border-primary bg-primary/5'
-                                      : 'hover:bg-muted/50'
-                                  }`}
-                                  onClick={() => handleToggleAgentLink(automation.id)}
-                                >
-                                  <Checkbox
-                                    checked={itemAgentLinks.includes(automation.id)}
-                                    onCheckedChange={() => handleToggleAgentLink(automation.id)}
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <Bot className="h-4 w-4 text-muted-foreground" />
-                                      <span className="font-medium text-sm truncate">
-                                        {automation.name}
-                                      </span>
-                                      {automation.is_active && (
-                                        <Badge variant="outline" className="text-xs">Ativo</Badge>
-                                      )}
-                                    </div>
-                                    {automation.description && (
-                                      <span className="text-xs text-muted-foreground line-clamp-1">
-                                        {automation.description}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-muted-foreground text-center py-4">
-                              Nenhum agente de IA configurado
-                            </p>
-                          )}
-                        </ScrollArea>
-                      </DialogContent>
-                    </Dialog>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEditDialog(selectedItem)}
-                    >
-                      <Edit className="h-4 w-4 mr-2" />
-                      Editar
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {selectedItem.item_type === 'document' && selectedItem.file_url ? (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-muted rounded-lg">
-                      <p className="text-sm">
-                        <strong>Arquivo:</strong> {selectedItem.file_name}
-                      </p>
-                      {selectedItem.file_size && (
-                        <p className="text-sm text-muted-foreground">
-                          Tamanho: {(selectedItem.file_size / 1024).toFixed(2)} KB
-                        </p>
-                      )}
-                    </div>
-                    <Button asChild>
-                      <a href={selectedItem.file_url} target="_blank" rel="noopener noreferrer">
-                        Abrir Documento
-                      </a>
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    <p className="whitespace-pre-wrap">{selectedItem.content}</p>
-                  </div>
-                )}
-                <div className="mt-6 pt-4 border-t text-xs text-muted-foreground">
-                  <p>Criado em: {new Date(selectedItem.created_at).toLocaleDateString('pt-BR')}</p>
-                  <p>Atualizado em: {new Date(selectedItem.updated_at).toLocaleDateString('pt-BR')}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center h-[400px] text-center">
-                <BookOpen className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium">Selecione um Item</h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Escolha um item na lista à esquerda para visualizar seu conteúdo
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Nenhum agente de IA configurado
+              </p>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
@@ -642,6 +633,27 @@ export default function KnowledgeBase() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Conhecimento</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir "{selectedItem?.title}"? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteItem}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
