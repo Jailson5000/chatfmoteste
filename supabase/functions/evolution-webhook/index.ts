@@ -355,6 +355,7 @@ async function sendAIResponseToWhatsApp(
 }
 
 // Process messages with internal MiauChat AI (calls ai-chat edge function)
+// CRITICAL: Must have valid automationId - prompt is the SINGLE SOURCE OF TRUTH
 async function processWithInternalAI(
   supabaseClient: any, 
   context: AutomationContext, 
@@ -368,19 +369,42 @@ async function processWithInternalAI(
   logDebug('AI_PROVIDER', 'Processing with MiauChat AI (internal)', { conversationId: context.conversationId });
 
   try {
-    // Get automation prompt if available
-    const { data: automations } = await supabaseClient
+    // CRITICAL: Get the CORRECT automation for this tenant
+    // Only use automations that are:
+    // 1. From the same law_firm_id
+    // 2. Active
+    // 3. Have a configured ai_prompt (required!)
+    const { data: automations, error: autoError } = await supabaseClient
       .from('automations')
-      .select('id, ai_prompt, ai_temperature')
+      .select('id, ai_prompt, ai_temperature, name')
       .eq('law_firm_id', context.lawFirmId)
       .eq('is_active', true)
+      .not('ai_prompt', 'is', null)
       .limit(1);
 
-    const automation = automations?.[0];
+    if (autoError || !automations || automations.length === 0) {
+      logDebug('AI_PROVIDER', 'No valid automation found with prompt configured', { 
+        lawFirmId: context.lawFirmId,
+        error: autoError 
+      });
+      return;
+    }
+
+    const automation = automations[0];
+    
+    if (!automation.ai_prompt || automation.ai_prompt.trim() === '') {
+      logDebug('AI_PROVIDER', 'Automation has no prompt configured, cannot proceed', { 
+        automationId: automation.id 
+      });
+      return;
+    }
+
+    logDebug('AI_PROVIDER', `Using agent: ${automation.name}`, { automationId: automation.id });
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-    // Call internal ai-chat edge function
+    // Call internal ai-chat edge function with automationId (REQUIRED)
     const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
       method: 'POST',
       headers: {
@@ -390,21 +414,32 @@ async function processWithInternalAI(
       body: JSON.stringify({
         conversationId: context.conversationId,
         message: context.messageContent,
-        customPrompt: automation?.ai_prompt,
-        temperature: automation?.ai_temperature,
-        automationId: automation?.id,
+        automationId: automation.id, // REQUIRED for proper isolation
+        context: {
+          clientName: context.contactName,
+          clientPhone: context.contactPhone,
+          lawFirmId: context.lawFirmId,
+        },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      logDebug('AI_PROVIDER', 'Internal AI call failed', { status: response.status, error: errorText });
+      logDebug('AI_PROVIDER', 'Internal AI call failed', { 
+        status: response.status, 
+        error: errorText,
+        automationId: automation.id 
+      });
       return;
     }
 
     const result = await response.json();
     const aiResponse = result.response;
-    logDebug('AI_PROVIDER', 'Internal AI response received', { hasResponse: !!aiResponse, responseLength: aiResponse?.length });
+    logDebug('AI_PROVIDER', 'Internal AI response received', { 
+      hasResponse: !!aiResponse, 
+      responseLength: aiResponse?.length,
+      automationId: automation.id 
+    });
 
     if (aiResponse) {
       // Send the response back to WhatsApp
@@ -415,9 +450,11 @@ async function processWithInternalAI(
     await supabaseClient
       .from('webhook_logs')
       .insert({
+        automation_id: automation.id,
         direction: 'internal',
         payload: {
           provider: 'miauchat_ai',
+          automation_name: automation.name,
           conversation_id: context.conversationId,
           message: context.messageContent,
           response_sent: !!aiResponse,
@@ -431,6 +468,7 @@ async function processWithInternalAI(
 }
 
 // Process messages with OpenAI using company's own API key
+// CRITICAL: Must have valid automation with prompt - no fallbacks allowed
 async function processWithOpenAI(
   supabaseClient: any, 
   context: AutomationContext, 
@@ -449,16 +487,29 @@ async function processWithOpenAI(
   logDebug('AI_PROVIDER', 'Processing with OpenAI (company API key)', { conversationId: context.conversationId });
 
   try {
-    // Get automation prompt if available
-    const { data: automations } = await supabaseClient
+    // CRITICAL: Get the CORRECT automation for this tenant
+    const { data: automations, error: autoError } = await supabaseClient
       .from('automations')
-      .select('ai_prompt, ai_temperature')
+      .select('id, ai_prompt, ai_temperature, name')
       .eq('law_firm_id', context.lawFirmId)
       .eq('is_active', true)
+      .not('ai_prompt', 'is', null)
       .limit(1);
 
-    const automation = automations?.[0];
+    if (autoError || !automations || automations.length === 0) {
+      logDebug('AI_PROVIDER', 'No valid automation found with prompt configured', { lawFirmId: context.lawFirmId });
+      return;
+    }
+
+    const automation = automations[0];
     
+    if (!automation.ai_prompt || automation.ai_prompt.trim() === '') {
+      logDebug('AI_PROVIDER', 'Automation has no prompt configured, cannot proceed', { automationId: automation.id });
+      return;
+    }
+
+    logDebug('AI_PROVIDER', `Using agent: ${automation.name}`, { automationId: automation.id });
+
     // Get recent messages for context
     const { data: recentMessages } = await supabaseClient
       .from('messages')
@@ -467,14 +518,22 @@ async function processWithOpenAI(
       .order('created_at', { ascending: false })
       .limit(10);
 
-    // Build messages array for OpenAI
-    const systemPrompt = automation?.ai_prompt || 
-      `Você é um assistente jurídico profissional. Responda de forma clara e objetiva.
-       Nome do contato: ${context.contactName}
-       Telefone: ${context.contactPhone}`;
+    // Agent prompt is the SINGLE SOURCE OF TRUTH - no fallbacks
+    const systemPrompt = automation.ai_prompt;
 
     const messages = [
       { role: 'system', content: systemPrompt },
+      // Add behavioral instruction for human-like responses
+      { 
+        role: 'system', 
+        content: `REGRA CRÍTICA DE COMUNICAÇÃO:
+- Responda como uma pessoa real em atendimento
+- Envie mensagens CURTAS e OBJETIVAS (máximo 2-3 frases por vez)
+- Faça UMA pergunta ou informação por mensagem
+- NÃO envie textos longos ou explicações extensas
+- Use linguagem natural e profissional
+- Aguarde a resposta do cliente antes de continuar` 
+      },
       ...(recentMessages?.reverse() || []).map((msg: any) => ({
         role: msg.is_from_me ? 'assistant' : 'user',
         content: msg.content || ''
@@ -492,8 +551,8 @@ async function processWithOpenAI(
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages,
-        temperature: automation?.ai_temperature || 0.7,
-        max_tokens: 1024,
+        temperature: automation.ai_temperature || 0.7,
+        max_tokens: 300, // Limit response length for shorter messages
       }),
     });
 
@@ -507,7 +566,10 @@ async function processWithOpenAI(
     const aiResponse = result.choices?.[0]?.message?.content;
 
     if (aiResponse) {
-      logDebug('AI_PROVIDER', 'OpenAI response received', { responseLength: aiResponse.length });
+      logDebug('AI_PROVIDER', 'OpenAI response received', { 
+        responseLength: aiResponse.length,
+        automationId: automation.id 
+      });
 
       // Send the response back to WhatsApp
       await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse);
@@ -516,9 +578,11 @@ async function processWithOpenAI(
       await supabaseClient
         .from('webhook_logs')
         .insert({
+          automation_id: automation.id,
           direction: 'internal',
           payload: {
             provider: 'openai_company',
+            automation_name: automation.name,
             conversation_id: context.conversationId,
             message: context.messageContent,
             model: 'gpt-4o-mini',
