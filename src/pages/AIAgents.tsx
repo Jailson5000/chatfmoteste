@@ -148,13 +148,11 @@ function DraggableAgent({
 function DroppableFolder({ 
   folder, 
   children,
-  isOver 
 }: { 
   folder: AgentFolder | null;
   children: React.ReactNode;
-  isOver?: boolean;
 }) {
-  const { setNodeRef } = useDroppable({
+  const { setNodeRef, isOver } = useDroppable({
     id: folder ? folder.id : 'no-folder',
     data: { type: 'folder', folder },
   });
@@ -163,8 +161,8 @@ function DroppableFolder({
     <div 
       ref={setNodeRef}
       className={cn(
-        "transition-colors",
-        isOver && "bg-primary/10 ring-2 ring-primary/30 rounded-lg"
+        "transition-all duration-200",
+        isOver && "bg-primary/10 ring-2 ring-primary ring-inset rounded-lg"
       )}
     >
       {children}
