@@ -34,6 +34,13 @@ const roles: { value: AppRole; label: string; description: string; icon: React.R
     requiresDepartments: false,
   },
   {
+    value: "advogado",
+    label: "Supervisor",
+    description: "Supervisão de equipe e acompanhamento de conversas",
+    icon: <Users className="h-4 w-4" />,
+    requiresDepartments: false,
+  },
+  {
     value: "atendente",
     label: "Atendente",
     description: "Acesso apenas aos departamentos selecionados",
