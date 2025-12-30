@@ -905,6 +905,78 @@ serve(async (req) => {
           messageType = 'audio';
           mediaUrl = data.message.audioMessage.url || '';
           mediaMimeType = data.message.audioMessage.mimetype || 'audio/ogg';
+          
+          // Transcribe audio for AI processing
+          if (!data.key.fromMe) {
+            try {
+              logDebug('AUDIO', 'Attempting to transcribe audio for AI', { requestId, messageId: data.key.id });
+              
+              // Get audio via Evolution API
+              const evolutionBaseUrl = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+              const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
+              
+              if (evolutionBaseUrl && evolutionApiKey && instance.instance_name) {
+                const mediaResponse = await fetch(
+                  `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instance.instance_name}`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'apikey': evolutionApiKey,
+                    },
+                    body: JSON.stringify({
+                      message: { key: data.key, message: data.message },
+                      convertToMp4: false,
+                    }),
+                  }
+                );
+
+                if (mediaResponse.ok) {
+                  const mediaData = await mediaResponse.json();
+                  const audioBase64 = mediaData.base64;
+
+                  if (audioBase64) {
+                    // Call transcribe-audio edge function
+                    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                    
+                    const transcribeResponse = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${supabaseKey}`,
+                      },
+                      body: JSON.stringify({
+                        audio: audioBase64,
+                        mimeType: mediaMimeType,
+                      }),
+                    });
+
+                    if (transcribeResponse.ok) {
+                      const transcribeResult = await transcribeResponse.json();
+                      if (transcribeResult.text) {
+                        messageContent = `[Áudio transcrito]: ${transcribeResult.text}`;
+                        logDebug('AUDIO', 'Audio transcribed successfully', { 
+                          requestId, 
+                          transcriptionLength: transcribeResult.text.length 
+                        });
+                      }
+                    } else {
+                      logDebug('AUDIO', 'Transcription failed', { 
+                        requestId, 
+                        status: transcribeResponse.status 
+                      });
+                    }
+                  }
+                }
+              }
+            } catch (transcribeError) {
+              logDebug('AUDIO', 'Error transcribing audio', { 
+                requestId, 
+                error: transcribeError instanceof Error ? transcribeError.message : transcribeError 
+              });
+            }
+          }
         } else if (data.message?.videoMessage) {
           messageType = 'video';
           messageContent = data.message.videoMessage.caption || '';
