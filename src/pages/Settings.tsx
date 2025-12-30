@@ -70,6 +70,8 @@ import type { AppRole } from "@/hooks/useUserRole";
 const roleLabels: Record<string, { label: string; color: string }> = {
   admin: { label: "Administrador", color: "bg-primary text-primary-foreground" },
   gerente: { label: "Gerente", color: "bg-blue-500 text-white" },
+  advogado: { label: "Supervisor", color: "bg-amber-500 text-white" },
+  estagiario: { label: "Supervisor", color: "bg-amber-500 text-white" },
   atendente: { label: "Atendente", color: "bg-muted text-muted-foreground" },
 };
 

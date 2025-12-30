@@ -38,16 +38,16 @@ import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 const roleLabels: Record<AppRole, { label: string; variant: "default" | "secondary" | "outline" | "destructive"; description: string }> = {
   admin: { label: "Administrador", variant: "default", description: "Acesso total ao sistema" },
   gerente: { label: "Gerente", variant: "secondary", description: "Acesso completo à operação" },
-  advogado: { label: "Advogado", variant: "outline", description: "Acesso a conversas e casos" },
-  estagiario: { label: "Estagiário", variant: "outline", description: "Acesso limitado" },
+  advogado: { label: "Supervisor", variant: "outline", description: "Supervisão de equipe e conversas" },
+  estagiario: { label: "Supervisor", variant: "outline", description: "Supervisão de equipe e conversas" },
   atendente: { label: "Atendente", variant: "outline", description: "Apenas departamentos selecionados" },
 };
 
 const roleIcons: Record<AppRole, React.ReactNode> = {
   admin: <Shield className="h-3 w-3" />,
   gerente: <Users className="h-3 w-3" />,
-  advogado: <Building2 className="h-3 w-3" />,
-  estagiario: <Building2 className="h-3 w-3" />,
+  advogado: <Users className="h-3 w-3" />,
+  estagiario: <Users className="h-3 w-3" />,
   atendente: <Headphones className="h-3 w-3" />,
 };
 
