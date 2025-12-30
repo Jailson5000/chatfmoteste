@@ -8,6 +8,7 @@ import {
   Settings2, 
   Power,
   ChevronDown,
+  ChevronRight,
   Check,
   AlertCircle,
   Loader2,
@@ -18,7 +19,11 @@ import {
   GripVertical,
   Trash2,
   Bot,
-  Copy
+  Copy,
+  FolderPlus,
+  Folder,
+  FolderOpen,
+  Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +34,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
+import { useAgentFolders, AgentFolder } from "@/hooks/useAgentFolders";
 import { useKnowledgeItems } from "@/hooks/useKnowledgeItems";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -50,6 +56,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -74,15 +81,29 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 const MAX_PROMPT_LENGTH = 5000;
 
 type ChannelType = "all" | "instance" | "department";
 type ViewMode = "list" | "editor";
 
+// Color picker options
+const FOLDER_COLORS = [
+  "#6366f1", "#8b5cf6", "#a855f7", "#d946ef",
+  "#ec4899", "#f43f5e", "#ef4444", "#f97316",
+  "#f59e0b", "#eab308", "#84cc16", "#22c55e",
+  "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9",
+];
+
 export default function AIAgents() {
   const { toast } = useToast();
   const { automations, isLoading: automationsLoading, updateAutomation, createAutomation, deleteAutomation } = useAutomations();
+  const { folders, isLoading: foldersLoading, createFolder, updateFolder, deleteFolder, moveAgentToFolder } = useAgentFolders();
   const { knowledgeItems, isLoading: knowledgeLoading } = useKnowledgeItems();
   const { instances, isLoading: instancesLoading } = useWhatsAppInstances();
   const { departments, isLoading: departmentsLoading } = useDepartments();
@@ -93,10 +114,21 @@ export default function AIAgents() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<Automation | null>(null);
+  
+  // Folder state
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [isCreateFolderDialogOpen, setIsCreateFolderDialogOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderColor, setNewFolderColor] = useState("#6366f1");
+  const [folderToEdit, setFolderToEdit] = useState<AgentFolder | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<AgentFolder | null>(null);
+  const [editFolderName, setEditFolderName] = useState("");
+  const [editFolderColor, setEditFolderColor] = useState("#6366f1");
 
   // New agent form
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentDescription, setNewAgentDescription] = useState("");
+  const [newAgentFolderId, setNewAgentFolderId] = useState<string | null>(null);
 
   // Editor state
   const [prompt, setPrompt] = useState("");
@@ -139,6 +171,18 @@ export default function AIAgents() {
     }
   }, [prompt, isActive, selectedAgent]);
 
+  const toggleFolder = (folderId: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  };
+
   const handleSelectAgent = (agent: Automation) => {
     setSelectedAgent(agent);
     setViewMode("editor");
@@ -152,11 +196,73 @@ export default function AIAgents() {
     setSelectedAgent(null);
   };
 
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    
+    try {
+      await createFolder.mutateAsync({
+        name: newFolderName,
+        color: newFolderColor,
+      });
+      
+      setIsCreateFolderDialogOpen(false);
+      setNewFolderName("");
+      setNewFolderColor("#6366f1");
+    } catch (error) {
+      // Error handled in hook
+    }
+  };
+
+  const handleEditFolder = async () => {
+    if (!folderToEdit || !editFolderName.trim()) return;
+    
+    try {
+      await updateFolder.mutateAsync({
+        id: folderToEdit.id,
+        name: editFolderName,
+        color: editFolderColor,
+      });
+      
+      setFolderToEdit(null);
+      toast({
+        title: "Pasta atualizada",
+        description: "A pasta foi atualizada com sucesso.",
+      });
+    } catch (error) {
+      // Error handled in hook
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!folderToDelete) return;
+    
+    try {
+      await deleteFolder.mutateAsync(folderToDelete.id);
+      setFolderToDelete(null);
+    } catch (error) {
+      // Error handled in hook
+    }
+  };
+
+  const handleMoveToFolder = async (agentId: string, folderId: string | null) => {
+    try {
+      await moveAgentToFolder.mutateAsync({ agentId, folderId });
+      toast({
+        title: folderId ? "Agente movido" : "Agente removido da pasta",
+        description: folderId 
+          ? "O agente foi movido para a pasta." 
+          : "O agente foi removido da pasta.",
+      });
+    } catch (error) {
+      // Error handled in hook
+    }
+  };
+
   const handleCreateAgent = async () => {
     if (!newAgentName.trim()) return;
     
     try {
-      await createAutomation.mutateAsync({
+      const result = await createAutomation.mutateAsync({
         name: newAgentName,
         description: newAgentDescription,
         webhook_url: "",
@@ -165,9 +271,15 @@ export default function AIAgents() {
         is_active: true,
       });
       
+      // Move to folder if selected
+      if (newAgentFolderId && result) {
+        await moveAgentToFolder.mutateAsync({ agentId: result.id, folderId: newAgentFolderId });
+      }
+      
       setIsCreateDialogOpen(false);
       setNewAgentName("");
       setNewAgentDescription("");
+      setNewAgentFolderId(null);
       
       toast({
         title: "Agente criado",
@@ -192,7 +304,7 @@ export default function AIAgents() {
         trigger_config: agent.trigger_config || undefined,
         ai_prompt: agent.ai_prompt || "",
         ai_temperature: agent.ai_temperature || 0.7,
-        is_active: false, // Start as inactive
+        is_active: false,
       });
       
       toast({
@@ -253,7 +365,6 @@ export default function AIAgents() {
       setLastUpdated(new Date());
       setPromptVersion(prev => prev + 1);
       
-      // Update local state
       setSelectedAgent({
         ...selectedAgent,
         ai_prompt: prompt,
@@ -276,10 +387,23 @@ export default function AIAgents() {
     }
   };
 
+  // Filter and group agents
   const filteredAgents = automations.filter(agent => 
     agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const agentsWithoutFolder = filteredAgents.filter(agent => {
+    const agentAny = agent as any;
+    return !agentAny.folder_id;
+  });
+
+  const getAgentsInFolder = (folderId: string) => {
+    return filteredAgents.filter(agent => {
+      const agentAny = agent as any;
+      return agentAny.folder_id === folderId;
+    });
+  };
 
   const getAgentKeywords = (agent: Automation) => {
     const config = agent.trigger_config;
@@ -298,7 +422,7 @@ export default function AIAgents() {
     return automations.indexOf(agent) === 0;
   };
 
-  const isLoading = automationsLoading || knowledgeLoading || instancesLoading || departmentsLoading;
+  const isLoading = automationsLoading || foldersLoading || knowledgeLoading || instancesLoading || departmentsLoading;
 
   if (isLoading) {
     return (
@@ -307,6 +431,106 @@ export default function AIAgents() {
       </div>
     );
   }
+
+  // Agent Row Component
+  const AgentRow = ({ agent, inFolder = false }: { agent: Automation; inFolder?: boolean }) => (
+    <div
+      className={cn(
+        "grid gap-4 px-6 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group",
+        inFolder ? "grid-cols-[1fr_100px_150px_80px] pl-12" : "grid-cols-[auto_1fr_100px_150px_80px]"
+      )}
+      onClick={() => handleSelectAgent(agent)}
+    >
+      {!inFolder && (
+        <div className="flex items-center gap-2 w-8" onClick={(e) => e.stopPropagation()}>
+          <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
+          <Checkbox />
+        </div>
+      )}
+      
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{agent.name}</span>
+          {isPrimaryAgent(agent) && (
+            <Badge variant="secondary" className="text-xs">
+              Primário
+            </Badge>
+          )}
+        </div>
+        <p className="text-sm text-muted-foreground truncate">
+          {agent.description || "Sem descrição"}
+        </p>
+      </div>
+      
+      <div className="text-center">
+        <Badge variant="outline" className="gap-1">
+          <Clock className="h-3 w-3" />
+          {getAgentDelay(agent)}s
+        </Badge>
+      </div>
+      
+      <div className="text-sm text-muted-foreground truncate">
+        {getAgentKeywords(agent)}
+      </div>
+      
+      <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleSelectAgent(agent)}>
+              <Settings2 className="h-4 w-4 mr-2" />
+              Configurar
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleDuplicateAgent(agent)}>
+              <Copy className="h-4 w-4 mr-2" />
+              Duplicar
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {folders.length > 0 && (
+              <>
+                <DropdownMenuItem 
+                  className="text-muted-foreground text-xs cursor-default"
+                  disabled
+                >
+                  Mover para pasta
+                </DropdownMenuItem>
+                {folders.map(folder => (
+                  <DropdownMenuItem 
+                    key={folder.id}
+                    onClick={() => handleMoveToFolder(agent.id, folder.id)}
+                  >
+                    <Folder 
+                      className="h-4 w-4 mr-2" 
+                      style={{ color: folder.color }}
+                    />
+                    {folder.name}
+                  </DropdownMenuItem>
+                ))}
+                {(agent as any).folder_id && (
+                  <DropdownMenuItem onClick={() => handleMoveToFolder(agent.id, null)}>
+                    <FolderOpen className="h-4 w-4 mr-2 text-muted-foreground" />
+                    Remover da pasta
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+              </>
+            )}
+            <DropdownMenuItem 
+              className="text-destructive"
+              onClick={() => setAgentToDelete(agent)}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Excluir
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
 
   // Render List View
   if (viewMode === "list") {
@@ -343,10 +567,20 @@ export default function AIAgents() {
               className="pl-9"
             />
           </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Criar Agente
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsCreateFolderDialogOpen(true)} 
+              className="gap-2"
+            >
+              <FolderPlus className="h-4 w-4" />
+              Nova Pasta
+            </Button>
+            <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Criar Agente
+            </Button>
+          </div>
         </div>
 
         {/* Agents Table */}
@@ -364,7 +598,7 @@ export default function AIAgents() {
 
           {/* Table Body */}
           <div className="divide-y divide-border">
-            {filteredAgents.length === 0 ? (
+            {filteredAgents.length === 0 && folders.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Bot className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="font-medium text-lg mb-1">Nenhum agente criado</h3>
@@ -377,73 +611,227 @@ export default function AIAgents() {
                 </Button>
               </div>
             ) : (
-              filteredAgents.map((agent) => (
-                <div
-                  key={agent.id}
-                  className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group"
-                  onClick={() => handleSelectAgent(agent)}
-                >
-                  <div className="flex items-center gap-2 w-8" onClick={(e) => e.stopPropagation()}>
-                    <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
-                    <Checkbox />
-                  </div>
+              <>
+                {/* Folders */}
+                {folders.map((folder) => {
+                  const folderAgents = getAgentsInFolder(folder.id);
+                  const isExpanded = expandedFolders.has(folder.id);
                   
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{agent.name}</span>
-                      {isPrimaryAgent(agent) && (
-                        <Badge variant="secondary" className="text-xs">
-                          Primário
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {agent.description || "Sem descrição"}
-                    </p>
-                  </div>
-                  
-                  <div className="text-center">
-                    <Badge variant="outline" className="gap-1">
-                      <Clock className="h-3 w-3" />
-                      {getAgentDelay(agent)}s
-                    </Badge>
-                  </div>
-                  
-                  <div className="text-sm text-muted-foreground truncate">
-                    {getAgentKeywords(agent)}
-                  </div>
-                  
-                  <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleSelectAgent(agent)}>
-                          <Settings2 className="h-4 w-4 mr-2" />
-                          Configurar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDuplicateAgent(agent)}>
-                          <Copy className="h-4 w-4 mr-2" />
-                          Duplicar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          className="text-destructive"
-                          onClick={() => setAgentToDelete(agent)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Excluir
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))
+                  return (
+                    <Collapsible
+                      key={folder.id}
+                      open={isExpanded}
+                      onOpenChange={() => toggleFolder(folder.id)}
+                    >
+                      <div className="border-b border-border">
+                        <CollapsibleTrigger asChild>
+                          <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 items-center hover:bg-muted/30 cursor-pointer transition-colors group bg-muted/10">
+                            <div className="flex items-center gap-2 w-8">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                              <Folder 
+                                className="h-5 w-5" 
+                                style={{ color: folder.color }}
+                              />
+                              <span className="font-medium">{folder.name}</span>
+                              <Badge variant="secondary" className="text-xs">
+                                {folderAgents.length} agente{folderAgents.length !== 1 ? "s" : ""}
+                              </Badge>
+                            </div>
+                            
+                            <div></div>
+                            <div></div>
+                            
+                            <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => {
+                                    setFolderToEdit(folder);
+                                    setEditFolderName(folder.name);
+                                    setEditFolderColor(folder.color);
+                                  }}>
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Editar pasta
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    className="text-destructive"
+                                    onClick={() => setFolderToDelete(folder)}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Excluir pasta
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                        </CollapsibleTrigger>
+                        
+                        <CollapsibleContent>
+                          <div className="divide-y divide-border bg-muted/5">
+                            {folderAgents.length === 0 ? (
+                              <div className="pl-12 py-4 text-sm text-muted-foreground">
+                                Nenhum agente nesta pasta
+                              </div>
+                            ) : (
+                              folderAgents.map((agent) => (
+                                <AgentRow key={agent.id} agent={agent} inFolder />
+                              ))
+                            )}
+                          </div>
+                        </CollapsibleContent>
+                      </div>
+                    </Collapsible>
+                  );
+                })}
+
+                {/* Agents without folder */}
+                {agentsWithoutFolder.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} />
+                ))}
+              </>
             )}
           </div>
         </div>
+
+        {/* Create Folder Dialog */}
+        <Dialog open={isCreateFolderDialogOpen} onOpenChange={setIsCreateFolderDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Nova Pasta</DialogTitle>
+              <DialogDescription>
+                Crie uma pasta para organizar seus agentes de IA.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="folder-name">Nome da Pasta</Label>
+                <Input
+                  id="folder-name"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="Ex: Atendimento, Vendas, Suporte..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cor da Pasta</Label>
+                <div className="flex flex-wrap gap-2">
+                  {FOLDER_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setNewFolderColor(color)}
+                      className={cn(
+                        "h-8 w-8 rounded-full border-2 transition-all",
+                        newFolderColor === color 
+                          ? "border-foreground scale-110" 
+                          : "border-transparent hover:scale-105"
+                      )}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateFolderDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim() || createFolder.isPending}
+              >
+                {createFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Criar Pasta
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Folder Dialog */}
+        <Dialog open={!!folderToEdit} onOpenChange={() => setFolderToEdit(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar Pasta</DialogTitle>
+              <DialogDescription>
+                Altere o nome ou a cor da pasta.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-folder-name">Nome da Pasta</Label>
+                <Input
+                  id="edit-folder-name"
+                  value={editFolderName}
+                  onChange={(e) => setEditFolderName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cor da Pasta</Label>
+                <div className="flex flex-wrap gap-2">
+                  {FOLDER_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setEditFolderColor(color)}
+                      className={cn(
+                        "h-8 w-8 rounded-full border-2 transition-all",
+                        editFolderColor === color 
+                          ? "border-foreground scale-110" 
+                          : "border-transparent hover:scale-105"
+                      )}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setFolderToEdit(null)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleEditFolder}
+                disabled={!editFolderName.trim() || updateFolder.isPending}
+              >
+                {updateFolder.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Salvar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Folder Confirmation */}
+        <AlertDialog open={!!folderToDelete} onOpenChange={() => setFolderToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir Pasta</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem certeza que deseja excluir a pasta "{folderToDelete?.name}"? 
+                Os agentes dentro dela serão movidos para fora da pasta, não serão excluídos.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteFolder}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Create Agent Dialog */}
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -474,6 +862,30 @@ export default function AIAgents() {
                   rows={3}
                 />
               </div>
+              {folders.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Pasta (opcional)</Label>
+                  <Select 
+                    value={newAgentFolderId || "none"} 
+                    onValueChange={(value) => setNewAgentFolderId(value === "none" ? null : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione uma pasta" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem pasta</SelectItem>
+                      {folders.map((folder) => (
+                        <SelectItem key={folder.id} value={folder.id}>
+                          <div className="flex items-center gap-2">
+                            <Folder className="h-4 w-4" style={{ color: folder.color }} />
+                            {folder.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -490,7 +902,7 @@ export default function AIAgents() {
           </DialogContent>
         </Dialog>
 
-        {/* Delete Confirmation */}
+        {/* Delete Agent Confirmation */}
         <AlertDialog open={!!agentToDelete} onOpenChange={() => setAgentToDelete(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>

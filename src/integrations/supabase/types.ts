@@ -112,6 +112,44 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_folders: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          law_firm_id: string
+          name: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          name: string
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          name?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_folders_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_knowledge: {
         Row: {
           automation_id: string
@@ -196,6 +234,7 @@ export type Database = {
           ai_temperature: number | null
           created_at: string
           description: string | null
+          folder_id: string | null
           id: string
           is_active: boolean
           last_prompt: string | null
@@ -211,6 +250,7 @@ export type Database = {
           ai_temperature?: number | null
           created_at?: string
           description?: string | null
+          folder_id?: string | null
           id?: string
           is_active?: boolean
           last_prompt?: string | null
@@ -226,6 +266,7 @@ export type Database = {
           ai_temperature?: number | null
           created_at?: string
           description?: string | null
+          folder_id?: string | null
           id?: string
           is_active?: boolean
           last_prompt?: string | null
@@ -237,6 +278,13 @@ export type Database = {
           webhook_url?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "automations_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "agent_folders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "automations_law_firm_id_fkey"
             columns: ["law_firm_id"]
