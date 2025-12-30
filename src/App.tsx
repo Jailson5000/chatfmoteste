@@ -10,6 +10,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
+import { TenantProvider } from "@/hooks/useTenant";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
@@ -50,11 +51,12 @@ console.log("[MiauChat] Build:", APP_BUILD_ID);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
+    <TenantProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
           {/* Public routes */}
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Navigate to="/auth" replace />} />
@@ -237,11 +239,12 @@ const App = () => (
             <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
           </Route>
           
-          {/* Catch-all route */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+            {/* Catch-all route */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </TenantProvider>
   </QueryClientProvider>
 );
 
