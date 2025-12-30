@@ -906,10 +906,13 @@ serve(async (req) => {
           mediaUrl = data.message.audioMessage.url || '';
           mediaMimeType = data.message.audioMessage.mimetype || 'audio/ogg';
           
-          // Transcribe audio for AI processing
-          if (!data.key.fromMe) {
+          // Transcribe audio for AI processing ONLY if handler is AI
+          // If human handler, user can manually transcribe via button in chat
+          const shouldAutoTranscribe = !data.key.fromMe && conversation?.current_handler === 'ai';
+          
+          if (shouldAutoTranscribe) {
             try {
-              logDebug('AUDIO', 'Attempting to transcribe audio for AI', { requestId, messageId: data.key.id });
+              logDebug('AUDIO', 'Attempting to transcribe audio for AI (handler is AI)', { requestId, messageId: data.key.id });
               
               // Get audio via Evolution API
               const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
