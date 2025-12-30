@@ -95,12 +95,13 @@ export default function AdminTeam() {
         email: data.email,
         fullName: data.fullName,
         role: data.role,
+        departmentIds: data.departmentIds,
       });
       
-      // If there are departments, we'll need to update them after the user is created
-      // This will be handled by the trigger/webhook system
-      
       toast.success("Convite enviado com sucesso");
+    } catch (error: any) {
+      // Propagate the error to the dialog
+      throw error;
     } finally {
       setInviting(false);
     }
