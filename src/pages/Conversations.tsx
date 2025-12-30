@@ -31,6 +31,7 @@ import {
   Plus,
   Smile,
   Sparkles,
+  Volume2,
 } from "lucide-react";
 import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -73,6 +74,7 @@ import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialo
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
 import { ConversationSidebarCard } from "@/components/conversations/ConversationSidebarCard";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
+import { AudioModeIndicator } from "@/components/conversations/AudioModeIndicator";
 import { useConversations } from "@/hooks/useConversations";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -149,6 +151,20 @@ export default function Conversations() {
     whatsappInstances.filter(inst => inst.status === "connected"),
     [whatsappInstances]
   );
+
+  // Get active voice config from active automation
+  const activeVoiceConfig = useMemo(() => {
+    const activeAutomation = automations.find(a => a.is_active);
+    if (!activeAutomation?.trigger_config) return null;
+    const config = activeAutomation.trigger_config;
+    if (config.voice_enabled) {
+      return {
+        enabled: true,
+        voiceId: config.voice_id || undefined,
+      };
+    }
+    return null;
+  }, [automations]);
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -1346,7 +1362,7 @@ export default function Conversations() {
                           .toUpperCase()}
                       </span>
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <p className="font-medium">
                         {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
                       </p>
@@ -1355,6 +1371,30 @@ export default function Conversations() {
                         {selectedConversation.contact_phone || "---"}
                       </p>
                     </div>
+                    {/* Audio Mode Indicator Mobile */}
+                    {activeVoiceConfig?.enabled && (
+                      <AudioModeIndicator
+                        isAudioEnabled={true}
+                        voiceId={activeVoiceConfig.voiceId}
+                        onDisable={() => {
+                          const activeAutomation = automations.find(a => a.is_active);
+                          if (activeAutomation) {
+                            const newConfig = {
+                              ...activeAutomation.trigger_config,
+                              voice_enabled: false,
+                            };
+                            supabase
+                              .from("automations")
+                              .update({ trigger_config: newConfig, updated_at: new Date().toISOString() })
+                              .eq("id", activeAutomation.id)
+                              .then(() => {
+                                queryClient.invalidateQueries({ queryKey: ["automations"] });
+                                toast({ title: "Áudio desativado", description: "A IA voltará a responder por texto." });
+                              });
+                          }
+                        }}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1609,9 +1649,34 @@ export default function Conversations() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* Audio Mode Indicator */}
+                {activeVoiceConfig?.enabled && (
+                  <AudioModeIndicator
+                    isAudioEnabled={true}
+                    voiceId={activeVoiceConfig.voiceId}
+                    onDisable={() => {
+                      // Find active automation and disable voice
+                      const activeAutomation = automations.find(a => a.is_active);
+                      if (activeAutomation) {
+                        const newConfig = {
+                          ...activeAutomation.trigger_config,
+                          voice_enabled: false,
+                        };
+                        supabase
+                          .from("automations")
+                          .update({ trigger_config: newConfig, updated_at: new Date().toISOString() })
+                          .eq("id", activeAutomation.id)
+                          .then(() => {
+                            queryClient.invalidateQueries({ queryKey: ["automations"] });
+                            toast({ title: "Áudio desativado", description: "A IA voltará a responder por texto." });
+                          });
+                      }
+                    }}
+                  />
+                )}
+                
                 {/* AI Provider Indicator */}
                 <AIProviderBadge size="sm" />
-                
                 {/* Transfer Handler - Categorized */}
                 <Popover>
                   <PopoverTrigger asChild>
