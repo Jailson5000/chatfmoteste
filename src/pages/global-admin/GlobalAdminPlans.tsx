@@ -31,6 +31,10 @@ export default function GlobalAdminPlans() {
     max_users: 5,
     max_instances: 2,
     max_messages: 0,
+    max_ai_conversations: 250,
+    max_tts_minutes: 40,
+    max_agents: 1,
+    max_workspaces: 1,
     features: [] as string[],
     is_active: true,
   });
@@ -79,6 +83,10 @@ export default function GlobalAdminPlans() {
       max_users: 5,
       max_instances: 2,
       max_messages: 0,
+      max_ai_conversations: 250,
+      max_tts_minutes: 40,
+      max_agents: 1,
+      max_workspaces: 1,
       features: [],
       is_active: true,
     });
@@ -93,6 +101,10 @@ export default function GlobalAdminPlans() {
       max_users: plan.max_users,
       max_instances: plan.max_instances,
       max_messages: plan.max_messages || 0,
+      max_ai_conversations: plan.max_ai_conversations || 250,
+      max_tts_minutes: plan.max_tts_minutes || 40,
+      max_agents: plan.max_agents || 1,
+      max_workspaces: plan.max_workspaces || 1,
       features: plan.features || [],
       is_active: plan.is_active,
     });
@@ -151,13 +163,41 @@ export default function GlobalAdminPlans() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="max_messages">Máx. Mensagens</Label>
+          <Label htmlFor="max_agents">Máx. Agentes IA</Label>
           <Input
-            id="max_messages"
+            id="max_agents"
             type="number"
-            value={formData.max_messages}
-            onChange={(e) => setFormData({ ...formData, max_messages: parseInt(e.target.value) })}
-            placeholder="0 = ilimitado"
+            value={formData.max_agents}
+            onChange={(e) => setFormData({ ...formData, max_agents: parseInt(e.target.value) })}
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="max_ai_conversations">Conversas IA/mês</Label>
+          <Input
+            id="max_ai_conversations"
+            type="number"
+            value={formData.max_ai_conversations}
+            onChange={(e) => setFormData({ ...formData, max_ai_conversations: parseInt(e.target.value) })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="max_tts_minutes">Minutos TTS/mês</Label>
+          <Input
+            id="max_tts_minutes"
+            type="number"
+            value={formData.max_tts_minutes}
+            onChange={(e) => setFormData({ ...formData, max_tts_minutes: parseInt(e.target.value) })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="max_workspaces">Máx. Workspaces</Label>
+          <Input
+            id="max_workspaces"
+            type="number"
+            value={formData.max_workspaces}
+            onChange={(e) => setFormData({ ...formData, max_workspaces: parseInt(e.target.value) })}
           />
         </div>
       </div>
@@ -263,11 +303,27 @@ export default function GlobalAdminPlans() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="h-4 w-4 text-primary" />
-                    Até {plan.max_users} usuários
+                    {plan.max_users >= 999 ? "Usuários ilimitados" : `Até ${plan.max_users} usuários`}
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Check className="h-4 w-4 text-primary" />
                     {plan.max_instances} conexões WhatsApp
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="h-4 w-4 text-primary" />
+                    {plan.max_ai_conversations} conversas IA/mês
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="h-4 w-4 text-primary" />
+                    {plan.max_tts_minutes} min. áudio IA/mês
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="h-4 w-4 text-primary" />
+                    {plan.max_agents >= 999 ? "Agentes ilimitados" : `${plan.max_agents} agentes de IA`}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Check className="h-4 w-4 text-primary" />
+                    {plan.max_workspaces} workspaces
                   </div>
                   {plan.features?.map((feature, index) => (
                     <div key={index} className="flex items-center gap-2 text-sm">

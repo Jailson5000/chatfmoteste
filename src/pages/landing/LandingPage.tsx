@@ -27,49 +27,60 @@ import miauchatLogo from "@/assets/miauchat-logo.png";
 export function LandingPage() {
   const plans = [
     {
-      name: "START",
-      price: "199",
-      description: "Indicado para começar.",
+      name: "STARTER",
+      price: "497",
+      installment: "12x de R$ 497",
+      description: "Ideal para quem está começando e quer automatizar atendimentos com IA.",
       items: [
-        "1 número de WhatsApp",
-        "Até 3 usuários",
-        "Agente IA básico",
-        "Atendimento automatizado",
-        "Painel de controle",
+        "250 conversas com IA por mês",
+        "40 minutos de áudio IA por mês",
+        "4 membros",
+        "1 WhatsApp conectado",
+        "1 agente de IA",
+        "Transcrição de áudio e imagens",
+        "Mídias e mensagens rápidas",
+        "Mensagens agendadas",
       ],
       cta: "Começar agora",
-      ctaLink: "/auth?tab=signup",
+      ctaLink: "/register",
     },
     {
-      name: "PRO",
-      price: "399",
-      description: "Para empresas em crescimento.",
+      name: "PROFESSIONAL",
+      price: "697",
+      installment: "12x de R$ 697",
+      description: "Para empresas em crescimento que precisam de mais volume e flexibilidade.",
       items: [
-        "2 números de WhatsApp",
-        "Mais usuários",
-        "Agente IA avançado",
-        "Entendimento com IA",
-        "Fluxos mais inteligentes",
-        "Relatórios básicos",
+        "500 conversas com IA por mês",
+        "80 minutos de áudio IA por mês",
+        "6 membros",
+        "1 WhatsApp conectado",
+        "4 agentes de IA",
+        "Tudo do plano Starter",
+        "IA avançada para conversação",
+        "Maior capacidade operacional",
       ],
       cta: "Quero escalar meu atendimento",
-      ctaLink: "/auth?tab=signup",
+      ctaLink: "/register",
       popular: true,
     },
     {
       name: "ENTERPRISE",
-      price: "1.399",
-      description: "Para operações robustas.",
+      price: "1.497",
+      installment: "12x de R$ 1.497",
+      description: "Para operações maiores, empresas estruturadas e alto volume de atendimento.",
       items: [
-        "API completa",
-        "SLA dedicada",
-        "Integrações avançadas",
-        "Agentes IA ilimitados",
-        "Alto volume de mensagens",
-        "Suporte prioritário",
+        "1000 conversas com IA por mês",
+        "140 minutos de áudio IA por mês",
+        "Membros ilimitados",
+        "4 WhatsApps conectados",
+        "Agentes de IA ilimitados",
+        "8 Workspaces",
+        "Tudo do plano Professional",
+        "Suporte exclusivo",
+        "Estrutura completa para escala",
       ],
       cta: "Falar com vendas",
-      ctaLink: "/auth?tab=signup",
+      ctaLink: "/register",
     },
   ];
 
@@ -97,7 +108,7 @@ export function LandingPage() {
     {
       question: "Qual a diferença entre os planos?",
       answer:
-        "O plano Start é ideal para começar com 1 WhatsApp e até 3 usuários. O Pro oferece mais recursos como IA avançada e relatórios. O Enterprise é para operações robustas com API completa, integrações avançadas e suporte prioritário.",
+        "O plano Starter é ideal para começar com 250 conversas IA, 40 min de áudio, 4 membros e 1 agente. O Professional oferece 500 conversas, 80 min de áudio e 4 agentes. O Enterprise é para operações robustas com 1000 conversas, 140 min de áudio, membros e agentes ilimitados, 4 WhatsApps e suporte exclusivo.",
     },
     {
       question: "Existe período de teste ou contrato mínimo?",
@@ -425,8 +436,11 @@ export function LandingPage() {
                   </p>
                 </div>
                 <div className="mt-4 mb-4">
-                  <span className="text-white/40 text-xs">R$</span>
-                  <span className="text-4xl font-bold">{plan.price}</span>
+                  <div className="mb-1">
+                    <span className="text-red-400 text-sm font-semibold">💰 {plan.installment}</span>
+                  </div>
+                  <span className="text-white/40 text-xs">ou R$</span>
+                  <span className="text-3xl font-bold">{plan.price}</span>
                   <span className="text-white/40 text-sm"> / mês</span>
                 </div>
                 <ul className="space-y-2 mb-6 flex-1">
