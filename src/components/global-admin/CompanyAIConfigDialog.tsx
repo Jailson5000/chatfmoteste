@@ -31,7 +31,6 @@ interface CompanyAIConfigDialogProps {
 
 interface AISettings {
   ai_provider: string;
-  openai_api_key: string;
   n8n_webhook_url: string;
   n8n_webhook_secret: string;
   ai_capabilities: {
@@ -53,12 +52,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
   const [n8nEnabled, setN8nEnabled] = useState(false);
   
-  // OpenAI config - only show if API key exists
-  const [openaiApiKey, setOpenaiApiKey] = useState("");
-  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
-  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
-  const [testingOpenai, setTestingOpenai] = useState(false);
-  const [openaiTestResult, setOpenaiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  // OpenAI uses global system key - no per-company config needed
   
   // N8N config
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState("");
@@ -102,8 +96,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         setInternalEnabled(provider === "internal");
         setOpenaiEnabled(provider === "openai");
         setN8nEnabled(provider === "n8n");
-        setOpenaiApiKey(data.openai_api_key || "");
-        setHasOpenaiKey(Boolean(data.openai_api_key));
         setN8nWebhookUrl(data.n8n_webhook_url || "");
         setN8nSecret(data.n8n_webhook_secret || "");
         
@@ -143,7 +135,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       const settingsData = {
         law_firm_id: company.law_firm_id,
         ai_provider: activeProvider,
-        openai_api_key: openaiApiKey || null,
         n8n_webhook_url: n8nWebhookUrl || null,
         n8n_webhook_secret: n8nSecret || null,
         ai_capabilities: capabilities,
@@ -177,44 +168,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       toast.error("Erro ao salvar configurações: " + error.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleTestOpenai = async () => {
-    if (!openaiApiKey) {
-      toast.error("Insira a API Key da OpenAI");
-      return;
-    }
-    
-    setTestingOpenai(true);
-    setOpenaiTestResult(null);
-    
-    try {
-      const { data, error } = await supabase.functions.invoke("test-openai-key", {
-        body: { apiKey: openaiApiKey }
-      });
-      
-      if (error) throw error;
-      
-      setOpenaiTestResult({
-        success: data.success,
-        message: data.message
-      });
-      
-      if (data.success) {
-        toast.success("Conexão com OpenAI validada!");
-        setHasOpenaiKey(true);
-      } else {
-        toast.error(data.message || "Falha ao validar API Key");
-      }
-    } catch (error: any) {
-      setOpenaiTestResult({
-        success: false,
-        message: error.message || "Erro ao testar conexão"
-      });
-      toast.error("Erro ao testar conexão com OpenAI");
-    } finally {
-      setTestingOpenai(false);
     }
   };
 
@@ -326,7 +279,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 </div>
               </div>
 
-              {/* OpenAI - Simplified: just toggle on/off, show API key field only if needed */}
+              {/* OpenAI - Uses global system key, just toggle on/off */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -336,7 +289,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     <div>
                       <p className="font-medium text-white">OpenAI API</p>
                       <p className="text-xs text-white/50">
-                        {hasOpenaiKey ? "API Key configurada" : "API Key própria da empresa"}
+                        Usa a chave global do sistema
                       </p>
                     </div>
                   </div>
@@ -351,62 +304,11 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   </div>
                 </div>
 
-                {/* Only show API key config if OpenAI is enabled */}
+                {/* Show info when OpenAI is enabled */}
                 {openaiEnabled && (
-                  <div className="space-y-3 pt-2">
-                    {hasOpenaiKey ? (
-                      <div className="flex items-center gap-2 text-sm text-green-400">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>API Key já configurada e validada</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setHasOpenaiKey(false)}
-                          className="text-white/50 hover:text-white ml-auto"
-                        >
-                          Alterar
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Label className="text-white/70 text-sm">API Key</Label>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <Input
-                              type={showOpenaiKey ? "text" : "password"}
-                              value={openaiApiKey}
-                              onChange={(e) => setOpenaiApiKey(e.target.value)}
-                              placeholder="sk-..."
-                              className="bg-white/5 border-white/10 text-white pr-10"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-0 top-0 h-full text-white/50 hover:text-white"
-                              onClick={() => setShowOpenaiKey(!showOpenaiKey)}
-                            >
-                              {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleTestOpenai}
-                            disabled={testingOpenai || !openaiApiKey}
-                            className="border-white/10 text-white hover:bg-white/10"
-                          >
-                            {testingOpenai ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                        {openaiTestResult && (
-                          <div className={`flex items-center gap-2 text-xs ${openaiTestResult.success ? "text-green-400" : "text-red-400"}`}>
-                            {openaiTestResult.success ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                            {openaiTestResult.message}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2 text-sm text-green-400 pt-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Usando chave OpenAI global configurada no sistema</span>
                   </div>
                 )}
               </div>
