@@ -12,8 +12,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 // Available voices with descriptions
 const AVAILABLE_VOICES = [
-  { id: "camila", name: "Camila", gender: "female", description: "Voz feminina brasileira, profissional e acolhedora" },
   { id: "nova", name: "Nova", gender: "female", description: "Voz feminina suave e elegante" },
+  { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara e expressiva" },
   { id: "onyx", name: "Onyx", gender: "male", description: "Voz masculina grave e profissional" },
   { id: "echo", name: "Echo", gender: "male", description: "Voz masculina clara e amigável" },
 ] as const;
@@ -34,7 +34,7 @@ export function AIVoiceSettings() {
   
   const [settings, setSettings] = useState<VoiceSettings>({
     ai_voice_enabled: false,
-    ai_voice_id: "camila",
+    ai_voice_id: "nova",
   });
 
   // Load settings on mount
@@ -55,7 +55,7 @@ export function AIVoiceSettings() {
         if (data) {
           setSettings({
             ai_voice_enabled: data.ai_voice_enabled || false,
-            ai_voice_id: data.ai_voice_id || "camila",
+            ai_voice_id: data.ai_voice_id || "nova",
           });
         }
       } catch (error) {
