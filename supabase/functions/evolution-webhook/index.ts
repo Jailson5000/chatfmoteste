@@ -531,7 +531,7 @@ async function sendAIResponseToWhatsApp(
             .insert({
               conversation_id: context.conversationId,
               whatsapp_message_id: audioResult.messageId,
-              content: '[Mensagem de áudio]',
+              content: null,
               message_type: 'audio',
               is_from_me: true,
               sender_type: 'system',
