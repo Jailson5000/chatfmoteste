@@ -912,7 +912,9 @@ serve(async (req) => {
               logDebug('AUDIO', 'Attempting to transcribe audio for AI', { requestId, messageId: data.key.id });
               
               // Get audio via Evolution API
-              const evolutionBaseUrl = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+              const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+              // Normalize to avoid double-slashes when building endpoint URLs
+              const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
               const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
               
               logDebug('AUDIO', 'Evolution API config', { 
