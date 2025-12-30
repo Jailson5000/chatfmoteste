@@ -987,7 +987,10 @@ export function MessageBubble({
         )}
         
         {/* Render text content */}
-        {content && !content.startsWith("[") && (
+        {content && (
+          !content.trim().startsWith("[") ||
+          /^\[áudio transcrito\]/i.test(content.trim())
+        ) && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {highlightText ? highlightText(content) : content}
           </p>
