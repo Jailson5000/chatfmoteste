@@ -51,12 +51,15 @@ serve(async (req) => {
 
     console.log(`[custom-password-reset] Processing reset for: ${email}`);
 
+    // Determine the correct redirect URL - always use miauchat.com.br domain
+    const productionRedirect = redirect_to || 'https://www.miauchat.com.br/reset-password';
+    
     // Generate password reset link using Supabase Admin API
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email,
       options: {
-        redirectTo: redirect_to || `${supabaseUrl.replace('supabase.co', 'miauchat.com.br')}/reset-password`,
+        redirectTo: productionRedirect,
       },
     });
 
