@@ -498,6 +498,279 @@ function AudioPlayer({
   );
 }
 
+// AI Audio Player - fetches audio via Evolution API for AI-sent messages without media_url
+function AIAudioPlayer({ 
+  whatsappMessageId,
+  conversationId,
+  isFromMe,
+}: { 
+  whatsappMessageId: string;
+  conversationId: string;
+  isFromMe?: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+
+  const loadAudio = useCallback(async () => {
+    if (audioSrc) return; // Already loaded
+    
+    // Check memory cache first
+    const memoryCached = memoryCache.get(whatsappMessageId);
+    if (memoryCached) {
+      setAudioSrc(memoryCached);
+      return;
+    }
+
+    // Check IndexedDB cache
+    const dbCached = await getCachedAudio(whatsappMessageId);
+    if (dbCached) {
+      memoryCache.set(whatsappMessageId, dbCached);
+      setAudioSrc(dbCached);
+      return;
+    }
+
+    // Fetch from Evolution API
+    setIsLoading(true);
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "get_media",
+          conversationId,
+          whatsappMessageId,
+        },
+      });
+
+      if (response.error || !response.data?.success || !response.data?.base64) {
+        console.error("Failed to fetch AI audio:", response.error || response.data?.error);
+        setError(true);
+        return;
+      }
+
+      const mimeType = response.data.mimetype || "audio/mpeg";
+      const dataUrl = `data:${mimeType};base64,${response.data.base64}`;
+      
+      // Cache it
+      memoryCache.set(whatsappMessageId, dataUrl);
+      await setCachedAudio(whatsappMessageId, dataUrl);
+      
+      setAudioSrc(dataUrl);
+    } catch (err) {
+      console.error("Error fetching AI audio:", err);
+      setError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [whatsappMessageId, conversationId, audioSrc]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleDurationChange = () => setDuration(audio.duration);
+    const handleEnded = () => setIsPlaying(false);
+    const handleError = () => {
+      if (audioSrc) setError(true);
+    };
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+    };
+  }, [audioSrc]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
+
+  const handlePlayPause = async () => {
+    if (!audioSrc) {
+      await loadAudio();
+    }
+    
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // Wait for audio src to be set
+    if (!audioSrc) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => setError(true));
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSeek = (value: number[]) => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = value[0];
+      setCurrentTime(value[0]);
+    }
+  };
+
+  const formatTime = (time: number) => {
+    if (!isFinite(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/10">
+        <div className="h-10 w-10 rounded-full flex items-center justify-center bg-destructive/20">
+          <X className="h-5 w-5 text-destructive" />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm text-destructive">Áudio não disponível</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(
+      "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
+      isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
+    )}>
+      {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+      
+      {/* Mic icon indicator */}
+      <div className={cn(
+        "h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
+        isPlaying 
+          ? "bg-primary text-primary-foreground" 
+          : isFromMe ? "bg-primary/30" : "bg-muted"
+      )}>
+        <Mic className="h-5 w-5" />
+      </div>
+      
+      {/* Play button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 rounded-full flex-shrink-0 hover:scale-110 transition-transform"
+        onClick={handlePlayPause}
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : isPlaying ? (
+          <Pause className="h-5 w-5" />
+        ) : (
+          <Play className="h-5 w-5 ml-0.5" />
+        )}
+      </Button>
+      
+      {/* Progress section */}
+      <div className="flex-1 space-y-1.5">
+        {/* Waveform visualization */}
+        <div 
+          className="relative h-8 flex items-center gap-[2px] cursor-pointer group"
+          onClick={(e) => {
+            if (!audioSrc || !duration) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = clickX / rect.width;
+            const newTime = percentage * duration;
+            handleSeek([newTime]);
+          }}
+        >
+          {/* Waveform bars */}
+          {Array.from({ length: 40 }).map((_, i) => {
+            const barProgress = (i + 1) / 40;
+            const isPlayed = progressPercent / 100 >= barProgress;
+            const seed = (i * 7 + 13) % 17;
+            const height = 20 + (seed / 17) * 80;
+            
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex-1 rounded-full transition-all duration-150",
+                  isPlayed 
+                    ? "bg-primary" 
+                    : "bg-muted-foreground/30 group-hover:bg-muted-foreground/50",
+                  isPlaying && isPlayed && "animate-pulse"
+                )}
+                style={{ 
+                  height: `${height}%`,
+                  opacity: isPlayed ? 1 : 0.6
+                }}
+              />
+            );
+          })}
+          
+          {/* Progress indicator line */}
+          <div 
+            className="absolute top-0 bottom-0 w-0.5 bg-primary shadow-lg transition-all duration-100 z-10"
+            style={{ left: `${progressPercent}%` }}
+          >
+            <div className={cn(
+              "absolute -top-0.5 -bottom-0.5 -left-1 w-2.5 rounded-full bg-primary/20",
+              isPlaying && "animate-pulse"
+            )} />
+          </div>
+        </div>
+        
+        {/* Time and speed controls */}
+        <div className="flex justify-between items-center">
+          <span className="text-xs opacity-70 tabular-nums">{formatTime(currentTime)}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "text-xs font-medium px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5",
+                  "hover:bg-primary/20 active:scale-95",
+                  playbackSpeed !== 1 ? "text-primary bg-primary/10" : "opacity-70"
+                )}
+                title="Velocidade de reprodução"
+              >
+                {playbackSpeed}x
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="min-w-[60px]">
+              {SPEED_OPTIONS.map((speed) => (
+                <DropdownMenuItem
+                  key={speed}
+                  onClick={() => setPlaybackSpeed(speed)}
+                  className={cn(
+                    "justify-center text-xs cursor-pointer",
+                    playbackSpeed === speed && "bg-primary/10 text-primary font-medium"
+                  )}
+                >
+                  {speed}x
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span className="text-xs opacity-70 tabular-nums">{formatTime(duration)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Custom image component with decryption support
 function ImageViewer({ 
   src, 
@@ -997,8 +1270,17 @@ export function MessageBubble({
           </p>
         )}
 
-        {/* Show placeholder for audio/media without URL */}
-        {!hasMedia && messageType === "audio" && (
+        {/* Show audio player for AI-sent audio without URL - fetch via WhatsApp message ID */}
+        {!hasMedia && messageType === "audio" && whatsappMessageId && conversationId && (
+          <AIAudioPlayer 
+            whatsappMessageId={whatsappMessageId}
+            conversationId={conversationId}
+            isFromMe={isFromMe}
+          />
+        )}
+
+        {/* Show placeholder for audio without whatsappMessageId */}
+        {!hasMedia && messageType === "audio" && !whatsappMessageId && (
           <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
             <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
               <Mic className="h-5 w-5 text-primary" />
