@@ -19,6 +19,7 @@ import {
   Video,
   Mic,
   Pencil,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
@@ -57,23 +59,17 @@ import { useTags } from "@/hooks/useTags";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTemplates } from "@/hooks/useTemplates";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
+import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 import { supabase } from "@/integrations/supabase/client";
+import type { AppRole } from "@/hooks/useUserRole";
 
-const teamMembers = [
-  { id: "1", name: "Dr. Carlos Mendes", email: "carlos@escritorio.com", role: "admin", oab: "OAB/SP 123456", departments: [] },
-  { id: "2", name: "Dra. Fernanda Lima", email: "fernanda@escritorio.com", role: "advogado", oab: "OAB/SP 234567", departments: [] },
-  { id: "3", name: "Dr. Roberto Alves", email: "roberto@escritorio.com", role: "advogado", oab: "OAB/SP 345678", departments: [] },
-  { id: "4", name: "Ana Silva", email: "ana@escritorio.com", role: "estagiario", oab: null, departments: [] },
-  { id: "5", name: "João Santos", email: "joao@escritorio.com", role: "atendente", oab: null, departments: ["1", "2"] },
-];
-
-const roleLabels = {
+const roleLabels: Record<string, { label: string; color: string }> = {
   admin: { label: "Administrador", color: "bg-primary text-primary-foreground" },
-  advogado: { label: "Advogado", color: "bg-accent text-accent-foreground" },
-  estagiario: { label: "Estagiário", color: "bg-secondary text-secondary-foreground" },
+  gerente: { label: "Gerente", color: "bg-blue-500 text-white" },
   atendente: { label: "Atendente", color: "bg-muted text-muted-foreground" },
 };
 
@@ -128,7 +124,13 @@ export default function Settings() {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const templateMediaInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize form with law firm data
+  // Team management
+  const { members: teamMembers, isLoading: teamLoading, inviteMember, updateMemberRole, updateMemberDepartments, removeMember } = useTeamMembers();
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<string | null>(null);
+  const [editMemberRole, setEditMemberRole] = useState<AppRole>("atendente");
+  const [editMemberDepts, setEditMemberDepts] = useState<string[]>([]);
+  const [savingMember, setSavingMember] = useState(false);
   useEffect(() => {
     if (lawFirm) {
       setOfficeName(lawFirm.name || "");
@@ -901,117 +903,199 @@ export default function Settings() {
                     Gerencie os usuários e suas permissões
                   </CardDescription>
                 </div>
-                <Button>
+                <Button onClick={() => setInviteDialogOpen(true)}>
                   <Users className="h-4 w-4 mr-2" />
                   Convidar membro
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Função</TableHead>
-                    <TableHead>OAB</TableHead>
-                    <TableHead>Permissões</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {teamMembers.map((member) => (
-                    <TableRow key={member.id}>
-                      <TableCell className="font-medium">{member.name}</TableCell>
-                      <TableCell>{member.email}</TableCell>
-                      <TableCell>
-                        <Badge className={roleLabels[member.role as keyof typeof roleLabels].color}>
-                          {roleLabels[member.role as keyof typeof roleLabels].label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{member.oab || "—"}</TableCell>
-                      <TableCell>
-                        {member.role === "admin" && (
-                          <span className="text-xs text-muted-foreground">Acesso total</span>
-                        )}
-                        {member.role === "atendente" && (
-                          <div className="flex flex-wrap gap-1">
-                            {member.departments.length > 0 ? (
-                              member.departments.map(deptId => {
-                                const dept = departments.find(d => d.id === deptId);
-                                return dept ? (
-                                  <Badge key={deptId} variant="outline" className="text-xs" style={{ borderColor: dept.color, color: dept.color }}>
-                                    {dept.name}
-                                  </Badge>
-                                ) : null;
-                              })
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Sem departamentos</span>
-                            )}
-                          </div>
-                        )}
-                        {(member.role === "advogado" || member.role === "estagiario") && (
-                          <span className="text-xs text-muted-foreground">Acesso completo</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <Pencil className="h-3 w-3 mr-1" />
-                              Editar
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Editar Permissões - {member.name}</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4 mt-4">
-                              <div className="space-y-2">
-                                <Label>Função</Label>
-                                <Select defaultValue={member.role}>
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="admin">Administrador - Acesso total ao sistema</SelectItem>
-                                    <SelectItem value="advogado">Advogado - Acesso completo</SelectItem>
-                                    <SelectItem value="estagiario">Estagiário - Acesso completo</SelectItem>
-                                    <SelectItem value="atendente">Atendente - Apenas departamentos selecionados</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              {member.role === "atendente" && (
-                                <div className="space-y-2">
-                                  <Label>Departamentos com acesso</Label>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    Atendente não pode: modificar configurações, conexões ou automações.
-                                  </p>
-                                  <div className="space-y-2 border rounded-lg p-3">
-                                    {departments.map(dept => (
-                                      <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
-                                        <Checkbox defaultChecked={member.departments.includes(dept.id)} />
-                                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
-                                        <span className="text-sm">{dept.name}</span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="flex justify-end gap-2 pt-4">
-                                <Button variant="outline">Cancelar</Button>
-                                <Button>Salvar</Button>
-                              </div>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      </TableCell>
+              {teamLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : teamMembers.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhum membro na equipe</p>
+                  <p className="text-sm">Clique em "Convidar membro" para adicionar</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Função</TableHead>
+                      <TableHead>OAB</TableHead>
+                      <TableHead>Permissões</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {teamMembers.filter(m => m.is_active).map((member) => (
+                      <TableRow key={member.id}>
+                        <TableCell className="font-medium">{member.full_name}</TableCell>
+                        <TableCell>{member.email}</TableCell>
+                        <TableCell>
+                          <Badge className={roleLabels[member.role]?.color || "bg-muted"}>
+                            {roleLabels[member.role]?.label || member.role}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{member.oab_number || "—"}</TableCell>
+                        <TableCell>
+                          {(member.role === "admin" || member.role === "gerente") && (
+                            <span className="text-xs text-muted-foreground">
+                              {member.role === "admin" ? "Acesso total" : "Acesso completo"}
+                            </span>
+                          )}
+                          {member.role === "atendente" && (
+                            <div className="flex flex-wrap gap-1">
+                              {member.department_ids.length > 0 ? (
+                                member.department_ids.map(deptId => {
+                                  const dept = departments.find(d => d.id === deptId);
+                                  return dept ? (
+                                    <Badge key={deptId} variant="outline" className="text-xs" style={{ borderColor: dept.color, color: dept.color }}>
+                                      {dept.name}
+                                    </Badge>
+                                  ) : null;
+                                })
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Sem departamentos</span>
+                              )}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Dialog 
+                            open={editingMember === member.id} 
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setEditingMember(member.id);
+                                setEditMemberRole(member.role);
+                                setEditMemberDepts(member.department_ids);
+                              } else {
+                                setEditingMember(null);
+                              }
+                            }}
+                          >
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <Pencil className="h-3 w-3 mr-1" />
+                                Editar
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Editar Permissões - {member.full_name}</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4 mt-4">
+                                <div className="space-y-2">
+                                  <Label>Função</Label>
+                                  <Select 
+                                    value={editMemberRole} 
+                                    onValueChange={(v) => setEditMemberRole(v as AppRole)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="admin">Administrador - Acesso total ao sistema</SelectItem>
+                                      <SelectItem value="gerente">Gerente - Acesso completo à operação</SelectItem>
+                                      <SelectItem value="atendente">Atendente - Apenas departamentos selecionados</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                {editMemberRole === "atendente" && (
+                                  <div className="space-y-2">
+                                    <Label>Departamentos com acesso</Label>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      Atendente não pode: modificar configurações, conexões ou automações.
+                                    </p>
+                                    <div className="space-y-2 border rounded-lg p-3">
+                                      {departments.map(dept => (
+                                        <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
+                                          <Checkbox 
+                                            checked={editMemberDepts.includes(dept.id)}
+                                            onCheckedChange={(checked) => {
+                                              if (checked) {
+                                                setEditMemberDepts(prev => [...prev, dept.id]);
+                                              } else {
+                                                setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
+                                              }
+                                            }}
+                                          />
+                                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
+                                          <span className="text-sm">{dept.name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <DialogFooter className="pt-4">
+                                  <Button variant="outline" onClick={() => setEditingMember(null)}>
+                                    Cancelar
+                                  </Button>
+                                  <Button 
+                                    onClick={async () => {
+                                      setSavingMember(true);
+                                      try {
+                                        // Update role if changed
+                                        if (editMemberRole !== member.role) {
+                                          await updateMemberRole.mutateAsync({ 
+                                            memberId: member.id, 
+                                            role: editMemberRole 
+                                          });
+                                        }
+                                        // Update departments if atendente
+                                        if (editMemberRole === "atendente") {
+                                          await updateMemberDepartments.mutateAsync({
+                                            memberId: member.id,
+                                            departmentIds: editMemberDepts,
+                                          });
+                                        }
+                                        setEditingMember(null);
+                                        toast({
+                                          title: "Permissões atualizadas",
+                                          description: "As permissões do membro foram salvas.",
+                                        });
+                                      } catch (error: any) {
+                                        toast({
+                                          title: "Erro ao salvar",
+                                          description: error.message,
+                                          variant: "destructive",
+                                        });
+                                      } finally {
+                                        setSavingMember(false);
+                                      }
+                                    }}
+                                    disabled={savingMember}
+                                  >
+                                    {savingMember && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                    Salvar
+                                  </Button>
+                                </DialogFooter>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
+          
+          {/* Invite Member Dialog */}
+          <InviteMemberDialog
+            open={inviteDialogOpen}
+            onOpenChange={setInviteDialogOpen}
+            onInvite={async (data) => {
+              await inviteMember.mutateAsync(data);
+            }}
+            isLoading={inviteMember.isPending}
+          />
         </TabsContent>
 
         {/* Security Settings */}
