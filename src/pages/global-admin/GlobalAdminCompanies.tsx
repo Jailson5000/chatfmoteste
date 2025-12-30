@@ -1299,40 +1299,100 @@ export default function GlobalAdminCompanies() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-plan">Plano</Label>
-                <Select
-                  value={formData.plan_id}
-                  onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um plano" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {plans.map((plan) => (
-                      <SelectItem key={plan.id} value={plan.id}>
-                        {plan.name} - R$ {plan.price}/mês
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-max_users">Máx. Usuários</Label>
-                  <Input
-                    id="edit-max_users"
-                    type="number"
-                    value={formData.max_users}
-                    onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
-                  />
+                <div>
+                  <Select
+                    value={formData.plan_id}
+                    onValueChange={handlePlanSelect}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {plans.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.name} - R$ {plan.price}/mês
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-max_instances">Máx. Conexões</Label>
-                  <Input
-                    id="edit-max_instances"
-                    type="number"
-                    value={formData.max_instances}
-                    onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
-                  />
+                {formData.plan_id && !formData.use_custom_limits && (
+                  <p className="text-xs text-muted-foreground">
+                    Limites serão atualizados automaticamente com base no plano selecionado
+                  </p>
+                )}
+              </div>
+              
+              {/* Limits Section in Edit Dialog */}
+              <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    {formData.use_custom_limits ? <Unlock className="h-4 w-4 text-yellow-600" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                    Limites da Empresa
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="edit_use_custom_limits" className="text-xs text-muted-foreground">Personalizar</Label>
+                    <Switch
+                      id="edit_use_custom_limits"
+                      checked={formData.use_custom_limits}
+                      onCheckedChange={(checked) => {
+                        if (!checked && formData.plan_id) {
+                          const selectedPlan = plans.find(p => p.id === formData.plan_id);
+                          if (selectedPlan) {
+                            setFormData({
+                              ...formData,
+                              use_custom_limits: false,
+                              max_users: selectedPlan.max_users,
+                              max_instances: selectedPlan.max_instances,
+                              max_agents: selectedPlan.max_agents ?? 1,
+                              max_workspaces: selectedPlan.max_workspaces ?? 1,
+                              max_ai_conversations: selectedPlan.max_ai_conversations ?? 250,
+                              max_tts_minutes: selectedPlan.max_tts_minutes ?? 40,
+                            });
+                            return;
+                          }
+                        }
+                        setFormData({ ...formData, use_custom_limits: checked });
+                      }}
+                    />
+                  </div>
+                </div>
+                {formData.use_custom_limits && (
+                  <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                    Limites personalizados sobrescrevem o plano
+                  </Badge>
+                )}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_users" className="text-xs flex items-center gap-1"><Users className="h-3 w-3" />Usuários</Label>
+                    <Input id="edit_max_users" type="number" value={formData.max_users} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_instances" className="text-xs flex items-center gap-1"><Wifi className="h-3 w-3" />Conexões</Label>
+                    <Input id="edit_max_instances" type="number" value={formData.max_instances} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_agents" className="text-xs flex items-center gap-1"><Bot className="h-3 w-3" />Agentes IA</Label>
+                    <Input id="edit_max_agents" type="number" value={formData.max_agents} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_agents: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_workspaces" className="text-xs flex items-center gap-1"><Layers className="h-3 w-3" />Workspaces</Label>
+                    <Input id="edit_max_workspaces" type="number" value={formData.max_workspaces} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_workspaces: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_ai_conversations" className="text-xs flex items-center gap-1"><MessageSquare className="h-3 w-3" />IA/mês</Label>
+                    <Input id="edit_max_ai_conversations" type="number" value={formData.max_ai_conversations} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_ai_conversations: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="edit_max_tts_minutes" className="text-xs flex items-center gap-1"><Volume2 className="h-3 w-3" />Áudio/mês</Label>
+                    <Input id="edit_max_tts_minutes" type="number" value={formData.max_tts_minutes} disabled={!formData.use_custom_limits}
+                      onChange={(e) => setFormData({ ...formData, max_tts_minutes: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                  </div>
                 </div>
               </div>
             </div>

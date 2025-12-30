@@ -12,10 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle } from "lucide-react";
+import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Company {
@@ -40,6 +39,8 @@ interface AISettings {
     summary: boolean;
     transcription: boolean;
     classification: boolean;
+    image_analysis: boolean;
+    audio_response: boolean;
   };
 }
 
@@ -52,9 +53,9 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
   const [n8nEnabled, setN8nEnabled] = useState(false);
   
-  // OpenAI config
+  // OpenAI config - only show if API key exists
   const [openaiApiKey, setOpenaiApiKey] = useState("");
-  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [testingOpenai, setTestingOpenai] = useState(false);
   const [openaiTestResult, setOpenaiTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -66,12 +67,14 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // AI Capabilities
+  // AI Capabilities - image and audio are INDEPENDENT
   const [capabilities, setCapabilities] = useState({
     auto_reply: true,
     summary: true,
     transcription: true,
     classification: true,
+    image_analysis: true,
+    audio_response: true,
   });
 
   // Load settings when company changes
@@ -100,6 +103,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         setOpenaiEnabled(provider === "openai");
         setN8nEnabled(provider === "n8n");
         setOpenaiApiKey(data.openai_api_key || "");
+        setHasOpenaiKey(Boolean(data.openai_api_key));
         setN8nWebhookUrl(data.n8n_webhook_url || "");
         setN8nSecret(data.n8n_webhook_secret || "");
         
@@ -110,6 +114,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
             summary: caps.summary ?? true,
             transcription: caps.transcription ?? true,
             classification: caps.classification ?? true,
+            image_analysis: caps.image_analysis ?? true,
+            audio_response: caps.audio_response ?? true,
           });
         }
       }
@@ -197,6 +203,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       
       if (data.success) {
         toast.success("Conexão com OpenAI validada!");
+        setHasOpenaiKey(true);
       } else {
         toast.error(data.message || "Falha ao validar API Key");
       }
@@ -295,7 +302,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         ) : (
           <ScrollArea className="max-h-[60vh] pr-4">
             <div className="space-y-6">
-              {/* Internal AI */}
+              {/* Internal AI - Simple toggle like requested */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -319,7 +326,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 </div>
               </div>
 
-              {/* OpenAI */}
+              {/* OpenAI - Simplified: just toggle on/off, show API key field only if needed */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -328,7 +335,9 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     </div>
                     <div>
                       <p className="font-medium text-white">OpenAI API</p>
-                      <p className="text-xs text-white/50">API Key própria da empresa</p>
+                      <p className="text-xs text-white/50">
+                        {hasOpenaiKey ? "API Key configurada" : "API Key própria da empresa"}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -342,67 +351,67 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   </div>
                 </div>
 
+                {/* Only show API key config if OpenAI is enabled */}
                 {openaiEnabled && (
                   <div className="space-y-3 pt-2">
-                    <div className="space-y-2">
-                      <Label className="text-white/70 text-sm">API Key</Label>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <Input
-                            type={showOpenaiKey ? "text" : "password"}
-                            value={openaiApiKey}
-                            onChange={(e) => setOpenaiApiKey(e.target.value)}
-                            placeholder="sk-..."
-                            className="bg-white/5 border-white/10 text-white pr-10"
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="absolute right-0 top-0 h-full text-white/50 hover:text-white"
-                            onClick={() => setShowOpenaiKey(!showOpenaiKey)}
-                          >
-                            {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          </Button>
-                        </div>
+                    {hasOpenaiKey ? (
+                      <div className="flex items-center gap-2 text-sm text-green-400">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>API Key já configurada e validada</span>
                         <Button
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          onClick={handleTestOpenai}
-                          disabled={testingOpenai || !openaiApiKey}
-                          className="border-white/10 text-white hover:bg-white/10"
+                          onClick={() => setHasOpenaiKey(false)}
+                          className="text-white/50 hover:text-white ml-auto"
                         >
-                          {testingOpenai ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube className="h-4 w-4" />}
+                          Alterar
                         </Button>
                       </div>
-                      {openaiTestResult && (
-                        <div className={`flex items-center gap-2 text-xs ${openaiTestResult.success ? "text-green-400" : "text-red-400"}`}>
-                          {openaiTestResult.success ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                          {openaiTestResult.message}
+                    ) : (
+                      <div className="space-y-2">
+                        <Label className="text-white/70 text-sm">API Key</Label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              type={showOpenaiKey ? "text" : "password"}
+                              value={openaiApiKey}
+                              onChange={(e) => setOpenaiApiKey(e.target.value)}
+                              placeholder="sk-..."
+                              className="bg-white/5 border-white/10 text-white pr-10"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-0 top-0 h-full text-white/50 hover:text-white"
+                              onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                            >
+                              {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleTestOpenai}
+                            disabled={testingOpenai || !openaiApiKey}
+                            className="border-white/10 text-white hover:bg-white/10"
+                          >
+                            {testingOpenai ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube className="h-4 w-4" />}
+                          </Button>
                         </div>
-                      )}
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label className="text-white/70 text-sm">Modelo</Label>
-                      <div>
-                        <Select value={openaiModel} onValueChange={setOpenaiModel}>
-                          <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-[#1a1a1a] border-white/10">
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                            <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        {openaiTestResult && (
+                          <div className={`flex items-center gap-2 text-xs ${openaiTestResult.success ? "text-green-400" : "text-red-400"}`}>
+                            {openaiTestResult.success ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                            {openaiTestResult.message}
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* N8N */}
+              {/* N8N - Same pattern */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -480,10 +489,13 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 )}
               </div>
 
-              {/* AI Capabilities */}
+              {/* AI Capabilities - Image and Audio are INDEPENDENT */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <p className="font-medium text-white">Funcionalidades de IA</p>
-                <div className="grid grid-cols-2 gap-3">
+                <p className="text-xs text-white/50">Capacidades podem ser ativadas simultaneamente</p>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Core capabilities */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Switch
                       checked={capabilities.auto_reply}
@@ -512,6 +524,42 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     />
                     <span className="text-sm text-white/70">Classificação</span>
                   </label>
+                </div>
+
+                {/* Independent Image and Audio capabilities */}
+                <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
+                  <p className="text-sm text-white/70 font-medium">Capacidades Paralelas</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <div className="p-2 rounded-lg bg-purple-500/20">
+                        <Image className="h-4 w-4 text-purple-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-white font-medium">Análise de Imagens</p>
+                        <p className="text-xs text-white/50">Sempre ativa</p>
+                      </div>
+                      <Switch
+                        checked={capabilities.image_analysis}
+                        onCheckedChange={(checked) => setCapabilities({ ...capabilities, image_analysis: checked })}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <div className="p-2 rounded-lg bg-cyan-500/20">
+                        <Mic className="h-4 w-4 text-cyan-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-white font-medium">Resposta por Áudio</p>
+                        <p className="text-xs text-white/50">Sempre ativa</p>
+                      </div>
+                      <Switch
+                        checked={capabilities.audio_response}
+                        onCheckedChange={(checked) => setCapabilities({ ...capabilities, audio_response: checked })}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-white/40 italic">
+                    Imagem e áudio funcionam de forma independente e podem estar ativas simultaneamente
+                  </p>
                 </div>
               </div>
 
