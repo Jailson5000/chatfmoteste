@@ -2242,7 +2242,7 @@ export type Database = {
     }
     Enums: {
       admin_role: "super_admin" | "admin_operacional" | "admin_financeiro"
-      app_role: "admin" | "advogado" | "estagiario" | "atendente"
+      app_role: "admin" | "gerente" | "advogado" | "estagiario" | "atendente"
       case_status:
         | "novo_contato"
         | "triagem_ia"
@@ -2389,7 +2389,7 @@ export const Constants = {
   public: {
     Enums: {
       admin_role: ["super_admin", "admin_operacional", "admin_financeiro"],
-      app_role: ["admin", "advogado", "estagiario", "atendente"],
+      app_role: ["admin", "gerente", "advogado", "estagiario", "atendente"],
       case_status: [
         "novo_contato",
         "triagem_ia",
