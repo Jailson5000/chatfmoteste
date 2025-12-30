@@ -137,18 +137,63 @@ interface AutomationContext {
   instanceName: string;
 }
 
-// Get AI provider configuration - checks plan and tenant settings
+// =============================================================================
+// MATRIZ DE IAs POR PLANO E FUNCIONALIDADE
+// =============================================================================
+// | Funcionalidade      | IA          | Plano                    |
+// |---------------------|-------------|--------------------------|
+// | Conversação         | Gemini      | Starter                  |
+// | Conversação         | GPT         | Professional / Enterprise|
+// | Transcrição áudio   | OpenAI      | Todos                    |
+// | Visualização imagem | Gemini      | Todos                    |
+// =============================================================================
+
+type PlanType = 'starter' | 'professional' | 'enterprise' | 'unknown';
+type ConversationAI = 'gemini' | 'gpt';
+
+interface AIProviderConfig {
+  planType: PlanType;
+  conversationAI: ConversationAI;
+  capabilities: Record<string, boolean>;
+  openaiApiKey: string | null;
+}
+
+// Determine plan type from plan name
+function getPlanType(planName: string): PlanType {
+  const name = planName.toLowerCase().trim();
+  if (name.includes('starter') || name.includes('básico') || name.includes('basico')) {
+    return 'starter';
+  }
+  if (name.includes('professional') || name.includes('profissional') || name.includes('pro')) {
+    return 'professional';
+  }
+  if (name.includes('enterprise') || name.includes('empresarial')) {
+    return 'enterprise';
+  }
+  // Default to starter for unknown/free plans
+  return 'starter';
+}
+
+// Get conversation AI based on plan (FIXED RULES - NO OVERRIDE)
+function getConversationAI(planType: PlanType): ConversationAI {
+  switch (planType) {
+    case 'starter':
+      return 'gemini'; // Starter ALWAYS uses Gemini
+    case 'professional':
+    case 'enterprise':
+      return 'gpt'; // Professional/Enterprise ALWAYS use GPT
+    default:
+      return 'gemini'; // Default to Gemini for unknown
+  }
+}
+
+// Get AI provider configuration based on PLAN MATRIX (not tenant settings)
 async function getAIProviderConfig(
   supabaseClient: any, 
   lawFirmId: string
-): Promise<{ 
-  provider: string; 
-  capabilities: Record<string, boolean>;
-  openaiApiKey: string | null;
-  isEnterprise: boolean;
-}> {
+): Promise<AIProviderConfig> {
   try {
-    // First, check if this law firm has Enterprise plan
+    // Fetch company plan
     const { data: company } = await supabaseClient
       .from('companies')
       .select('plan_id, plans(name)')
@@ -156,53 +201,53 @@ async function getAIProviderConfig(
       .single();
 
     const planName = (company?.plans as any)?.name || '';
-    const isEnterprise = planName.toLowerCase() === 'enterprise';
+    const planType = getPlanType(planName);
+    const conversationAI = getConversationAI(planType);
 
-    // If not Enterprise, always use internal AI
-    if (!isEnterprise) {
-      logDebug('AI_PROVIDER', 'Non-Enterprise plan - forcing internal AI', { lawFirmId, planName });
-      return {
-        provider: 'internal',
-        capabilities: { auto_reply: true, summary: true, transcription: true, classification: true },
-        openaiApiKey: null,
-        isEnterprise: false,
-      };
-    }
-
-    // Enterprise plan - check tenant-specific AI settings
-    const { data: settings } = await supabaseClient
-      .from('law_firm_settings')
-      .select('ai_provider, ai_capabilities, openai_api_key')
-      .eq('law_firm_id', lawFirmId)
-      .single();
-
-    const aiProvider = settings?.ai_provider || 'internal';
-    const capabilities = settings?.ai_capabilities || {
-      auto_reply: true,
-      summary: true,
-      transcription: true,
-      classification: true,
-    };
-
-    logDebug('AI_PROVIDER', 'Enterprise plan - using tenant settings', { 
-      lawFirmId, 
-      provider: aiProvider,
-      hasOpenAIKey: Boolean(settings?.openai_api_key)
+    logDebug('AI_MATRIX', `Plan detected: ${planName} -> ${planType} -> Conversation AI: ${conversationAI}`, { 
+      lawFirmId,
+      planName,
+      planType,
+      conversationAI
     });
 
+    // For GPT plans (Professional/Enterprise), we need OpenAI key
+    let openaiApiKey: string | null = null;
+    if (conversationAI === 'gpt') {
+      // Try to get from tenant settings first
+      const { data: settings } = await supabaseClient
+        .from('law_firm_settings')
+        .select('openai_api_key')
+        .eq('law_firm_id', lawFirmId)
+        .single();
+      
+      // Use tenant key or fall back to global key
+      openaiApiKey = settings?.openai_api_key || Deno.env.get('OPENAI_API_KEY') || null;
+      
+      if (!openaiApiKey) {
+        logDebug('AI_MATRIX', 'WARNING: GPT required but no OpenAI key available', { lawFirmId });
+      }
+    }
+
     return {
-      provider: aiProvider,
-      capabilities,
-      openaiApiKey: settings?.openai_api_key || null,
-      isEnterprise: true,
+      planType,
+      conversationAI,
+      capabilities: { 
+        auto_reply: true, 
+        summary: true, 
+        transcription: true, // Always OpenAI Whisper
+        classification: true,
+        image_analysis: true // Always Gemini
+      },
+      openaiApiKey,
     };
   } catch (error) {
-    logDebug('AI_PROVIDER', 'Error fetching AI provider config, defaulting to internal', { error });
+    logDebug('AI_MATRIX', 'Error fetching plan config, defaulting to Starter (Gemini)', { error });
     return { 
-      provider: 'internal', 
-      capabilities: { auto_reply: true, summary: true, transcription: true, classification: true },
+      planType: 'starter',
+      conversationAI: 'gemini',
+      capabilities: { auto_reply: true, summary: true, transcription: true, classification: true, image_analysis: true },
       openaiApiKey: null,
-      isEnterprise: false,
     };
   }
 }
@@ -354,19 +399,19 @@ async function sendAIResponseToWhatsApp(
   }
 }
 
-// Process messages with internal MiauChat AI (calls ai-chat edge function)
+// Process messages with Gemini AI (Starter plan) via Lovable AI Gateway
 // CRITICAL: Must have valid automationId - prompt is the SINGLE SOURCE OF TRUTH
-async function processWithInternalAI(
+async function processWithGemini(
   supabaseClient: any, 
   context: AutomationContext, 
-  aiConfig: { provider: string; capabilities: Record<string, boolean>; openaiApiKey?: string | null; isEnterprise?: boolean }
+  aiConfig: AIProviderConfig
 ) {
   if (!aiConfig.capabilities.auto_reply) {
-    logDebug('AI_PROVIDER', 'auto_reply capability disabled, skipping internal AI');
+    logDebug('AI_MATRIX', 'auto_reply capability disabled, skipping Gemini');
     return;
   }
 
-  logDebug('AI_PROVIDER', 'Processing with MiauChat AI (internal)', { conversationId: context.conversationId });
+  logDebug('AI_MATRIX', `Processing with GEMINI (Plan: ${aiConfig.planType})`, { conversationId: context.conversationId });
 
   try {
     // CRITICAL: Get the CORRECT automation for this tenant
@@ -467,24 +512,24 @@ async function processWithInternalAI(
   }
 }
 
-// Process messages with OpenAI using company's own API key
+// Process messages with GPT (Professional/Enterprise plans)
 // CRITICAL: Must have valid automation with prompt - no fallbacks allowed
-async function processWithOpenAI(
+async function processWithGPT(
   supabaseClient: any, 
   context: AutomationContext, 
-  aiConfig: { provider: string; capabilities: Record<string, boolean>; openaiApiKey: string | null; isEnterprise: boolean }
+  aiConfig: AIProviderConfig
 ) {
   if (!aiConfig.capabilities.auto_reply) {
-    logDebug('AI_PROVIDER', 'auto_reply capability disabled, skipping OpenAI');
+    logDebug('AI_MATRIX', 'auto_reply capability disabled, skipping GPT');
     return;
   }
 
   if (!aiConfig.openaiApiKey) {
-    logDebug('AI_PROVIDER', 'OpenAI API key not configured, cannot process');
+    logDebug('AI_MATRIX', 'OpenAI API key not configured, cannot process GPT', { planType: aiConfig.planType });
     return;
   }
 
-  logDebug('AI_PROVIDER', 'Processing with OpenAI (company API key)', { conversationId: context.conversationId });
+  logDebug('AI_MATRIX', `Processing with GPT (Plan: ${aiConfig.planType})`, { conversationId: context.conversationId });
 
   try {
     // CRITICAL: Get the CORRECT automation for this tenant
@@ -497,18 +542,18 @@ async function processWithOpenAI(
       .limit(1);
 
     if (autoError || !automations || automations.length === 0) {
-      logDebug('AI_PROVIDER', 'No valid automation found with prompt configured', { lawFirmId: context.lawFirmId });
+      logDebug('AI_MATRIX', 'No valid automation found with prompt configured', { lawFirmId: context.lawFirmId });
       return;
     }
 
     const automation = automations[0];
     
     if (!automation.ai_prompt || automation.ai_prompt.trim() === '') {
-      logDebug('AI_PROVIDER', 'Automation has no prompt configured, cannot proceed', { automationId: automation.id });
+      logDebug('AI_MATRIX', 'Automation has no prompt configured, cannot proceed', { automationId: automation.id });
       return;
     }
 
-    logDebug('AI_PROVIDER', `Using agent: ${automation.name}`, { automationId: automation.id });
+    logDebug('AI_MATRIX', `Using agent: ${automation.name}`, { automationId: automation.id });
 
     // Get recent messages for context
     const { data: recentMessages } = await supabaseClient
@@ -541,7 +586,7 @@ async function processWithOpenAI(
       { role: 'user', content: context.messageContent }
     ];
 
-    // Call OpenAI API directly with company's key
+    // Call OpenAI API with GPT-4o-mini
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -558,7 +603,7 @@ async function processWithOpenAI(
 
     if (!response.ok) {
       const errorText = await response.text();
-      logDebug('AI_PROVIDER', 'OpenAI API call failed', { status: response.status, error: errorText });
+      logDebug('AI_MATRIX', 'GPT API call failed', { status: response.status, error: errorText });
       return;
     }
 
@@ -566,7 +611,7 @@ async function processWithOpenAI(
     const aiResponse = result.choices?.[0]?.message?.content;
 
     if (aiResponse) {
-      logDebug('AI_PROVIDER', 'OpenAI response received', { 
+      logDebug('AI_MATRIX', 'GPT response received', { 
         responseLength: aiResponse.length,
         automationId: automation.id 
       });
@@ -581,7 +626,8 @@ async function processWithOpenAI(
           automation_id: automation.id,
           direction: 'internal',
           payload: {
-            provider: 'openai_company',
+            provider: 'gpt',
+            plan_type: aiConfig.planType,
             automation_name: automation.name,
             conversation_id: context.conversationId,
             message: context.messageContent,
@@ -593,191 +639,43 @@ async function processWithOpenAI(
     }
 
   } catch (error) {
-    logDebug('AI_PROVIDER', 'Error processing with OpenAI', { error: error instanceof Error ? error.message : error });
+    logDebug('AI_MATRIX', 'Error processing with GPT', { error: error instanceof Error ? error.message : error });
   }
 }
 
-// Process automations - respects AI_PROVIDER setting per tenant
+// Process automations - RESPECTS AI MATRIX BY PLAN (NO OVERRIDE ALLOWED)
 async function processAutomations(supabaseClient: any, context: AutomationContext) {
-  // Check AI provider configuration for this tenant
+  // Get AI configuration based on PLAN MATRIX
   const aiConfig = await getAIProviderConfig(supabaseClient, context.lawFirmId);
   
-  // If provider is 'internal', skip n8n entirely
-  if (aiConfig.provider === 'internal') {
-    logDebug('AI_PROVIDER', 'Provider is INTERNAL - skipping n8n, will use MiauChat AI');
-    await processWithInternalAI(supabaseClient, context, aiConfig);
-    return;
-  }
+  logDebug('AI_MATRIX', `Routing conversation based on plan matrix`, {
+    planType: aiConfig.planType,
+    conversationAI: aiConfig.conversationAI,
+    hasOpenAIKey: Boolean(aiConfig.openaiApiKey)
+  });
 
-  // If provider is 'openai', use OpenAI with company's API key
-  if (aiConfig.provider === 'openai') {
-    logDebug('AI_PROVIDER', 'Provider is OPENAI - using company API key');
-    await processWithOpenAI(supabaseClient, context, aiConfig);
-    return;
-  }
-  
-  // If provider is 'n8n', proceed with n8n
-  logDebug('AI_PROVIDER', `Provider is ${aiConfig.provider.toUpperCase()} - routing to n8n`);
-  
-  const n8nWebhookUrl = Deno.env.get("N8N_WEBHOOK_URL");
-  const n8nToken = Deno.env.get("N8N_INTERNAL_TOKEN");
-
-  if (!n8nWebhookUrl) {
-    logDebug('AUTOMATION', 'N8N_WEBHOOK_URL not configured');
-    
-    // If hybrid mode, fallback to internal AI
-    if (aiConfig.provider === 'hybrid') {
-      logDebug('AI_PROVIDER', 'Hybrid mode - falling back to internal AI');
-      await processWithInternalAI(supabaseClient, context, aiConfig);
-    } else {
-      // N8N mode but not configured - log warning, don't fallback
-      logDebug('AI_PROVIDER', 'N8N mode but not configured - NO FALLBACK (by design)');
-    }
-    return;
-  }
-
-  try {
-    // Get active automations for this law firm
-    const { data: automations, error: autoError } = await supabaseClient
-      .from('automations')
-      .select('*')
-      .eq('law_firm_id', context.lawFirmId)
-      .eq('is_active', true);
-
-    if (autoError || !automations || automations.length === 0) {
-      logDebug('AUTOMATION', 'No active automations found', { error: autoError });
-      return;
-    }
-
-    logDebug('AUTOMATION', `Found ${automations.length} active automations`);
-
-    for (const automation of automations) {
-      const shouldTrigger = evaluateAutomationRules(automation, context);
+  // Route to correct AI based on PLAN (no manual override allowed)
+  switch (aiConfig.conversationAI) {
+    case 'gemini':
+      // Starter plan -> Gemini via Lovable AI Gateway
+      logDebug('AI_MATRIX', 'STARTER PLAN -> Routing to GEMINI');
+      await processWithGemini(supabaseClient, context, aiConfig);
+      break;
       
-      if (shouldTrigger) {
-        logDebug('AUTOMATION', `Triggering automation: ${automation.name}`, { automationId: automation.id });
-        
-        // Get conversation details for context
-        const { data: conversation } = await supabaseClient
-          .from('conversations')
-          .select(`
-            *,
-            client:clients(id, name, phone, email, document)
-          `)
-          .eq('id', context.conversationId)
-          .single();
-
-        // Get recent messages for context
-        const { data: recentMessages } = await supabaseClient
-          .from('messages')
-          .select('content, is_from_me, message_type, created_at, sender_type')
-          .eq('conversation_id', context.conversationId)
-          .order('created_at', { ascending: false })
-          .limit(15);
-
-        // Build payload - contact_phone at root level for easy n8n access
-        const currentHandler = String(conversation?.current_handler ?? 'ai').trim();
-        const payload = {
-          event: automation.trigger_type || 'new_message',
-          // Root level fields for easy n8n access
-          session_id: context.conversationId, // Use as Session ID in n8n Memory node
-          contact_phone: context.contactPhone,
-          contact_name: context.contactName,
-          remote_jid: context.remoteJid,
-          // Root-level fields for Switch rules in n8n
-          fromMe: false, // this function only triggers for inbound messages
-          current_handler: currentHandler,
-          // Root-level chat input (string) to avoid n8n Memory "input key" issues
-          input: context.messageContent,
-          automation: {
-            id: automation.id,
-            name: automation.name,
-            ai_prompt: automation.ai_prompt,
-            ai_temperature: automation.ai_temperature,
-          },
-          timestamp: new Date().toISOString(),
-          law_firm_id: context.lawFirmId,
-          conversation: {
-            id: context.conversationId,
-            remote_jid: context.remoteJid,
-            contact_name: context.contactName,
-            contact_phone: context.contactPhone,
-            status: conversation?.status || 'novo_contato',
-            current_handler: currentHandler,
-            ai_summary: conversation?.ai_summary,
-            needs_human_handoff: conversation?.needs_human_handoff,
-          },
-          client: conversation?.client || null,
-          whatsapp_instance: {
-            id: context.instanceId,
-            instance_name: context.instanceName,
-          },
-          message: {
-            content: context.messageContent,
-            type: context.messageType,
-          },
-          context: {
-            recent_messages: recentMessages?.reverse() || [],
-          },
-        };
-
-        // Send to N8N
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (n8nToken) {
-          headers["Authorization"] = `Bearer ${n8nToken}`;
-        }
-
-        // Use webhook_url from automation if set, otherwise use global N8N_WEBHOOK_URL
-        const targetUrl = automation.webhook_url || n8nWebhookUrl;
-
-        try {
-          const response = await fetch(targetUrl, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(payload),
-          });
-
-          logDebug('AUTOMATION', `N8N response: ${response.status}`, { automationId: automation.id });
-
-          // Log the webhook call
-          await supabaseClient
-            .from('webhook_logs')
-            .insert({
-              automation_id: automation.id,
-              direction: 'outgoing',
-              payload: payload,
-              response: response.ok ? { status: response.status } : null,
-              status_code: response.status,
-              error_message: response.ok ? null : `HTTP ${response.status}`,
-            });
-
-          // Update conversation n8n_last_response_at
-          await supabaseClient
-            .from('conversations')
-            .update({ n8n_last_response_at: new Date().toISOString() })
-            .eq('id', context.conversationId);
-
-        } catch (fetchError) {
-          logDebug('AUTOMATION', `Failed to call N8N webhook`, { error: fetchError });
-          
-          await supabaseClient
-            .from('webhook_logs')
-            .insert({
-              automation_id: automation.id,
-              direction: 'outgoing',
-              payload: payload,
-              status_code: 0,
-              error_message: fetchError instanceof Error ? fetchError.message : 'Unknown error',
-            });
-        }
-      }
-    }
-  } catch (error) {
-    logDebug('AUTOMATION', `Error processing automations`, { error: error instanceof Error ? error.message : error });
+    case 'gpt':
+      // Professional/Enterprise plan -> GPT via OpenAI
+      logDebug('AI_MATRIX', 'PROFESSIONAL/ENTERPRISE PLAN -> Routing to GPT');
+      await processWithGPT(supabaseClient, context, aiConfig);
+      break;
+      
+    default:
+      // Fallback to Gemini (should never happen)
+      logDebug('AI_MATRIX', 'Unknown AI type, defaulting to Gemini');
+      await processWithGemini(supabaseClient, context, aiConfig);
   }
 }
+
+// (N8N routing removed - using AI Matrix only)
 
 // Evaluate if automation rules match the message context
 function evaluateAutomationRules(automation: any, context: AutomationContext): boolean {
