@@ -53,7 +53,7 @@ export function LandingPage() {
         "500 conversas com IA por mês",
         "80 minutos de áudio IA por mês",
         "6 membros",
-        "1 WhatsApp conectado",
+        "2 WhatsApp conectados",
         "4 agentes de IA",
         "Tudo do plano Starter",
         "IA avançada para conversação",
