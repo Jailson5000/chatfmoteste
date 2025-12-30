@@ -86,9 +86,28 @@ if command -v curl &> /dev/null; then
         echo -e "   Status HTTP: ${GREEN}${HTTP_STATUS} OK${NC}"
         
         # Try to get the build info from the page source
-        # Note: This is a basic check - the actual build ID might be in compiled JS
         VPS_HTML=$(curl -s --max-time 10 "${VPS_URL}" 2>/dev/null || echo "")
-        
+
+        VPS_TITLE=$(echo "$VPS_HTML" | grep -oP '(?<=<title>).*?(?=</title>)' | head -n 1 || echo "")
+        if [ -n "$VPS_TITLE" ]; then
+            if echo "$VPS_TITLE" | grep -qi "lovable"; then
+                echo -e "   Title: ${RED}${VPS_TITLE}${NC}"
+                echo -e "   ${RED}❌ Branding incorreto detectado (Lovable) — provável build antigo no VPS${NC}"
+            elif echo "$VPS_TITLE" | grep -qi "miauchat"; then
+                echo -e "   Title: ${GREEN}${VPS_TITLE}${NC}"
+            else
+                echo -e "   Title: ${YELLOW}${VPS_TITLE}${NC}"
+            fi
+        else
+            echo -e "   Title: ${YELLOW}não detectado${NC}"
+        fi
+
+        if echo "$VPS_HTML" | grep -q 'href="/favicon.png"'; then
+            echo -e "   Favicon: ${GREEN}/favicon.png${NC}"
+        else
+            echo -e "   Favicon: ${YELLOW}não confirmado no HTML${NC}"
+        fi
+
         if echo "$VPS_HTML" | grep -q "MiauChat"; then
             echo -e "   Conteúdo: ${GREEN}MiauChat detectado${NC}"
         else
