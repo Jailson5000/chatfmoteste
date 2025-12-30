@@ -9,6 +9,8 @@ export interface TriggerConfig {
   keywords?: string[];
   message_types?: string[];
   first_message_only?: boolean;
+  voice_enabled?: boolean;
+  voice_id?: string;
 }
 
 export interface Automation {

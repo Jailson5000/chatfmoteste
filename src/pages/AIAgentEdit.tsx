@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -31,11 +31,21 @@ import {
   History,
   AtSign,
   BookOpen,
+  Volume2,
+  Play,
+  Square,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+
+// Available voices
+const AVAILABLE_VOICES = [
+  { id: "shimmer", name: "Shimmer", gender: "female", description: "Feminina" },
+  { id: "onyx", name: "Onyx", gender: "male", description: "Masculina grave" },
+  { id: "echo", name: "Echo", gender: "male", description: "Masculina clara" },
+] as const;
 
 const TRIGGER_TYPES = [
   { value: 'new_message', label: 'Nova Mensagem Recebida' },
@@ -76,6 +86,13 @@ export default function AIAgentEdit() {
   const [editedTriggerType, setEditedTriggerType] = useState('new_message');
   const [isActive, setIsActive] = useState(true);
   
+  // Voice settings
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceId, setVoiceId] = useState('shimmer');
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
   const [isSaving, setIsSaving] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
@@ -97,9 +114,26 @@ export default function AIAgentEdit() {
         setEditedTriggerType(found.trigger_type);
         setIsActive(found.is_active);
         setLastSaved(new Date(found.updated_at));
+        
+        // Load voice settings from trigger_config
+        const triggerConfig = found.trigger_config as Record<string, unknown> | null;
+        if (triggerConfig) {
+          setVoiceEnabled(Boolean(triggerConfig.voice_enabled));
+          setVoiceId((triggerConfig.voice_id as string) || 'shimmer');
+        }
       }
     }
   }, [automations, id]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   const insertMention = useCallback((mention: string) => {
     const before = editedPrompt.slice(0, cursorPosition);
@@ -179,6 +213,7 @@ export default function AIAgentEdit() {
   const promptPercentage = Math.round((promptLength / MAX_PROMPT_CHARS) * 100);
   const isOverLimit = promptLength > MAX_PROMPT_CHARS;
 
+  const currentTriggerConfig = automation.trigger_config as Record<string, unknown> | null;
   const hasChanges = 
     editedPrompt !== (automation.ai_prompt || '') ||
     editedTemperature !== (automation.ai_temperature || 0.7) ||
@@ -186,7 +221,9 @@ export default function AIAgentEdit() {
     editedDescription !== (automation.description || '') ||
     editedWebhookUrl !== automation.webhook_url ||
     editedTriggerType !== automation.trigger_type ||
-    isActive !== automation.is_active;
+    isActive !== automation.is_active ||
+    voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
+    voiceId !== ((currentTriggerConfig?.voice_id as string) || 'shimmer');
 
   const handleSave = async () => {
     if (isOverLimit) {
@@ -200,6 +237,14 @@ export default function AIAgentEdit() {
 
     setIsSaving(true);
     try {
+      // Build updated trigger_config with voice settings
+      const existingConfig = automation.trigger_config as Record<string, unknown> | null;
+      const updatedTriggerConfig = {
+        ...existingConfig,
+        voice_enabled: voiceEnabled,
+        voice_id: voiceId,
+      };
+
       // Update automation in database
       await updateAutomation.mutateAsync({
         id: automation.id,
@@ -210,6 +255,7 @@ export default function AIAgentEdit() {
         ai_prompt: editedPrompt,
         ai_temperature: editedTemperature,
         is_active: isActive,
+        trigger_config: updatedTriggerConfig,
       });
 
       // Sync prompt with N8N
@@ -272,6 +318,75 @@ export default function AIAgentEdit() {
       description: "A URL do webhook foi copiada.",
     });
     setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  const handleTestVoice = async () => {
+    if (isPlayingVoice && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsPlayingVoice(false);
+      return;
+    }
+
+    setIsTestingVoice(true);
+    try {
+      const testText = "Olá! Esta é uma demonstração da voz selecionada.";
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-text-to-speech`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ 
+            text: testText,
+            voiceId: voiceId,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Falha ao gerar áudio");
+      }
+
+      const data = await response.json();
+      
+      if (data.audioContent) {
+        const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        
+        audio.onended = () => {
+          setIsPlayingVoice(false);
+          audioRef.current = null;
+        };
+        
+        audio.onerror = () => {
+          setIsPlayingVoice(false);
+          audioRef.current = null;
+          toast({
+            title: "Erro ao reproduzir",
+            description: "Não foi possível reproduzir o áudio",
+            variant: "destructive",
+          });
+        };
+        
+        await audio.play();
+        setIsPlayingVoice(true);
+      }
+    } catch (error: any) {
+      console.error("[AIAgentEdit] Voice test error:", error);
+      toast({
+        title: "Erro no teste",
+        description: error.message || "Não foi possível testar a voz",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTestingVoice(false);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -583,6 +698,65 @@ Você é uma atendente do escritório @Nome do escritório , especializada em id
 
             {/* Knowledge Base Section */}
             <AgentKnowledgeSection automationId={automation.id} />
+
+            <Separator className="my-4" />
+
+            {/* Voice Settings */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm flex items-center gap-2">
+                  <Volume2 className="h-4 w-4" />
+                  Voz do Agente
+                </Label>
+                <Switch
+                  checked={voiceEnabled}
+                  onCheckedChange={setVoiceEnabled}
+                />
+              </div>
+              
+              {voiceEnabled && (
+                <div className="space-y-3">
+                  <Select value={voiceId} onValueChange={setVoiceId}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AVAILABLE_VOICES.map((voice) => (
+                        <SelectItem key={voice.id} value={voice.id}>
+                          <span className="flex items-center gap-2">
+                            {voice.name}
+                            <Badge variant="secondary" className="text-xs">
+                              {voice.description}
+                            </Badge>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestVoice}
+                    disabled={isTestingVoice}
+                    className="w-full gap-2"
+                  >
+                    {isTestingVoice ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isPlayingVoice ? (
+                      <Square className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                    {isPlayingVoice ? "Parar" : "Testar Voz"}
+                  </Button>
+                  
+                  <p className="text-xs text-muted-foreground">
+                    O agente responderá com áudio além de texto
+                  </p>
+                </div>
+              )}
+            </div>
 
             <Separator className="my-4" />
 
