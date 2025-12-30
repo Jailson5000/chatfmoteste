@@ -1,28 +1,57 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenant } from "@/hooks/useTenant";
 import { LandingPage } from "@/pages/landing/LandingPage";
+import { Button } from "@/components/ui/button";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
+
+// Timeout de segurança: 10 segundos para auth resolver
+const AUTH_TIMEOUT_MS = 10000;
 
 const Index = () => {
   const { user, loading: authLoading } = useAuth();
   const { isMainDomain, isLoading: tenantLoading, subdomain, error: tenantError } = useTenant();
   const navigate = useNavigate();
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
   useEffect(() => {
     document.title = "MiauChat | Multiplataforma de Inteligência Artificial Unificada";
   }, []);
 
+  // Timeout de segurança para auth em tenants
+  useEffect(() => {
+    if (tenantLoading || isMainDomain) return;
+    if (!subdomain) return;
+    
+    // Se já resolveu, não precisa de timeout
+    if (!authLoading) {
+      setAuthTimedOut(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (authLoading) {
+        console.warn('[Index] Auth timeout reached - auth still loading after', AUTH_TIMEOUT_MS, 'ms');
+        setAuthTimedOut(true);
+      }
+    }, AUTH_TIMEOUT_MS);
+
+    return () => clearTimeout(timeout);
+  }, [tenantLoading, isMainDomain, subdomain, authLoading]);
+
   // PRIORITY 1: Tenant subdomain redirect (before auth check)
-  // Se é um subdomínio de tenant, redireciona IMEDIATAMENTE para /auth ou dashboard
   useEffect(() => {
     if (tenantLoading) return;
     
     // É um subdomínio de tenant (não main domain)
     if (!isMainDomain && subdomain) {
       // Aguarda apenas o auth loading inicial finalizar
-      if (authLoading) return;
+      if (authLoading && !authTimedOut) return;
+      
+      // Se deu timeout, não tenta redirecionar - mostra erro
+      if (authTimedOut) return;
       
       // Se usuário já está logado, vai pro dashboard
       if (user) {
@@ -32,7 +61,7 @@ const Index = () => {
         navigate("/auth", { replace: true });
       }
     }
-  }, [tenantLoading, authLoading, isMainDomain, subdomain, user, navigate]);
+  }, [tenantLoading, authLoading, authTimedOut, isMainDomain, subdomain, user, navigate]);
 
   // PRIORITY 2: Usuário logado no domínio principal
   useEffect(() => {
@@ -59,8 +88,49 @@ const Index = () => {
     );
   }
 
-  // Se é um subdomínio (tenant), mostra loading até auth resolver
+  // Se é um subdomínio (tenant)
   if (!isMainDomain && subdomain) {
+    // Timeout atingido - mostra erro amigável
+    if (authTimedOut) {
+      return (
+        <div className="dark flex min-h-screen items-center justify-center bg-background">
+          <div className="flex flex-col items-center gap-6 text-center max-w-md px-6">
+            <img 
+              src={miauchatLogo} 
+              alt="MiauChat" 
+              className="w-20 h-20 object-contain opacity-80" 
+            />
+            <div className="flex items-center gap-2 text-amber-500">
+              <AlertTriangle className="h-6 w-6" />
+              <h1 className="text-xl font-semibold">Problema de Conexão</h1>
+            </div>
+            <p className="text-muted-foreground">
+              Não foi possível verificar sua sessão. Isso pode acontecer por instabilidade na conexão ou problemas temporários no servidor.
+            </p>
+            <div className="flex flex-col gap-3 w-full">
+              <Button 
+                onClick={() => window.location.reload()}
+                className="w-full gap-2"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Tentar Novamente
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={() => navigate("/auth", { replace: true })}
+                className="w-full"
+              >
+                Ir para Login
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground/60">
+              Se o problema persistir, entre em contato com o suporte.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     // Aguarda auth resolver antes de mostrar loading de redirect
     if (authLoading) {
       return (
@@ -97,20 +167,23 @@ const Index = () => {
   if (tenantError && !isMainDomain) {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4 text-center max-w-md px-4">
+        <div className="flex flex-col items-center gap-6 text-center max-w-md px-6">
           <img 
             src={miauchatLogo} 
             alt="MiauChat" 
-            className="w-20 h-20 object-contain" 
+            className="w-20 h-20 object-contain opacity-80" 
           />
-          <h1 className="text-2xl font-bold text-foreground">Empresa não encontrada</h1>
+          <div className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-6 w-6" />
+            <h1 className="text-xl font-semibold">Empresa não encontrada</h1>
+          </div>
           <p className="text-muted-foreground">{tenantError}</p>
-          <a 
-            href="https://www.miauchat.com.br" 
-            className="text-primary hover:underline"
+          <Button 
+            variant="outline"
+            onClick={() => window.location.href = "https://www.miauchat.com.br"}
           >
             Ir para o site principal
-          </a>
+          </Button>
         </div>
       </div>
     );
