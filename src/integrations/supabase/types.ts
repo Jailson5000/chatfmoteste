@@ -428,6 +428,67 @@ export type Database = {
           },
         ]
       }
+      client_memories: {
+        Row: {
+          client_id: string
+          content: string
+          created_at: string
+          fact_type: string
+          id: string
+          importance: number | null
+          is_active: boolean | null
+          law_firm_id: string
+          source_conversation_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          content: string
+          created_at?: string
+          fact_type: string
+          id?: string
+          importance?: number | null
+          is_active?: boolean | null
+          law_firm_id: string
+          source_conversation_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          content?: string
+          created_at?: string
+          fact_type?: string
+          id?: string
+          importance?: number | null
+          is_active?: boolean | null
+          law_firm_id?: string
+          source_conversation_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_memories_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_memories_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_memories_source_conversation_id_fkey"
+            columns: ["source_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_tags: {
         Row: {
           client_id: string
@@ -723,12 +784,14 @@ export type Database = {
           id: string
           internal_notes: string | null
           last_message_at: string | null
+          last_summarized_at: string | null
           law_firm_id: string
           n8n_last_response_at: string | null
           needs_human_handoff: boolean | null
           priority: number
           remote_jid: string
           status: Database["public"]["Enums"]["case_status"]
+          summary_message_count: number | null
           tags: string[] | null
           updated_at: string
           whatsapp_instance_id: string | null
@@ -745,12 +808,14 @@ export type Database = {
           id?: string
           internal_notes?: string | null
           last_message_at?: string | null
+          last_summarized_at?: string | null
           law_firm_id: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
           priority?: number
           remote_jid: string
           status?: Database["public"]["Enums"]["case_status"]
+          summary_message_count?: number | null
           tags?: string[] | null
           updated_at?: string
           whatsapp_instance_id?: string | null
@@ -767,12 +832,14 @@ export type Database = {
           id?: string
           internal_notes?: string | null
           last_message_at?: string | null
+          last_summarized_at?: string | null
           law_firm_id?: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
           priority?: number
           remote_jid?: string
           status?: Database["public"]["Enums"]["case_status"]
+          summary_message_count?: number | null
           tags?: string[] | null
           updated_at?: string
           whatsapp_instance_id?: string | null
