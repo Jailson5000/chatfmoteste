@@ -34,13 +34,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
 import { CompanyAIConfigDialog } from "@/components/global-admin/CompanyAIConfigDialog";
+import { CompanyLimitsEditor } from "@/components/global-admin/CompanyLimitsEditor";
+import { CompanyUsageMonitor } from "@/components/global-admin/CompanyUsageMonitor";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -57,6 +59,7 @@ export default function GlobalAdminCompanies() {
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
   const [aiConfigCompany, setAiConfigCompany] = useState<typeof companies[0] | null>(null);
+  const [usageMonitorCompany, setUsageMonitorCompany] = useState<typeof companies[0] | null>(null);
   const [resettingPassword, setResettingPassword] = useState<string | null>(null);
   const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -120,11 +123,35 @@ export default function GlobalAdminCompanies() {
     plan_id: "",
     max_users: 5,
     max_instances: 2,
+    max_agents: 1,
+    max_workspaces: 1,
+    max_ai_conversations: 250,
+    max_tts_minutes: 40,
+    use_custom_limits: false,
     subdomain: "",
     auto_activate_workflow: true,
     admin_name: "",
     admin_email: "",
   });
+
+  // Auto-fill limits when plan changes
+  const handlePlanSelect = (planId: string) => {
+    const selectedPlan = plans.find(p => p.id === planId);
+    if (selectedPlan && !formData.use_custom_limits) {
+      setFormData({
+        ...formData,
+        plan_id: planId,
+        max_users: selectedPlan.max_users,
+        max_instances: selectedPlan.max_instances,
+        max_agents: selectedPlan.max_agents ?? 1,
+        max_workspaces: selectedPlan.max_workspaces ?? 1,
+        max_ai_conversations: selectedPlan.max_ai_conversations ?? 250,
+        max_tts_minutes: selectedPlan.max_tts_minutes ?? 40,
+      });
+    } else {
+      setFormData({ ...formData, plan_id: planId });
+    }
+  };
 
   // Apply all filters
   const filteredCompanies = companies.filter((company) => {
@@ -173,6 +200,25 @@ export default function GlobalAdminCompanies() {
     });
   };
 
+  const resetFormData = () => ({
+    name: "",
+    document: "",
+    email: "",
+    phone: "",
+    plan_id: "",
+    max_users: 5,
+    max_instances: 2,
+    max_agents: 1,
+    max_workspaces: 1,
+    max_ai_conversations: 250,
+    max_tts_minutes: 40,
+    use_custom_limits: false,
+    subdomain: "",
+    auto_activate_workflow: true,
+    admin_name: "",
+    admin_email: "",
+  });
+
   const handleCreate = async () => {
     await createCompany.mutateAsync({
       ...formData,
@@ -181,14 +227,14 @@ export default function GlobalAdminCompanies() {
       admin_email: formData.admin_email || undefined,
     });
     setIsCreateDialogOpen(false);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true, admin_name: "", admin_email: "" });
+    setFormData(resetFormData());
   };
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
     await updateCompany.mutateAsync({ id: editingCompany, ...formData });
     setEditingCompany(null);
-    setFormData({ name: "", document: "", email: "", phone: "", plan_id: "", max_users: 5, max_instances: 2, subdomain: "", auto_activate_workflow: true, admin_name: "", admin_email: "" });
+    setFormData(resetFormData());
   };
 
   const handleDelete = async (company: typeof companies[0]) => {
@@ -198,6 +244,7 @@ export default function GlobalAdminCompanies() {
   };
 
   const openEditDialog = (company: typeof companies[0]) => {
+    const companyPlan = plans.find(p => p.id === company.plan_id);
     setFormData({
       name: company.name,
       document: company.document || "",
@@ -206,6 +253,11 @@ export default function GlobalAdminCompanies() {
       plan_id: company.plan_id || "",
       max_users: company.max_users,
       max_instances: company.max_instances,
+      max_agents: company.max_agents ?? companyPlan?.max_agents ?? 1,
+      max_workspaces: company.max_workspaces ?? companyPlan?.max_workspaces ?? 1,
+      max_ai_conversations: company.max_ai_conversations ?? companyPlan?.max_ai_conversations ?? 250,
+      max_tts_minutes: company.max_tts_minutes ?? companyPlan?.max_tts_minutes ?? 40,
+      use_custom_limits: company.use_custom_limits || false,
       subdomain: company.law_firm?.subdomain || "",
       auto_activate_workflow: true,
       admin_name: "",
@@ -437,41 +489,83 @@ export default function GlobalAdminCompanies() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="plan">Plano</Label>
+                    <Label htmlFor="plan">Plano *</Label>
                     <Select
                       value={formData.plan_id}
-                      onValueChange={(value) => setFormData({ ...formData, plan_id: value })}
+                      onValueChange={handlePlanSelect}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecione um plano" />
                       </SelectTrigger>
                       <SelectContent>
-                        {plans.map((plan) => (
+                        {plans.filter(p => p.is_active).map((plan) => (
                           <SelectItem key={plan.id} value={plan.id}>
-                            {plan.name} - R$ {plan.price}/mês
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{plan.name}</span>
+                              <span className="text-muted-foreground">R$ {plan.price}/mês</span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {formData.plan_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Limites serão preenchidos automaticamente com base no plano selecionado
+                      </p>
+                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="max_users">Máx. Usuários</Label>
-                      <Input
-                        id="max_users"
-                        type="number"
-                        value={formData.max_users}
-                        onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) })}
-                      />
+                  {/* Limits Section */}
+                  <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        {formData.use_custom_limits ? <Unlock className="h-4 w-4 text-yellow-600" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                        Limites da Empresa
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="use_custom_limits" className="text-xs text-muted-foreground">Personalizar</Label>
+                        <Switch
+                          id="use_custom_limits"
+                          checked={formData.use_custom_limits}
+                          onCheckedChange={(checked) => setFormData({ ...formData, use_custom_limits: checked })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="max_instances">Máx. Conexões</Label>
-                      <Input
-                        id="max_instances"
-                        type="number"
-                        value={formData.max_instances}
-                        onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) })}
-                      />
+                    {formData.use_custom_limits && (
+                      <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                        Limites personalizados sobrescrevem o plano
+                      </Badge>
+                    )}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="max_users" className="text-xs flex items-center gap-1"><Users className="h-3 w-3" />Usuários</Label>
+                        <Input id="max_users" type="number" value={formData.max_users} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_users: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="max_instances" className="text-xs flex items-center gap-1"><Wifi className="h-3 w-3" />Conexões</Label>
+                        <Input id="max_instances" type="number" value={formData.max_instances} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_instances: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="max_agents" className="text-xs flex items-center gap-1"><Bot className="h-3 w-3" />Agentes IA</Label>
+                        <Input id="max_agents" type="number" value={formData.max_agents} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_agents: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="max_workspaces" className="text-xs flex items-center gap-1"><Layers className="h-3 w-3" />Workspaces</Label>
+                        <Input id="max_workspaces" type="number" value={formData.max_workspaces} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_workspaces: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="max_ai_conversations" className="text-xs flex items-center gap-1"><MessageSquare className="h-3 w-3" />IA/mês</Label>
+                        <Input id="max_ai_conversations" type="number" value={formData.max_ai_conversations} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_ai_conversations: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="max_tts_minutes" className="text-xs flex items-center gap-1"><Volume2 className="h-3 w-3" />Áudio/mês</Label>
+                        <Input id="max_tts_minutes" type="number" value={formData.max_tts_minutes} disabled={!formData.use_custom_limits}
+                          onChange={(e) => setFormData({ ...formData, max_tts_minutes: parseInt(e.target.value) || 0, use_custom_limits: true })} className="h-8" />
+                      </div>
                     </div>
                   </div>
                   

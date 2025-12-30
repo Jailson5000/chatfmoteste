@@ -17,6 +17,12 @@ interface Company {
   created_at: string;
   updated_at: string;
   subdomain?: string;
+  // Custom limits fields
+  use_custom_limits: boolean;
+  max_agents: number | null;
+  max_workspaces: number | null;
+  max_ai_conversations: number | null;
+  max_tts_minutes: number | null;
   // Provisioning status fields
   client_app_status: string;
   provisioning_status: string;
@@ -36,6 +42,12 @@ interface Company {
     id: string;
     name: string;
     price: number;
+    max_users: number;
+    max_instances: number;
+    max_agents: number;
+    max_workspaces: number;
+    max_ai_conversations: number;
+    max_tts_minutes: number;
   } | null;
   law_firm?: {
     id: string;
@@ -65,6 +77,12 @@ interface CreateCompanyData {
   max_instances?: number;
   subdomain?: string;
   auto_activate_workflow?: boolean;
+  // Custom limits
+  use_custom_limits?: boolean;
+  max_agents?: number;
+  max_workspaces?: number;
+  max_ai_conversations?: number;
+  max_tts_minutes?: number;
   // Admin user creation
   admin_email?: string;
   admin_name?: string;
@@ -98,7 +116,7 @@ export function useCompanies() {
         .from("companies")
         .select(`
           *,
-          plan:plans(id, name, price),
+          plan:plans(id, name, price, max_users, max_instances, max_agents, max_workspaces, max_ai_conversations, max_tts_minutes),
           law_firm:law_firms(id, subdomain)
         `)
         .order("created_at", { ascending: false });
