@@ -31,6 +31,8 @@ interface CompanyAIConfigDialogProps {
 
 interface AISettings {
   ai_provider: string;
+  ia_site_active: boolean;
+  openai_active: boolean;
   n8n_webhook_url: string;
   n8n_webhook_secret: string;
   ai_capabilities: {
@@ -92,14 +94,24 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       if (error) throw error;
 
       if (data) {
-        const provider = data.ai_provider || "internal";
-        setInternalEnabled(provider === "internal");
-        setOpenaiEnabled(provider === "openai");
-        setN8nEnabled(provider === "n8n");
+        const caps = data.ai_capabilities as any;
+        
+        // Support new simultaneous AI activation model
+        // Check if new fields exist, otherwise fallback to legacy provider field
+        if (caps?.ia_site_active !== undefined || caps?.openai_active !== undefined) {
+          setInternalEnabled(caps?.ia_site_active ?? true);
+          setOpenaiEnabled(caps?.openai_active ?? false);
+        } else {
+          // Legacy: convert from ai_provider field
+          const provider = data.ai_provider || "internal";
+          setInternalEnabled(provider === "internal");
+          setOpenaiEnabled(provider === "openai");
+        }
+        
+        setN8nEnabled(data.ai_provider === "n8n");
         setN8nWebhookUrl(data.n8n_webhook_url || "");
         setN8nSecret(data.n8n_webhook_secret || "");
         
-        const caps = data.ai_capabilities as any;
         if (caps) {
           setCapabilities({
             auto_reply: caps.auto_reply ?? true,
@@ -127,17 +139,26 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
     setSaving(true);
     try {
-      // Determine active provider
+      // Determine primary provider for legacy compatibility
+      // Priority: n8n > openai > internal
       let activeProvider = "internal";
       if (n8nEnabled) activeProvider = "n8n";
-      else if (openaiEnabled) activeProvider = "openai";
+      else if (openaiEnabled && !internalEnabled) activeProvider = "openai";
+      else if (openaiEnabled && internalEnabled) activeProvider = "hybrid"; // Both active
+
+      // Store activation flags in ai_capabilities for new model
+      const enhancedCapabilities = {
+        ...capabilities,
+        ia_site_active: internalEnabled,
+        openai_active: openaiEnabled,
+      };
 
       const settingsData = {
         law_firm_id: company.law_firm_id,
         ai_provider: activeProvider,
         n8n_webhook_url: n8nWebhookUrl || null,
         n8n_webhook_secret: n8nSecret || null,
-        ai_capabilities: capabilities,
+        ai_capabilities: enhancedCapabilities,
         ai_settings_updated_at: new Date().toISOString(),
       };
 
@@ -211,27 +232,56 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
     }
   };
 
+  // Allow IA do Site and OpenAI to be ACTIVE SIMULTANEOUSLY
+  // n8n is exclusive (disables others)
   const handleProviderChange = (provider: "internal" | "openai" | "n8n", enabled: boolean) => {
     if (provider === "internal") {
       setInternalEnabled(enabled);
-      if (enabled) {
-        setOpenaiEnabled(false);
-        setN8nEnabled(false);
-      }
+      // Don't disable OpenAI - they can be active together
+      if (enabled) setN8nEnabled(false);
     } else if (provider === "openai") {
       setOpenaiEnabled(enabled);
-      if (enabled) {
-        setInternalEnabled(false);
-        setN8nEnabled(false);
-      }
+      // Don't disable IA do Site - they can be active together
+      if (enabled) setN8nEnabled(false);
     } else if (provider === "n8n") {
       setN8nEnabled(enabled);
       if (enabled) {
+        // n8n is exclusive
         setInternalEnabled(false);
         setOpenaiEnabled(false);
       }
     }
   };
+
+  // Compute which AI handles what based on current state
+  const getAIResponsibilities = () => {
+    const bothActive = internalEnabled && openaiEnabled;
+    
+    if (bothActive) {
+      return {
+        chat: "OpenAI",
+        audio: "OpenAI",
+        transcription: "OpenAI",
+        image: "IA do Site"
+      };
+    } else if (openaiEnabled) {
+      return {
+        chat: "OpenAI",
+        audio: "OpenAI",
+        transcription: "OpenAI",
+        image: "Indisponível"
+      };
+    } else {
+      return {
+        chat: "IA do Site",
+        audio: "IA do Site",
+        transcription: "IA do Site",
+        image: "IA do Site"
+      };
+    }
+  };
+
+  const responsibilities = getAIResponsibilities();
 
   if (!company) return null;
 
@@ -312,6 +362,54 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   </div>
                 )}
               </div>
+
+              {/* AI Responsibilities Summary - Show when both IAs are active */}
+              {(internalEnabled || openaiEnabled) && !n8nEnabled && (
+                <div className="p-4 rounded-lg bg-gradient-to-r from-blue-500/10 to-emerald-500/10 border border-white/10 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                    <p className="font-medium text-white text-sm">
+                      {internalEnabled && openaiEnabled ? "Modo Híbrido Ativo" : "Distribuição de Funções"}
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2 p-2 rounded bg-white/5">
+                      <span className="text-white/60">💬 Conversação:</span>
+                      <span className={`font-medium ${responsibilities.chat === "OpenAI" ? "text-emerald-400" : "text-blue-400"}`}>
+                        {responsibilities.chat}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 rounded bg-white/5">
+                      <span className="text-white/60">🎙️ Áudio/TTS:</span>
+                      <span className={`font-medium ${responsibilities.audio === "OpenAI" ? "text-emerald-400" : "text-blue-400"}`}>
+                        {responsibilities.audio}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 rounded bg-white/5">
+                      <span className="text-white/60">🎧 Transcrição:</span>
+                      <span className={`font-medium ${responsibilities.transcription === "OpenAI" ? "text-emerald-400" : "text-blue-400"}`}>
+                        {responsibilities.transcription}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 rounded bg-white/5">
+                      <span className="text-white/60">🖼️ Imagens:</span>
+                      <span className={`font-medium ${
+                        responsibilities.image === "IA do Site" ? "text-blue-400" : 
+                        responsibilities.image === "Indisponível" ? "text-red-400" : "text-emerald-400"
+                      }`}>
+                        {responsibilities.image}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {internalEnabled && openaiEnabled && (
+                    <p className="text-xs text-white/50">
+                      Quando ambas IAs estão ativas, OpenAI processa conversação e áudio, enquanto IA do Site analisa imagens.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* N8N - Same pattern */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
