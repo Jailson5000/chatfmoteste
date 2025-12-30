@@ -239,6 +239,10 @@ export default function AIAgents() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<Automation | null>(null);
   
+  // Multi-select state
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  
   // Folder state
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isCreateFolderDialogOpen, setIsCreateFolderDialogOpen] = useState(false);
@@ -602,6 +606,64 @@ export default function AIAgents() {
     }
   };
 
+  // Selection handlers
+  const toggleAgentSelection = (agentId: string) => {
+    setSelectedAgentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedAgentIds.size === filteredAgents.length) {
+      setSelectedAgentIds(new Set());
+    } else {
+      setSelectedAgentIds(new Set(filteredAgents.map(a => a.id)));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedAgentIds(new Set());
+  };
+
+  const handleBulkMoveToFolder = async (folderId: string | null) => {
+    const agentIds = Array.from(selectedAgentIds);
+    for (const agentId of agentIds) {
+      try {
+        await moveAgentToFolder.mutateAsync({ agentId, folderId });
+      } catch (error) {
+        // Continue with next agent
+      }
+    }
+    clearSelection();
+    toast({
+      title: "Agentes movidos",
+      description: `${agentIds.length} agente(s) foram movidos.`,
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const agentIds = Array.from(selectedAgentIds);
+    for (const agentId of agentIds) {
+      try {
+        await deleteAutomation.mutateAsync(agentId);
+      } catch (error) {
+        // Continue with next agent
+      }
+    }
+    clearSelection();
+    setIsBulkDeleteOpen(false);
+    toast({
+      title: "Agentes excluídos",
+      description: `${agentIds.length} agente(s) foram excluídos.`,
+    });
+  };
+
   const handleSave = async () => {
     if (!selectedAgent) return;
     
@@ -698,15 +760,27 @@ export default function AIAgents() {
     );
   }
 
-  // Agent Row Component (without drag handle, used inside DraggableAgent)
-  const AgentRowContent = ({ agent, inFolder = false }: { agent: Automation; inFolder?: boolean }) => (
-    <div
-      className={cn(
-        "flex-1 grid gap-4 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group",
-        inFolder ? "grid-cols-[1fr_100px_150px_80px]" : "grid-cols-[1fr_100px_150px_80px]"
-      )}
-      onClick={() => handleSelectAgent(agent)}
-    >
+  // Agent Row Component (without drag handle, used inside SortableAgent)
+  const AgentRowContent = ({ agent, inFolder = false }: { agent: Automation; inFolder?: boolean }) => {
+    const isSelected = selectedAgentIds.has(agent.id);
+    
+    return (
+      <div
+        className={cn(
+          "flex-1 grid gap-4 py-4 items-center hover:bg-muted/30 cursor-pointer transition-colors group",
+          inFolder ? "grid-cols-[auto_1fr_100px_150px_80px]" : "grid-cols-[auto_1fr_100px_150px_80px]",
+          isSelected && "bg-primary/5"
+        )}
+        onClick={() => handleSelectAgent(agent)}
+      >
+        {/* Checkbox */}
+        <div onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={() => toggleAgentSelection(agent.id)}
+            className="data-[state=checked]:bg-primary"
+          />
+        </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium">{agent.name}</span>
@@ -797,7 +871,8 @@ export default function AIAgents() {
         </DropdownMenu>
       </div>
     </div>
-  );
+    );
+  };
 
   // Render List View
   if (viewMode === "list") {
@@ -855,10 +930,71 @@ export default function AIAgents() {
             </div>
           </div>
 
+          {/* Selection Actions Bar */}
+          {selectedAgentIds.size > 0 && (
+            <div className="flex items-center justify-between px-6 py-3 bg-primary/5 border-b border-border animate-fade-in">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">
+                  {selectedAgentIds.size} agente{selectedAgentIds.size !== 1 ? "s" : ""} selecionado{selectedAgentIds.size !== 1 ? "s" : ""}
+                </span>
+                <Button variant="ghost" size="sm" onClick={clearSelection} className="text-muted-foreground">
+                  Limpar seleção
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                {folders.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-2">
+                        <Folder className="h-4 w-4" />
+                        Mover para pasta
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      {folders.map(folder => (
+                        <DropdownMenuItem 
+                          key={folder.id}
+                          onClick={() => handleBulkMoveToFolder(folder.id)}
+                        >
+                          <Folder 
+                            className="h-4 w-4 mr-2" 
+                            style={{ color: folder.color }}
+                          />
+                          {folder.name}
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleBulkMoveToFolder(null)}>
+                        <FolderOpen className="h-4 w-4 mr-2 text-muted-foreground" />
+                        Remover das pastas
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2 text-destructive hover:text-destructive"
+                  onClick={() => setIsBulkDeleteOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Agents Table */}
           <div className="flex-1 overflow-auto">
             {/* Table Header */}
-            <div className="grid grid-cols-[auto_1fr_100px_150px_80px] gap-4 px-6 py-3 border-b border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+            <div className="grid grid-cols-[auto_auto_1fr_100px_150px_80px] gap-4 px-6 py-3 border-b border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+              <div className="w-5">
+                <Checkbox
+                  checked={filteredAgents.length > 0 && selectedAgentIds.size === filteredAgents.length}
+                  onCheckedChange={toggleSelectAll}
+                  className="data-[state=checked]:bg-primary"
+                />
+              </div>
               <div className="w-6"></div>
               <div>Agente</div>
               <div className="text-center">Delay</div>
@@ -1293,6 +1429,27 @@ export default function AIAgents() {
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   Excluir
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Bulk Delete Confirmation */}
+          <AlertDialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Excluir Agentes Selecionados</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Tem certeza que deseja excluir {selectedAgentIds.size} agente{selectedAgentIds.size !== 1 ? "s" : ""}? Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleBulkDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Excluir {selectedAgentIds.size} agente{selectedAgentIds.size !== 1 ? "s" : ""}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
