@@ -126,24 +126,39 @@ export default function Auth() {
     }
 
     setIsLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(forgotPasswordEmail, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
-    });
-
-    if (error) {
-      toast({
-        title: "Erro ao enviar email",
-        description: "Não foi possível enviar o email de recuperação. Tente novamente.",
-        variant: "destructive",
+    
+    try {
+      // Use custom password reset function to send via Resend
+      const { data, error } = await supabase.functions.invoke('custom-password-reset', {
+        body: {
+          email: forgotPasswordEmail,
+          redirect_to: `${window.location.origin}/reset-password`,
+        },
       });
-    } else {
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro ao enviar email');
+      }
+
       toast({
         title: "Email enviado!",
         description: "Verifique sua caixa de entrada para redefinir sua senha.",
       });
       setShowForgotPassword(false);
       setForgotPasswordEmail("");
+    } catch (err: any) {
+      console.error('[Auth] Password reset error:', err);
+      toast({
+        title: "Erro ao enviar email",
+        description: err?.message || "Não foi possível enviar o email de recuperação. Tente novamente.",
+        variant: "destructive",
+      });
     }
+    
     setIsLoading(false);
   };
 
