@@ -244,12 +244,25 @@ export function useAuth() {
 
     // THEN check for existing session
     console.log("[useAuth] Verificando sessão existente...");
-    supabase.auth.getSession().then(({ data: { session: existingSession }, error }) => {
+    supabase.auth.getSession().then(async ({ data: { session: existingSession }, error }) => {
       if (error) {
         console.error("[useAuth] Erro ao obter sessão:", error.message);
         // Clear invalid session/token if there's an error
         console.log("[useAuth] Limpando sessão inválida...");
-        supabase.auth.signOut().catch(() => {});
+        
+        // Force clear localStorage tokens
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.includes('supabase') || key.includes('sb-')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (e) {
+          console.error("[useAuth] Erro ao limpar localStorage:", e);
+        }
+        
+        await supabase.auth.signOut().catch(() => {});
         setSession(null);
         setUser(null);
         setLoading(false);
@@ -259,6 +272,16 @@ export function useAuth() {
       console.log("[useAuth] getSession resultado:", existingSession ? "sessão encontrada" : "sem sessão");
       
       if (existingSession) {
+        // Validate the session has required fields
+        if (!existingSession.user?.id || !existingSession.access_token) {
+          console.log("[useAuth] Sessão incompleta, limpando...");
+          await supabase.auth.signOut().catch(() => {});
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        
         setSession(existingSession);
         setUser(existingSession.user);
         setSessionExpired(false);

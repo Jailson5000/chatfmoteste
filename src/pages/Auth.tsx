@@ -33,7 +33,9 @@ export default function Auth() {
   const [loginData, setLoginData] = useState({ email: "", password: "" });
 
   useEffect(() => {
+    // Só redireciona quando auth terminou de carregar E user existe
     if (!loading && user) {
+      console.log("[Auth] Usuário já logado, redirecionando para dashboard");
       navigate("/dashboard", { replace: true });
     }
   }, [user, loading, navigate]);

@@ -6,36 +6,43 @@ import { LandingPage } from "@/pages/landing/LandingPage";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 
 const Index = () => {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { isMainDomain, isLoading: tenantLoading, subdomain, error: tenantError } = useTenant();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Basic page title hygiene when navigating back from other pages
-    const previousTitle = document.title;
     document.title = "MiauChat | Multiplataforma de Inteligência Artificial Unificada";
-
-    return () => {
-      document.title = previousTitle || "MiauChat";
-    };
   }, []);
 
+  // PRIORITY 1: Tenant subdomain redirect (before auth check)
+  // Se é um subdomínio de tenant, redireciona IMEDIATAMENTE para /auth
   useEffect(() => {
-    // Se o usuário está logado, redireciona para o dashboard
-    if (user) {
-      navigate("/dashboard");
-      return;
+    if (tenantLoading) return;
+    
+    // É um subdomínio de tenant (não main domain)
+    if (!isMainDomain && subdomain) {
+      // Se usuário já está logado, vai pro dashboard
+      if (user) {
+        navigate("/dashboard", { replace: true });
+      } else {
+        // Se não está logado, vai pro login
+        navigate("/auth", { replace: true });
+      }
     }
+  }, [tenantLoading, isMainDomain, subdomain, user, navigate]);
 
-    // Se é um subdomínio de tenant (não é domínio principal),
-    // redireciona para a página de login em vez de mostrar a landing
-    if (!tenantLoading && !isMainDomain && subdomain) {
-      navigate("/auth", { replace: true });
+  // PRIORITY 2: Usuário logado no domínio principal
+  useEffect(() => {
+    if (authLoading || tenantLoading) return;
+    
+    // Só redireciona se estiver no domínio principal E logado
+    if (isMainDomain && user) {
+      navigate("/dashboard", { replace: true });
     }
-  }, [user, navigate, tenantLoading, isMainDomain, subdomain]);
+  }, [user, authLoading, tenantLoading, isMainDomain, navigate]);
 
-  // Loading state - aguarda tanto auth quanto tenant detection
-  if (loading || tenantLoading) {
+  // Loading state - aguarda tenant detection PRIMEIRO
+  if (tenantLoading) {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -44,14 +51,12 @@ const Index = () => {
             alt="MiauChat" 
             className="w-20 h-20 object-contain animate-pulse" 
           />
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         </div>
       </div>
     );
   }
 
-  // Se é um subdomínio (tenant), não mostra landing page
-  // O useEffect acima já redirecionou, mas este é um fallback
+  // Se é um subdomínio (tenant), mostra loading até redirecionar
   if (!isMainDomain && subdomain) {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background">
@@ -61,6 +66,7 @@ const Index = () => {
             alt="MiauChat" 
             className="w-20 h-20 object-contain animate-pulse" 
           />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
           <p className="text-muted-foreground">Redirecionando...</p>
         </div>
       </div>
@@ -85,6 +91,22 @@ const Index = () => {
           >
             Ir para o site principal
           </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading auth no domínio principal
+  if (authLoading && isMainDomain) {
+    return (
+      <div className="dark flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <img 
+            src={miauchatLogo} 
+            alt="MiauChat" 
+            className="w-20 h-20 object-contain animate-pulse" 
+          />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         </div>
       </div>
     );
