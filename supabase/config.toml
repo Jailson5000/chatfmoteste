@@ -65,3 +65,9 @@ verify_jwt = false
 
 [functions.approve-company]
 verify_jwt = false
+
+[functions.send-auth-email]
+verify_jwt = false
+
+[functions.custom-password-reset]
+verify_jwt = false
