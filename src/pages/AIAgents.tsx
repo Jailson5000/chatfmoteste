@@ -17,7 +17,8 @@ import {
   MoreHorizontal,
   GripVertical,
   Trash2,
-  Bot
+  Bot,
+  Copy
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -176,6 +177,32 @@ export default function AIAgents() {
       toast({
         title: "Erro ao criar agente",
         description: "Não foi possível criar o agente.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDuplicateAgent = async (agent: Automation) => {
+    try {
+      await createAutomation.mutateAsync({
+        name: `${agent.name} (cópia)`,
+        description: agent.description || "",
+        webhook_url: agent.webhook_url || "",
+        trigger_type: agent.trigger_type,
+        trigger_config: agent.trigger_config || undefined,
+        ai_prompt: agent.ai_prompt || "",
+        ai_temperature: agent.ai_temperature || 0.7,
+        is_active: false, // Start as inactive
+      });
+      
+      toast({
+        title: "Agente duplicado",
+        description: `Uma cópia de "${agent.name}" foi criada.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao duplicar",
+        description: "Não foi possível duplicar o agente.",
         variant: "destructive",
       });
     }
@@ -397,6 +424,10 @@ export default function AIAgents() {
                         <DropdownMenuItem onClick={() => handleSelectAgent(agent)}>
                           <Settings2 className="h-4 w-4 mr-2" />
                           Configurar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleDuplicateAgent(agent)}>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Duplicar
                         </DropdownMenuItem>
                         <DropdownMenuItem 
                           className="text-destructive"
