@@ -385,10 +385,27 @@ async function sendAIResponseToWhatsApp(
   voiceConfig?: VoiceConfig
 ): Promise<boolean> {
   try {
-    logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', { 
-      conversationId: context.conversationId, 
-      responseLength: aiResponse.length 
+    const AUDIO_PLACEHOLDER_RE = /\[\s*mensagem de [áa]udio\s*\]/gi;
+    const sanitizeText = (value: string) =>
+      value
+        .replace(AUDIO_PLACEHOLDER_RE, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    const sanitizedResponse = sanitizeText(aiResponse);
+
+    logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', {
+      conversationId: context.conversationId,
+      responseLength: sanitizedResponse.length,
     });
+
+    if (!sanitizedResponse) {
+      logDebug('SEND_RESPONSE', 'AI response became empty after sanitization; skipping send', {
+        conversationId: context.conversationId,
+      });
+      return false;
+    }
 
     // Get instance details for API URL and key
     const { data: instance } = await supabaseClient
@@ -407,18 +424,18 @@ async function sendAIResponseToWhatsApp(
     const sendUrl = `${apiUrl}/message/sendText/${instance.instance_name}`;
 
     // Split response into paragraphs (by double newline or single newline with meaningful content)
-    const paragraphs = aiResponse
+    const paragraphs = sanitizedResponse
       .split(/\n\n+/)
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
 
     // If only one paragraph but it's very long, try to split by single newlines
     let messageParts: string[] = [];
     if (paragraphs.length === 1 && paragraphs[0].length > 300) {
       messageParts = paragraphs[0]
         .split(/\n/)
-        .map(p => p.trim())
-        .filter(p => p.length > 0);
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
     } else {
       messageParts = paragraphs;
     }
@@ -435,7 +452,7 @@ async function sendAIResponseToWhatsApp(
 
     // If still just one part, use as-is
     if (messageParts.length === 0) {
-      messageParts = [aiResponse];
+      messageParts = [sanitizedResponse];
     }
 
     logDebug('SEND_RESPONSE', `Splitting into ${messageParts.length} messages`, { 
@@ -446,16 +463,22 @@ async function sendAIResponseToWhatsApp(
     const allMessageContents: string[] = [];
 
     for (let i = 0; i < messageParts.length; i++) {
-      const part = messageParts[i];
-      
+      const part = sanitizeText(messageParts[i]);
+
+      // If sanitization removed everything (e.g. the response was only a placeholder), skip
+      if (!part) {
+        logDebug('SEND_RESPONSE', `Skipping empty message part ${i + 1}/${messageParts.length} after sanitization`);
+        continue;
+      }
+
       // Add delay between messages (simulate typing)
       if (i > 0) {
         const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
-        await new Promise(resolve => setTimeout(resolve, typingDelay));
+        await new Promise((resolve) => setTimeout(resolve, typingDelay));
       }
 
-      logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, { 
-        partLength: part.length 
+      logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
+        partLength: part.length,
       });
 
       const sendResponse = await fetch(sendUrl, {
