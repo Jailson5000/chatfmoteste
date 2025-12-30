@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.test-openai-key]
 verify_jwt = false
+
+[functions.invite-team-member]
+verify_jwt = false
