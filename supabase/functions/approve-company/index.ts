@@ -79,7 +79,8 @@ serve(async (req) => {
 
     // Parse request body
     const body: ApproveRequest = await req.json();
-    const { company_id, action, rejection_reason, plan_id, max_users = 5, max_instances = 2, auto_activate_workflow = true } = body;
+    const { company_id, action, rejection_reason, plan_id, auto_activate_workflow = true } = body;
+    let { max_users = 5, max_instances = 2 } = body;
 
     if (!company_id || !action) {
       return new Response(
@@ -113,6 +114,30 @@ serve(async (req) => {
     }
 
     console.log(`[approve-company] Processing ${action} for company: ${company.name}`);
+
+    // If plan_id is provided, fetch plan details to get limits
+    const effectivePlanId = plan_id || company.plan_id;
+    let planName = 'Não definido';
+    
+    if (effectivePlanId) {
+      const { data: planData } = await supabase
+        .from('plans')
+        .select('name, max_users, max_instances')
+        .eq('id', effectivePlanId)
+        .single();
+      
+      if (planData) {
+        planName = planData.name;
+        // Use plan limits if not explicitly provided in request
+        if (!body.max_users && planData.max_users) {
+          max_users = planData.max_users;
+        }
+        if (!body.max_instances && planData.max_instances) {
+          max_instances = planData.max_instances;
+        }
+        console.log(`[approve-company] Using plan "${planName}" with limits: ${max_users} users, ${max_instances} instances`);
+      }
+    }
 
     // ========================================
     // HANDLE REJECTION

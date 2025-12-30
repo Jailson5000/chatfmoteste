@@ -58,6 +58,8 @@ export default function GlobalAdminCompanies() {
   const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  // State to track plan changes for pending companies
+  const [pendingPlanChanges, setPendingPlanChanges] = useState<Record<string, string>>({});
 
   const handleResetPassword = async (company: typeof companies[0]) => {
     if (!company.admin_user_id) {
@@ -233,11 +235,29 @@ export default function GlobalAdminCompanies() {
   };
 
   const handleApprove = async (company: typeof companies[0]) => {
+    const selectedPlanId = pendingPlanChanges[company.id] || company.plan_id;
+    const selectedPlan = plans.find(p => p.id === selectedPlanId);
+    
     const confirmApprove = confirm(
-      `Aprovar empresa "${company.name}"?\n\nIsso irá provisionar o APP do cliente, criar workflow n8n e enviar email de acesso.`
+      `Aprovar empresa "${company.name}"?\n\nPlano: ${selectedPlan?.name || 'Não definido'}\n\nIsso irá provisionar o APP do cliente, criar workflow n8n e enviar email de acesso.`
     );
     if (!confirmApprove) return;
-    await approveCompany.mutateAsync({ companyId: company.id });
+    await approveCompany.mutateAsync({ 
+      companyId: company.id,
+      planId: selectedPlanId || undefined,
+    });
+    // Clear the pending change after approval
+    setPendingPlanChanges(prev => {
+      const { [company.id]: _, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const handlePlanChange = (companyId: string, planId: string) => {
+    setPendingPlanChanges(prev => ({
+      ...prev,
+      [companyId]: planId,
+    }));
   };
 
   const handleReject = async () => {
@@ -536,68 +556,109 @@ export default function GlobalAdminCompanies() {
                       <TableHead>Empresa</TableHead>
                       <TableHead>Subdomínio</TableHead>
                       <TableHead>Contato</TableHead>
+                      <TableHead>Plano Escolhido</TableHead>
                       <TableHead>Cadastrada em</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pendingCompanies.map((company) => (
-                      <TableRow key={company.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{company.name}</p>
-                            <p className="text-sm text-muted-foreground">{company.document || '-'}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {company.law_firm?.subdomain ? (
-                            <div className="flex items-center gap-1 text-sm">
-                              <Globe className="h-3 w-3 text-muted-foreground" />
-                              <span className="font-mono">{company.law_firm.subdomain}.miauchat.com.br</span>
+                    {pendingCompanies.map((company) => {
+                      const currentPlanId = pendingPlanChanges[company.id] || company.plan_id;
+                      const selectedPlan = plans.find(p => p.id === currentPlanId);
+                      const hasChangedPlan = pendingPlanChanges[company.id] && pendingPlanChanges[company.id] !== company.plan_id;
+                      
+                      return (
+                        <TableRow key={company.id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{company.name}</p>
+                              <p className="text-sm text-muted-foreground">{company.document || '-'}</p>
                             </div>
-                          ) : (
-                            <span className="text-muted-foreground text-sm">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm">{company.email}</p>
-                            <p className="text-sm text-muted-foreground">{company.phone || '-'}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(company.created_at).toLocaleDateString("pt-BR", {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => handleApprove(company)}
-                              disabled={approveCompany.isPending}
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <Check className="h-4 w-4 mr-1" />
-                              Aprovar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => setRejectingCompany(company)}
-                              disabled={rejectCompany.isPending}
-                            >
-                              <X className="h-4 w-4 mr-1" />
-                              Rejeitar
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell>
+                            {company.law_firm?.subdomain ? (
+                              <div className="flex items-center gap-1 text-sm">
+                                <Globe className="h-3 w-3 text-muted-foreground" />
+                                <span className="font-mono">{company.law_firm.subdomain}.miauchat.com.br</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="text-sm">{company.email}</p>
+                              <p className="text-sm text-muted-foreground">{company.phone || '-'}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-2">
+                              <Select
+                                value={currentPlanId || ''}
+                                onValueChange={(value) => handlePlanChange(company.id, value)}
+                              >
+                                <SelectTrigger className={`w-[180px] ${hasChangedPlan ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
+                                  <SelectValue placeholder="Selecionar plano" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {plans.filter(p => p.is_active).map((plan) => (
+                                    <SelectItem key={plan.id} value={plan.id}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium">{plan.name}</span>
+                                        <span className="text-muted-foreground">
+                                          R$ {plan.price}/mês
+                                        </span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {selectedPlan && (
+                                <div className="text-xs text-muted-foreground">
+                                  {selectedPlan.max_users} usuários • {selectedPlan.max_instances} conexões
+                                </div>
+                              )}
+                              {hasChangedPlan && (
+                                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                                  Plano alterado
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {new Date(company.created_at).toLocaleDateString("pt-BR", {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprove(company)}
+                                disabled={approveCompany.isPending}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                <Check className="h-4 w-4 mr-1" />
+                                Aprovar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => setRejectingCompany(company)}
+                                disabled={rejectCompany.isPending}
+                              >
+                                <X className="h-4 w-4 mr-1" />
+                                Rejeitar
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
