@@ -15,12 +15,15 @@ const Index = () => {
   }, []);
 
   // PRIORITY 1: Tenant subdomain redirect (before auth check)
-  // Se é um subdomínio de tenant, redireciona IMEDIATAMENTE para /auth
+  // Se é um subdomínio de tenant, redireciona IMEDIATAMENTE para /auth ou dashboard
   useEffect(() => {
     if (tenantLoading) return;
     
     // É um subdomínio de tenant (não main domain)
     if (!isMainDomain && subdomain) {
+      // Aguarda apenas o auth loading inicial finalizar
+      if (authLoading) return;
+      
       // Se usuário já está logado, vai pro dashboard
       if (user) {
         navigate("/dashboard", { replace: true });
@@ -29,7 +32,7 @@ const Index = () => {
         navigate("/auth", { replace: true });
       }
     }
-  }, [tenantLoading, isMainDomain, subdomain, user, navigate]);
+  }, [tenantLoading, authLoading, isMainDomain, subdomain, user, navigate]);
 
   // PRIORITY 2: Usuário logado no domínio principal
   useEffect(() => {
@@ -56,8 +59,25 @@ const Index = () => {
     );
   }
 
-  // Se é um subdomínio (tenant), mostra loading até redirecionar
+  // Se é um subdomínio (tenant), mostra loading até auth resolver
   if (!isMainDomain && subdomain) {
+    // Aguarda auth resolver antes de mostrar loading de redirect
+    if (authLoading) {
+      return (
+        <div className="dark flex min-h-screen items-center justify-center bg-background">
+          <div className="flex flex-col items-center gap-4">
+            <img 
+              src={miauchatLogo} 
+              alt="MiauChat" 
+              className="w-20 h-20 object-contain animate-pulse" 
+            />
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          </div>
+        </div>
+      );
+    }
+    
+    // Auth resolveu, mostra loading de redirect
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
