@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 import { useAuth } from "./useAuth";
 import { useCompanyLimits } from "./useCompanyLimits";
 import type { AppRole } from "./useUserRole";
@@ -194,7 +195,10 @@ export function useTeamMembers() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const message = await getFunctionErrorMessage(error);
+        throw new Error(message);
+      }
       if (data?.error) throw new Error(data.error);
 
       return data;

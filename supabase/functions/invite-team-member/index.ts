@@ -11,7 +11,7 @@ const corsHeaders = {
 interface InviteRequest {
   email: string;
   full_name: string;
-  role: "admin" | "gerente" | "atendente";
+  role: "admin" | "gerente" | "advogado" | "estagiario" | "atendente";
   law_firm_id: string;
   department_ids?: string[];
 }
@@ -36,6 +36,8 @@ function generateTemporaryPassword(): string {
 const roleLabels: Record<string, string> = {
   admin: "Administrador",
   gerente: "Gerente",
+  advogado: "Supervisor",
+  estagiario: "Supervisor",
   atendente: "Atendente",
 };
 
@@ -182,6 +184,14 @@ serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+  const json = (status: number, payload: Record<string, unknown>) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
@@ -190,14 +200,82 @@ serve(async (req) => {
   });
 
   try {
+    const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
+    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+      return json(401, {
+        code: "UNAUTHORIZED",
+        message: "Sessão inválida. Faça login novamente.",
+      });
+    }
+
+    // We validate the user here (instead of relying on verify_jwt) so we can support all JWT formats.
+    const authSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: authUserData, error: authUserError } = await authSupabase.auth.getUser();
+    if (authUserError || !authUserData?.user) {
+      console.error("[invite-team-member] Invalid JWT", authUserError);
+      return json(401, {
+        code: "UNAUTHORIZED",
+        message: "Sessão expirada. Faça login novamente.",
+      });
+    }
+
     const body: InviteRequest = await req.json();
     const { email, full_name, role, law_firm_id, department_ids = [] } = body;
 
     if (!email || !full_name || !role || !law_firm_id) {
-      return new Response(
-        JSON.stringify({ error: "email, full_name, role and law_firm_id are required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return json(400, {
+        code: "BAD_REQUEST",
+        message: "email, full_name, role and law_firm_id são obrigatórios",
+      });
+    }
+
+    // Authorization: inviter must belong to this law firm AND be admin/gerente
+    const inviterId = authUserData.user.id;
+
+    const { data: inviterProfile, error: inviterProfileError } = await supabase
+      .from("profiles")
+      .select("law_firm_id")
+      .eq("id", inviterId)
+      .single();
+
+    if (inviterProfileError || !inviterProfile?.law_firm_id) {
+      console.error("[invite-team-member] Inviter profile missing", inviterProfileError);
+      return json(403, {
+        code: "FORBIDDEN",
+        message: "Você não tem permissão para convidar membros.",
+      });
+    }
+
+    if (inviterProfile.law_firm_id !== law_firm_id) {
+      return json(403, {
+        code: "FORBIDDEN",
+        message: "Você não tem permissão para convidar membros para este escritório.",
+      });
+    }
+
+    const { data: inviterRole, error: inviterRoleError } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", inviterId)
+      .single();
+
+    if (inviterRoleError || !inviterRole?.role) {
+      console.error("[invite-team-member] Inviter role missing", inviterRoleError);
+      return json(403, {
+        code: "FORBIDDEN",
+        message: "Você não tem permissão para convidar membros.",
+      });
+    }
+
+    if (!(["admin", "gerente"].includes(inviterRole.role))) {
+      return json(403, {
+        code: "FORBIDDEN",
+        message: "Somente Admin ou Gerente pode convidar membros.",
+      });
     }
 
     console.log("[invite-team-member] Inviting:", email, "to law firm:", law_firm_id);
@@ -232,19 +310,26 @@ serve(async (req) => {
 
     if (authError) {
       console.error("[invite-team-member] Auth error:", authError);
-      
-      // Check if user already exists
-      if (authError.message?.includes('already exists')) {
-        return new Response(
-          JSON.stringify({ error: "Este email já está cadastrado no sistema" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+
+      const authMsg = (authError.message || "").toLowerCase();
+      const isDuplicateEmail =
+        authMsg.includes("already") ||
+        authMsg.includes("exists") ||
+        authMsg.includes("registered") ||
+        authMsg.includes("duplicate") ||
+        authMsg.includes("email");
+
+      if (isDuplicateEmail) {
+        return json(409, {
+          code: "USER_ALREADY_EXISTS",
+          message: "Este e-mail já possui cadastro. Use outro e-mail ou peça para o usuário fazer login.",
+        });
       }
-      
-      return new Response(
-        JSON.stringify({ error: authError.message }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+
+      return json(400, {
+        code: "CREATE_USER_FAILED",
+        message: authError.message || "Falha ao criar usuário",
+      });
     }
 
     if (!authData.user) {
