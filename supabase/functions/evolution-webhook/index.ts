@@ -137,33 +137,73 @@ interface AutomationContext {
   instanceName: string;
 }
 
-// Get AI provider configuration from system_settings
-async function getAIProviderConfig(supabaseClient: any): Promise<{ provider: string; capabilities: Record<string, boolean> }> {
+// Get AI provider configuration - checks plan and tenant settings
+async function getAIProviderConfig(
+  supabaseClient: any, 
+  lawFirmId: string
+): Promise<{ 
+  provider: string; 
+  capabilities: Record<string, boolean>;
+  openaiApiKey: string | null;
+  isEnterprise: boolean;
+}> {
   try {
-    const { data: providerSetting } = await supabaseClient
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'ai_provider')
+    // First, check if this law firm has Enterprise plan
+    const { data: company } = await supabaseClient
+      .from('companies')
+      .select('plan_id, plans(name)')
+      .eq('law_firm_id', lawFirmId)
       .single();
 
-    const { data: capabilitiesSetting } = await supabaseClient
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'ai_capabilities')
+    const planName = (company?.plans as any)?.name || '';
+    const isEnterprise = planName.toLowerCase() === 'enterprise';
+
+    // If not Enterprise, always use internal AI
+    if (!isEnterprise) {
+      logDebug('AI_PROVIDER', 'Non-Enterprise plan - forcing internal AI', { lawFirmId, planName });
+      return {
+        provider: 'internal',
+        capabilities: { auto_reply: true, summary: true, transcription: true, classification: true },
+        openaiApiKey: null,
+        isEnterprise: false,
+      };
+    }
+
+    // Enterprise plan - check tenant-specific AI settings
+    const { data: settings } = await supabaseClient
+      .from('law_firm_settings')
+      .select('ai_provider, ai_capabilities, openai_api_key')
+      .eq('law_firm_id', lawFirmId)
       .single();
+
+    const aiProvider = settings?.ai_provider || 'internal';
+    const capabilities = settings?.ai_capabilities || {
+      auto_reply: true,
+      summary: true,
+      transcription: true,
+      classification: true,
+    };
+
+    logDebug('AI_PROVIDER', 'Enterprise plan - using tenant settings', { 
+      lawFirmId, 
+      provider: aiProvider,
+      hasOpenAIKey: Boolean(settings?.openai_api_key)
+    });
 
     return {
-      provider: (providerSetting?.value as string) || 'n8n',
-      capabilities: (capabilitiesSetting?.value as Record<string, boolean>) || {
-        auto_reply: true,
-        summary: true,
-        transcription: true,
-        classification: true,
-      },
+      provider: aiProvider,
+      capabilities,
+      openaiApiKey: settings?.openai_api_key || null,
+      isEnterprise: true,
     };
   } catch (error) {
-    logDebug('AI_PROVIDER', 'Error fetching AI provider config, defaulting to n8n', { error });
-    return { provider: 'n8n', capabilities: { auto_reply: true, summary: true, transcription: true, classification: true } };
+    logDebug('AI_PROVIDER', 'Error fetching AI provider config, defaulting to internal', { error });
+    return { 
+      provider: 'internal', 
+      capabilities: { auto_reply: true, summary: true, transcription: true, classification: true },
+      openaiApiKey: null,
+      isEnterprise: false,
+    };
   }
 }
 
@@ -171,7 +211,7 @@ async function getAIProviderConfig(supabaseClient: any): Promise<{ provider: str
 async function processWithInternalAI(
   supabaseClient: any, 
   context: AutomationContext, 
-  aiConfig: { provider: string; capabilities: Record<string, boolean> }
+  aiConfig: { provider: string; capabilities: Record<string, boolean>; openaiApiKey?: string | null; isEnterprise?: boolean }
 ) {
   if (!aiConfig.capabilities.auto_reply) {
     logDebug('AI_PROVIDER', 'auto_reply capability disabled, skipping internal AI');
@@ -235,10 +275,109 @@ async function processWithInternalAI(
   }
 }
 
-// Process automations - respects AI_PROVIDER setting
+// Process messages with OpenAI using company's own API key
+async function processWithOpenAI(
+  supabaseClient: any, 
+  context: AutomationContext, 
+  aiConfig: { provider: string; capabilities: Record<string, boolean>; openaiApiKey: string | null; isEnterprise: boolean }
+) {
+  if (!aiConfig.capabilities.auto_reply) {
+    logDebug('AI_PROVIDER', 'auto_reply capability disabled, skipping OpenAI');
+    return;
+  }
+
+  if (!aiConfig.openaiApiKey) {
+    logDebug('AI_PROVIDER', 'OpenAI API key not configured, cannot process');
+    return;
+  }
+
+  logDebug('AI_PROVIDER', 'Processing with OpenAI (company API key)', { conversationId: context.conversationId });
+
+  try {
+    // Get automation prompt if available
+    const { data: automations } = await supabaseClient
+      .from('automations')
+      .select('ai_prompt, ai_temperature')
+      .eq('law_firm_id', context.lawFirmId)
+      .eq('is_active', true)
+      .limit(1);
+
+    const automation = automations?.[0];
+    
+    // Get recent messages for context
+    const { data: recentMessages } = await supabaseClient
+      .from('messages')
+      .select('content, is_from_me, message_type, created_at')
+      .eq('conversation_id', context.conversationId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    // Build messages array for OpenAI
+    const systemPrompt = automation?.ai_prompt || 
+      `Você é um assistente jurídico profissional. Responda de forma clara e objetiva.
+       Nome do contato: ${context.contactName}
+       Telefone: ${context.contactPhone}`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...(recentMessages?.reverse() || []).map((msg: any) => ({
+        role: msg.is_from_me ? 'assistant' : 'user',
+        content: msg.content || ''
+      })),
+      { role: 'user', content: context.messageContent }
+    ];
+
+    // Call OpenAI API directly with company's key
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${aiConfig.openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        temperature: automation?.ai_temperature || 0.7,
+        max_tokens: 1024,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logDebug('AI_PROVIDER', 'OpenAI API call failed', { status: response.status, error: errorText });
+      return;
+    }
+
+    const result = await response.json();
+    const aiResponse = result.choices?.[0]?.message?.content;
+
+    if (aiResponse) {
+      logDebug('AI_PROVIDER', 'OpenAI response received', { responseLength: aiResponse.length });
+
+      // Log the AI processing
+      await supabaseClient
+        .from('webhook_logs')
+        .insert({
+          direction: 'internal',
+          payload: {
+            provider: 'openai_company',
+            conversation_id: context.conversationId,
+            message: context.messageContent,
+            model: 'gpt-4o-mini',
+          },
+          status_code: 200,
+        });
+    }
+
+  } catch (error) {
+    logDebug('AI_PROVIDER', 'Error processing with OpenAI', { error: error instanceof Error ? error.message : error });
+  }
+}
+
+// Process automations - respects AI_PROVIDER setting per tenant
 async function processAutomations(supabaseClient: any, context: AutomationContext) {
-  // Check AI provider configuration first
-  const aiConfig = await getAIProviderConfig(supabaseClient);
+  // Check AI provider configuration for this tenant
+  const aiConfig = await getAIProviderConfig(supabaseClient, context.lawFirmId);
   
   // If provider is 'internal', skip n8n entirely
   if (aiConfig.provider === 'internal') {
@@ -246,8 +385,15 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
     await processWithInternalAI(supabaseClient, context, aiConfig);
     return;
   }
+
+  // If provider is 'openai', use OpenAI with company's API key
+  if (aiConfig.provider === 'openai') {
+    logDebug('AI_PROVIDER', 'Provider is OPENAI - using company API key');
+    await processWithOpenAI(supabaseClient, context, aiConfig);
+    return;
+  }
   
-  // If provider is 'n8n' or 'hybrid', proceed with n8n
+  // If provider is 'n8n', proceed with n8n
   logDebug('AI_PROVIDER', `Provider is ${aiConfig.provider.toUpperCase()} - routing to n8n`);
   
   const n8nWebhookUrl = Deno.env.get("N8N_WEBHOOK_URL");

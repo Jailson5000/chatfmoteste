@@ -7,7 +7,8 @@ import {
   CheckCircle2, 
   AlertCircle,
   ArrowRight,
-  Settings
+  Settings,
+  Key
 } from "lucide-react";
 import { useAIProvider } from "@/hooks/useAIProvider";
 import { Button } from "@/components/ui/button";
@@ -21,13 +22,12 @@ interface AIProviderIndicatorProps {
 
 /**
  * Component that shows the current AI provider status with visual indicators.
- * Shows the flow of messages and which system is processing them.
  */
 export function AIProviderIndicator({ 
   variant = "compact",
   className 
 }: AIProviderIndicatorProps) {
-  const { config, isLoading, isN8N, isInternal, isHybrid } = useAIProvider();
+  const { config, isLoading, isN8N, isInternal, isOpenAI } = useAIProvider();
   const navigate = useNavigate();
 
   if (isLoading) {
@@ -63,10 +63,10 @@ export function AIProviderIndicator({
               <span className="font-medium">MiauChat AI</span>
             </>
           )}
-          {isHybrid && (
+          {isOpenAI && (
             <>
-              <Bot className="h-4 w-4 text-purple-500" />
-              <span className="font-medium">Híbrido</span>
+              <Key className="h-4 w-4 text-purple-500" />
+              <span className="font-medium">OpenAI</span>
             </>
           )}
         </div>
@@ -102,23 +102,17 @@ export function AIProviderIndicator({
             <ArrowRight className="h-4 w-4 text-muted-foreground" />
             
             {isN8N && (
-              <>
-                <div className={cn(
-                  "p-2 rounded-lg border-2",
-                  config.n8nConfigured 
-                    ? "bg-blue-500/10 border-blue-500/30" 
-                    : "bg-destructive/10 border-destructive/30"
-                )}>
-                  <div className="flex items-center gap-1">
-                    <Workflow className="h-4 w-4 text-blue-500" />
-                    <span className="text-xs font-medium">N8N Webhook</span>
-                  </div>
+              <div className={cn(
+                "p-2 rounded-lg border-2",
+                config.n8nConfigured 
+                  ? "bg-blue-500/10 border-blue-500/30" 
+                  : "bg-destructive/10 border-destructive/30"
+              )}>
+                <div className="flex items-center gap-1">
+                  <Workflow className="h-4 w-4 text-blue-500" />
+                  <span className="text-xs font-medium">N8N</span>
                 </div>
-                <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                <div className="p-2 bg-background rounded-lg border">
-                  <span className="text-xs font-medium">OpenAI</span>
-                </div>
-              </>
+              </div>
             )}
             
             {isInternal && (
@@ -130,28 +124,28 @@ export function AIProviderIndicator({
               </div>
             )}
             
-            {isHybrid && (
-              <>
-                <div className="p-2 bg-emerald-500/10 rounded-lg border-2 border-emerald-500/30">
-                  <div className="flex items-center gap-1">
-                    <Sparkles className="h-4 w-4 text-emerald-500" />
-                    <span className="text-xs font-medium">Chat</span>
-                  </div>
+            {isOpenAI && (
+              <div className="p-2 bg-purple-500/10 rounded-lg border-2 border-purple-500/30">
+                <div className="flex items-center gap-1">
+                  <Key className="h-4 w-4 text-purple-500" />
+                  <span className="text-xs font-medium">OpenAI</span>
                 </div>
-                <span className="text-xs text-muted-foreground">+</span>
-                <div className="p-2 bg-blue-500/10 rounded-lg border-2 border-blue-500/30">
-                  <div className="flex items-center gap-1">
-                    <Workflow className="h-4 w-4 text-blue-500" />
-                    <span className="text-xs font-medium">Automações</span>
-                  </div>
-                </div>
-              </>
+              </div>
             )}
           </div>
         </div>
 
         {/* Status Indicators */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30">
+            {isInternal ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            ) : (
+              <div className="h-4 w-4 rounded-full bg-muted" />
+            )}
+            <p className="text-xs font-medium">MiauChat</p>
+          </div>
+          
           <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30">
             {isN8N ? (
               config.n8nConfigured ? (
@@ -162,43 +156,22 @@ export function AIProviderIndicator({
             ) : (
               <div className="h-4 w-4 rounded-full bg-muted" />
             )}
-            <div>
-              <p className="text-xs font-medium">N8N</p>
-              <p className="text-xs text-muted-foreground">
-                {config.n8nConfigured ? "Configurado" : "Não configurado"}
-              </p>
-            </div>
+            <p className="text-xs font-medium">N8N</p>
           </div>
           
           <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30">
-            {isInternal || isHybrid ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            {isOpenAI ? (
+              config.openaiConfigured ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-destructive" />
+              )
             ) : (
               <div className="h-4 w-4 rounded-full bg-muted" />
             )}
-            <div>
-              <p className="text-xs font-medium">MiauChat AI</p>
-              <p className="text-xs text-muted-foreground">
-                Sempre disponível
-              </p>
-            </div>
+            <p className="text-xs font-medium">OpenAI</p>
           </div>
         </div>
-
-        {/* Warning for N8N not configured */}
-        {isN8N && !config.n8nConfigured && (
-          <div className="flex items-start gap-2 p-3 bg-destructive/10 rounded-lg border border-destructive/20">
-            <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-destructive">
-                N8N não configurado
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Configure o webhook do N8N ou mude para MiauChat AI.
-              </p>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );
