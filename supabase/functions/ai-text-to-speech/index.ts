@@ -18,8 +18,7 @@ const corsHeaders = {
 
 // Available voices for TTS (OpenAI valid voices)
 const VOICES: Record<string, { name: string; gender: string; description: string }> = {
-  // Female voices
-  'nova': { name: 'Nova', gender: 'female', description: 'Voz feminina suave e elegante' },
+  // Female voice
   'shimmer': { name: 'Shimmer', gender: 'female', description: 'Voz feminina clara e expressiva' },
   // Male voices  
   'onyx': { name: 'Onyx', gender: 'male', description: 'Voz masculina grave e profissional' },
@@ -42,7 +41,7 @@ serve(async (req) => {
     }
 
     // Validate voice - use nova as default if invalid
-    const voice = voiceId in VOICES ? voiceId : 'nova';
+    const voice = voiceId in VOICES ? voiceId : 'shimmer';
 
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
