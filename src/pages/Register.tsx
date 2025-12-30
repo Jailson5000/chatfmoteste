@@ -1,20 +1,26 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2 } from "lucide-react";
+import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { publicRegistrationSchema, companyFieldConfig } from "@/lib/schemas/companySchema";
+import { usePlans } from "@/hooks/usePlans";
 
 export default function Register() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const { plans, isLoading: plansLoading } = usePlans();
+  
+  // Filter only active plans
+  const activePlans = plans.filter(plan => plan.is_active);
   
   const [formData, setFormData] = useState({
     companyName: "",
@@ -22,6 +28,7 @@ export default function Register() {
     email: "",
     phone: "",
     document: "",
+    planId: "",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,6 +54,7 @@ export default function Register() {
           admin_email: formData.email,
           phone: formData.phone || undefined,
           document: formData.document || undefined,
+          plan_id: formData.planId,
         },
       });
 
@@ -299,10 +307,73 @@ export default function Register() {
                 </div>
               </div>
               
+              {/* Plan Selection */}
+              <div className="space-y-3">
+                <Label className="text-zinc-300 flex items-center gap-2">
+                  <CreditCard className="h-4 w-4 text-zinc-500" />
+                  {companyFieldConfig.planId.label} *
+                </Label>
+                
+                {plansLoading ? (
+                  <div className="text-zinc-500 text-sm">Carregando planos...</div>
+                ) : activePlans.length === 0 ? (
+                  <div className="text-zinc-500 text-sm">Nenhum plano disponível</div>
+                ) : (
+                  <RadioGroup
+                    value={formData.planId}
+                    onValueChange={(value) => setFormData({ ...formData, planId: value })}
+                    className="space-y-2"
+                  >
+                    {activePlans.map((plan) => (
+                      <div
+                        key={plan.id}
+                        className={`relative flex items-start p-3 rounded-lg border transition-all cursor-pointer ${
+                          formData.planId === plan.id
+                            ? "border-red-500 bg-red-500/10"
+                            : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
+                        }`}
+                        onClick={() => setFormData({ ...formData, planId: plan.id })}
+                      >
+                        <RadioGroupItem
+                          value={plan.id}
+                          id={plan.id}
+                          className="mt-1 border-zinc-500 text-red-500"
+                        />
+                        <div className="ml-3 flex-1">
+                          <div className="flex items-center justify-between">
+                            <Label
+                              htmlFor={plan.id}
+                              className="text-white font-medium cursor-pointer"
+                            >
+                              {plan.name}
+                            </Label>
+                            <span className="text-red-400 font-semibold">
+                              R$ {plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              <span className="text-xs text-zinc-500">/{plan.billing_period === 'monthly' ? 'mês' : plan.billing_period}</span>
+                            </span>
+                          </div>
+                          {plan.description && (
+                            <p className="text-zinc-400 text-xs mt-1">{plan.description}</p>
+                          )}
+                          <div className="flex gap-3 mt-2 text-xs text-zinc-500">
+                            <span>{plan.max_users} usuários</span>
+                            <span>•</span>
+                            <span>{plan.max_instances} instâncias</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </RadioGroup>
+                )}
+              </div>
+              
               <div className="bg-zinc-800/30 rounded-lg p-3 border border-zinc-700/50">
                 <p className="text-xs text-zinc-400">
                   ⚠️ Após o cadastro, sua solicitação será analisada pela nossa equipe. 
                   Você receberá um email com os dados de acesso após a aprovação.
+                  <span className="block mt-1 text-zinc-500">
+                    O plano selecionado só será ativado após a aprovação do cadastro.
+                  </span>
                 </p>
               </div>
               
