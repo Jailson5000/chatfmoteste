@@ -1188,6 +1188,16 @@ export function MessageBubble({
     messageType === "document"
   );
 
+  const displayContent = (() => {
+    if (!content) return "";
+    // Remove placeholder lines that are used to represent audio-only messages
+    return content
+      .split("\n")
+      .filter((line) => line.trim() !== "[Mensagem de áudio]")
+      .join("\n")
+      .trim();
+  })();
+
   return (
     <div
       className={cn(
@@ -1259,13 +1269,12 @@ export function MessageBubble({
           </div>
         )}
         
-        {/* Render text content - show unless it's ONLY the placeholder */}
-        {content && content.trim() !== '[Mensagem de áudio]' && (
+        {/* Render text content (strip audio placeholder line if it came mixed with text) */}
+        {displayContent && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
-            {highlightText ? highlightText(content) : content}
+            {highlightText ? highlightText(displayContent) : displayContent}
           </p>
         )}
-
         {/* Show audio player for AI-sent audio without URL - fetch via WhatsApp message ID */}
         {!hasMedia && messageType === "audio" && whatsappMessageId && conversationId && (
           <AIAudioPlayer 
