@@ -56,6 +56,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "admin_notification_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "company_usage_summary"
+            referencedColumns: ["company_id"]
+          },
         ]
       }
       admin_profiles: {
@@ -734,8 +741,12 @@ export type Database = {
           initial_access_email_sent_at: string | null
           last_health_check_at: string | null
           law_firm_id: string | null
+          max_agents: number | null
+          max_ai_conversations: number | null
           max_instances: number | null
+          max_tts_minutes: number | null
           max_users: number | null
+          max_workspaces: number | null
           n8n_created_at: string | null
           n8n_last_error: string | null
           n8n_next_retry_at: string | null
@@ -756,6 +767,7 @@ export type Database = {
           template_version: number | null
           trial_ends_at: string | null
           updated_at: string
+          use_custom_limits: boolean
         }
         Insert: {
           admin_user_id?: string | null
@@ -773,8 +785,12 @@ export type Database = {
           initial_access_email_sent_at?: string | null
           last_health_check_at?: string | null
           law_firm_id?: string | null
+          max_agents?: number | null
+          max_ai_conversations?: number | null
           max_instances?: number | null
+          max_tts_minutes?: number | null
           max_users?: number | null
+          max_workspaces?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
           n8n_next_retry_at?: string | null
@@ -795,6 +811,7 @@ export type Database = {
           template_version?: number | null
           trial_ends_at?: string | null
           updated_at?: string
+          use_custom_limits?: boolean
         }
         Update: {
           admin_user_id?: string | null
@@ -812,8 +829,12 @@ export type Database = {
           initial_access_email_sent_at?: string | null
           last_health_check_at?: string | null
           law_firm_id?: string | null
+          max_agents?: number | null
+          max_ai_conversations?: number | null
           max_instances?: number | null
+          max_tts_minutes?: number | null
           max_users?: number | null
+          max_workspaces?: number | null
           n8n_created_at?: string | null
           n8n_last_error?: string | null
           n8n_next_retry_at?: string | null
@@ -834,6 +855,7 @@ export type Database = {
           template_version?: number | null
           trial_ends_at?: string | null
           updated_at?: string
+          use_custom_limits?: boolean
         }
         Relationships: [
           {
@@ -1891,6 +1913,56 @@ export type Database = {
           },
         ]
       }
+      usage_history_monthly: {
+        Row: {
+          ai_conversations: number | null
+          billing_period: string
+          closed_at: string | null
+          created_at: string | null
+          id: string
+          law_firm_id: string
+          max_agents_snapshot: number | null
+          max_instances_snapshot: number | null
+          max_users_snapshot: number | null
+          transcriptions: number | null
+          tts_minutes: number | null
+        }
+        Insert: {
+          ai_conversations?: number | null
+          billing_period: string
+          closed_at?: string | null
+          created_at?: string | null
+          id?: string
+          law_firm_id: string
+          max_agents_snapshot?: number | null
+          max_instances_snapshot?: number | null
+          max_users_snapshot?: number | null
+          transcriptions?: number | null
+          tts_minutes?: number | null
+        }
+        Update: {
+          ai_conversations?: number | null
+          billing_period?: string
+          closed_at?: string | null
+          created_at?: string | null
+          id?: string
+          law_firm_id?: string
+          max_agents_snapshot?: number | null
+          max_instances_snapshot?: number | null
+          max_users_snapshot?: number | null
+          transcriptions?: number | null
+          tts_minutes?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_history_monthly_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       usage_records: {
         Row: {
           billing_period: string
@@ -2088,9 +2160,49 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      company_usage_summary: {
+        Row: {
+          company_id: string | null
+          company_name: string | null
+          current_agents: number | null
+          current_ai_conversations: number | null
+          current_instances: number | null
+          current_tts_minutes: number | null
+          current_users: number | null
+          effective_max_agents: number | null
+          effective_max_ai_conversations: number | null
+          effective_max_instances: number | null
+          effective_max_tts_minutes: number | null
+          effective_max_users: number | null
+          effective_max_workspaces: number | null
+          law_firm_id: string | null
+          plan_id: string | null
+          plan_name: string | null
+          use_custom_limits: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "companies_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "companies_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
+      check_company_limit: {
+        Args: { _increment?: number; _law_firm_id: string; _limit_type: string }
+        Returns: Json
+      }
       clone_template_for_company: {
         Args: { _company_id: string; _law_firm_id: string }
         Returns: Json
