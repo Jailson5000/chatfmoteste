@@ -71,3 +71,9 @@ verify_jwt = false
 
 [functions.custom-password-reset]
 verify_jwt = false
+
+[functions.ai-chat]
+verify_jwt = false
+
+[functions.ai-classify]
+verify_jwt = false
