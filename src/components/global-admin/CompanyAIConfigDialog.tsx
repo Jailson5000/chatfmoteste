@@ -141,10 +141,12 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
     try {
       // Determine primary provider for legacy compatibility
       // Priority: n8n > openai > internal
+      // Note: When both IA do Site and OpenAI are active, we store 'internal' for legacy
+      // The actual activation flags are in ai_capabilities (ia_site_active, openai_active)
       let activeProvider = "internal";
       if (n8nEnabled) activeProvider = "n8n";
       else if (openaiEnabled && !internalEnabled) activeProvider = "openai";
-      else if (openaiEnabled && internalEnabled) activeProvider = "hybrid"; // Both active
+      // When both active, keep 'internal' as legacy value - actual logic uses ai_capabilities flags
 
       // Store activation flags in ai_capabilities for new model
       const enhancedCapabilities = {
