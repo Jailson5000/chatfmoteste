@@ -1,10 +1,10 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useUserRole } from "@/hooks/useUserRole";
+import { useUserRole, AppRole } from "@/hooks/useUserRole";
 
 interface AdminRouteProps {
   children: React.ReactNode;
-  allowedRoles?: ("admin" | "advogado" | "estagiario" | "atendente")[];
+  allowedRoles?: AppRole[];
 }
 
 export function AdminRoute({ children, allowedRoles = ["admin"] }: AdminRouteProps) {
