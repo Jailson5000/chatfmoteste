@@ -20,6 +20,47 @@ interface ChatRequest {
   };
 }
 
+// Helper to fetch agent knowledge base items
+async function getAgentKnowledge(
+  supabase: any,
+  automationId: string
+): Promise<string> {
+  const { data: agentKnowledge, error } = await supabase
+    .from("agent_knowledge")
+    .select(`
+      knowledge_item_id,
+      knowledge_items (
+        id,
+        title,
+        content,
+        category,
+        item_type
+      )
+    `)
+    .eq("automation_id", automationId);
+
+  if (error || !agentKnowledge || agentKnowledge.length === 0) {
+    console.log(`[AI Chat] No knowledge items found for automation ${automationId}`);
+    return "";
+  }
+
+  const knowledgeItems = agentKnowledge
+    .map((ak: any) => ak.knowledge_items)
+    .filter(Boolean);
+
+  if (knowledgeItems.length === 0) {
+    return "";
+  }
+
+  const knowledgeText = knowledgeItems
+    .map((item: any) => `### ${item.title} (${item.category})\n${item.content || ""}`)
+    .join("\n\n");
+
+  console.log(`[AI Chat] Loaded ${knowledgeItems.length} knowledge items for automation ${automationId}`);
+
+  return `\n\n📚 BASE DE CONHECIMENTO (use estas informações para responder):\n${knowledgeText}`;
+}
+
 // Helper to fetch client memories
 async function getClientMemories(
   supabase: any,
@@ -261,6 +302,15 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
       { role: "system", content: systemPrompt }
     ];
 
+    // Add agent knowledge base if automationId is provided
+    let knowledgeText = "";
+    if (automationId) {
+      knowledgeText = await getAgentKnowledge(supabase, automationId);
+      if (knowledgeText) {
+        messages.push({ role: "system", content: knowledgeText });
+      }
+    }
+
     // Add client memories if clientId is provided
     let clientMemoriesText = "";
     if (context?.clientId) {
@@ -304,7 +354,7 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
     messages.push({ role: "user", content: message });
 
     console.log(`[AI Chat] Processing message for conversation ${conversationId}`);
-    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}`);
+    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}`);
 
     // Call Lovable AI
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
