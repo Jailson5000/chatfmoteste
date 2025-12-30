@@ -9,13 +9,181 @@ const corsHeaders = {
 interface ChatRequest {
   conversationId: string;
   message: string;
-  automationId?: string; // Optional: use specific agent prompt
+  automationId?: string;
   context?: {
     clientName?: string;
     clientPhone?: string;
     currentStatus?: string;
     previousMessages?: Array<{ role: string; content: string }>;
+    clientId?: string;
+    lawFirmId?: string;
   };
+}
+
+// Helper to fetch client memories
+async function getClientMemories(
+  supabase: any,
+  clientId: string
+): Promise<string> {
+  const { data: memories } = await supabase
+    .from("client_memories")
+    .select("fact_type, content, importance")
+    .eq("client_id", clientId)
+    .eq("is_active", true)
+    .order("importance", { ascending: false })
+    .limit(15);
+
+  if (!memories || memories.length === 0) {
+    return "";
+  }
+
+  const memoryText = (memories as any[])
+    .map((m: any) => `- [${m.fact_type}] ${m.content}`)
+    .join("\n");
+
+  return `\n\n📝 MEMÓRIA DO CLIENTE (fatos importantes já conhecidos):\n${memoryText}`;
+}
+
+// Helper to get conversation context for long conversations
+async function getConversationContext(
+  supabase: any,
+  conversationId: string,
+  maxMessages: number = 10
+): Promise<{ messages: Array<{ role: string; content: string }>; needsSummary: boolean }> {
+  // Get total message count
+  const { count } = await supabase
+    .from("messages")
+    .select("*", { count: "exact", head: true })
+    .eq("conversation_id", conversationId);
+
+  const totalMessages = count || 0;
+  const needsSummary = totalMessages > 20;
+
+  // Get recent messages
+  const { data: recentMessages } = await supabase
+    .from("messages")
+    .select("content, is_from_me, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(maxMessages);
+
+  if (!recentMessages || recentMessages.length === 0) {
+    return { messages: [], needsSummary: false };
+  }
+
+  // Convert to chat format (reverse to chronological order)
+  const messages = (recentMessages as any[])
+    .reverse()
+    .filter((m: any) => m.content)
+    .map((m: any) => ({
+      role: m.is_from_me ? "assistant" : "user",
+      content: m.content!
+    }));
+
+  return { messages, needsSummary };
+}
+
+// Generate and save conversation summary
+async function generateAndSaveSummary(
+  supabase: any,
+  conversationId: string,
+  LOVABLE_API_KEY: string
+): Promise<string | null> {
+  // Check if we recently summarized
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("ai_summary, last_summarized_at, summary_message_count")
+    .eq("id", conversationId)
+    .single();
+
+  const { count: currentCount } = await supabase
+    .from("messages")
+    .select("*", { count: "exact", head: true })
+    .eq("conversation_id", conversationId);
+
+  const conv = conversation as any;
+
+  // If we have a recent summary and not many new messages, use existing
+  if (
+    conv?.ai_summary &&
+    conv?.summary_message_count &&
+    currentCount &&
+    currentCount - conv.summary_message_count < 15
+  ) {
+    return conv.ai_summary;
+  }
+
+  // Get all messages for summary
+  const { data: allMessages } = await supabase
+    .from("messages")
+    .select("content, is_from_me, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  if (!allMessages || allMessages.length < 10) {
+    return null;
+  }
+
+  // Build conversation text for summarization
+  const conversationText = (allMessages as any[])
+    .filter((m: any) => m.content)
+    .map((m: any) => `${m.is_from_me ? "Assistente" : "Cliente"}: ${m.content}`)
+    .join("\n");
+
+  const summaryPrompt = `Resuma esta conversa jurídica em 3-4 frases, destacando:
+- O problema principal do cliente
+- Informações importantes coletadas
+- Status atual do atendimento
+- Próximos passos acordados (se houver)
+
+CONVERSA:
+${conversationText}
+
+Responda apenas com o resumo, sem formatação especial.`;
+
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [{ role: "user", content: summaryPrompt }],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("[AI Chat] Failed to generate summary");
+      return conv?.ai_summary || null;
+    }
+
+    const data = await response.json();
+    const summary = data.choices?.[0]?.message?.content;
+
+    if (summary) {
+      // Save summary to conversation
+      await supabase
+        .from("conversations")
+        .update({
+          ai_summary: summary,
+          last_summarized_at: new Date().toISOString(),
+          summary_message_count: currentCount,
+        })
+        .eq("id", conversationId);
+
+      console.log(`[AI Chat] Generated new summary for conversation ${conversationId}`);
+      return summary;
+    }
+
+    return conv?.ai_summary || null;
+  } catch (error) {
+    console.error("[AI Chat] Summary generation error:", error);
+    return conv?.ai_summary || null;
+  }
 }
 
 serve(async (req) => {
@@ -42,7 +210,6 @@ serve(async (req) => {
       );
     }
 
-    // Create Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -79,13 +246,13 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
         .single();
 
       if (automation && !automationError) {
-        if (automation.ai_prompt) {
-          systemPrompt = automation.ai_prompt;
+        if ((automation as any).ai_prompt) {
+          systemPrompt = (automation as any).ai_prompt;
         }
-        if (automation.ai_temperature !== null) {
-          temperature = automation.ai_temperature;
+        if ((automation as any).ai_temperature !== null) {
+          temperature = (automation as any).ai_temperature;
         }
-        console.log(`Using custom prompt from automation: ${automation.name}`);
+        console.log(`[AI Chat] Using custom prompt from automation: ${(automation as any).name}`);
       }
     }
 
@@ -94,18 +261,41 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
       { role: "system", content: systemPrompt }
     ];
 
+    // Add client memories if clientId is provided
+    let clientMemoriesText = "";
+    if (context?.clientId) {
+      clientMemoriesText = await getClientMemories(supabase, context.clientId);
+    }
+
+    // Get conversation context with potential summary
+    const { messages: previousMessages, needsSummary } = await getConversationContext(
+      supabase,
+      conversationId
+    );
+
+    // If conversation is long, generate/use summary
+    let summaryText = "";
+    if (needsSummary) {
+      const summary = await generateAndSaveSummary(supabase, conversationId, LOVABLE_API_KEY);
+      if (summary) {
+        summaryText = `\n\n📋 RESUMO DA CONVERSA ANTERIOR:\n${summary}`;
+      }
+    }
+
     // Add context about the client
-    if (context?.clientName || context?.clientPhone) {
+    if (context?.clientName || context?.clientPhone || clientMemoriesText || summaryText) {
       const clientInfo = `Informações do cliente:
-- Nome: ${context.clientName || "Não informado"}
-- Telefone: ${context.clientPhone || "Não informado"}
-- Status atual: ${context.currentStatus || "Novo contato"}`;
+- Nome: ${context?.clientName || "Não informado"}
+- Telefone: ${context?.clientPhone || "Não informado"}
+- Status atual: ${context?.currentStatus || "Novo contato"}${clientMemoriesText}${summaryText}`;
       
       messages.push({ role: "system", content: clientInfo });
     }
 
-    // Add previous messages for context (last 10)
-    if (context?.previousMessages && context.previousMessages.length > 0) {
+    // Add previous messages for context
+    if (previousMessages.length > 0) {
+      messages.push(...previousMessages);
+    } else if (context?.previousMessages && context.previousMessages.length > 0) {
       const recentMessages = context.previousMessages.slice(-10);
       messages.push(...recentMessages);
     }
@@ -114,7 +304,7 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
     messages.push({ role: "user", content: message });
 
     console.log(`[AI Chat] Processing message for conversation ${conversationId}`);
-    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}`);
+    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}`);
 
     // Call Lovable AI
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -162,6 +352,23 @@ Se o cliente demonstrar urgência extrema ou risco iminente, informe que um advo
     }
 
     console.log(`[AI Chat] Response generated, length: ${aiResponse.length}`);
+
+    // Trigger fact extraction in background if we have client info
+    if (context?.clientId && context?.lawFirmId) {
+      // Fire and forget - don't await
+      fetch(`${supabaseUrl}/functions/v1/extract-client-facts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
+          conversationId,
+          clientId: context.clientId,
+          lawFirmId: context.lawFirmId,
+        }),
+      }).catch(err => console.error("[AI Chat] Failed to trigger fact extraction:", err));
+    }
 
     return new Response(
       JSON.stringify({
