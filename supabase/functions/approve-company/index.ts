@@ -296,33 +296,50 @@ serve(async (req) => {
     const adminName = body.admin_name || lawFirm?.name || company.name;
 
     // ========================================
-    // STEP 1: CREATE DEFAULT AUTOMATION
+    // STEP 1: CLONE TEMPLATE BASE FOR COMPANY
     // ========================================
-    console.log('[approve-company] Creating default automation...');
+    console.log('[approve-company] Cloning template base for company...');
     
-    const n8nWebhookUrl = Deno.env.get('N8N_WEBHOOK_URL');
+    let templateCloneResult = null;
     let automationId: string | null = null;
 
-    const { data: automation, error: automationError } = await supabase
-      .from('automations')
-      .insert({
-        law_firm_id: lawFirm.id,
-        name: 'Atendente IA Principal',
-        trigger_type: 'message_received',
-        webhook_url: n8nWebhookUrl || 'https://n8n.miauchat.com.br/webhook/atendimento',
-        is_active: true,
-        ai_prompt: `Você é um assistente virtual da empresa ${company.name}. Seja cordial e profissional.`,
-        ai_temperature: 0.7,
-        trigger_config: { enabled: true },
-      })
-      .select()
-      .single();
+    try {
+      // Call the database function to clone template
+      const { data: cloneResult, error: cloneError } = await supabase
+        .rpc('clone_template_for_company', {
+          _law_firm_id: lawFirm.id,
+          _company_id: company_id,
+        });
 
-    if (!automationError && automation) {
-      automationId = automation.id;
-      console.log('[approve-company] Automation created:', automationId);
-    } else {
-      console.warn('[approve-company] Automation creation failed:', automationError);
+      if (cloneError) {
+        console.error('[approve-company] Template clone error:', cloneError);
+        // Fallback: create basic automation manually
+        const n8nWebhookUrl = Deno.env.get('N8N_WEBHOOK_URL');
+        const { data: automation, error: automationError } = await supabase
+          .from('automations')
+          .insert({
+            law_firm_id: lawFirm.id,
+            name: 'Atendente IA Principal',
+            trigger_type: 'message_received',
+            webhook_url: n8nWebhookUrl || 'https://n8n.miauchat.com.br/webhook/atendimento',
+            is_active: true,
+            ai_prompt: `Você é um assistente virtual da empresa ${company.name}. Seja cordial e profissional.`,
+            ai_temperature: 0.7,
+            trigger_config: { enabled: true },
+          })
+          .select()
+          .single();
+
+        if (!automationError && automation) {
+          automationId = automation.id;
+        }
+      } else {
+        templateCloneResult = cloneResult;
+        automationId = cloneResult?.automation_id || null;
+        console.log('[approve-company] Template cloned successfully:', cloneResult);
+      }
+    } catch (templateError) {
+      console.error('[approve-company] Template clone exception:', templateError);
     }
 
     // Update client app status
@@ -566,6 +583,8 @@ serve(async (req) => {
         provisioning_status: provisioningStatus,
         admin_user_created: !!adminUserResult,
         n8n_workflow_id: n8nResult?.workflow_id,
+        template_cloned: !!templateCloneResult,
+        template_version: templateCloneResult?.template_version,
         timestamp: new Date().toISOString(),
       },
     });

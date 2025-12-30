@@ -186,6 +186,119 @@ export type Database = {
           },
         ]
       }
+      ai_template_base: {
+        Row: {
+          ai_capabilities: Json | null
+          ai_prompt: string | null
+          ai_provider: string
+          ai_temperature: number | null
+          created_at: string
+          created_by: string | null
+          default_automation_description: string | null
+          default_automation_name: string | null
+          default_automation_trigger_config: Json | null
+          default_automation_trigger_type: string | null
+          default_departments: Json | null
+          default_statuses: Json | null
+          default_tags: Json | null
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          response_delay_seconds: number | null
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          ai_capabilities?: Json | null
+          ai_prompt?: string | null
+          ai_provider?: string
+          ai_temperature?: number | null
+          created_at?: string
+          created_by?: string | null
+          default_automation_description?: string | null
+          default_automation_name?: string | null
+          default_automation_trigger_config?: Json | null
+          default_automation_trigger_type?: string | null
+          default_departments?: Json | null
+          default_statuses?: Json | null
+          default_tags?: Json | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          response_delay_seconds?: number | null
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          ai_capabilities?: Json | null
+          ai_prompt?: string | null
+          ai_provider?: string
+          ai_temperature?: number | null
+          created_at?: string
+          created_by?: string | null
+          default_automation_description?: string | null
+          default_automation_name?: string | null
+          default_automation_trigger_config?: Json | null
+          default_automation_trigger_type?: string | null
+          default_departments?: Json | null
+          default_statuses?: Json | null
+          default_tags?: Json | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          response_delay_seconds?: number | null
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: []
+      }
+      ai_template_versions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          knowledge_items_snapshot: Json | null
+          notes: string | null
+          template_id: string
+          template_snapshot: Json
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          knowledge_items_snapshot?: Json | null
+          notes?: string | null
+          template_id: string
+          template_snapshot: Json
+          version: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          knowledge_items_snapshot?: Json | null
+          notes?: string | null
+          template_id?: string
+          template_snapshot?: Json
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_template_versions_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "ai_template_base"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
@@ -639,6 +752,8 @@ export type Database = {
           rejected_by: string | null
           rejection_reason: string | null
           status: string
+          template_cloned_at: string | null
+          template_version: number | null
           trial_ends_at: string | null
           updated_at: string
         }
@@ -676,6 +791,8 @@ export type Database = {
           rejected_by?: string | null
           rejection_reason?: string | null
           status?: string
+          template_cloned_at?: string | null
+          template_version?: number | null
           trial_ends_at?: string | null
           updated_at?: string
         }
@@ -713,6 +830,8 @@ export type Database = {
           rejected_by?: string | null
           rejection_reason?: string | null
           status?: string
+          template_cloned_at?: string | null
+          template_version?: number | null
           trial_ends_at?: string | null
           updated_at?: string
         }
@@ -1600,6 +1719,65 @@ export type Database = {
           },
         ]
       }
+      template_knowledge_items: {
+        Row: {
+          category: string
+          content: string | null
+          created_at: string
+          file_name: string | null
+          file_size: number | null
+          file_type: string | null
+          file_url: string | null
+          id: string
+          is_active: boolean
+          item_type: string
+          position: number | null
+          template_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          content?: string | null
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          is_active?: boolean
+          item_type?: string
+          position?: number | null
+          template_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          content?: string | null
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string | null
+          id?: string
+          is_active?: boolean
+          item_type?: string
+          position?: number | null
+          template_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_knowledge_items_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "ai_template_base"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       templates: {
         Row: {
           category: string | null
@@ -1809,6 +1987,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      clone_template_for_company: {
+        Args: { _company_id: string; _law_firm_id: string }
+        Returns: Json
+      }
       get_admin_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["admin_role"]
