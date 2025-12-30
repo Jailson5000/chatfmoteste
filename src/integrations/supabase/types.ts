@@ -1031,27 +1031,36 @@ export type Database = {
       }
       law_firm_settings: {
         Row: {
+          ai_capabilities: Json | null
+          ai_provider: string
           created_at: string
           evolution_api_key: string | null
           evolution_api_url: string | null
           id: string
           law_firm_id: string
+          openai_api_key: string | null
           updated_at: string
         }
         Insert: {
+          ai_capabilities?: Json | null
+          ai_provider?: string
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
           law_firm_id: string
+          openai_api_key?: string | null
           updated_at?: string
         }
         Update: {
+          ai_capabilities?: Json | null
+          ai_provider?: string
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
           law_firm_id?: string
+          openai_api_key?: string | null
           updated_at?: string
         }
         Relationships: [
