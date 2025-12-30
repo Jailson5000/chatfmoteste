@@ -175,12 +175,14 @@ serve(async (req) => {
       },
     });
 
-    // Send notification email to admin (suporte@miauchat.com.br)
-    // TEMPLATE: CADASTRO RECEBIDO (EM ANÁLISE)
-    let emailSent = false;
+    // Send emails
+    let adminEmailSent = false;
+    let userEmailSent = false;
+    
     if (resendApiKey) {
+      // 1) Send confirmation email TO THE USER who registered
       try {
-        const emailHtml = `
+        const userEmailHtml = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -191,22 +193,112 @@ serve(async (req) => {
   <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
     
     <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); padding: 30px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">⏳ Cadastro recebido — MIAUCHAT</h1>
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">✅ Cadastro Recebido!</h1>
     </div>
     
     <div style="padding: 30px;">
       <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
-        Olá,
+        Olá, <strong>${admin_name}</strong>!
       </p>
       
       <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
-        Recebemos o cadastro da empresa <strong>"${company_name}"</strong> no MIAUCHAT<br>
-        (Multiplataforma de Inteligência Artificial Unificada).
+        Recebemos o cadastro da empresa <strong>"${company_name}"</strong> no MIAUCHAT.
+      </p>
+      
+      <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #92400e; margin: 0; font-weight: 600;">
+          📋 Sua solicitação está em análise
+        </p>
+      </div>
+      
+      <h3 style="color: #1f2937; font-size: 16px; margin-top: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">
+        Próximos passos:
+      </h3>
+      
+      <ol style="color: #4b5563; padding-left: 20px;">
+        <li style="margin-bottom: 12px;">Nossa equipe irá analisar seu cadastro</li>
+        <li style="margin-bottom: 12px;">Após aprovação, você receberá um novo email com seus dados de acesso</li>
+        <li style="margin-bottom: 12px;">Acesse o MiauChat e comece a usar!</li>
+      </ol>
+      
+      <div style="background: #f3f4f6; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;">Seu subdomínio reservado:</p>
+        <p style="color: #1f2937; margin: 0; font-weight: 600; font-size: 16px;">
+          ${subdomain}.miauchat.com.br
+        </p>
+      </div>
+      
+      <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
+        Este processo geralmente leva até 24 horas úteis.
+      </p>
+      
+      <p style="color: #9ca3af; font-size: 14px; font-style: italic; margin-top: 16px;">
+        Caso tenha dúvidas, responda este email ou entre em contato pelo suporte@miauchat.com.br
+      </p>
+    </div>
+    
+    <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
+        — MIAUCHAT
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+        Multiplataforma de Inteligência Artificial Unificada
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+        `;
+
+        const userEmailResponse = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'MiauChat <suporte@miauchat.com.br>',
+            to: [admin_email],
+            subject: `✅ Cadastro recebido — ${company_name}`,
+            html: userEmailHtml,
+          }),
+        });
+
+        if (userEmailResponse.ok) {
+          userEmailSent = true;
+          console.log('[register-company] User confirmation email sent to:', admin_email);
+        } else {
+          const errorText = await userEmailResponse.text();
+          console.error('[register-company] User email error:', errorText);
+        }
+      } catch (emailError) {
+        console.error('[register-company] User email exception:', emailError);
+      }
+
+      // 2) Send notification email TO ADMIN (suporte@miauchat.com.br)
+      try {
+        const adminEmailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Novo cadastro pendente — MIAUCHAT</title>
+</head>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; line-height: 1.6;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    
+    <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); padding: 30px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">⏳ Novo Cadastro Pendente</h1>
+    </div>
+    
+    <div style="padding: 30px;">
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Uma nova empresa solicitou cadastro no MIAUCHAT.
       </p>
       
       <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 24px 0;">
         <p style="color: #92400e; margin: 0; font-weight: 600; font-size: 18px;">
-          📋 Status atual: EM ANÁLISE
+          📋 Status: AGUARDANDO APROVAÇÃO
         </p>
       </div>
       
@@ -245,18 +337,10 @@ serve(async (req) => {
         </tr>
       </table>
       
-      <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
-        Nosso time irá revisar as informações e, após aprovação, o acesso será liberado automaticamente.
-      </p>
-      
-      <p style="color: #9ca3af; font-size: 14px; font-style: italic; margin-top: 16px;">
-        Não é necessário responder este email.
-      </p>
-      
       <div style="margin-top: 30px; text-align: center;">
         <a href="https://www.miauchat.com.br/global-admin/companies" 
            style="display: inline-block; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-          Acessar Painel Admin
+          Revisar no Painel Admin
         </a>
       </div>
     </div>
@@ -274,7 +358,7 @@ serve(async (req) => {
 </html>
         `;
 
-        const emailResponse = await fetch('https://api.resend.com/emails', {
+        const adminEmailResponse = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${resendApiKey}`,
@@ -283,20 +367,20 @@ serve(async (req) => {
           body: JSON.stringify({
             from: 'MiauChat <suporte@miauchat.com.br>',
             to: [adminEmail],
-            subject: `⏳ Cadastro recebido — MIAUCHAT`,
-            html: emailHtml,
+            subject: `⏳ Novo cadastro pendente: ${company_name}`,
+            html: adminEmailHtml,
           }),
         });
 
-        if (emailResponse.ok) {
-          emailSent = true;
-          console.log('[register-company] Admin notification email sent');
+        if (adminEmailResponse.ok) {
+          adminEmailSent = true;
+          console.log('[register-company] Admin notification email sent to:', adminEmail);
         } else {
-          const errorText = await emailResponse.text();
-          console.error('[register-company] Email error:', errorText);
+          const errorText = await adminEmailResponse.text();
+          console.error('[register-company] Admin email error:', errorText);
         }
       } catch (emailError) {
-        console.error('[register-company] Email exception:', emailError);
+        console.error('[register-company] Admin email exception:', emailError);
       }
     } else {
       console.warn('[register-company] RESEND_API_KEY not configured');
@@ -313,7 +397,8 @@ serve(async (req) => {
         admin_name,
         admin_email,
         subdomain,
-        email_sent: emailSent,
+        admin_email_sent: adminEmailSent,
+        user_email_sent: userEmailSent,
       },
     });
 

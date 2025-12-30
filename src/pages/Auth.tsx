@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Mail, Lock, User, ArrowRight, Building2, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -18,17 +17,6 @@ const loginSchema = z.object({
   password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres").max(100),
 });
 
-const signupSchema = z.object({
-  companyName: z.string().min(2, "Nome da empresa deve ter no mínimo 2 caracteres").max(100),
-  adminName: z.string().min(2, "Nome do administrador deve ter no mínimo 2 caracteres").max(100),
-  email: z.string().email("Email inválido").max(255),
-  password: z.string().min(6, "Senha deve ter no mínimo 6 caracteres").max(100),
-  confirmPassword: z.string().min(6, "Confirmação de senha obrigatória").max(100),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "As senhas não coincidem",
-  path: ["confirmPassword"],
-});
-
 const forgotPasswordSchema = z.object({
   email: z.string().email("Email inválido").max(255),
 });
@@ -39,18 +27,10 @@ export default function Auth() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
   
   const [loginData, setLoginData] = useState({ email: "", password: "" });
-  const [signupData, setSignupData] = useState({ 
-    companyName: "", 
-    adminName: "", 
-    email: "", 
-    password: "", 
-    confirmPassword: "" 
-  });
 
   useEffect(() => {
     if (!loading && user) {
@@ -61,7 +41,6 @@ export default function Auth() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Debug: Check config before attempting login
     const configCheck = checkSupabaseConfig();
     logAuthAttempt("handleLogin START", { 
       email: loginData.email,
@@ -127,62 +106,6 @@ export default function Auth() {
       toast({
         title: "Erro de conexão",
         description: `Falha na conexão: ${err?.message || 'Erro desconhecido'}. Verifique o console para detalhes.`,
-        variant: "destructive",
-      });
-    }
-    setIsLoading(false);
-  };
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log("[Auth] handleSignup iniciado");
-    
-    const result = signupSchema.safeParse(signupData);
-    if (!result.success) {
-      console.log("[Auth] Validação signup falhou:", result.error.errors[0].message);
-      toast({
-        title: "Erro de validação",
-        description: result.error.errors[0].message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    console.log("[Auth] Chamando supabase.auth.signUp...");
-    
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: signupData.email,
-        password: signupData.password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          data: {
-            full_name: signupData.adminName,
-            company_name: signupData.companyName,
-          },
-        },
-      });
-
-      if (error) {
-        console.error("[Auth] Erro de signup:", error.message, "| Código:", error.status);
-        toast({
-          title: "Erro ao criar conta",
-          description: "Não foi possível criar a conta. Verifique os dados e tente novamente.",
-          variant: "destructive",
-        });
-      } else {
-        console.log("[Auth] Signup bem-sucedido, user:", data.user ? "criado" : "não criado");
-        toast({
-          title: "Conta criada!",
-          description: "Você já pode acessar o sistema.",
-        });
-      }
-    } catch (err: any) {
-      console.error("[Auth] Exceção no signup:", err?.message || err);
-      toast({
-        title: "Erro de conexão",
-        description: "Não foi possível conectar ao servidor.",
         variant: "destructive",
       });
     }
@@ -292,7 +215,7 @@ export default function Auth() {
         </div>
       </div>
 
-      {/* Right Panel - Auth Forms */}
+      {/* Right Panel - Login Form */}
       <div className="flex-1 flex items-center justify-center p-8 bg-zinc-950">
         <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl animate-scale-in" style={{ animationDelay: "0.3s" }}>
           <CardHeader className="text-center pb-2">
@@ -314,7 +237,7 @@ export default function Auth() {
               <>
                 <CardTitle className="text-2xl text-white">Acesse sua conta</CardTitle>
                 <CardDescription className="text-zinc-400">
-                  Entre ou cadastre sua empresa para continuar
+                  Entre com suas credenciais para continuar
                 </CardDescription>
               </>
             )}
@@ -355,185 +278,82 @@ export default function Auth() {
                 </button>
               </form>
             ) : (
-              <Tabs defaultValue="login" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-6 bg-zinc-800/50">
-                  <TabsTrigger value="login" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
-                    Entrar
-                  </TabsTrigger>
-                  <TabsTrigger value="signup" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
-                    Cadastrar
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="login">
-                  <form onSubmit={handleLogin} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="login-email" className="text-zinc-300">Email</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="login-email"
-                          type="email"
-                          placeholder="seu@email.com"
-                          className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={loginData.email}
-                          onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="login-password" className="text-zinc-300">Senha</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="login-password"
-                          type={showPassword ? "text" : "password"}
-                          placeholder="••••••••"
-                          className="pl-10 pr-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={loginData.password}
-                          onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                    <button 
-                      type="button" 
-                      onClick={() => setShowForgotPassword(true)}
-                      className="text-sm text-red-400 hover:text-red-300 transition-colors"
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="login-email" className="text-zinc-300">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                    <Input
+                      id="login-email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
+                      value={loginData.email}
+                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="login-password" className="text-zinc-300">Senha</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                    <Input
+                      id="login-password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="pl-10 pr-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
+                      value={loginData.password}
+                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                     >
-                      Esqueci minha senha
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
-                    <Button 
-                      type="submit" 
-                      className="w-full bg-red-600 hover:bg-red-700 text-white" 
-                      disabled={isLoading}
-                    >
-                      {isLoading ? "Entrando..." : "Entrar"}
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Button>
-                    
-                    <div className="text-center pt-2">
-                      <span className="text-sm text-zinc-500">Não tem uma conta? </span>
-                      <Link 
-                        to="/register" 
-                        className="text-sm text-red-400 hover:text-red-300 transition-colors font-medium"
-                      >
-                        Cadastre-se
-                      </Link>
-                    </div>
-                  </form>
-                </TabsContent>
+                  </div>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setShowForgotPassword(true)}
+                  className="text-sm text-red-400 hover:text-red-300 transition-colors"
+                >
+                  Esqueci minha senha
+                </button>
+                <Button 
+                  type="submit" 
+                  className="w-full bg-red-600 hover:bg-red-700 text-white" 
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Entrando..." : "Entrar"}
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
                 
-                <TabsContent value="signup">
-                  <form onSubmit={handleSignup} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-company" className="text-zinc-300">Nome da Empresa</Label>
-                      <div className="relative">
-                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="signup-company"
-                          type="text"
-                          placeholder="Sua empresa"
-                          className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={signupData.companyName}
-                          onChange={(e) => setSignupData({ ...signupData, companyName: e.target.value })}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-admin" className="text-zinc-300">Nome do Administrador</Label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="signup-admin"
-                          type="text"
-                          placeholder="Seu nome"
-                          className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={signupData.adminName}
-                          onChange={(e) => setSignupData({ ...signupData, adminName: e.target.value })}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-email" className="text-zinc-300">Email</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="signup-email"
-                          type="email"
-                          placeholder="seu@email.com"
-                          className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={signupData.email}
-                          onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password" className="text-zinc-300">Senha</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="signup-password"
-                          type={showPassword ? "text" : "password"}
-                          placeholder="••••••••"
-                          className="pl-10 pr-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={signupData.password}
-                          onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-confirm-password" className="text-zinc-300">Confirmar Senha</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                        <Input
-                          id="signup-confirm-password"
-                          type={showConfirmPassword ? "text" : "password"}
-                          placeholder="••••••••"
-                          className="pl-10 pr-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
-                          value={signupData.confirmPassword}
-                          onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                        >
-                          {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full bg-red-600 hover:bg-red-700 text-white" 
-                      disabled={isLoading}
-                    >
-                      {isLoading ? "Criando conta..." : "Criar conta"}
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Button>
-                  </form>
-                </TabsContent>
-              </Tabs>
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-zinc-700" />
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="px-2 bg-zinc-900 text-zinc-500">ou</span>
+                  </div>
+                </div>
+                
+                <div className="text-center">
+                  <p className="text-sm text-zinc-400 mb-3">
+                    Ainda não tem uma conta?
+                  </p>
+                  <Link 
+                    to="/register" 
+                    className="inline-flex items-center gap-2 text-red-400 hover:text-red-300 transition-colors font-medium"
+                  >
+                    Cadastre sua empresa
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              </form>
             )}
             
             <div className="mt-6 pt-6 border-t border-zinc-800 text-center">
