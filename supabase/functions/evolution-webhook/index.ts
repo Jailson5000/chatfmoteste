@@ -207,6 +207,99 @@ async function getAIProviderConfig(
   }
 }
 
+// Helper function to send AI response back to WhatsApp and save to database
+async function sendAIResponseToWhatsApp(
+  supabaseClient: any,
+  context: AutomationContext,
+  aiResponse: string
+): Promise<boolean> {
+  try {
+    logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', { 
+      conversationId: context.conversationId, 
+      responseLength: aiResponse.length 
+    });
+
+    // Get instance details for API URL and key
+    const { data: instance } = await supabaseClient
+      .from('whatsapp_instances')
+      .select('api_url, api_key, instance_name')
+      .eq('id', context.instanceId)
+      .single();
+
+    if (!instance) {
+      logDebug('SEND_RESPONSE', 'Instance not found', { instanceId: context.instanceId });
+      return false;
+    }
+
+    // Normalize API URL
+    const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
+    
+    // Send message via Evolution API
+    const sendUrl = `${apiUrl}/message/sendText/${instance.instance_name}`;
+    logDebug('SEND_RESPONSE', 'Calling Evolution API', { url: sendUrl });
+
+    const sendResponse = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': instance.api_key || '',
+      },
+      body: JSON.stringify({
+        number: context.remoteJid,
+        text: aiResponse,
+      }),
+    });
+
+    if (!sendResponse.ok) {
+      const errorText = await sendResponse.text();
+      logDebug('SEND_RESPONSE', 'Evolution API send failed', { 
+        status: sendResponse.status, 
+        error: errorText 
+      });
+      return false;
+    }
+
+    const sendResult = await sendResponse.json();
+    const whatsappMessageId = sendResult?.key?.id;
+    logDebug('SEND_RESPONSE', 'Message sent successfully', { whatsappMessageId });
+
+    // Save the AI response to the database
+    const { error: saveError } = await supabaseClient
+      .from('messages')
+      .insert({
+        conversation_id: context.conversationId,
+        whatsapp_message_id: whatsappMessageId,
+        content: aiResponse,
+        message_type: 'text',
+        is_from_me: true,
+        sender_type: 'system',
+        ai_generated: true,
+      });
+
+    if (saveError) {
+      logDebug('SEND_RESPONSE', 'Failed to save AI message to DB', { error: saveError });
+    } else {
+      logDebug('SEND_RESPONSE', 'AI message saved to DB');
+    }
+
+    // Update conversation last_message_at
+    await supabaseClient
+      .from('conversations')
+      .update({ 
+        last_message_at: new Date().toISOString(),
+        n8n_last_response_at: new Date().toISOString(),
+      })
+      .eq('id', context.conversationId);
+
+    return true;
+  } catch (error) {
+    logDebug('SEND_RESPONSE', 'Error sending AI response', { 
+      error: error instanceof Error ? error.message : error 
+    });
+    return false;
+  }
+}
+
 // Process messages with internal MiauChat AI (calls ai-chat edge function)
 async function processWithInternalAI(
   supabaseClient: any, 
@@ -224,7 +317,7 @@ async function processWithInternalAI(
     // Get automation prompt if available
     const { data: automations } = await supabaseClient
       .from('automations')
-      .select('ai_prompt, ai_temperature')
+      .select('id, ai_prompt, ai_temperature')
       .eq('law_firm_id', context.lawFirmId)
       .eq('is_active', true)
       .limit(1);
@@ -245,6 +338,7 @@ async function processWithInternalAI(
         message: context.messageContent,
         customPrompt: automation?.ai_prompt,
         temperature: automation?.ai_temperature,
+        automationId: automation?.id,
       }),
     });
 
@@ -255,7 +349,13 @@ async function processWithInternalAI(
     }
 
     const result = await response.json();
-    logDebug('AI_PROVIDER', 'Internal AI response received', { hasResponse: !!result.response });
+    const aiResponse = result.response;
+    logDebug('AI_PROVIDER', 'Internal AI response received', { hasResponse: !!aiResponse, responseLength: aiResponse?.length });
+
+    if (aiResponse) {
+      // Send the response back to WhatsApp
+      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse);
+    }
 
     // Log the AI processing
     await supabaseClient
@@ -266,6 +366,7 @@ async function processWithInternalAI(
           provider: 'miauchat_ai',
           conversation_id: context.conversationId,
           message: context.messageContent,
+          response_sent: !!aiResponse,
         },
         status_code: 200,
       });
@@ -354,6 +455,9 @@ async function processWithOpenAI(
     if (aiResponse) {
       logDebug('AI_PROVIDER', 'OpenAI response received', { responseLength: aiResponse.length });
 
+      // Send the response back to WhatsApp
+      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse);
+
       // Log the AI processing
       await supabaseClient
         .from('webhook_logs')
@@ -364,6 +468,7 @@ async function processWithOpenAI(
             conversation_id: context.conversationId,
             message: context.messageContent,
             model: 'gpt-4o-mini',
+            response_sent: true,
           },
           status_code: 200,
         });
