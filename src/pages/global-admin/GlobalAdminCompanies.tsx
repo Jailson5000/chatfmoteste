@@ -44,17 +44,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-
-function generateSubdomainFromName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .substring(0, 30);
-}
+import { companyFieldConfig, adminCreateCompanySchema } from "@/lib/schemas/companySchema";
+import { generateSubdomainFromName } from "@/hooks/useTenant";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
@@ -328,12 +319,13 @@ export default function GlobalAdminCompanies() {
               <div className="flex-1 overflow-y-auto px-6 pb-4">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="name">Nome da Empresa</Label>
+                    <Label htmlFor="name">{companyFieldConfig.companyName.label} *</Label>
                     <Input
                       id="name"
                       value={formData.name}
                       onChange={(e) => handleNameChange(e.target.value)}
-                      placeholder="Nome da empresa"
+                      placeholder={companyFieldConfig.companyName.placeholder}
+                      maxLength={companyFieldConfig.companyName.maxLength}
                     />
                   </div>
                   <div className="space-y-2">
@@ -345,6 +337,7 @@ export default function GlobalAdminCompanies() {
                         onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
                         placeholder="empresa"
                         className="flex-1"
+                        maxLength={30}
                       />
                       <span className="text-sm text-muted-foreground whitespace-nowrap">.miauchat.com.br</span>
                     </div>
@@ -354,32 +347,36 @@ export default function GlobalAdminCompanies() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="document">CNPJ/CPF</Label>
+                      <Label htmlFor="document">{companyFieldConfig.document.label}</Label>
                       <Input
                         id="document"
                         value={formData.document}
                         onChange={(e) => setFormData({ ...formData, document: e.target.value })}
-                        placeholder="00.000.000/0000-00"
+                        placeholder={companyFieldConfig.document.placeholder}
+                        maxLength={companyFieldConfig.document.maxLength}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="phone">Telefone</Label>
+                      <Label htmlFor="phone">{companyFieldConfig.phone.label}</Label>
                       <Input
                         id="phone"
+                        type={companyFieldConfig.phone.type}
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder="(00) 00000-0000"
+                        placeholder={companyFieldConfig.phone.placeholder}
+                        maxLength={companyFieldConfig.phone.maxLength}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">{companyFieldConfig.email.label}</Label>
                     <Input
                       id="email"
-                      type="email"
+                      type={companyFieldConfig.email.type}
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      placeholder="contato@empresa.com"
+                      placeholder={companyFieldConfig.email.placeholder}
+                      maxLength={companyFieldConfig.email.maxLength}
                     />
                   </div>
                   <div className="space-y-2">
@@ -426,22 +423,24 @@ export default function GlobalAdminCompanies() {
                     <p className="text-sm font-medium">Administrador da Empresa</p>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="admin_name">Nome do Admin</Label>
+                        <Label htmlFor="admin_name">{companyFieldConfig.adminName.label}</Label>
                         <Input
                           id="admin_name"
                           value={formData.admin_name}
                           onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
-                          placeholder="Nome completo"
+                          placeholder={companyFieldConfig.adminName.placeholder}
+                          maxLength={companyFieldConfig.adminName.maxLength}
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="admin_email">Email do Admin</Label>
+                        <Label htmlFor="admin_email">{companyFieldConfig.email.label} do Admin</Label>
                         <Input
                           id="admin_email"
-                          type="email"
+                          type={companyFieldConfig.email.type}
                           value={formData.admin_email}
                           onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
                           placeholder="admin@empresa.com"
+                          maxLength={companyFieldConfig.email.maxLength}
                         />
                       </div>
                     </div>
