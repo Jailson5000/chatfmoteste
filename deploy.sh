@@ -58,6 +58,14 @@ npm run build
 echo -e "${GREEN}   ✅ Build concluído${NC}"
 echo ""
 
+# White-label guard (bloqueia deploy se detectar branding incorreto)
+if [ -f "scripts/check-whitelabel.sh" ]; then
+    echo -e "${YELLOW}🛡️  Verificando White Label (title/favicon)...${NC}"
+    chmod +x scripts/check-whitelabel.sh
+    ./scripts/check-whitelabel.sh
+    echo ""
+fi
+
 # Reload Nginx
 echo -e "${YELLOW}🔄 Recarregando Nginx...${NC}"
 sudo systemctl reload nginx
