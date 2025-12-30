@@ -25,12 +25,15 @@ import {
   Eye,
   EyeOff,
   Crown,
-  Shield
+  Shield,
+  Loader2,
+  TestTube
 } from "lucide-react";
 import { useCompanyPlan } from "@/hooks/useCompanyPlan";
 import { useTenantAISettings, TenantAIProvider } from "@/hooks/useTenantAISettings";
 import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AICapability {
   id: string;
@@ -101,6 +104,8 @@ export default function AdminAISettings() {
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Load settings from tenant AI settings
   useEffect(() => {
@@ -148,6 +153,39 @@ export default function AdminAISettings() {
       toast.error("Erro ao remover API Key");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestApiKey = async () => {
+    const keyToTest = openaiApiKey.trim();
+    if (!keyToTest) {
+      toast.error("Digite uma API Key para testar");
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("test-openai-key", {
+        body: { apiKey: keyToTest },
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        setTestResult({ success: true, message: data.message || "Conexão validada com sucesso!" });
+        toast.success("API Key válida!");
+      } else {
+        setTestResult({ success: false, message: data.error || "API Key inválida" });
+        toast.error("API Key inválida");
+      }
+    } catch (error) {
+      console.error("Error testing API key:", error);
+      setTestResult({ success: false, message: "Erro ao testar conexão" });
+      toast.error("Erro ao testar conexão");
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -469,6 +507,34 @@ export default function AdminAISettings() {
               <p className="text-xs text-muted-foreground">
                 Sua API Key é armazenada de forma segura e nunca é exposta.
               </p>
+            </div>
+
+            {/* Test Connection Button */}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={handleTestApiKey}
+                disabled={isTesting || !openaiApiKey.trim()}
+                className="gap-2"
+              >
+                {isTesting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <TestTube className="h-4 w-4" />
+                )}
+                {isTesting ? "Testando..." : "Testar Conexão"}
+              </Button>
+
+              {testResult && (
+                <div className={`flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}>
+                  {testResult.success ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  {testResult.message}
+                </div>
+              )}
             </div>
 
             <Alert>
