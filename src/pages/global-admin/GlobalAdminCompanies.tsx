@@ -34,12 +34,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
 import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog";
+import { CompanyAIConfigDialog } from "@/components/global-admin/CompanyAIConfigDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,6 +56,7 @@ export default function GlobalAdminCompanies() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
   const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
+  const [aiConfigCompany, setAiConfigCompany] = useState<typeof companies[0] | null>(null);
   const [resettingPassword, setResettingPassword] = useState<string | null>(null);
   const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -1067,6 +1069,10 @@ export default function GlobalAdminCompanies() {
                                   <Settings className="mr-2 h-4 w-4" />
                                   Configurar Domínio
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setAiConfigCompany(company)}>
+                                  <Bot className="mr-2 h-4 w-4" />
+                                  Configurar IA
+                                </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleResetPassword(company)}
                                   disabled={resettingPassword === company.id || !company.admin_user_id}
@@ -1293,6 +1299,13 @@ export default function GlobalAdminCompanies() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* AI Config Dialog */}
+      <CompanyAIConfigDialog
+        company={aiConfigCompany}
+        open={!!aiConfigCompany}
+        onOpenChange={(open) => !open && setAiConfigCompany(null)}
+      />
     </div>
   );
 }
