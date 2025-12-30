@@ -1259,12 +1259,8 @@ export function MessageBubble({
           </div>
         )}
         
-        {/* Render text content - don't show [Mensagem de áudio] placeholder text */}
-        {content && 
-          !content.includes('[Mensagem de áudio]') && (
-            !content.trim().startsWith("[") ||
-            /^\[áudio transcrito\]/i.test(content.trim())
-          ) && (
+        {/* Render text content - show unless it's ONLY the placeholder */}
+        {content && content.trim() !== '[Mensagem de áudio]' && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {highlightText ? highlightText(content) : content}
           </p>
