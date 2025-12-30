@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { publicRegistrationSchema, companyFieldConfig } from "@/lib/schemas/companySchema";
 import { usePlans } from "@/hooks/usePlans";
+import { formatPhone, formatDocument } from "@/lib/inputMasks";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -278,12 +279,11 @@ export default function Register() {
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <Input
                       id="phone"
-                      type={companyFieldConfig.phone.type}
-                      placeholder={companyFieldConfig.phone.placeholder}
-                      maxLength={companyFieldConfig.phone.maxLength}
+                      type="tel"
+                      placeholder="(00) 00000-0000"
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                     />
                   </div>
                 </div>
@@ -297,11 +297,10 @@ export default function Register() {
                     <Input
                       id="document"
                       type="text"
-                      placeholder={companyFieldConfig.document.placeholder}
-                      maxLength={companyFieldConfig.document.maxLength}
+                      placeholder="000.000.000-00 ou 00.000.000/0000-00"
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.document}
-                      onChange={(e) => setFormData({ ...formData, document: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, document: formatDocument(e.target.value) })}
                     />
                   </div>
                 </div>
@@ -325,28 +324,25 @@ export default function Register() {
                     className="space-y-2"
                   >
                     {activePlans.map((plan) => (
-                      <div
+                      <label
                         key={plan.id}
+                        htmlFor={`plan-${plan.id}`}
                         className={`relative flex items-start p-3 rounded-lg border transition-all cursor-pointer ${
                           formData.planId === plan.id
                             ? "border-red-500 bg-red-500/10"
                             : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
                         }`}
-                        onClick={() => setFormData({ ...formData, planId: plan.id })}
                       >
                         <RadioGroupItem
                           value={plan.id}
-                          id={plan.id}
+                          id={`plan-${plan.id}`}
                           className="mt-1 border-zinc-500 text-red-500"
                         />
                         <div className="ml-3 flex-1">
                           <div className="flex items-center justify-between">
-                            <Label
-                              htmlFor={plan.id}
-                              className="text-white font-medium cursor-pointer"
-                            >
+                            <span className="text-white font-medium">
                               {plan.name}
-                            </Label>
+                            </span>
                             <span className="text-red-400 font-semibold">
                               R$ {plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                               <span className="text-xs text-zinc-500">/{plan.billing_period === 'monthly' ? 'mês' : plan.billing_period}</span>
@@ -361,7 +357,7 @@ export default function Register() {
                             <span>{plan.max_instances} instâncias</span>
                           </div>
                         </div>
-                      </div>
+                      </label>
                     ))}
                   </RadioGroup>
                 )}
