@@ -259,22 +259,35 @@ interface VoiceConfig {
   voiceId: string;
 }
 
-// Only respond with audio when the CLIENT explicitly requests it.
+// Only respond with audio when the CLIENT explicitly requests it or indicates reading difficulty.
 // (voiceConfig.enabled is just a permission toggle)
 function isAudioRequested(userText: string): boolean {
   if (!userText) return false;
   const t = userText.toLowerCase();
 
   // Common PT-BR ways users ask for voice notes
-  const patterns: RegExp[] = [
+  const explicitAudioPatterns: RegExp[] = [
     /(manda|envia|responde|responda|responder).{0,40}(áudio|audio|mensagem de voz|voz)/i,
     /(áudio|audio|mensagem de voz|voz).{0,40}(manda|envia|responde|responda|responder)/i,
     /por\s+(áudio|audio)/i,
     /em\s+(áudio|audio)/i,
     /em\s+voz/i,
+    /pode\s+(falar|responder|mandar).{0,20}(áudio|audio|voz)/i,
+    /prefiro\s+(áudio|audio|voz)/i,
   ];
 
-  return patterns.some((p) => p.test(t));
+  // Reading difficulty patterns - auto-activate audio for accessibility
+  const readingDifficultyPatterns: RegExp[] = [
+    /n[aã]o\s+(sei|consigo)\s+ler/i,
+    /dificuldade\s+(de|para|em)\s+ler/i,
+    /n[aã]o\s+leio\s+bem/i,
+    /problema\s+(de|para|com)\s+(leitura|ler)/i,
+    /n[aã]o\s+enxergo\s+bem/i,
+    /tenho\s+dificuldade\s+(visual|de\s+vis[aã]o)/i,
+  ];
+
+  return explicitAudioPatterns.some((p) => p.test(t)) || 
+         readingDifficultyPatterns.some((p) => p.test(t));
 }
 
 // Helper function to generate TTS audio using OpenAI
@@ -459,84 +472,18 @@ async function sendAIResponseToWhatsApp(
       conversationId: context.conversationId 
     });
 
-    let lastWhatsappMessageId: string | null = null;
-    const allMessageContents: string[] = [];
-
-    for (let i = 0; i < messageParts.length; i++) {
-      const part = sanitizeText(messageParts[i]);
-
-      // If sanitization removed everything (e.g. the response was only a placeholder), skip
-      if (!part) {
-        logDebug('SEND_RESPONSE', `Skipping empty message part ${i + 1}/${messageParts.length} after sanitization`);
-        continue;
-      }
-
-      // Add delay between messages (simulate typing)
-      if (i > 0) {
-        const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
-        await new Promise((resolve) => setTimeout(resolve, typingDelay));
-      }
-
-      logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
-        partLength: part.length,
-      });
-
-      const sendResponse = await fetch(sendUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': instance.api_key || '',
-        },
-        body: JSON.stringify({
-          number: context.remoteJid,
-          text: part,
-        }),
-      });
-
-      if (!sendResponse.ok) {
-        const errorText = await sendResponse.text();
-        logDebug('SEND_RESPONSE', `Evolution API send failed for part ${i + 1}`, { 
-          status: sendResponse.status, 
-          error: errorText 
-        });
-        continue; // Try to send remaining parts
-      }
-
-      const sendResult = await sendResponse.json();
-      lastWhatsappMessageId = sendResult?.key?.id;
-      allMessageContents.push(part);
-
-      logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, { 
-        whatsappMessageId: lastWhatsappMessageId 
-      });
-
-      // Save each message part to the database
-      const { error: saveError } = await supabaseClient
-        .from('messages')
-        .insert({
-          conversation_id: context.conversationId,
-          whatsapp_message_id: lastWhatsappMessageId,
-          content: part,
-          message_type: 'text',
-          is_from_me: true,
-          sender_type: 'system',
-          ai_generated: true,
-        });
-
-      if (saveError) {
-        logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
-      }
-    }
-
+    // Check BEFORE sending if audio was requested - if so, skip text and send ONLY audio
     const audioRequested = isAudioRequested(context.messageContent);
+    const shouldSendOnlyAudio = voiceConfig?.enabled && audioRequested;
 
-    // If voice is enabled AND the client requested audio, generate and send audio response
-    if (voiceConfig?.enabled && audioRequested && allMessageContents.length > 0) {
-      logDebug('SEND_RESPONSE', 'Client requested audio, generating TTS', { voiceId: voiceConfig.voiceId });
+    if (shouldSendOnlyAudio) {
+      logDebug('SEND_RESPONSE', 'Audio requested - sending ONLY audio, skipping text messages', { 
+        voiceId: voiceConfig?.voiceId 
+      });
 
       // Combine all text parts for audio
-      const fullText = allMessageContents.join(' ');
-      const audioBase64 = await generateTTSAudio(fullText, voiceConfig.voiceId);
+      const fullText = messageParts.join(' ');
+      const audioBase64 = await generateTTSAudio(fullText, voiceConfig!.voiceId);
 
       if (audioBase64) {
         const audioResult = await sendAudioToWhatsApp(
@@ -562,11 +509,111 @@ async function sendAIResponseToWhatsApp(
               media_mime_type: 'audio/mpeg',
             });
 
-          logDebug('SEND_RESPONSE', 'Audio message sent and saved');
+          logDebug('SEND_RESPONSE', 'Audio-only response sent and saved');
+        }
+      } else {
+        logDebug('SEND_RESPONSE', 'TTS generation failed, falling back to text');
+        // Fallback: send text if audio generation fails
+        for (let i = 0; i < messageParts.length; i++) {
+          const part = sanitizeText(messageParts[i]);
+          if (!part) continue;
+
+          const sendResponse = await fetch(sendUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': instance.api_key || '',
+            },
+            body: JSON.stringify({
+              number: context.remoteJid,
+              text: part,
+            }),
+          });
+
+          if (sendResponse.ok) {
+            const sendResult = await sendResponse.json();
+            await supabaseClient
+              .from('messages')
+              .insert({
+                conversation_id: context.conversationId,
+                whatsapp_message_id: sendResult?.key?.id,
+                content: part,
+                message_type: 'text',
+                is_from_me: true,
+                sender_type: 'system',
+                ai_generated: true,
+              });
+          }
         }
       }
-    } else if (voiceConfig?.enabled && !audioRequested) {
-      logDebug('SEND_RESPONSE', 'Voice enabled but client did not request audio; skipping audio');
+    } else {
+      // Normal text-only flow
+      let lastWhatsappMessageId: string | null = null;
+
+      for (let i = 0; i < messageParts.length; i++) {
+        const part = sanitizeText(messageParts[i]);
+
+        // If sanitization removed everything, skip
+        if (!part) {
+          logDebug('SEND_RESPONSE', `Skipping empty message part ${i + 1}/${messageParts.length} after sanitization`);
+          continue;
+        }
+
+        // Add delay between messages (simulate typing)
+        if (i > 0) {
+          const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
+          await new Promise((resolve) => setTimeout(resolve, typingDelay));
+        }
+
+        logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
+          partLength: part.length,
+        });
+
+        const sendResponse = await fetch(sendUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': instance.api_key || '',
+          },
+          body: JSON.stringify({
+            number: context.remoteJid,
+            text: part,
+          }),
+        });
+
+        if (!sendResponse.ok) {
+          const errorText = await sendResponse.text();
+          logDebug('SEND_RESPONSE', `Evolution API send failed for part ${i + 1}`, { 
+            status: sendResponse.status, 
+            error: errorText 
+          });
+          continue; // Try to send remaining parts
+        }
+
+        const sendResult = await sendResponse.json();
+        lastWhatsappMessageId = sendResult?.key?.id;
+
+        logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, { 
+          whatsappMessageId: lastWhatsappMessageId 
+        });
+
+        // Save each message part to the database
+        const { error: saveError } = await supabaseClient
+          .from('messages')
+          .insert({
+            conversation_id: context.conversationId,
+            whatsapp_message_id: lastWhatsappMessageId,
+            content: part,
+            message_type: 'text',
+            is_from_me: true,
+            sender_type: 'system',
+            ai_generated: true,
+          });
+
+        if (saveError) {
+          logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
+        }
+      }
     }
 
     // Update conversation last_message_at
@@ -578,8 +625,8 @@ async function sendAIResponseToWhatsApp(
       })
       .eq('id', context.conversationId);
 
-    logDebug('SEND_RESPONSE', `All ${allMessageContents.length} message parts sent and saved`);
-    return allMessageContents.length > 0;
+    logDebug('SEND_RESPONSE', `Response sent successfully (audio-only: ${shouldSendOnlyAudio})`);
+    return true;
   } catch (error) {
     logDebug('SEND_RESPONSE', 'Error sending AI response', { 
       error: error instanceof Error ? error.message : error 
