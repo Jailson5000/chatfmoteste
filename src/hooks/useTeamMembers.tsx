@@ -157,7 +157,17 @@ export function useTeamMembers() {
 
   // Invite new member
   const inviteMember = useMutation({
-    mutationFn: async ({ email, fullName, role }: { email: string; fullName: string; role: AppRole }) => {
+    mutationFn: async ({ 
+      email, 
+      fullName, 
+      role, 
+      departmentIds = [] 
+    }: { 
+      email: string; 
+      fullName: string; 
+      role: AppRole; 
+      departmentIds?: string[];
+    }) => {
       // Check limit before creating
       const limitCheck = await checkLimit('users', 1, true);
       if (!limitCheck.allowed) {
@@ -173,41 +183,30 @@ export function useTeamMembers() {
 
       if (!profile?.law_firm_id) throw new Error("Escritório não encontrado");
 
-      // Create the user via sign up (they will need to set their password)
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password: crypto.randomUUID(), // Temporary password, they'll reset it
-        options: {
-          data: {
-            full_name: fullName,
-          },
+      // Call edge function to create user and send email
+      const { data, error } = await supabase.functions.invoke("invite-team-member", {
+        body: {
+          email,
+          full_name: fullName,
+          role,
+          law_firm_id: profile.law_firm_id,
+          department_ids: departmentIds,
         },
       });
 
-      if (authError) throw authError;
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
-      // Update the profile with law_firm_id
-      if (authData.user) {
-        await supabase
-          .from("profiles")
-          .update({ law_firm_id: profile.law_firm_id })
-          .eq("id", authData.user.id);
-
-        // Set the role
-        await supabase
-          .from("user_roles")
-          .update({ role })
-          .eq("user_id", authData.user.id);
-      }
-
-      return authData;
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["team-members"] });
       refetchLimits();
       toast({
         title: "Convite enviado",
-        description: "Um email de convite foi enviado para o novo membro.",
+        description: data?.email_sent 
+          ? "Um email de convite foi enviado para o novo membro."
+          : "Membro adicionado com sucesso.",
       });
     },
     onError: (error: any) => {
