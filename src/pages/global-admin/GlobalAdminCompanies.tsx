@@ -232,7 +232,22 @@ export default function GlobalAdminCompanies() {
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
-    await updateCompany.mutateAsync({ id: editingCompany, ...formData });
+    // Only send fields that exist in the companies table
+    const updateData = {
+      name: formData.name,
+      document: formData.document,
+      email: formData.email,
+      phone: formData.phone,
+      plan_id: formData.plan_id,
+      max_users: formData.max_users,
+      max_instances: formData.max_instances,
+      max_agents: formData.max_agents,
+      max_workspaces: formData.max_workspaces,
+      max_ai_conversations: formData.max_ai_conversations,
+      max_tts_minutes: formData.max_tts_minutes,
+      use_custom_limits: formData.use_custom_limits,
+    };
+    await updateCompany.mutateAsync({ id: editingCompany, ...updateData });
     setEditingCompany(null);
     setFormData(resetFormData());
   };
