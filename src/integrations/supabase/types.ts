@@ -1272,6 +1272,8 @@ export type Database = {
           ai_provider: string
           ai_settings_updated_at: string | null
           ai_settings_updated_by: string | null
+          ai_voice_enabled: boolean | null
+          ai_voice_id: string | null
           created_at: string
           evolution_api_key: string | null
           evolution_api_url: string | null
@@ -1291,6 +1293,8 @@ export type Database = {
           ai_provider?: string
           ai_settings_updated_at?: string | null
           ai_settings_updated_by?: string | null
+          ai_voice_enabled?: boolean | null
+          ai_voice_id?: string | null
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
@@ -1310,6 +1314,8 @@ export type Database = {
           ai_provider?: string
           ai_settings_updated_at?: string | null
           ai_settings_updated_by?: string | null
+          ai_voice_enabled?: boolean | null
+          ai_voice_id?: string | null
           created_at?: string
           evolution_api_key?: string | null
           evolution_api_url?: string | null
