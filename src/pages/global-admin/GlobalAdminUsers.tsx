@@ -28,6 +28,7 @@ import {
 import { Users, MoreHorizontal, Shield, ShieldCheck, ShieldAlert, UserX, UserCheck } from "lucide-react";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
 import { AdminRole } from "@/hooks/useAdminAuth";
+import { AddAdminDialog } from "@/components/global-admin/AddAdminDialog";
 
 const roleLabels: Record<AdminRole, { label: string; variant: "default" | "secondary" | "destructive"; icon: typeof Shield }> = {
   super_admin: { label: "Super Admin", variant: "destructive", icon: ShieldAlert },
@@ -49,11 +50,14 @@ export default function GlobalAdminUsers() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Usuários Admin</h1>
-        <p className="text-muted-foreground">
-          Gerencie os administradores do sistema
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Usuários Admin</h1>
+          <p className="text-muted-foreground">
+            Gerencie os administradores do sistema
+          </p>
+        </div>
+        <AddAdminDialog />
       </div>
 
       {/* Stats */}
