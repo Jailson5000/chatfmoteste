@@ -45,7 +45,7 @@ export function useLawFirm() {
 
   const updateLawFirm = useMutation({
     mutationFn: async (updates: Partial<LawFirm>) => {
-      if (!lawFirm) throw new Error("Escritório não encontrado");
+      if (!lawFirm) throw new Error("Empresa não encontrada");
 
       const { data, error } = await supabase
         .from("law_firms")
@@ -59,16 +59,16 @@ export function useLawFirm() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["law_firm"] });
-      toast({ title: "Escritório atualizado" });
+      toast({ title: "Empresa atualizada" });
     },
     onError: (error) => {
-      toast({ title: "Erro ao atualizar escritório", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao atualizar empresa", description: error.message, variant: "destructive" });
     },
   });
 
   const uploadLogo = useMutation({
     mutationFn: async (file: File) => {
-      if (!lawFirm) throw new Error("Escritório não encontrado");
+      if (!lawFirm) throw new Error("Empresa não encontrada");
 
       const fileExt = file.name.split(".").pop();
       const fileName = `${lawFirm.id}/logo.${fileExt}`;

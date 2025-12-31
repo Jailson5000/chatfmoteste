@@ -821,9 +821,9 @@ export default function Settings() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Dados do Escritório</CardTitle>
+              <CardTitle>Dados da Empresa</CardTitle>
               <CardDescription>
-                Informações básicas do seu escritório de advocacia
+                Informações básicas da sua empresa
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -832,7 +832,7 @@ export default function Settings() {
                   <Label htmlFor="office-name">Nome da Empresa</Label>
                   <Input 
                     id="office-name" 
-                    placeholder="Escritório de Advocacia" 
+                    placeholder="Nome da empresa" 
                     value={officeName}
                     onChange={(e) => setOfficeName(e.target.value)}
                   />
@@ -929,7 +929,6 @@ export default function Settings() {
                       <TableHead>Nome</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Função</TableHead>
-                      <TableHead>OAB</TableHead>
                       <TableHead>Permissões</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
@@ -944,7 +943,6 @@ export default function Settings() {
                             {roleLabels[member.role]?.label || member.role}
                           </Badge>
                         </TableCell>
-                        <TableCell>{member.oab_number || "—"}</TableCell>
                         <TableCell>
                           {(member.role === "admin" || member.role === "gerente") && (
                             <span className="text-xs text-muted-foreground">

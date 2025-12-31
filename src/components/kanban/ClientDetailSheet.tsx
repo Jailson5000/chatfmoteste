@@ -61,13 +61,13 @@ interface ClientDetailSheetProps {
 // Mock handlers for transfer
 const availableHandlers = {
   ai: [
-    { id: 'ai-1', name: 'Assistente Jurídico', description: 'IA para triagem inicial' },
+    { id: 'ai-1', name: 'Assistente Virtual', description: 'IA para triagem inicial' },
     { id: 'ai-2', name: 'IA Triagem', description: 'IA para classificação' },
     { id: 'ai-3', name: 'IA Documentos', description: 'IA para análise de docs' },
   ],
   human: [
-    { id: 'human-1', name: 'Dr. Carlos Silva', role: 'Advogado' },
-    { id: 'human-2', name: 'Dra. Ana Costa', role: 'Advogada' },
+    { id: 'human-1', name: 'Carlos Silva', role: 'Gerente' },
+    { id: 'human-2', name: 'Ana Costa', role: 'Supervisora' },
     { id: 'human-3', name: 'João Atendente', role: 'Atendente' },
     { id: 'human-4', name: 'Maria Santos', role: 'Estagiária' },
   ]
@@ -88,7 +88,7 @@ const generateMockMessages = (clientName: string): Message[] => {
   return [
     {
       id: '1',
-      content: 'Olá! Bem-vindo ao nosso escritório. Como posso ajudá-lo hoje?',
+      content: 'Olá! Bem-vindo à nossa empresa. Como posso ajudá-lo hoje?',
       isFromMe: true,
       createdAt: new Date(now.getTime() - 3600000 * 5),
       senderType: 'ai',
@@ -96,7 +96,7 @@ const generateMockMessages = (clientName: string): Message[] => {
     },
     {
       id: '2',
-      content: 'Olá, preciso de ajuda com um processo trabalhista. Fui demitido sem justa causa.',
+      content: 'Olá, preciso de informações sobre os serviços de vocês.',
       isFromMe: false,
       createdAt: new Date(now.getTime() - 3600000 * 4.5),
       senderType: 'client',

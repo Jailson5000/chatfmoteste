@@ -147,7 +147,7 @@ export default function AdminDashboard() {
                 <div>
                   <p className="font-medium">Dados da Empresa</p>
                   <p className="text-sm text-muted-foreground">
-                    Atualizar informações do escritório
+                    Atualizar informações da empresa
                   </p>
                 </div>
               </div>
@@ -159,7 +159,7 @@ export default function AdminDashboard() {
           <CardHeader>
             <CardTitle>Informações da Empresa</CardTitle>
             <CardDescription>
-              Dados do seu escritório
+              Dados da sua empresa
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

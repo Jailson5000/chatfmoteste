@@ -1550,17 +1550,16 @@ const AVAILABLE_VOICES = [
                 placeholder="Digite aqui o prompt principal da IA...
 
 Exemplo:
-Você é um assistente virtual do escritório [Nome do Escritório]. Seu papel é:
+Você é um assistente virtual da empresa [Nome da Empresa]. Seu papel é:
 
 1. Fazer a triagem inicial dos clientes
-2. Coletar informações básicas sobre o caso
-3. Agendar consultas quando solicitado
+2. Coletar informações básicas sobre a solicitação
+3. Agendar reuniões quando solicitado
 4. Responder dúvidas frequentes
 
 Regras:
 - Seja sempre cordial e profissional
-- Nunca dê aconselhamento jurídico específico
-- Encaminhe casos complexos para um advogado humano
+- Encaminhe casos complexos para um atendente humano
 - Mantenha a confidencialidade das informações"
                 className="h-full resize-none border-0 focus-visible:ring-0 rounded-lg text-base font-mono min-h-[400px]"
                 maxLength={MAX_PROMPT_LENGTH}
