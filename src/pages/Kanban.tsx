@@ -513,7 +513,7 @@ export default function Kanban() {
 
       {/* Conversation Chat Panel */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col">
+        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col [&>button]:hidden">
           {selectedConversation && (
             <KanbanChatPanel
               conversationId={selectedConversation.id}
@@ -521,6 +521,15 @@ export default function Kanban() {
               contactPhone={selectedConversation.contact_phone}
               currentHandler={selectedConversation.current_handler}
               assignedProfile={selectedConversation.assigned_profile}
+              clientId={selectedConversation.client_id}
+              clientStatus={selectedConversation.client?.custom_status_id}
+              conversationTags={selectedConversation.tags}
+              departmentId={selectedConversation.department_id}
+              customStatuses={customStatuses}
+              tags={tags}
+              departments={departments}
+              members={members}
+              automations={automations}
               onClose={() => setSheetOpen(false)}
             />
           )}

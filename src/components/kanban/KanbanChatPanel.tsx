@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
+import { useClients } from "@/hooks/useClients";
 
 import { cn } from "@/lib/utils";
 import { 
@@ -29,7 +29,13 @@ import {
   Zap,
   Lock,
   Sparkles,
-  Paperclip
+  Paperclip,
+  Pencil,
+  Folder,
+  Tag,
+  CircleDot,
+  ArrowRightLeft,
+  Users
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -40,6 +46,20 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 interface Message {
   id: string;
@@ -54,12 +74,52 @@ interface Message {
   media_url?: string | null;
 }
 
+interface CustomStatus {
+  id: string;
+  name: string;
+  color: string;
+  is_active: boolean;
+}
+
+interface TagItem {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface Department {
+  id: string;
+  name: string;
+  color: string;
+  is_active: boolean;
+}
+
+interface TeamMember {
+  id: string;
+  full_name: string;
+}
+
+interface Automation {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 interface KanbanChatPanelProps {
   conversationId: string;
   contactName: string | null;
   contactPhone: string | null;
   currentHandler: 'ai' | 'human';
   assignedProfile?: { full_name: string } | null;
+  clientId?: string | null;
+  clientStatus?: string | null;
+  conversationTags?: string[] | null;
+  departmentId?: string | null;
+  customStatuses: CustomStatus[];
+  tags: TagItem[];
+  departments: Department[];
+  members: TeamMember[];
+  automations: Automation[];
   onClose: () => void;
 }
 
@@ -69,11 +129,22 @@ export function KanbanChatPanel({
   contactPhone,
   currentHandler,
   assignedProfile,
+  clientId,
+  clientStatus,
+  conversationTags,
+  departmentId,
+  customStatuses,
+  tags,
+  departments,
+  members,
+  automations,
   onClose,
 }: KanbanChatPanelProps) {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { transferHandler, updateConversation } = useConversations();
+  const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
+  const { updateClientStatus } = useClients();
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [messageInput, setMessageInput] = useState("");
@@ -85,6 +156,34 @@ export function KanbanChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  // Edit name state
+  const [editNameOpen, setEditNameOpen] = useState(false);
+  const [editingName, setEditingName] = useState(contactName || "");
+  
+  // Status selector state
+  const [statusOpen, setStatusOpen] = useState(false);
+  
+  // Tags selector state
+  const [tagsOpen, setTagsOpen] = useState(false);
+  
+  // Department selector state
+  const [departmentOpen, setDepartmentOpen] = useState(false);
+  
+  // Transfer popover state
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferSearch, setTransferSearch] = useState("");
+
+  // Get current status
+  const currentStatusObj = customStatuses.find(s => s.id === clientStatus);
+  
+  // Get current department
+  const currentDepartment = departments.find(d => d.id === departmentId);
+  
+  // Get current tags
+  const currentTags = (conversationTags || [])
+    .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
+    .filter(Boolean) as TagItem[];
 
   // Fetch messages
   useEffect(() => {
@@ -391,9 +490,89 @@ export function KanbanChatPanel({
   };
 
   const handleExpand = () => {
-    // Navigate to Conversations page with this specific conversation ID
     navigate(`/conversations?id=${conversationId}`);
     onClose();
+  };
+
+  const handleSaveName = async () => {
+    if (!editingName.trim()) return;
+    
+    try {
+      await updateConversation.mutateAsync({
+        id: conversationId,
+        contact_name: editingName.trim(),
+      });
+      toast({ title: "Nome atualizado" });
+      setEditNameOpen(false);
+    } catch (error) {
+      toast({
+        title: "Erro ao atualizar nome",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStatusChange = (statusId: string) => {
+    if (!clientId) {
+      toast({
+        title: "Sem cliente vinculado",
+        description: "Esta conversa não tem um cliente vinculado.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const newStatusId = currentStatusObj?.id === statusId ? null : statusId;
+    updateClientStatus.mutate({ clientId, statusId: newStatusId }, {
+      onSuccess: () => {
+        toast({ title: "Status atualizado" });
+        setStatusOpen(false);
+      },
+    });
+  };
+
+  const handleTagToggle = (tag: TagItem) => {
+    const currentTagNames = conversationTags || [];
+    const hasTag = currentTagNames.includes(tag.name);
+    
+    let newTags: string[];
+    if (hasTag) {
+      newTags = currentTagNames.filter(t => t !== tag.name);
+    } else {
+      if (currentTagNames.length >= 4) {
+        toast({ title: "Máximo de 4 tags" });
+        return;
+      }
+      newTags = [...currentTagNames, tag.name];
+    }
+    
+    updateConversationTags.mutate({ conversationId, tags: newTags }, {
+      onSuccess: () => toast({ title: "Tags atualizadas" }),
+    });
+  };
+
+  const handleDepartmentChange = (deptId: string) => {
+    const newDeptId = currentDepartment?.id === deptId ? null : deptId;
+    updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId }, {
+      onSuccess: () => {
+        toast({ title: "Departamento atualizado" });
+        setDepartmentOpen(false);
+      },
+    });
+  };
+
+  const handleTransferTo = (type: 'ai' | 'human', memberId?: string) => {
+    transferHandler.mutate({
+      conversationId,
+      handlerType: type,
+      assignedTo: memberId,
+    }, {
+      onSuccess: () => {
+        toast({ title: type === 'ai' ? "Transferido para IA" : "Transferido para atendente" });
+        setTransferOpen(false);
+        setTransferSearch("");
+      },
+    });
   };
 
   const getMessageIcon = (type?: string) => {
@@ -433,44 +612,293 @@ export function KanbanChatPanel({
     }
   };
 
+  // Filtered members for transfer search
+  const filteredMembers = members.filter(m => 
+    m.full_name.toLowerCase().includes(transferSearch.toLowerCase())
+  );
+
+  // Filtered automations for transfer search
+  const filteredAutomations = automations.filter(a => 
+    a.name.toLowerCase().includes(transferSearch.toLowerCase())
+  );
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header - Single header with close button */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
-            <AvatarImage
-              src={`https://api.dicebear.com/7.x/initials/svg?seed=${contactName || contactPhone}`}
-            />
-            <AvatarFallback>
-              {contactName?.charAt(0)?.toUpperCase() || "?"}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <h3 className="font-semibold">{contactName || contactPhone}</h3>
-            <p className="text-xs text-muted-foreground">{contactPhone}</p>
+      {/* Header */}
+      <div className="p-4 border-b border-border space-y-3">
+        {/* Top row: Avatar, name, actions */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Avatar className="h-10 w-10">
+              <AvatarImage
+                src={`https://api.dicebear.com/7.x/initials/svg?seed=${contactName || contactPhone}`}
+              />
+              <AvatarFallback>
+                {contactName?.charAt(0)?.toUpperCase() || "?"}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <div className="flex items-center gap-1">
+                <h3 className="font-semibold">{contactName || contactPhone}</h3>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6"
+                  onClick={() => {
+                    setEditingName(contactName || "");
+                    setEditNameOpen(true);
+                  }}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{contactPhone}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleArchive}
+              title="Arquivar"
+            >
+              <Archive className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleExpand}
+              title="Expandir conversa"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose} title="Fechar">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={handleArchive}
-            title="Arquivar"
-          >
-            <Archive className="h-4 w-4" />
-          </Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={handleExpand}
-            title="Expandir conversa"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onClose} title="Fechar">
-            <X className="h-4 w-4" />
-          </Button>
+
+        {/* Second row: Properties - Status, Tags, Department, Transfer */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Selector */}
+          <Popover open={statusOpen} onOpenChange={setStatusOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5">
+                <CircleDot className="h-3 w-3" />
+                {currentStatusObj ? (
+                  <Badge 
+                    variant="outline" 
+                    className="text-xs px-1.5 py-0"
+                    style={{ 
+                      backgroundColor: `${currentStatusObj.color}20`,
+                      borderColor: currentStatusObj.color,
+                      color: currentStatusObj.color
+                    }}
+                  >
+                    {currentStatusObj.name}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Status</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="start">
+              <div className="space-y-1">
+                {customStatuses.filter(s => s.is_active).map(status => (
+                  <Button
+                    key={status.id}
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "w-full justify-start gap-2",
+                      currentStatusObj?.id === status.id && "bg-muted"
+                    )}
+                    onClick={() => handleStatusChange(status.id)}
+                  >
+                    <div 
+                      className="h-3 w-3 rounded-full" 
+                      style={{ backgroundColor: status.color }}
+                    />
+                    {status.name}
+                    {currentStatusObj?.id === status.id && (
+                      <Check className="h-3 w-3 ml-auto" />
+                    )}
+                  </Button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Tags Selector */}
+          <Popover open={tagsOpen} onOpenChange={setTagsOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5">
+                <Tag className="h-3 w-3" />
+                {currentTags.length > 0 ? (
+                  <div className="flex gap-1">
+                    {currentTags.slice(0, 2).map(tag => (
+                      <Badge 
+                        key={tag.id}
+                        variant="outline" 
+                        className="text-xs px-1 py-0"
+                        style={{ 
+                          backgroundColor: `${tag.color}20`,
+                          borderColor: tag.color,
+                          color: tag.color
+                        }}
+                      >
+                        {tag.name}
+                      </Badge>
+                    ))}
+                    {currentTags.length > 2 && (
+                      <span className="text-xs text-muted-foreground">+{currentTags.length - 2}</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Tags</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="start">
+              <div className="space-y-1">
+                {tags.map(tag => {
+                  const isSelected = currentTags.some(t => t.id === tag.id);
+                  return (
+                    <Button
+                      key={tag.id}
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "w-full justify-start gap-2",
+                        isSelected && "bg-muted"
+                      )}
+                      onClick={() => handleTagToggle(tag)}
+                    >
+                      <div 
+                        className="h-3 w-3 rounded-full" 
+                        style={{ backgroundColor: tag.color }}
+                      />
+                      {tag.name}
+                      {isSelected && <Check className="h-3 w-3 ml-auto" />}
+                    </Button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Department Selector */}
+          <Popover open={departmentOpen} onOpenChange={setDepartmentOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5">
+                <Folder className="h-3 w-3" />
+                {currentDepartment ? (
+                  <Badge 
+                    variant="outline" 
+                    className="text-xs px-1.5 py-0"
+                    style={{ 
+                      backgroundColor: `${currentDepartment.color}20`,
+                      borderColor: currentDepartment.color,
+                      color: currentDepartment.color
+                    }}
+                  >
+                    {currentDepartment.name}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Departamento</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="start">
+              <div className="space-y-1">
+                {departments.filter(d => d.is_active).map(dept => (
+                  <Button
+                    key={dept.id}
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "w-full justify-start gap-2",
+                      currentDepartment?.id === dept.id && "bg-muted"
+                    )}
+                    onClick={() => handleDepartmentChange(dept.id)}
+                  >
+                    <Folder 
+                      className="h-3 w-3" 
+                      style={{ color: dept.color }}
+                    />
+                    {dept.name}
+                    {currentDepartment?.id === dept.id && (
+                      <Check className="h-3 w-3 ml-auto" />
+                    )}
+                  </Button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Transfer Selector */}
+          <Popover open={transferOpen} onOpenChange={setTransferOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5">
+                <ArrowRightLeft className="h-3 w-3" />
+                <span className="text-xs">Transferir</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-0" align="start">
+              <Command>
+                <CommandInput 
+                  placeholder="Buscar..." 
+                  value={transferSearch}
+                  onValueChange={setTransferSearch}
+                />
+                <CommandList>
+                  <CommandEmpty>Nenhum resultado.</CommandEmpty>
+                  
+                  {filteredAutomations.length > 0 && (
+                    <CommandGroup heading="IA">
+                      {filteredAutomations.map(automation => (
+                        <CommandItem
+                          key={automation.id}
+                          value={`ai-${automation.name}`}
+                          onSelect={() => handleTransferTo("ai")}
+                          className="flex items-center gap-2"
+                        >
+                          <div className="w-6 h-6 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                            <Zap className="h-3 w-3 text-purple-600" />
+                          </div>
+                          <span className="text-sm">{automation.name}</span>
+                          {currentHandler === "ai" && (
+                            <Check className="h-3 w-3 ml-auto text-primary" />
+                          )}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                  
+                  <CommandGroup heading="Humano">
+                    {filteredMembers.map(member => (
+                      <CommandItem
+                        key={member.id}
+                        value={member.full_name}
+                        onSelect={() => handleTransferTo("human", member.id)}
+                        className="flex items-center gap-2"
+                      >
+                        <Avatar className="h-6 w-6">
+                          <AvatarFallback className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700">
+                            {member.full_name.charAt(0)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm">{member.full_name}</span>
+                        {currentHandler === "human" && assignedProfile?.full_name === member.full_name && (
+                          <Check className="h-3 w-3 ml-auto text-primary" />
+                        )}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -502,35 +930,28 @@ export function KanbanChatPanel({
                 >
                   <div
                     className={cn(
-                      "max-w-[80%] rounded-lg px-3 py-2 text-sm",
+                      "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm break-words overflow-hidden",
                       isInternal
-                        ? "bg-warning/20 text-warning-foreground border border-warning/30"
+                        ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
                         : isFromMe
-                        ? isAI
-                          ? "bg-purple-500/20 text-foreground"
-                          : "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
+                          ? isAI
+                            ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
+                            : "bg-green-500 text-white rounded-br-md dark:bg-green-600"
+                          : "bg-muted rounded-bl-md"
                     )}
                   >
                     {/* Sender indicator */}
-                    {isFromMe && (
-                      <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
-                        {isInternal ? (
-                          <>
-                            <Lock className="h-3 w-3" />
-                            <span>Interno</span>
-                          </>
-                        ) : isAI ? (
-                          <>
-                            <Bot className="h-3 w-3" />
-                            <span>IA</span>
-                          </>
-                        ) : (
-                          <>
-                            <User className="h-3 w-3" />
-                            <span>{assignedProfile?.full_name?.split(" ")[0] || "Você"}</span>
-                          </>
-                        )}
+                    {isInternal && (
+                      <div className="flex items-center gap-1 text-xs text-yellow-700 mb-1 dark:text-yellow-300">
+                        <Lock className="h-3 w-3" />
+                        Interno
+                      </div>
+                    )}
+                    
+                    {isAI && isFromMe && !isInternal && (
+                      <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
+                        <Bot className="h-3 w-3" />
+                        Assistente IA
                       </div>
                     )}
 
@@ -543,11 +964,14 @@ export function KanbanChatPanel({
                     )}
 
                     {/* Content */}
-                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
 
                     {/* Time and status */}
-                    <div className="flex items-center justify-end gap-1 mt-1">
-                      <span className="text-xs opacity-70">{formatTime(msg.created_at)}</span>
+                    <div className={cn(
+                      "flex items-center justify-end gap-1 mt-1",
+                      isFromMe && !isInternal && !isAI ? "text-white/70" : "opacity-70"
+                    )}>
+                      <span className="text-xs">{formatTime(msg.created_at)}</span>
                       {renderStatusIcon(msg.status, isFromMe)}
                     </div>
                   </div>
@@ -763,7 +1187,7 @@ export function KanbanChatPanel({
               </>
             ) : (
               <>
-                <User className="h-3 w-3 text-success" />
+                <User className="h-3 w-3 text-green-500" />
                 <span>{assignedProfile?.full_name || "Atendimento humano"}</span>
               </>
             )}
@@ -783,6 +1207,35 @@ export function KanbanChatPanel({
           </Button>
         </div>
       </div>
+
+      {/* Edit Name Dialog */}
+      <Dialog open={editNameOpen} onOpenChange={setEditNameOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Editar nome do contato</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <Input
+              value={editingName}
+              onChange={(e) => setEditingName(e.target.value)}
+              placeholder="Nome do contato"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleSaveName();
+                }
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditNameOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveName}>
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
