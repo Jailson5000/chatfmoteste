@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Plus, Search, Upload, User, SlidersHorizontal } from "lucide-react";
+import { Plus, Search, Upload, Download, User, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,7 @@ import { useTags } from "@/hooks/useTags";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { exportToExcel, getFormattedDate } from "@/lib/exportUtils";
 
 export default function Contacts() {
   const { clients, isLoading, createClient, deleteClient } = useClients();
@@ -175,6 +176,26 @@ export default function Contacts() {
     );
   };
 
+  const handleExport = () => {
+    const dataToExport = filteredClients.map((client) => {
+      const status = getStatusById(client.custom_status_id);
+      const department = getDepartmentById(client.department_id);
+      return {
+        Nome: client.name,
+        Telefone: formatPhone(client.phone),
+        Email: client.email || "",
+        CPF_CNPJ: client.document || "",
+        Status: status?.name || "",
+        Departamento: department?.name || "",
+        Endereco: client.address || "",
+        Observacoes: client.notes || "",
+        Criado_Em: format(new Date(client.created_at), "dd/MM/yyyy", { locale: ptBR }),
+      };
+    });
+    exportToExcel(dataToExport, `contatos-${getFormattedDate()}`, "Contatos");
+    toast({ title: "Contatos exportados com sucesso" });
+  };
+
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Search and Filters Row */}
@@ -236,6 +257,16 @@ export default function Contacts() {
           <Button variant="outline" className="gap-2">
             <SlidersHorizontal className="h-4 w-4" />
             Mais filtros
+          </Button>
+
+          <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="h-4 w-4" />
+            Importar
+          </Button>
+
+          <Button variant="outline" className="gap-2" onClick={handleExport}>
+            <Download className="h-4 w-4" />
+            Exportar
           </Button>
 
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
