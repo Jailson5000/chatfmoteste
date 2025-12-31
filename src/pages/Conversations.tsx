@@ -182,9 +182,10 @@ export default function Conversations() {
     statuses: string[];
     handlers: Array<'ai' | 'human'>;
     tags: string[];
+    departments: string[];
     searchName: string;
     searchPhone: string;
-  }>({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
+  }>({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
 
   // Message search state
   const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -599,11 +600,18 @@ export default function Conversations() {
         if (!hasMatchingTag) return false;
       }
 
+      // Department filter
+      if (conversationFilters.departments.length > 0) {
+        if (!conv.department?.id || !conversationFilters.departments.includes(conv.department.id)) {
+          return false;
+        }
+      }
+
       // Tab filter
       switch (activeTab) {
         case "chat":
-          // "Meus Chats": Only show conversations assigned to current user
-          return conv.handler === "human" && conv.assignedTo === user?.id;
+          // "Chat": Only show conversations assigned to current user (as human handler)
+          return conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
         case "ai":
           return conv.handler === "ai";
         case "queue":
@@ -612,7 +620,7 @@ export default function Conversations() {
           return true;
       }
     });
-  }, [mappedConversations, conversationFilters, searchQuery, activeTab, user?.id]);
+  }, [mappedConversations, conversationFilters, searchQuery, activeTab, userProfile?.full_name]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
@@ -1521,6 +1529,7 @@ export default function Conversations() {
             onSearchChange={setSearchQuery}
             availableStatuses={availableStatuses}
             availableTags={availableTags}
+            availableDepartments={departments.filter(d => d.is_active).map(d => ({ id: d.id, name: d.name, color: d.color }))}
           />
         </div>
 

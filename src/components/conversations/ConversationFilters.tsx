@@ -14,13 +14,14 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Filter, Bot, User, Tag, X, Search, ChevronDown, ChevronRight } from "lucide-react";
+import { Filter, Bot, User, Tag, X, Search, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useState } from "react";
 
 interface FilterState {
   statuses: string[];
   handlers: Array<'ai' | 'human'>;
   tags: string[];
+  departments: string[];
   searchName: string;
   searchPhone: string;
 }
@@ -32,6 +33,7 @@ interface ConversationFiltersProps {
   onSearchChange: (query: string) => void;
   availableStatuses: Array<{ id: string; name: string; color: string }>;
   availableTags: Array<{ id: string; name: string; color: string }>;
+  availableDepartments?: Array<{ id: string; name: string; color: string }>;
 }
 
 export function ConversationFilters({ 
@@ -40,17 +42,20 @@ export function ConversationFilters({
   searchQuery,
   onSearchChange,
   availableStatuses,
-  availableTags
+  availableTags,
+  availableDepartments = []
 }: ConversationFiltersProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [handlerOpen, setHandlerOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
+  const [departmentOpen, setDepartmentOpen] = useState(false);
   
   const activeFiltersCount = 
     filters.statuses.length + 
     filters.handlers.length + 
-    filters.tags.length;
+    filters.tags.length +
+    (filters.departments?.length || 0);
 
   const toggleStatus = (statusId: string) => {
     const newStatuses = filters.statuses.includes(statusId)
@@ -73,8 +78,16 @@ export function ConversationFilters({
     onFiltersChange({ ...filters, tags: newTags });
   };
 
+  const toggleDepartment = (deptId: string) => {
+    const currentDepts = filters.departments || [];
+    const newDepartments = currentDepts.includes(deptId)
+      ? currentDepts.filter(d => d !== deptId)
+      : [...currentDepts, deptId];
+    onFiltersChange({ ...filters, departments: newDepartments });
+  };
+
   const clearFilters = () => {
-    onFiltersChange({ statuses: [], handlers: [], tags: [], searchName: '', searchPhone: '' });
+    onFiltersChange({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
     onSearchChange('');
   };
 
@@ -273,6 +286,55 @@ export function ConversationFilters({
                   )}
                 </CollapsibleContent>
               </Collapsible>
+
+              {availableDepartments.length > 0 && (
+                <>
+                  <Separator className="my-1" />
+
+                  {/* Department Filter - Cascade */}
+                  <Collapsible open={departmentOpen} onOpenChange={setDepartmentOpen}>
+                    <CollapsibleTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        className="w-full justify-between h-9 px-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Folder className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">Departamento</span>
+                          {(filters.departments?.length || 0) > 0 && (
+                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                              {filters.departments?.length}
+                            </Badge>
+                          )}
+                        </div>
+                        {departmentOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                      {availableDepartments.map(dept => (
+                        <label 
+                          key={dept.id} 
+                          className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
+                        >
+                          <Checkbox 
+                            checked={filters.departments?.includes(dept.id) || false}
+                            onCheckedChange={() => toggleDepartment(dept.id)}
+                          />
+                          <div 
+                            className="w-2.5 h-2.5 rounded-full" 
+                            style={{ backgroundColor: dept.color }} 
+                          />
+                          <span className="text-sm">{dept.name}</span>
+                        </label>
+                      ))}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </>
+              )}
             </div>
           </ScrollArea>
         </PopoverContent>
