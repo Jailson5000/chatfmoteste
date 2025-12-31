@@ -43,6 +43,7 @@ import { DomainConfigDialog } from "@/components/global-admin/DomainConfigDialog
 import { CompanyAIConfigDialog } from "@/components/global-admin/CompanyAIConfigDialog";
 import { CompanyLimitsEditor } from "@/components/global-admin/CompanyLimitsEditor";
 import { CompanyUsageMonitor } from "@/components/global-admin/CompanyUsageMonitor";
+import { CompanyUsersDialog } from "@/components/global-admin/CompanyUsersDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,6 +61,7 @@ export default function GlobalAdminCompanies() {
   const [domainConfigCompany, setDomainConfigCompany] = useState<typeof companies[0] | null>(null);
   const [aiConfigCompany, setAiConfigCompany] = useState<typeof companies[0] | null>(null);
   const [usageMonitorCompany, setUsageMonitorCompany] = useState<typeof companies[0] | null>(null);
+  const [usersDialogCompany, setUsersDialogCompany] = useState<typeof companies[0] | null>(null);
   const [resettingPassword, setResettingPassword] = useState<string | null>(null);
   const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
@@ -1182,6 +1184,10 @@ export default function GlobalAdminCompanies() {
                                   <Bot className="mr-2 h-4 w-4" />
                                   Configurar IA
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setUsersDialogCompany(company)}>
+                                  <Users className="mr-2 h-4 w-4" />
+                                  Ver Usuários
+                                </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleResetPassword(company)}
                                   disabled={resettingPassword === company.id || !company.admin_user_id}
@@ -1474,6 +1480,17 @@ export default function GlobalAdminCompanies() {
         company={aiConfigCompany}
         open={!!aiConfigCompany}
         onOpenChange={(open) => !open && setAiConfigCompany(null)}
+      />
+
+      {/* Company Users Dialog */}
+      <CompanyUsersDialog
+        open={!!usersDialogCompany}
+        onOpenChange={(open) => !open && setUsersDialogCompany(null)}
+        company={usersDialogCompany ? {
+          id: usersDialogCompany.id,
+          name: usersDialogCompany.name,
+          law_firm_id: usersDialogCompany.law_firm_id,
+        } : null}
       />
     </div>
   );

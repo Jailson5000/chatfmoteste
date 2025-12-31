@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { 
+  extractSubdomainFromOrigin, 
+  validateTenantAccess, 
+  logTenantSecurityEvent 
+} from "../_shared/tenant-validation.ts";
 
 // Production CORS configuration
 const ALLOWED_ORIGINS = [
@@ -257,7 +262,7 @@ serve(async (req) => {
     // Get user's law firm
     const { data: profile, error: profileError } = await supabaseClient
       .from("profiles")
-      .select("law_firm_id")
+      .select("law_firm_id, email")
       .eq("id", user.id)
       .single();
 
@@ -265,8 +270,44 @@ serve(async (req) => {
       throw new Error("User not associated with a law firm");
     }
 
+    // Get user's subdomain for tenant validation
+    const { data: lawFirm } = await supabaseClient
+      .from("law_firms")
+      .select("subdomain")
+      .eq("id", profile.law_firm_id)
+      .single();
+
+    const userSubdomain = lawFirm?.subdomain || null;
+    const requestSubdomain = extractSubdomainFromOrigin(
+      req.headers.get("origin"),
+      req.headers.get("referer")
+    );
+
+    // Validate tenant access (subdomain matching)
+    const userTenant = {
+      userId: user.id,
+      email: profile.email,
+      lawFirmId: profile.law_firm_id,
+      subdomain: userSubdomain,
+    };
+
+    if (!validateTenantAccess(userTenant, requestSubdomain)) {
+      await logTenantSecurityEvent(supabaseClient, {
+        userId: user.id,
+        email: profile.email,
+        action: "evolution_api_access_denied",
+        expectedSubdomain: userSubdomain,
+        requestSubdomain,
+        ipAddress: req.headers.get("x-forwarded-for") || undefined,
+        userAgent: req.headers.get("user-agent") || undefined,
+        blocked: true,
+      });
+      throw new Error("Tenant access denied");
+    }
+
     const lawFirmId = profile.law_firm_id as string;
     const body: EvolutionRequest = await req.json();
+
 
     console.log(`[Evolution API] Action: ${body.action}, Instance: ${body.instanceName || body.instanceId}`);
 
