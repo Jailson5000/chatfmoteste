@@ -66,8 +66,11 @@ function buildInitialAccessEmail(
   adminEmail: string,
   temporaryPassword: string
 ): { subject: string; html: string } {
-  // Use main domain for now
-  const accessUrl = `https://www.miauchat.com.br/auth`;
+  // CRITICAL: Use tenant subdomain for security isolation
+  // Each client must access via their own subdomain only
+  const accessUrl = subdomain 
+    ? `https://${subdomain}.miauchat.com.br/auth`
+    : `https://www.miauchat.com.br/auth`;
   
   return {
     subject: `Bem-vindo ao MiauChat – Dados de Acesso | ${companyName}`,
