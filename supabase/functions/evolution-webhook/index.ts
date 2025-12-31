@@ -117,6 +117,54 @@ function normalizeEventName(event: string): string {
   return normalized;
 }
 
+// Helper to extract phone number from JID
+function extractPhoneFromJid(jid: string | null): string | null {
+  if (!jid) return null;
+  const match = jid.match(/(\d+)@/);
+  return match ? match[1] : jid.replace(/@.*/, '');
+}
+
+// Fetch connected phone number from Evolution API
+async function fetchConnectedPhoneNumber(
+  apiUrl: string,
+  apiKey: string,
+  instanceName: string
+): Promise<string | null> {
+  try {
+    const url = `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': apiKey,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) {
+      console.log(`[Webhook] fetchInstances failed: ${res.status}`);
+      return null;
+    }
+    
+    const data = await res.json().catch(() => null);
+    const candidates = Array.isArray(data) ? data : data?.instances ? data.instances : [data];
+    
+    const found = candidates?.find?.((i: any) => i?.instanceName === instanceName || i?.name === instanceName) ?? candidates?.[0];
+    
+    const ownerJid = found?.owner || found?.instance?.owner || found?.profile?.owner || found?.profile?.id || null;
+    return extractPhoneFromJid(ownerJid);
+  } catch (e) {
+    console.log(`[Webhook] Error fetching phone number: ${e}`);
+    return null;
+  }
+}
+
 // Detailed logging helper
 function logDebug(section: string, message: string, data?: unknown) {
   const timestamp = new Date().toISOString();
@@ -1134,13 +1182,34 @@ serve(async (req) => {
           dbStatus = 'disconnected';
         }
 
+        // Build update payload
+        const updatePayload: Record<string, unknown> = { 
+          status: dbStatus, 
+          updated_at: new Date().toISOString() 
+        };
+
+        // When connected, fetch and store phone number if missing
+        if (dbStatus === 'connected' && !instance.phone_number && instance.api_key && instance.api_url) {
+          logDebug('CONNECTION', `Fetching phone number for newly connected instance`, { requestId });
+          try {
+            const phoneNumber = await fetchConnectedPhoneNumber(
+              instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, ''),
+              instance.api_key,
+              instance.instance_name
+            );
+            if (phoneNumber) {
+              updatePayload.phone_number = phoneNumber;
+              logDebug('CONNECTION', `Phone number fetched: ${phoneNumber}`, { requestId });
+            }
+          } catch (e) {
+            logDebug('CONNECTION', `Failed to fetch phone number (non-fatal): ${e}`, { requestId });
+          }
+        }
+
         // Update instance status
         const { error: updateError } = await supabaseClient
           .from('whatsapp_instances')
-          .update({ 
-            status: dbStatus, 
-            updated_at: new Date().toISOString() 
-          })
+          .update(updatePayload)
           .eq('id', instance.id);
 
         if (updateError) {

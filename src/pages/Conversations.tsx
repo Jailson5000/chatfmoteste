@@ -564,10 +564,8 @@ export default function Conversations() {
       unread: unreadCounts[conv.id] || 0,
       handler: conv.current_handler as "ai" | "human",
       status: conv.status,
-      tags: (conv.tags || []).map((tagName) => ({
-        name: tagName,
-        color: tagColorMap[tagName] || "#6366f1",
-      })),
+      // Use client_tags from client_tags table instead of conversation.tags
+      tags: (conv as any).client_tags || [],
       assignedTo: conv.assigned_profile?.full_name || null,
       whatsappInstance: conv.whatsapp_instance?.display_name || conv.whatsapp_instance?.instance_name || null,
       whatsappPhone: conv.whatsapp_instance?.phone_number || null,

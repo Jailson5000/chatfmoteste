@@ -37,6 +37,10 @@ interface ConversationWithLastMessage extends Conversation {
     name: string;
     color: string;
   } | null;
+  client_tags?: Array<{
+    name: string;
+    color: string;
+  }>;
 }
 
 export function useConversations() {
@@ -77,6 +81,32 @@ export function useConversations() {
         }, {} as Record<string, string>);
       }
 
+      // Fetch client IDs to get their tags
+      const clientIds = (convs || [])
+        .map(c => (c.client as { id?: string } | null)?.id)
+        .filter((id): id is string => id !== null && id !== undefined);
+
+      // Fetch client tags from client_tags table
+      let clientTagsMap: Record<string, Array<{ name: string; color: string }>> = {};
+      if (clientIds.length > 0) {
+        const { data: clientTagsData } = await supabase
+          .from("client_tags")
+          .select("client_id, tag:tags(name, color)")
+          .in("client_id", clientIds);
+        
+        if (clientTagsData) {
+          clientTagsMap = clientTagsData.reduce((acc, ct) => {
+            const clientId = ct.client_id;
+            const tag = ct.tag as { name: string; color: string } | null;
+            if (tag) {
+              if (!acc[clientId]) acc[clientId] = [];
+              acc[clientId].push({ name: tag.name, color: tag.color });
+            }
+            return acc;
+          }, {} as Record<string, Array<{ name: string; color: string }>>);
+        }
+      }
+
       // Fetch last message and unread count for each conversation
       const conversationsWithMessages: ConversationWithLastMessage[] = await Promise.all(
         (convs || []).map(async (conv) => {
@@ -96,18 +126,17 @@ export function useConversations() {
               .is("read_at", null)
           ]);
 
+          const clientData = conv.client as { id?: string; custom_status_id?: string | null; avatar_url?: string | null; custom_status?: { id: string; name: string; color: string } | null } | null;
+          const clientId = clientData?.id;
+
           return {
             ...conv,
             last_message: lastMsgResult.data,
             whatsapp_instance: conv.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
             assigned_profile: conv.assigned_to ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" } : null,
             unread_count: unreadResult.count || 0,
-            client: conv.client as { 
-              id?: string;
-              custom_status_id?: string | null; 
-              avatar_url?: string | null;
-              custom_status?: { id: string; name: string; color: string } | null;
-            } | null,
+            client: clientData,
+            client_tags: clientId ? clientTagsMap[clientId] || [] : [],
           };
         })
       );
