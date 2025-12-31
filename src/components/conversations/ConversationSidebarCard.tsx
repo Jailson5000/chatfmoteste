@@ -1,5 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Bot, Folder, Phone, Tag, User } from "lucide-react";
 
@@ -183,11 +184,50 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
       {/* Footer */}
       <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Tag className="h-3 w-3" />
-          <div className="flex items-center gap-1">
-            <Phone className="h-3 w-3" />
-            <span className="tabular-nums">{connectionId}</span>
-          </div>
+          {/* Tags icon with tooltip */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center cursor-pointer hover:text-foreground transition-colors">
+                  <Tag className="h-3 w-3" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                {conversation.tags.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 p-1">
+                    {conversation.tags.map((tag, idx) => (
+                      <Badge
+                        key={`tooltip-${tag.name}-${idx}`}
+                        className="text-xs h-5 px-2 border-0"
+                        style={{ backgroundColor: `${tag.color}40`, color: tag.color }}
+                      >
+                        {tag.name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Sem etiquetas</span>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Phone icon with last 4 digits */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
+                  <Phone className="h-3 w-3" />
+                  <span className="tabular-nums">{connectionId}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <span className="text-xs">
+                  {conversation.whatsappInstance || "Instância não definida"}
+                </span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         <div className="flex items-center gap-1.5 min-w-0">

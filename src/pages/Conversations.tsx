@@ -569,7 +569,7 @@ export default function Conversations() {
         color: tagColorMap[tagName] || "#6366f1",
       })),
       assignedTo: conv.assigned_profile?.full_name || null,
-      whatsappInstance: conv.whatsapp_instance?.instance_name || null,
+      whatsappInstance: conv.whatsapp_instance?.display_name || conv.whatsapp_instance?.instance_name || null,
       whatsappPhone: conv.whatsapp_instance?.phone_number || null,
       avatarUrl: conv.client?.avatar_url || null,
       clientStatus: conv.client?.custom_status || null,
