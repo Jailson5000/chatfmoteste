@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, User, Phone, Tag, CheckCheck, Image, Mic, Video, FileText } from "lucide-react";
+import { Bot, User, Phone, CheckCheck, Image, Mic, Video, FileText } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -115,8 +115,20 @@ export function KanbanCard({
   
   const isAI = conversation.current_handler === 'ai';
 
-  // Instance phone last 4 digits
-  const instanceLastFour = conversation.whatsapp_instance?.phone_number?.slice(-4) || "----";
+  // Instance identifier: last 4 digits of phone OR display_name/instance_name as fallback
+  const getInstanceIdentifier = () => {
+    const phone = conversation.whatsapp_instance?.phone_number;
+    if (phone && phone.length >= 4) {
+      return `•••${phone.slice(-4)}`;
+    }
+    // Fallback to display_name or instance_name
+    const displayName = conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name;
+    if (displayName) {
+      return displayName.length > 8 ? displayName.slice(0, 8) : displayName;
+    }
+    return "----";
+  };
+  const instanceIdentifier = getInstanceIdentifier();
   
   // Get matched tags
   const conversationTags = (conversation.tags || [])
@@ -209,40 +221,11 @@ export function KanbanCard({
         </div>
       )}
 
-      {/* Tags */}
-      {conversationTags.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {conversationTags.slice(0, 2).map((tag, idx) => (
-            <Badge 
-              key={idx}
-              className="text-xs h-5 px-2 border-0"
-              style={{ 
-                backgroundColor: `${tag!.color}20`,
-                color: tag!.color 
-              }}
-            >
-              {tag!.name}
-            </Badge>
-          ))}
-          {conversationTags.length > 2 && (
-            <Badge variant="secondary" className="text-xs h-5 px-1.5">
-              +{conversationTags.length - 2}
-            </Badge>
-          )}
-        </div>
-      )}
-
       {/* Footer: Instance, Handler */}
       <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {/* Instance phone */}
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Tag className="h-3 w-3" />
-          </div>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Phone className="h-3 w-3" />
-            <span>{instanceLastFour}</span>
-          </div>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Phone className="h-3 w-3" />
+          <span>{instanceIdentifier}</span>
         </div>
 
         {/* Handler */}
