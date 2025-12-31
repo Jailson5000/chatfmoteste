@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Phone, Tag, User } from "lucide-react";
+import { Bot, Folder, Phone, Smartphone, Tag, User } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -55,17 +55,17 @@ function formatBrazilianPhone(phone: string): string {
   return phone;
 }
 
-/** Returns connection identifier: last 4 digits of phone_number, or instance_name abbreviation */
-function getConnectionIdentifier(phone: string | null, instanceName: string | null): string {
+/** Returns connection identifier info: last 4 digits of phone_number, or instance_name abbreviation */
+function getConnectionInfo(phone: string | null, instanceName: string | null): { label: string; isPhone: boolean } {
   const digits = (phone || "").replace(/\D/g, "");
   if (digits.length >= 4) {
-    return `•••${digits.slice(-4)}`;
+    return { label: `•••${digits.slice(-4)}`, isPhone: true };
   }
-  // Fallback to instance name (first 4 chars or full name if shorter)
+  // Fallback to instance name (first 6 chars or full name if shorter)
   if (instanceName) {
-    return instanceName.length > 6 ? instanceName.slice(0, 4) : instanceName;
+    return { label: instanceName.length > 6 ? instanceName.slice(0, 6) : instanceName, isPhone: false };
   }
-  return "----";
+  return { label: "----", isPhone: false };
 }
 
 interface ConversationSidebarCardProps {
@@ -80,7 +80,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
     ? `IA ${conversation.aiAgentName || ""}`.trim()
     : conversation.assignedTo?.split(" ")[0] || "Atendente";
 
-  const connectionId = getConnectionIdentifier(conversation.whatsappPhone, conversation.whatsappInstance);
+  const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
 
   return (
     <button
@@ -212,13 +212,17 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
             </Tooltip>
           </TooltipProvider>
 
-          {/* Phone icon with last 4 digits */}
+          {/* Connection icon with identifier */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
-                  <Phone className="h-3 w-3" />
-                  <span className="tabular-nums">{connectionId}</span>
+                  {connectionInfo.isPhone ? (
+                    <Phone className="h-3 w-3" />
+                  ) : (
+                    <Smartphone className="h-3 w-3" />
+                  )}
+                  <span className="tabular-nums">{connectionInfo.label}</span>
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top">

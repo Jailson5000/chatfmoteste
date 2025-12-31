@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Bot, User, Phone, CheckCheck, Image, Mic, Video, FileText } from "lucide-react";
+import { Bot, User, Phone, CheckCheck, Image, Mic, Video, FileText, Smartphone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -116,19 +116,20 @@ export function KanbanCard({
   const isAI = conversation.current_handler === 'ai';
 
   // Instance identifier: last 4 digits of phone OR display_name/instance_name as fallback
-  const getInstanceIdentifier = () => {
+  const getInstanceInfo = () => {
     const phone = conversation.whatsapp_instance?.phone_number;
-    if (phone && phone.length >= 4) {
-      return `•••${phone.slice(-4)}`;
+    const digits = (phone || "").replace(/\D/g, "");
+    if (digits.length >= 4) {
+      return { label: `•••${digits.slice(-4)}`, isPhone: true };
     }
     // Fallback to display_name or instance_name
     const displayName = conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name;
     if (displayName) {
-      return displayName.length > 8 ? displayName.slice(0, 8) : displayName;
+      return { label: displayName.length > 8 ? displayName.slice(0, 8) : displayName, isPhone: false };
     }
-    return "----";
+    return { label: "----", isPhone: false };
   };
-  const instanceIdentifier = getInstanceIdentifier();
+  const instanceInfo = getInstanceInfo();
   
   // Get matched tags
   const conversationTags = (conversation.tags || [])
@@ -224,8 +225,12 @@ export function KanbanCard({
       {/* Footer: Instance, Handler */}
       <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Phone className="h-3 w-3" />
-          <span>{instanceIdentifier}</span>
+          {instanceInfo.isPhone ? (
+            <Phone className="h-3 w-3" />
+          ) : (
+            <Smartphone className="h-3 w-3" />
+          )}
+          <span>{instanceInfo.label}</span>
         </div>
 
         {/* Handler */}
