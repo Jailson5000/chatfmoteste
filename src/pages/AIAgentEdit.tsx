@@ -59,10 +59,10 @@ const MAX_PROMPT_CHARS = 10000;
 
 // Available mention variables
 const MENTION_VARIABLES = [
-  { key: '@Nome do escritório', description: 'Nome do escritório de advocacia' },
+  { key: '@Nome da empresa', description: 'Nome da sua empresa' },
   { key: '@Nome do cliente', description: 'Nome do cliente na conversa' },
   { key: '@Atendimento', description: 'Departamento de atendimento' },
-  { key: '@Advogado responsável', description: 'Nome do advogado responsável' },
+  { key: '@Responsável', description: 'Nome do responsável pelo atendimento' },
   { key: '@Data atual', description: 'Data atual formatada' },
   { key: '@Hora atual', description: 'Hora atual formatada' },
   { key: '@Ativar áudio', description: 'Comando para ativar resposta por áudio' },
@@ -517,9 +517,9 @@ Use @ para inserir variáveis dinâmicas como @Nome do cliente, @Atendimento, et
 Exemplo:
 REGRAS DE COMUNICAÇÃO
 • Linguagem clara, educada, profissional e acolhedora
-• Nunca dê parecer jurídico definitivo — apenas orientação e triagem
+• Forneça orientações gerais e faça a triagem inicial
 
-Você é uma atendente do escritório @Nome do escritório , especializada em identificar se o cliente tem direito à revisão de aposentadoria."
+Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
               className={cn(
                 "min-h-[calc(100vh-280px)] font-mono text-sm leading-relaxed resize-none border-0 focus-visible:ring-0 p-0 bg-transparent",
                 isOverLimit && "text-destructive"

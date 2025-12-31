@@ -67,7 +67,7 @@ export default function AdminCompany() {
       <div>
         <h1 className="text-2xl font-bold">Dados da Empresa</h1>
         <p className="text-muted-foreground">
-          Atualize as informações do seu escritório
+          Atualize as informações da sua empresa
         </p>
       </div>
 

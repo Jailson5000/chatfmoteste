@@ -51,7 +51,6 @@ export default function Profile() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [oabNumber, setOabNumber] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,7 +87,6 @@ export default function Profile() {
         setFullName(data.full_name || "");
         setEmail(data.email || "");
         setPhone(data.phone || "");
-        setOabNumber(data.oab_number || "");
         setJobTitle(data.job_title || "");
         setAvatarUrl(data.avatar_url);
       } catch (error) {
@@ -116,7 +114,6 @@ export default function Profile() {
         .update({
           full_name: fullName,
           phone: phone || null,
-          oab_number: oabNumber || null,
           job_title: jobTitle || null,
           updated_at: new Date().toISOString(),
         })
@@ -383,35 +380,21 @@ export default function Profile() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="oabNumber">Número OAB</Label>
+              <Label htmlFor="jobTitle">Cargo / Função</Label>
               <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="oabNumber"
-                  value={oabNumber}
-                  onChange={(e) => setOabNumber(e.target.value)}
-                  placeholder="000000/UF"
+                  id="jobTitle"
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                  placeholder="Ex: Gerente, Atendente, Vendedor"
                   className="pl-10"
                 />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Este cargo será exibido na assinatura das suas mensagens
+              </p>
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="jobTitle">Cargo / Função</Label>
-            <div className="relative">
-              <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                id="jobTitle"
-                value={jobTitle}
-                onChange={(e) => setJobTitle(e.target.value)}
-                placeholder="Ex: Advogado, Estagiário, Atendente"
-                className="pl-10"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Este cargo será exibido na assinatura das suas mensagens
-            </p>
           </div>
 
           <Separator />
