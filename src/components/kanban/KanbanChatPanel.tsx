@@ -35,8 +35,12 @@ import {
   Tag,
   CircleDot,
   ArrowRightLeft,
-  Users
+  Users,
+  Play,
+  Pause,
+  FileAudio
 } from "lucide-react";
+import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
@@ -72,6 +76,293 @@ interface Message {
   is_internal?: boolean;
   message_type?: string;
   media_url?: string | null;
+  media_mime_type?: string | null;
+  whatsapp_message_id?: string | null;
+}
+
+// Memory cache for decrypted audio
+const audioMemoryCache = new Map<string, string>();
+
+// Check if URL is encrypted WhatsApp media
+function isEncryptedMedia(url: string): boolean {
+  return url.includes(".enc") || url.includes("mmg.whatsapp.net");
+}
+
+// Transcription cache
+const transcriptionCache = new Map<string, string>();
+
+// Simple audio player for Kanban chat
+function KanbanAudioPlayer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+  isFromMe,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+  isFromMe?: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+  
+  // Transcription state
+  const [transcription, setTranscription] = useState<string | null>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+
+  // Decrypt audio on mount if needed
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadAudio = async () => {
+      // Check memory cache first
+      const memoryCached = audioMemoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      // Check IndexedDB cache
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        audioMemoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      // Fetch from API
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "audio/ogg";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        audioMemoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadAudio();
+    cleanupOldCache();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  // Check for cached transcription
+  useEffect(() => {
+    if (whatsappMessageId) {
+      const cached = transcriptionCache.get(whatsappMessageId);
+      if (cached) setTranscription(cached);
+    }
+  }, [whatsappMessageId]);
+
+  const audioSrc = needsDecryption ? decryptedSrc : src;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const handleDurationChange = () => setDuration(audio.duration);
+    const handleEnded = () => setIsPlaying(false);
+    const handleError = () => {
+      if (!isDecrypting && audioSrc) setError(true);
+    };
+
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('durationchange', handleDurationChange);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('durationchange', handleDurationChange);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+    };
+  }, [isDecrypting, audioSrc]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio || !audioSrc) return;
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => setError(true));
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !audioSrc || !duration) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percentage = clickX / rect.width;
+    const newTime = percentage * duration;
+    audio.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const formatTime = (time: number) => {
+    if (!isFinite(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const handleTranscribe = async () => {
+    if (isTranscribing || !audioSrc) return;
+
+    if (whatsappMessageId && transcriptionCache.has(whatsappMessageId)) {
+      setTranscription(transcriptionCache.get(whatsappMessageId)!);
+      return;
+    }
+
+    setIsTranscribing(true);
+    try {
+      let audioBase64: string;
+      
+      if (audioSrc.startsWith('data:')) {
+        audioBase64 = audioSrc.split(',')[1];
+      } else {
+        const response = await fetch(audioSrc);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        audioBase64 = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      const response = await supabase.functions.invoke("transcribe-audio", {
+        body: {
+          audioBase64,
+          mimeType: mimeType || "audio/ogg",
+        },
+      });
+
+      if (response.data?.transcription) {
+        const text = response.data.transcription;
+        setTranscription(text);
+        if (whatsappMessageId) {
+          transcriptionCache.set(whatsappMessageId, text);
+        }
+      }
+    } catch (err) {
+      setTranscription("Erro ao transcrever");
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center gap-2 min-w-[200px] p-2 rounded-lg bg-background/30">
+        <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        </div>
+        <span className="text-xs opacity-70">Carregando áudio...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 min-w-[160px] p-2 rounded-lg bg-destructive/10">
+        <X className="h-4 w-4 text-destructive" />
+        <span className="text-xs text-destructive">Áudio indisponível</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 min-w-[200px] max-w-[280px]">
+        {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+        
+        {/* Play button */}
+        <button
+          className={cn(
+            "h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
+            isPlaying ? "bg-primary text-primary-foreground" : "bg-background/50 hover:bg-background/70"
+          )}
+          onClick={togglePlay}
+          disabled={!audioSrc}
+        >
+          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+        </button>
+        
+        {/* Progress bar */}
+        <div className="flex-1 space-y-1">
+          <div 
+            className="h-2 bg-background/50 rounded-full cursor-pointer overflow-hidden"
+            onClick={handleSeek}
+          >
+            <div 
+              className="h-full bg-primary rounded-full transition-all"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] opacity-60">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </div>
+        
+        {/* Transcribe button */}
+        <button
+          className="h-7 w-7 rounded-full flex items-center justify-center hover:bg-background/50 transition-colors"
+          onClick={handleTranscribe}
+          disabled={isTranscribing}
+          title="Transcrever áudio"
+        >
+          {isTranscribing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <FileAudio className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      
+      {/* Transcription */}
+      {transcription && (
+        <div className="text-xs opacity-80 italic px-1 py-1 bg-background/20 rounded">
+          "{transcription}"
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface CustomStatus {
@@ -936,7 +1227,7 @@ export function KanbanChatPanel({
                         ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
                         : isFromMe
                           ? isAI
-                            ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
+                            ? "bg-purple-500 text-white rounded-br-md dark:bg-purple-600"
                             : "bg-green-500 text-white rounded-br-md dark:bg-green-600"
                           : "bg-muted rounded-bl-md"
                     )}
@@ -950,27 +1241,43 @@ export function KanbanChatPanel({
                     )}
                     
                     {isAI && isFromMe && !isInternal && (
-                      <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
+                      <div className="flex items-center gap-1 text-xs text-white/80 mb-1">
                         <Bot className="h-3 w-3" />
                         Assistente IA
                       </div>
                     )}
 
-                    {/* Media icon */}
-                    {msgIcon && (
-                      <div className="flex items-center gap-1 mb-1 text-muted-foreground">
+                    {/* Audio player */}
+                    {msg.message_type === 'audio' && msg.media_url && (
+                      <KanbanAudioPlayer
+                        src={msg.media_url}
+                        mimeType={msg.media_mime_type || undefined}
+                        whatsappMessageId={msg.whatsapp_message_id || undefined}
+                        conversationId={conversationId}
+                        isFromMe={isFromMe}
+                      />
+                    )}
+
+                    {/* Media icon for non-audio */}
+                    {msgIcon && msg.message_type !== 'audio' && (
+                      <div className={cn(
+                        "flex items-center gap-1 mb-1",
+                        isFromMe && !isInternal ? "text-white/70" : "text-muted-foreground"
+                      )}>
                         {msgIcon}
                         <span className="text-xs capitalize">{msg.message_type}</span>
                       </div>
                     )}
 
-                    {/* Content */}
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    {/* Content (hide for audio if no text) */}
+                    {(msg.message_type !== 'audio' || msg.content) && (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
 
                     {/* Time and status */}
                     <div className={cn(
                       "flex items-center justify-end gap-1 mt-1",
-                      isFromMe && !isInternal && !isAI ? "text-white/70" : "opacity-70"
+                      isFromMe && !isInternal ? "text-white/70" : "opacity-70"
                     )}>
                       <span className="text-xs">{formatTime(msg.created_at)}</span>
                       {renderStatusIcon(msg.status, isFromMe)}
