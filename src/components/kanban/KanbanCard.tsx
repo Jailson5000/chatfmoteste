@@ -1,7 +1,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, User, Phone, CheckCheck, Image, Mic, Video, FileText, Smartphone } from "lucide-react";
+import { Bot, User, Phone, CheckCheck, Image, Mic, Video, FileText, Smartphone, Tag } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -222,15 +223,46 @@ export function KanbanCard({
         </div>
       )}
 
-      {/* Footer: Instance, Handler */}
+      {/* Footer: Tags, Instance, Handler */}
       <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          {instanceInfo.isPhone ? (
-            <Phone className="h-3 w-3" />
-          ) : (
-            <Smartphone className="h-3 w-3" />
-          )}
-          <span>{instanceInfo.label}</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {/* Tags icon with tooltip */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center cursor-pointer hover:text-foreground transition-colors">
+                  <Tag className="h-3 w-3" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                {conversationTags.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 p-1">
+                    {conversationTags.map((tag, idx) => (
+                      <Badge
+                        key={`tooltip-${tag?.name}-${idx}`}
+                        className="text-xs h-5 px-2 border-0"
+                        style={{ backgroundColor: `${tag?.color}40`, color: tag?.color }}
+                      >
+                        {tag?.name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Sem etiquetas</span>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Instance identifier */}
+          <div className="flex items-center gap-1">
+            {instanceInfo.isPhone ? (
+              <Phone className="h-3 w-3" />
+            ) : (
+              <Smartphone className="h-3 w-3" />
+            )}
+            <span>{instanceInfo.label}</span>
+          </div>
         </div>
 
         {/* Handler */}
