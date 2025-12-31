@@ -154,6 +154,7 @@ export function KanbanChatPanel({
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
@@ -238,12 +239,12 @@ export function KanbanChatPanel({
     };
   }, [conversationId, toast]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom when messages change or loading finishes
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!isLoading && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   // Mark messages as read
   useEffect(() => {
@@ -978,6 +979,8 @@ export function KanbanChatPanel({
                 </div>
               );
             })}
+            {/* Scroll anchor */}
+            <div ref={messagesEndRef} />
           </div>
         )}
       </ScrollArea>
