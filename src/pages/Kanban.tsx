@@ -13,7 +13,7 @@ import { useClients } from "@/hooks/useClients";
 import { KanbanFilters } from "@/components/kanban/KanbanFilters";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
-import { Link } from "react-router-dom";
+import { CreateDepartmentDialog } from "@/components/kanban/CreateDepartmentDialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -279,12 +279,14 @@ export default function Kanban() {
             <p className="text-muted-foreground mb-6">
               Crie departamentos para organizar suas conversas no Kanban.
             </p>
-            <Button asChild>
-              <Link to="/settings">
-                <Plus className="h-4 w-4 mr-2" />
-                Criar Departamentos
-              </Link>
-            </Button>
+            <CreateDepartmentDialog
+              trigger={
+                <Button>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Criar Departamento
+                </Button>
+              }
+            />
           </div>
         </div>
       </div>
