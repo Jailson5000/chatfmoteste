@@ -226,6 +226,7 @@ serve(async (req) => {
     console.log("[create-company-admin] Temporary password generated");
 
     // Create user in Supabase Auth
+    // IMPORTANT: Pass law_firm_id in metadata so the handle_new_user trigger can use it
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email: admin_email,
       password: temporaryPassword,
@@ -233,6 +234,7 @@ serve(async (req) => {
       user_metadata: {
         full_name: admin_name,
         firm_name: company_name,
+        law_firm_id: law_firm_id, // CRITICAL: This is used by handle_new_user trigger
       },
     });
 
