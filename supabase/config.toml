@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.invite-team-member]
 verify_jwt = false
+
+[functions.create-global-admin]
+verify_jwt = false
