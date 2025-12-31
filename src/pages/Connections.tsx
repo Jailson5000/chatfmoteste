@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   Search,
   Plus,
@@ -69,6 +69,75 @@ export default function Connections() {
   const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
 
   const MAX_POLLS = 60;
+  const POLL_INTERVAL = 2000; // 2 seconds
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, []);
+
+  // Stop polling function
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      console.log("[Connections] Stopping status polling");
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // Start polling for connection status
+  const startPolling = useCallback((instanceId: string) => {
+    stopPolling();
+    let count = 0;
+    
+    console.log("[Connections] Starting status polling for:", instanceId);
+    
+    pollIntervalRef.current = setInterval(async () => {
+      count++;
+      setPollCount(count);
+      
+      if (count >= MAX_POLLS) {
+        console.log("[Connections] Max polls reached, stopping");
+        stopPolling();
+        setQrError("Tempo esgotado. Tente novamente.");
+        return;
+      }
+
+      try {
+        console.log(`[Connections] Polling status (${count}/${MAX_POLLS})...`);
+        const result = await getStatus.mutateAsync(instanceId);
+        console.log("[Connections] Poll result:", result);
+        
+        if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
+          console.log("[Connections] Instance connected! Stopping poll.");
+          stopPolling();
+          setConnectionStatus("Conectado!");
+          setCurrentQRCode(null); // Hide QR code
+          await refetch(); // Refresh instance list
+          
+          // Close dialog after showing success
+          setTimeout(() => {
+            setIsQRDialogOpen(false);
+            setConnectionStatus(null);
+            setPollCount(0);
+          }, 1500);
+        } else if (result.qrCode && result.qrCode !== currentQRCode) {
+          // QR code updated (e.g., expired and regenerated)
+          console.log("[Connections] QR code updated");
+          setCurrentQRCode(result.qrCode);
+        }
+      } catch (error) {
+        console.error("[Connections] Poll error:", error);
+        // Continue polling despite errors
+      }
+    }, POLL_INTERVAL);
+  }, [stopPolling, getStatus, refetch, currentQRCode]);
 
   const filteredInstances = useMemo(() => {
     if (!searchQuery.trim()) return instances;
@@ -104,9 +173,14 @@ export default function Connections() {
       await refetch();
 
       if (result.qrCode && result.instance) {
+        console.log("[Connections] New instance created with QR code, starting polling");
         setCurrentQRCode(result.qrCode);
         setCurrentInstanceId(result.instance.id);
+        setConnectionStatus("Escaneie o QR Code");
+        setPollCount(0);
         setIsQRDialogOpen(true);
+        // Start polling for the new instance
+        startPolling(result.instance.id);
       }
     } catch (error) {
       console.error("Create instance error:", error);
@@ -119,25 +193,36 @@ export default function Connections() {
     setQrError(null);
     setQrLoading(true);
     setConnectionStatus("Conectando...");
+    setPollCount(0);
     setIsQRDialogOpen(true);
+    stopPolling(); // Stop any existing polling
 
     try {
+      console.log("[Connections] Getting QR code for instance:", instance.id);
       const result = await getQRCode.mutateAsync(instance.id);
+      console.log("[Connections] QR code result:", result);
 
-      if (result.status === "open" || result.status === "connected") {
+      if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
+        console.log("[Connections] Already connected!");
         setConnectionStatus("Conectado!");
         await refetch();
-        setTimeout(() => setIsQRDialogOpen(false), 1500);
+        setTimeout(() => {
+          setIsQRDialogOpen(false);
+          setConnectionStatus(null);
+        }, 1500);
         return;
       }
 
       if (result.qrCode) {
         setCurrentQRCode(result.qrCode);
         setConnectionStatus("Escaneie o QR Code");
+        // Start polling for status updates
+        startPolling(instance.id);
       } else {
         setQrError("QR Code não disponível. Tente novamente.");
       }
     } catch (error) {
+      console.error("[Connections] Error getting QR code:", error);
       setQrError(error instanceof Error ? error.message : "Erro ao obter QR Code");
     } finally {
       setQrLoading(false);
@@ -145,11 +230,14 @@ export default function Connections() {
   };
 
   const handleCloseQRDialog = () => {
+    console.log("[Connections] Closing QR dialog");
+    stopPolling();
     setIsQRDialogOpen(false);
     setCurrentQRCode(null);
     setCurrentInstanceId(null);
     setQrError(null);
     setConnectionStatus(null);
+    setPollCount(0);
   };
 
   const getStatusBadge = (status: string | null) => {
