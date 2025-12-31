@@ -1120,6 +1120,22 @@ export function KanbanChatPanel({
                   <Mic className="h-4 w-4" />
                 </Button>
 
+                {/* Internal message button */}
+                <Button
+                  variant={isInternalMode ? "default" : "ghost"}
+                  size="icon"
+                  className={cn(
+                    "h-8 w-8",
+                    isInternalMode 
+                      ? "bg-yellow-500 hover:bg-yellow-600 text-white" 
+                      : "text-muted-foreground hover:text-yellow-500"
+                  )}
+                  onClick={() => setIsInternalMode(!isInternalMode)}
+                  title="Mensagem interna"
+                >
+                  <Lock className="h-4 w-4" />
+                </Button>
+
                 {/* Pontual intervention button - only when AI is handling */}
                 {currentHandler === "ai" && !isInternalMode && (
                   <Button
