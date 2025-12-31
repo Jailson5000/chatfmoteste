@@ -51,9 +51,11 @@ export function useCompanyApproval(): CompanyApprovalStatus {
 
         if (profileError || !profile?.law_firm_id) {
           console.log('[useCompanyApproval] No law_firm_id found for user');
+          // SECURITY: Block users without a valid law_firm_id
+          // Only global admins (checked separately) should be allowed without law_firm
           setStatus({
-            approval_status: 'approved', // Default to approved if no company found (e.g., global admin)
-            rejection_reason: null,
+            approval_status: 'rejected', // BLOCK access - no valid company
+            rejection_reason: 'Usuário não está vinculado a nenhuma empresa válida.',
             company_name: null,
             company_subdomain: null,
             loading: false,
@@ -70,11 +72,11 @@ export function useCompanyApproval(): CompanyApprovalStatus {
 
         if (companyError || !company) {
           console.log('[useCompanyApproval] No company found for law_firm_id:', profile.law_firm_id);
-          // No company record means user was created before approval system
-          // Default to approved for backwards compatibility
+          // SECURITY: Block users without a valid company record
+          // All users MUST have a company record to access the system
           setStatus({
-            approval_status: 'approved',
-            rejection_reason: null,
+            approval_status: 'rejected', // BLOCK access - no valid company
+            rejection_reason: 'Sua empresa não está cadastrada no sistema. Entre em contato com o suporte.',
             company_name: null,
             company_subdomain: null,
             loading: false,
@@ -96,9 +98,10 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         });
       } catch (err) {
         console.error('[useCompanyApproval] Error:', err);
+        // SECURITY: Block access on any error - fail secure
         setStatus({
-          approval_status: 'approved', // Default to approved on error
-          rejection_reason: null,
+          approval_status: 'rejected', // BLOCK access on error
+          rejection_reason: 'Erro ao verificar acesso. Tente novamente ou contate o suporte.',
           company_name: null,
           company_subdomain: null,
           loading: false,

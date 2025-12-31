@@ -179,7 +179,7 @@ export function LandingPage() {
               asChild
               className="bg-red-600 hover:bg-red-500 text-white h-10 px-6 rounded-xl"
             >
-              <Link to="/auth?tab=signup">
+              <Link to="/register">
                 Começar
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -242,7 +242,7 @@ export function LandingPage() {
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
             >
-              <Link to="/auth?tab=signup">
+              <Link to="/register">
                 Quero conhecer o MIAUCHAT
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -552,7 +552,7 @@ export function LandingPage() {
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-xl shadow-red-600/20"
             >
-              <Link to="/auth?tab=signup">
+              <Link to="/register">
                 Começar agora
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -563,7 +563,7 @@ export function LandingPage() {
               variant="outline"
               className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-12 px-8 rounded-xl text-sm"
             >
-              <Link to="/auth?tab=signup">Solicitar demonstração</Link>
+              <Link to="/register">Solicitar demonstração</Link>
             </Button>
           </div>
         </div>
