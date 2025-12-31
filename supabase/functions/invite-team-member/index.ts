@@ -46,9 +46,13 @@ function buildInviteEmail(
   companyName: string,
   role: string,
   email: string,
-  temporaryPassword: string
+  temporaryPassword: string,
+  subdomain?: string | null
 ): { subject: string; html: string } {
-  const accessUrl = `https://www.miauchat.com.br/auth`;
+  // Use subdomain if available, otherwise main domain
+  const accessUrl = subdomain 
+    ? `https://${subdomain}.miauchat.com.br/auth`
+    : `https://www.miauchat.com.br/auth`;
   const roleLabel = roleLabels[role] || role;
   
   return {
@@ -280,10 +284,10 @@ serve(async (req) => {
 
     console.log("[invite-team-member] Inviting:", email, "to law firm:", law_firm_id);
 
-    // Get law firm name
+    // Get law firm name and subdomain
     const { data: lawFirm, error: lawFirmError } = await supabase
       .from('law_firms')
-      .select('name')
+      .select('name, subdomain')
       .eq('id', law_firm_id)
       .single();
 
@@ -299,12 +303,14 @@ serve(async (req) => {
     const temporaryPassword = generateTemporaryPassword();
 
     // Create user with admin API
+    // IMPORTANT: Pass law_firm_id in metadata so the handle_new_user trigger can use it
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: temporaryPassword,
       email_confirm: true, // Auto-confirm email
       user_metadata: {
         full_name,
+        law_firm_id, // CRITICAL: This is used by handle_new_user trigger
       },
     });
 
@@ -405,7 +411,8 @@ serve(async (req) => {
       lawFirm.name,
       role,
       email,
-      temporaryPassword
+      temporaryPassword,
+      lawFirm.subdomain // Pass subdomain for correct accessUrl
     );
 
     console.log("[invite-team-member] Sending invite email to:", email);
