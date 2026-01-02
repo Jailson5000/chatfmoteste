@@ -538,7 +538,7 @@ async function generateTTSAudio(text: string, voiceId: string): Promise<string |
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'tts-1',
+        model: 'tts-1-hd',
         input: trimmedText,
         voice: voiceId,
         response_format: 'mp3',
