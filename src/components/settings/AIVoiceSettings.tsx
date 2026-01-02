@@ -24,8 +24,6 @@ const AVAILABLE_VOICES = [
   { id: "nathan_drake", name: "Nathan Drake", gender: "male", description: "Voz masculina jovem e casual", provider: "speaktor" },
   // OpenAI voices (fallback)
   { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara (OpenAI)", provider: "openai" },
-  { id: "onyx", name: "Onyx", gender: "male", description: "Voz masculina grave (OpenAI)", provider: "openai" },
-  { id: "echo", name: "Echo", gender: "male", description: "Voz masculina amigável (OpenAI)", provider: "openai" },
 ] as const;
 
 interface VoiceSettings {
