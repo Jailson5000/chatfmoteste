@@ -9,20 +9,7 @@ import { Loader2, Volume2, Play, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { supabase } from "@/integrations/supabase/client";
-
-// Available voices with descriptions
-const AVAILABLE_VOICES = [
-  // Speaktor Pro voices - Brasileiras (PT-BR)
-  { id: "renata", name: "Renata", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
-  { id: "natalia", name: "Natália", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
-  { id: "adriana", name: "Adriana", gender: "female", description: "Voz feminina brasileira adulto", provider: "speaktor" },
-  { id: "carla", name: "Carla", gender: "female", description: "Voz feminina brasileira adulto", provider: "speaktor" },
-  { id: "rodrigo", name: "Rodrigo", gender: "male", description: "Voz masculina brasileira jovem adulto", provider: "speaktor" },
-  { id: "paulo", name: "Paulo", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
-  { id: "carlos", name: "Carlos", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
-  // OpenAI voices (fallback)
-  { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara (OpenAI)", provider: "openai" },
-] as const;
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 interface VoiceSettings {
   ai_voice_enabled: boolean;
@@ -40,7 +27,7 @@ export function AIVoiceSettings() {
   
   const [settings, setSettings] = useState<VoiceSettings>({
     ai_voice_enabled: false,
-    ai_voice_id: "renata", // Default to Brazilian Speaktor voice
+    ai_voice_id: DEFAULT_VOICE_ID,
   });
 
   // Load settings on mount
