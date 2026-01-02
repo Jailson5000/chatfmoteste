@@ -8,10 +8,11 @@ export default function GoogleCalendarCallback() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("Conectando ao Google Calendar...");
+  const [returnOrigin, setReturnOrigin] = useState<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get("code");
-    const state = searchParams.get("state"); // law_firm_id passed via OAuth state
+    const stateParam = searchParams.get("state"); // Base64 encoded JSON with law_firm_id and return_origin
     const error = searchParams.get("error");
 
     if (error) {
@@ -21,21 +22,38 @@ export default function GoogleCalendarCallback() {
       return;
     }
 
-    if (code && state) {
-      handleOAuthCallback(code, state);
-    } else if (code && !state) {
+    if (code && stateParam) {
+      try {
+        // Decode state parameter
+        const stateData = JSON.parse(atob(stateParam));
+        const lawFirmId = stateData.law_firm_id;
+        const origin = stateData.return_origin;
+        
+        if (origin) {
+          setReturnOrigin(origin);
+        }
+
+        if (lawFirmId) {
+          handleOAuthCallback(code, lawFirmId, origin);
+        } else {
+          throw new Error("law_firm_id missing from state");
+        }
+      } catch (e) {
+        console.error("[GoogleCalendarCallback] Error parsing state:", e);
+        setStatus("error");
+        setMessage("Parâmetros de autenticação inválidos. Tente novamente.");
+        redirectBack(3000);
+      }
+    } else if (code && !stateParam) {
       setStatus("error");
       setMessage("Parâmetros de autenticação inválidos. Tente novamente.");
       redirectBack(3000);
     }
   }, [searchParams]);
 
-  const redirectBack = (delay: number) => {
+  const redirectBack = (delay: number, origin?: string | null) => {
     const isPopup = window.name === "google_calendar_oauth";
-
-    // Try to get the stored return URL
-    const returnUrl = sessionStorage.getItem("google_calendar_return_url");
-    sessionStorage.removeItem("google_calendar_return_url");
+    const targetOrigin = origin || returnOrigin;
 
     setTimeout(() => {
       if (isPopup) {
@@ -48,26 +66,25 @@ export default function GoogleCalendarCallback() {
         }
       }
 
-      if (returnUrl) {
-        window.location.href = returnUrl;
+      // If we have a return origin (tenant subdomain), redirect there
+      if (targetOrigin && targetOrigin !== window.location.origin) {
+        window.location.href = `${targetOrigin}/settings?tab=integrations`;
       } else {
         navigate("/settings?tab=integrations");
       }
     }, delay);
   };
 
-  const handleOAuthCallback = async (code: string, lawFirmId: string) => {
+  const handleOAuthCallback = async (code: string, lawFirmId: string, origin?: string | null) => {
     try {
       console.log("[GoogleCalendarCallback] Exchanging code for law_firm:", lawFirmId);
-
-      const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
 
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
         body: {
           action: "exchange_code",
           code,
           law_firm_id: lawFirmId,
-          redirect_url: redirectUrl,
+          // redirect_url not needed anymore - edge function uses centralized URL
         },
       });
 
@@ -87,7 +104,7 @@ export default function GoogleCalendarCallback() {
           // ignore
         }
 
-        redirectBack(1200);
+        redirectBack(1200, origin);
       } else {
         throw new Error(data?.error || "Erro desconhecido");
       }
@@ -105,7 +122,7 @@ export default function GoogleCalendarCallback() {
         // ignore
       }
 
-      redirectBack(1500);
+      redirectBack(1500, origin);
     }
   };
 
