@@ -25,9 +25,10 @@ const OPENAI_VOICES: Record<string, { name: string; gender: string; description:
   'echo': { name: 'Echo', gender: 'male', description: 'Voz masculina clara e amigável' },
 };
 
-// Speaktor voice mapping
+// Speaktor voice mapping (voiceId -> Speaktor voice name)
 const SPEAKTOR_VOICES: Record<string, string> = {
-  'shimmer': 'Vanessa Morgan',
+  'vanessa_morgan': 'Vanessa Morgan',
+  'shimmer': 'Vanessa Morgan', // Map OpenAI voices to Speaktor equivalents
   'onyx': 'Ravi Ananda', 
   'echo': 'Julian Hale',
 };
@@ -52,10 +53,10 @@ async function getSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; a
 }
 
 async function generateWithSpeaktor(text: string, voiceId: string, apiKey: string, defaultVoice: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
-  // Map OpenAI voice to Speaktor voice, or use the default configured voice
+  // Map voiceId to Speaktor voice, fallback to default configured voice
   const speaktorVoice = SPEAKTOR_VOICES[voiceId] || defaultVoice;
   
-  console.log(`[TTS-Speaktor] Generating audio with voice: ${speaktorVoice}, text length: ${text.length}`);
+  console.log(`[TTS-Speaktor] Generating audio with voice: ${speaktorVoice} (from voiceId: ${voiceId}), text length: ${text.length}`);
 
   const response = await fetch("https://api.tor.app/developer/text_to_speech", {
     method: "POST",
