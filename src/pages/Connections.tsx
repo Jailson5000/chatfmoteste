@@ -7,6 +7,8 @@ import {
   XCircle,
   RefreshCw,
   Loader2,
+  Globe,
+  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,18 +27,22 @@ import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useToast } from "@/hooks/use-toast";
+import { useTrayIntegration } from "@/hooks/useTrayIntegration";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
 import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
 import { ConnectionDetailPanel } from "@/components/connections/ConnectionDetailPanel";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useNavigate } from "react-router-dom";
 
 export default function Connections() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { isAdmin } = useUserRole();
   const { evolutionApiUrl, evolutionApiKey, isConfigured: isApiConfigured } = useLawFirmSettings();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
+  const { integration: trayIntegration, isLoading: trayLoading } = useTrayIntegration();
   
   const {
     instances,
@@ -339,7 +345,66 @@ export default function Connections() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredInstances.length === 0 ? (
+              {/* Tray Chat Integration Row */}
+              {trayIntegration?.is_enabled && (
+                <tr
+                  className="hover:bg-muted/20 cursor-pointer transition-colors bg-gradient-to-r from-orange-500/5 to-transparent"
+                  onClick={() => navigate("/settings?tab=integrations")}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-orange-500/10 flex items-center justify-center">
+                        <Globe className="h-5 w-5 text-orange-500" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-orange-500">Chat no Site (Tray)</p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>Widget de atendimento</span>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-500 border-orange-500/20">
+                            WEB
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">—</td>
+                  <td className="px-4 py-3 text-muted-foreground">—</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">
+                        IA
+                      </Badge>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    {trayIntegration.activated_at 
+                      ? formatDistanceToNow(new Date(trayIntegration.activated_at), { addSuffix: true, locale: ptBR })
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
+                      Ativo
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate("/settings?tab=integrations");
+                      }}
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              )}
+              
+              {/* WhatsApp Instances */}
+              {filteredInstances.length === 0 && !trayIntegration?.is_enabled ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     {searchQuery ? "Nenhuma conexão encontrada" : "Nenhuma conexão configurada"}
