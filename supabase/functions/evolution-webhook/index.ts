@@ -181,7 +181,7 @@ async function resolveAutomationForConversation(
   supabaseClient: any,
   lawFirmId: string,
   conversationId: string
-): Promise<{ id: string; ai_prompt: string; ai_temperature: number | null; name: string; trigger_config: any } | null> {
+): Promise<{ id: string; ai_prompt: string; ai_temperature: number | null; name: string; trigger_config: any; version: number; updated_at: string } | null> {
   try {
     // Step 1: Get conversation to find whatsapp_instance_id
     const { data: conversation } = await supabaseClient
@@ -201,7 +201,7 @@ async function resolveAutomationForConversation(
       if (instance?.default_automation_id) {
         const { data: automation } = await supabaseClient
           .from('automations')
-          .select('id, ai_prompt, ai_temperature, name, trigger_config')
+          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
           .not('ai_prompt', 'is', null)
@@ -211,6 +211,8 @@ async function resolveAutomationForConversation(
           logDebug('AUTOMATION_RESOLVE', 'Using instance default automation', { 
             automationId: automation.id, 
             automationName: automation.name,
+            version: automation.version,
+            updatedAt: automation.updated_at,
             source: 'whatsapp_instance' 
           });
           return automation;
@@ -228,7 +230,7 @@ async function resolveAutomationForConversation(
     if (settings?.default_automation_id) {
       const { data: automation } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
         .eq('id', settings.default_automation_id)
         .eq('is_active', true)
         .not('ai_prompt', 'is', null)
@@ -238,6 +240,8 @@ async function resolveAutomationForConversation(
         logDebug('AUTOMATION_RESOLVE', 'Using company default automation', { 
           automationId: automation.id, 
           automationName: automation.name,
+          version: automation.version,
+          updatedAt: automation.updated_at,
           source: 'law_firm_settings' 
         });
         return automation;
@@ -247,7 +251,7 @@ async function resolveAutomationForConversation(
     // Step 4: Fallback to first active automation (ordered by position, then created_at)
     const { data: automations, error: autoError } = await supabaseClient
       .from('automations')
-      .select('id, ai_prompt, ai_temperature, name, trigger_config')
+      .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
       .eq('law_firm_id', lawFirmId)
       .eq('is_active', true)
       .not('ai_prompt', 'is', null)
@@ -269,6 +273,8 @@ async function resolveAutomationForConversation(
     logDebug('AUTOMATION_RESOLVE', 'Using fallback automation (first active)', { 
       automationId: automation.id, 
       automationName: automation.name,
+      version: automation.version,
+      updatedAt: automation.updated_at,
       source: 'fallback_first_active' 
     });
     return automation;
