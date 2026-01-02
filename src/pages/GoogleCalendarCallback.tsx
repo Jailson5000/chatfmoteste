@@ -17,16 +17,15 @@ export default function GoogleCalendarCallback() {
     if (error) {
       setStatus("error");
       setMessage("Conexão cancelada ou negada pelo Google.");
-      // Try to get return origin from state even on error
       if (stateParam) {
         try {
           const stateData = JSON.parse(atob(stateParam));
-          redirectToTenant(stateData.return_origin, false);
+          finishAndClose(stateData.return_origin, false);
         } catch {
-          redirectToTenant(null, false);
+          finishAndClose(null, false);
         }
       } else {
-        redirectToTenant(null, false);
+        finishAndClose(null, false);
       }
       return;
     }
@@ -36,29 +35,61 @@ export default function GoogleCalendarCallback() {
     } else {
       setStatus("error");
       setMessage("Parâmetros de autenticação inválidos.");
-      redirectToTenant(null, false);
+      finishAndClose(null, false);
     }
   }, [searchParams]);
 
-  const redirectToTenant = (returnOrigin: string | null, success: boolean, email?: string) => {
-    setTimeout(() => {
-      // Build redirect URL with status
-      const params = new URLSearchParams();
-      params.set("tab", "integrations");
-      if (success && email) {
-        params.set("gcal_success", "true");
-        params.set("gcal_email", email);
-      } else {
-        params.set("gcal_error", "true");
-      }
+  const finishAndClose = (returnOrigin: string | null, success: boolean, email?: string) => {
+    // Check if we're in a popup window
+    const isPopup = window.opener && !window.opener.closed;
 
-      if (returnOrigin) {
-        window.location.href = `${returnOrigin}/settings?${params.toString()}`;
+    // Signal result to opener window via localStorage
+    try {
+      localStorage.setItem(
+        "google_calendar_oauth_result",
+        JSON.stringify({
+          status: success ? "success" : "error",
+          email: email || undefined,
+          message: success ? undefined : message,
+          ts: Date.now(),
+        })
+      );
+    } catch {
+      // ignore localStorage errors
+    }
+
+    setTimeout(() => {
+      if (isPopup) {
+        // We're in a popup - just close it
+        // The opener window will detect the localStorage change and refresh
+        try {
+          window.close();
+        } catch {
+          // If we can't close, redirect as fallback
+          redirectToTenant(returnOrigin, success, email);
+        }
       } else {
-        // Fallback to main domain settings
-        window.location.href = `/settings?${params.toString()}`;
+        // Not a popup (user opened directly or popup blocked) - redirect
+        redirectToTenant(returnOrigin, success, email);
       }
-    }, 1500);
+    }, 1000);
+  };
+
+  const redirectToTenant = (returnOrigin: string | null, success: boolean, email?: string) => {
+    const params = new URLSearchParams();
+    params.set("tab", "integrations");
+    if (success && email) {
+      params.set("gcal_success", "true");
+      params.set("gcal_email", email);
+    } else {
+      params.set("gcal_error", "true");
+    }
+
+    if (returnOrigin) {
+      window.location.href = `${returnOrigin}/settings?${params.toString()}`;
+    } else {
+      window.location.href = `/settings?${params.toString()}`;
+    }
   };
 
   const handleOAuthCallback = async (code: string, stateParam: string) => {
@@ -103,7 +134,7 @@ export default function GoogleCalendarCallback() {
       if (data?.success) {
         setStatus("success");
         setMessage(`Google Calendar conectado com sucesso! (${data.email})`);
-        redirectToTenant(returnOrigin, true, data.email);
+        finishAndClose(returnOrigin, true, data.email);
       } else {
         throw new Error(data?.error || "Erro desconhecido");
       }
@@ -111,7 +142,7 @@ export default function GoogleCalendarCallback() {
       console.error("[GoogleCalendarCallback] Error:", error);
       setStatus("error");
       setMessage(error.message || "Erro ao conectar com o Google Calendar.");
-      redirectToTenant(returnOrigin, false);
+      finishAndClose(returnOrigin, false);
     }
   };
 
@@ -128,15 +159,16 @@ export default function GoogleCalendarCallback() {
           <>
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
             <p className="text-lg text-green-600 dark:text-green-400">{message}</p>
+            <p className="text-sm text-muted-foreground">Fechando janela...</p>
           </>
         )}
         {status === "error" && (
           <>
             <XCircle className="h-12 w-12 text-destructive mx-auto" />
             <p className="text-lg text-destructive">{message}</p>
+            <p className="text-sm text-muted-foreground">Fechando janela...</p>
           </>
         )}
-        <p className="text-sm text-muted-foreground">Redirecionando...</p>
       </div>
     </div>
   );
