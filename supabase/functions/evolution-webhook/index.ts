@@ -783,6 +783,32 @@ async function sendAIResponseToWhatsApp(
       // Combine all text parts for audio
       const fullText = messageParts.join(' ').trim();
       
+      // CRITICAL: Detect if AI only sent an "audio announcement" instead of real content
+      // These patterns indicate the AI failed to follow instructions and just announced it would send audio
+      const audioAnnouncementPatterns = [
+        /vou\s+(ativar|mandar|enviar|gravar|ligar)\s*(o)?\s*(áudio|audio|voz)/i,
+        /ativando\s+(o)?\s*(áudio|audio)/i,
+        /um\s+momento.*áudio/i,
+        /áudio.*ativado/i,
+        /deixa\s+eu\s+(mandar|enviar|gravar)/i,
+        /^claro,?\s*(vou|deixa)/i,
+        /vou\s+te\s+(explicar|falar)\s+(por|em)\s+áudio/i,
+      ];
+      
+      const isJustAnnouncement = audioAnnouncementPatterns.some(p => p.test(fullText));
+      
+      if (isJustAnnouncement) {
+        logDebug('SEND_RESPONSE', 'CRITICAL: AI sent only an announcement, not real content!', { 
+          text: fullText.substring(0, 200)
+        });
+        // This is a BAD response - the AI didn't provide actual content
+        // We need to send a helpful message to the user instead of the useless announcement
+        const fallbackMessage = 'Desculpe, houve um problema técnico. Por favor, repita sua pergunta que vou te responder.';
+        const fallbackParts = [fallbackMessage];
+        await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, fallbackParts, sanitizeText, false);
+        return true;
+      }
+      
       // Validate we have actual content to convert to audio
       if (!fullText || fullText.length < 5) {
         logDebug('SEND_RESPONSE', 'CRITICAL: Text too short for TTS, falling back to text', { 
@@ -1165,12 +1191,24 @@ async function processWithGPT(
 - Use linguagem natural e profissional
 - Aguarde a resposta do cliente antes de continuar
 
-REGRA CRÍTICA SOBRE PEDIDOS DE ÁUDIO:
-- Se o cliente pedir resposta por áudio/voz, você DEVE responder NORMALMENTE com o conteúdo da resposta em TEXTO
-- O sistema converterá automaticamente sua resposta em áudio e enviará ao cliente
-- NUNCA diga "vou mandar por áudio", "vou ativar áudio", "vou gravar um áudio" ou frases similares
-- NUNCA envie "[Mensagem de áudio]" ou placeholders - responda com o conteúdo real
-- Simplesmente responda à pergunta do cliente como se fosse texto normal${clientMemoriesText}${summaryText}` 
+🚨 REGRA ABSOLUTAMENTE CRÍTICA SOBRE PEDIDOS DE ÁUDIO 🚨
+ATENÇÃO: Esta regra é OBRIGATÓRIA e sua violação causa falha total no sistema!
+
+QUANDO O CLIENTE PEDIR RESPOSTA POR ÁUDIO/VOZ:
+✅ CORRETO: Responda diretamente com a informação solicitada em texto
+   Exemplo: "Você vai precisar de RG, CPF e comprovante de residência."
+
+❌ PROIBIDO (causa erro crítico no sistema):
+   - "Vou ativar o áudio..."
+   - "Vou mandar por áudio..."
+   - "Um momento, vou gravar..."
+   - "Claro, vou te explicar por áudio..."
+   - Qualquer frase anunciando que vai enviar áudio
+
+O SISTEMA CONVERTE AUTOMATICAMENTE SUA RESPOSTA DE TEXTO EM ÁUDIO.
+Se você enviar apenas um "aviso", o cliente receberá um áudio dizendo "vou mandar áudio" - o que é inútil.
+
+RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!${clientMemoriesText}${summaryText}` 
       },
       ...(recentMessages?.reverse() || []).map((msg: any) => ({
         role: msg.is_from_me ? 'assistant' : 'user',

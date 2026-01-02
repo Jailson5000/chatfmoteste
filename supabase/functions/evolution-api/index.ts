@@ -184,13 +184,19 @@ function extractRejectCallFlag(payload: any): boolean {
 // Get the webhook URL for this project
 const WEBHOOK_URL = `${Deno.env.get("SUPABASE_URL")}/functions/v1/evolution-webhook`;
 
-async function getInstanceById(supabaseClient: any, lawFirmId: string, instanceDbId: string) {
-  const { data: instance, error } = await supabaseClient
+async function getInstanceById(supabaseClient: any, lawFirmId: string | null, instanceDbId: string, isGlobalAdmin: boolean = false) {
+  // Global admins can access any instance (for audit/support purposes)
+  let query = supabaseClient
     .from("whatsapp_instances")
     .select("*")
-    .eq("id", instanceDbId)
-    .eq("law_firm_id", lawFirmId)
-    .single();
+    .eq("id", instanceDbId);
+  
+  // Only filter by law_firm_id if not a global admin
+  if (!isGlobalAdmin && lawFirmId) {
+    query = query.eq("law_firm_id", lawFirmId);
+  }
+  
+  const { data: instance, error } = await query.single();
 
   if (error || !instance) {
     console.error("[Evolution API] Instance not found:", error);
@@ -266,7 +272,16 @@ serve(async (req) => {
       .eq("id", user.id)
       .single();
 
-    if (profileError || !profile?.law_firm_id) {
+    // Check if user is a global admin (super_admin or admin)
+    const { data: adminRole } = await supabaseClient
+      .from("admin_user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .single();
+    
+    const isGlobalAdmin = !!adminRole;
+
+    if (profileError || (!profile?.law_firm_id && !isGlobalAdmin)) {
       throw new Error("User not associated with a law firm");
     }
 
@@ -1130,21 +1145,29 @@ serve(async (req) => {
           throw new Error("whatsappMessageId is required");
         }
 
-        console.log(`[Evolution API] Getting media for message: ${body.whatsappMessageId}`);
+        console.log(`[Evolution API] Getting media for message: ${body.whatsappMessageId}, isGlobalAdmin: ${isGlobalAdmin}`);
 
-        // Get instance from conversation
-        const { data: conversation, error: convError } = await supabaseClient
+        // Get instance from conversation - global admins can access any conversation
+        let convQuery = supabaseClient
           .from("conversations")
-          .select("whatsapp_instance_id")
-          .eq("id", body.conversationId)
-          .eq("law_firm_id", lawFirmId)
-          .single();
+          .select("whatsapp_instance_id, law_firm_id")
+          .eq("id", body.conversationId);
+        
+        // Only filter by law_firm_id if not a global admin
+        if (!isGlobalAdmin) {
+          convQuery = convQuery.eq("law_firm_id", lawFirmId);
+        }
+        
+        const { data: conversation, error: convError } = await convQuery.single();
 
         if (convError || !conversation?.whatsapp_instance_id) {
+          console.error("[Evolution API] Conversation not found:", convError, { conversationId: body.conversationId, lawFirmId, isGlobalAdmin });
           throw new Error("Conversation not found");
         }
 
-        const instance = await getInstanceById(supabaseClient, lawFirmId, conversation.whatsapp_instance_id);
+        // Use the conversation's law_firm_id to get the instance
+        const targetLawFirmId = conversation.law_firm_id;
+        const instance = await getInstanceById(supabaseClient, targetLawFirmId, conversation.whatsapp_instance_id, isGlobalAdmin);
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Call Evolution API to get decrypted media
