@@ -41,9 +41,9 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
     const caps = settings?.ai_capabilities as Record<string, unknown> | null;
     
     return {
-      // Default: ElevenLabs enabled, OpenAI as fallback
+      // Default: ElevenLabs enabled, OpenAI as fallback (always enabled)
       elevenLabsEnabled: caps?.elevenlabs_active !== false, // true by default
-      openaiEnabled: caps?.openai_active === true,
+      openaiEnabled: true, // OpenAI is ALWAYS available as fallback
       elevenLabsVoice: (caps?.elevenlabs_voice as string) || null,
     };
   } catch (error) {
@@ -62,10 +62,13 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
     return { success: false, error: "ElevenLabs API key not configured" };
   }
 
-  // Resolve voice ID - default to Laura
+  // Resolve voice ID - default to Laura, handle legacy el_sarah
   let resolvedVoiceId: string;
   if (ELEVENLABS_VOICES[voiceId]) {
     resolvedVoiceId = ELEVENLABS_VOICES[voiceId];
+  } else if (voiceId === 'el_sarah') {
+    // Legacy: redirect el_sarah to el_laura
+    resolvedVoiceId = ELEVENLABS_VOICES['el_laura'];
   } else if (voiceId.length > 15) {
     resolvedVoiceId = voiceId;
   } else {
@@ -216,23 +219,20 @@ serve(async (req) => {
         );
       }
       
-      // ElevenLabs failed, try OpenAI if enabled
-      console.log(`[TTS] ElevenLabs failed, checking OpenAI fallback...`);
-      if (config.openaiEnabled) {
-        console.log(`[TTS] Falling back to OpenAI`);
-        const openaiResult = await generateOpenAIAudio(text, 'nova');
-        
-        if (openaiResult.success) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              audioContent: openaiResult.audioContent,
-              mimeType: "audio/mpeg",
-              provider: "openai",
-            }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+      // ElevenLabs failed, ALWAYS try OpenAI as fallback
+      console.log(`[TTS] ElevenLabs failed, falling back to OpenAI...`);
+      const openaiResult = await generateOpenAIAudio(text, 'shimmer');
+      
+      if (openaiResult.success) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            audioContent: openaiResult.audioContent,
+            mimeType: "audio/mpeg",
+            provider: "openai",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
       
       // Both failed
@@ -242,34 +242,25 @@ serve(async (req) => {
       );
     }
 
-    // ElevenLabs disabled, use OpenAI if enabled
-    if (config.openaiEnabled) {
-      console.log(`[TTS] ElevenLabs disabled, using OpenAI`);
-      const result = await generateOpenAIAudio(text, 'nova');
+    // ElevenLabs disabled, use OpenAI directly
+    console.log(`[TTS] ElevenLabs disabled, using OpenAI`);
+    const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
-      if (result.success) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            audioContent: result.audioContent,
-            mimeType: "audio/mpeg",
-            provider: "openai",
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
+    if (openaiResult.success) {
       return new Response(
-        JSON.stringify({ error: result.error || "OpenAI TTS generation failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: true,
+          audioContent: openaiResult.audioContent,
+          mimeType: "audio/mpeg",
+          provider: "openai",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // No TTS provider enabled
-    console.log(`[TTS] No TTS provider enabled for tenant`);
+      
     return new Response(
-      JSON.stringify({ error: "No TTS provider enabled for this company" }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: openaiResult.error || "OpenAI TTS generation failed" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
