@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Info, Link2, FileText, PenTool, ChevronDown } from "lucide-react";
+import { Info, Link2, FileText, PenTool, ChevronDown, ShoppingCart } from "lucide-react";
 import { GoogleCalendarIntegration } from "./integrations/GoogleCalendarIntegration";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { IntegrationCard } from "./IntegrationCard";
@@ -43,6 +43,13 @@ function DocuSignIcon() {
   );
 }
 
+function TrayEcommerceIcon() {
+  return (
+    <div className="w-10 h-10 rounded-lg bg-[#FF6B00] flex items-center justify-center">
+      <ShoppingCart className="h-5 w-5 text-white" />
+    </div>
+  );
+}
 
 export function IntegrationsSettings() {
   const [infoOpen, setInfoOpen] = useState(false);
@@ -112,6 +119,13 @@ export function IntegrationsSettings() {
           icon={<DocuSignIcon />}
           title="DocuSign"
           description="A DocuSign é o padrão global para gestão de transações digitais com milhões de usuários em mais de 188 países."
+          isComingSoon
+        />
+        
+        <IntegrationCard
+          icon={<TrayEcommerceIcon />}
+          title="Tray E-commerce"
+          description="Integre pedidos, clientes e catálogo do seu e-commerce Tray diretamente com a plataforma para gestão de vendas."
           isComingSoon
         />
       </div>
