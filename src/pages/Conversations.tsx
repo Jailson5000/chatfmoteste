@@ -134,7 +134,7 @@ interface Message {
 
 export default function Conversations() {
   const { user } = useAuth();
-  const { conversations, isLoading, transferHandler, updateConversation, updateConversationDepartment, updateConversationTags, updateClientStatus } = useConversations();
+  const { conversations, isLoading, transferHandler, updateConversation, updateConversationDepartment, updateConversationTags, updateClientStatus, updateConversationAudioMode } = useConversations();
   const { members: teamMembers } = useTeamMembers();
   const { departments } = useDepartments();
   const { tags } = useTags();
@@ -152,8 +152,8 @@ export default function Conversations() {
     [whatsappInstances]
   );
 
-  // Get active voice config from active automation
-  const activeVoiceConfig = useMemo(() => {
+  // Get active voice config from active automation (global permission)
+  const globalVoiceConfig = useMemo(() => {
     const activeAutomation = automations.find(a => a.is_active);
     if (!activeAutomation?.trigger_config) return null;
     const config = activeAutomation.trigger_config;
@@ -251,6 +251,16 @@ export default function Conversations() {
     conversations.find((c) => c.id === selectedConversationId),
     [conversations, selectedConversationId]
   );
+
+  // Check if audio mode is enabled for the SELECTED CONVERSATION (SINGLE SOURCE OF TRUTH)
+  // This takes precedence over global voice config
+  const conversationAudioEnabled = useMemo(() => {
+    if (!selectedConversation) return false;
+    return (selectedConversation as any).ai_audio_enabled === true;
+  }, [selectedConversation]);
+
+  // Show audio indicator if: voice is globally enabled AND conversation has audio mode active
+  const showAudioIndicator = globalVoiceConfig?.enabled && conversationAudioEnabled;
 
   // Fetch user profile for signature
   useEffect(() => {
@@ -1378,26 +1388,17 @@ export default function Conversations() {
                       </p>
                     </div>
                     {/* Audio Mode Indicator Mobile */}
-                    {activeVoiceConfig?.enabled && (
+                    {showAudioIndicator && selectedConversation && (
                       <AudioModeIndicator
                         isAudioEnabled={true}
-                        voiceId={activeVoiceConfig.voiceId}
+                        voiceId={globalVoiceConfig?.voiceId}
                         onDisable={() => {
-                          const activeAutomation = automations.find(a => a.is_active);
-                          if (activeAutomation) {
-                            const newConfig = {
-                              ...activeAutomation.trigger_config,
-                              voice_enabled: false,
-                            };
-                            supabase
-                              .from("automations")
-                              .update({ trigger_config: newConfig, updated_at: new Date().toISOString() })
-                              .eq("id", activeAutomation.id)
-                              .then(() => {
-                                queryClient.invalidateQueries({ queryKey: ["automations"] });
-                                toast({ title: "Áudio desativado", description: "A IA voltará a responder por texto." });
-                              });
-                          }
+                          // Disable audio mode for THIS CONVERSATION (SINGLE SOURCE OF TRUTH)
+                          updateConversationAudioMode.mutate({
+                            conversationId: selectedConversation.id,
+                            enabled: false,
+                            reason: 'manual_toggle',
+                          });
                         }}
                       />
                     )}
@@ -1657,27 +1658,17 @@ export default function Conversations() {
               </div>
               <div className="flex items-center gap-2">
                 {/* Audio Mode Indicator */}
-                {activeVoiceConfig?.enabled && (
+                {showAudioIndicator && selectedConversation && (
                   <AudioModeIndicator
                     isAudioEnabled={true}
-                    voiceId={activeVoiceConfig.voiceId}
+                    voiceId={globalVoiceConfig?.voiceId}
                     onDisable={() => {
-                      // Find active automation and disable voice
-                      const activeAutomation = automations.find(a => a.is_active);
-                      if (activeAutomation) {
-                        const newConfig = {
-                          ...activeAutomation.trigger_config,
-                          voice_enabled: false,
-                        };
-                        supabase
-                          .from("automations")
-                          .update({ trigger_config: newConfig, updated_at: new Date().toISOString() })
-                          .eq("id", activeAutomation.id)
-                          .then(() => {
-                            queryClient.invalidateQueries({ queryKey: ["automations"] });
-                            toast({ title: "Áudio desativado", description: "A IA voltará a responder por texto." });
-                          });
-                      }
+                      // Disable audio mode for THIS CONVERSATION (SINGLE SOURCE OF TRUTH)
+                      updateConversationAudioMode.mutate({
+                        conversationId: selectedConversation.id,
+                        enabled: false,
+                        reason: 'manual_toggle',
+                      });
                     }}
                   />
                 )}

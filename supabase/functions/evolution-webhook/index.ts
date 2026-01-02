@@ -630,8 +630,14 @@ async function resolveVoiceWithPrecedence(
   }
 }
 
-// Only respond with audio when the CLIENT explicitly requests it or indicates reading difficulty.
-// (voiceConfig.enabled is just a permission toggle)
+// ============= AUDIO MODE STATE MACHINE =============
+// States: TEXT_MODE (default) and AUDIO_MODE (active)
+// Transitions:
+// - Client requests audio -> TEXT_MODE -> AUDIO_MODE (persist ai_audio_enabled = true)
+// - Client sends TEXT message -> AUDIO_MODE -> TEXT_MODE (persist ai_audio_enabled = false)
+// - User clicks "Disable audio" in UI -> any state -> TEXT_MODE (persist ai_audio_enabled = false)
+
+// Detect EXPLICIT audio activation requests
 function isAudioRequestedFromText(userText: string): boolean {
   if (!userText) return false;
   const t = userText.toLowerCase();
@@ -661,77 +667,134 @@ function isAudioRequestedFromText(userText: string): boolean {
          readingDifficultyPatterns.some((p) => p.test(t));
 }
 
-// Check if audio mode should be active based on:
-// 1. Current message explicitly requests audio
-// 2. Client indicated reading difficulty in recent messages
-// 3. Client has been sending audio messages (prefers audio communication)
+// Detect EXPLICIT audio deactivation requests
+function isAudioDeactivationRequest(userText: string): boolean {
+  if (!userText) return false;
+  const t = userText.toLowerCase();
+
+  const deactivationPatterns: RegExp[] = [
+    /n[aã]o\s+(manda|envia|responde).{0,20}(áudio|audio|voz)/i,
+    /sem\s+(áudio|audio|voz)/i,
+    /(pode|responde|responda|responder)\s+(por|em|com)?\s*texto/i,
+    /prefiro\s+texto/i,
+    /para\s+(com|de)\s+(áudio|audio|voz)/i,
+    /volta\s+(pro|para\s+o?)?\s*texto/i,
+    /só\s+texto/i,
+    /desativa\s+(o)?\s*(áudio|audio|voz)/i,
+    /n[aã]o\s+precis[ao]\s+(de)?\s*(áudio|audio|voz)/i,
+  ];
+
+  return deactivationPatterns.some((p) => p.test(t));
+}
+
+// Update audio mode state in database
+async function updateAudioModeState(
+  supabaseClient: any,
+  conversationId: string,
+  enabled: boolean,
+  reason: 'user_request' | 'text_message_received' | 'manual_toggle' | 'accessibility_need'
+): Promise<boolean> {
+  try {
+    const now = new Date().toISOString();
+    const updateData: any = {
+      ai_audio_enabled: enabled,
+      ai_audio_enabled_by: reason,
+    };
+    
+    if (enabled) {
+      updateData.ai_audio_last_enabled_at = now;
+    } else {
+      updateData.ai_audio_last_disabled_at = now;
+    }
+
+    const { error } = await supabaseClient
+      .from('conversations')
+      .update(updateData)
+      .eq('id', conversationId);
+
+    if (error) {
+      logDebug('AUDIO_MODE', 'Failed to update audio state', { error, conversationId, enabled, reason });
+      return false;
+    }
+
+    logDebug('AUDIO_MODE', 'Audio state updated successfully', { 
+      conversationId, 
+      enabled, 
+      reason 
+    });
+    return true;
+  } catch (error) {
+    logDebug('AUDIO_MODE', 'Error updating audio state', { error, conversationId });
+    return false;
+  }
+}
+
+// SINGLE SOURCE OF TRUTH: Check audio mode from database and apply state machine logic
+// This is the ONLY function that determines whether to respond with audio
 async function shouldRespondWithAudio(
   supabaseClient: any,
   conversationId: string,
   currentMessageText: string,
   currentMessageType: string
 ): Promise<boolean> {
-  // Check current message first
-  if (isAudioRequestedFromText(currentMessageText)) {
-    logDebug('AUDIO_MODE', 'Audio requested in current message');
-    return true;
-  }
-
   try {
-    // Get recent messages to check for audio preference pattern
-    const { data: recentMessages } = await supabaseClient
-      .from('messages')
-      .select('content, message_type, is_from_me, created_at')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(15);
+    // 1. FIRST: Load the current state from database (SINGLE SOURCE OF TRUTH)
+    const { data: conversation, error: convError } = await supabaseClient
+      .from('conversations')
+      .select('ai_audio_enabled, ai_audio_enabled_by')
+      .eq('id', conversationId)
+      .single();
 
-    if (!recentMessages || recentMessages.length === 0) {
+    if (convError) {
+      logDebug('AUDIO_MODE', 'Error loading conversation audio state', { error: convError, conversationId });
       return false;
     }
 
-    // Count client audio messages (indicates preference for audio communication)
-    const clientAudioCount = recentMessages.filter(
-      (m: any) => !m.is_from_me && m.message_type === 'audio'
-    ).length;
+    const currentAudioEnabled = conversation?.ai_audio_enabled === true;
+    
+    logDebug('AUDIO_MODE', 'Loaded audio state from DB', { 
+      conversationId,
+      ai_audio_enabled: currentAudioEnabled,
+      ai_audio_enabled_by: conversation?.ai_audio_enabled_by,
+    });
 
-    // Check if client requested audio in any recent message
-    const clientMessages = recentMessages.filter((m: any) => !m.is_from_me && m.content);
-    const hasRecentAudioRequest = clientMessages.some((m: any) => 
-      isAudioRequestedFromText(m.content || '')
-    );
+    // 2. Check if client EXPLICITLY requested audio deactivation
+    if (isAudioDeactivationRequest(currentMessageText)) {
+      logDebug('AUDIO_MODE', 'Client requested to DISABLE audio');
+      await updateAudioModeState(supabaseClient, conversationId, false, 'user_request');
+      return false;
+    }
 
-    if (hasRecentAudioRequest) {
-      logDebug('AUDIO_MODE', 'Client requested audio in recent messages');
+    // 3. Check if client EXPLICITLY requested audio activation
+    if (isAudioRequestedFromText(currentMessageText)) {
+      logDebug('AUDIO_MODE', 'Client requested to ENABLE audio');
+      await updateAudioModeState(supabaseClient, conversationId, true, 'user_request');
       return true;
     }
 
-    // If client is predominantly sending audio messages (3+ in last 15), respond with audio
-    if (clientAudioCount >= 3) {
-      logDebug('AUDIO_MODE', `Client prefers audio communication (${clientAudioCount} audio messages)`);
+    // 4. STATE MACHINE: If audio is currently enabled but client sent TEXT message, auto-disable
+    // This implements "Desativação automática do áudio ao receber mensagem por texto"
+    if (currentAudioEnabled && currentMessageType === 'text') {
+      logDebug('AUDIO_MODE', 'Audio was enabled but client sent TEXT - auto-disabling audio mode');
+      await updateAudioModeState(supabaseClient, conversationId, false, 'text_message_received');
+      return false;
+    }
+
+    // 5. If audio is enabled and message is audio, keep audio mode
+    if (currentAudioEnabled && currentMessageType === 'audio') {
+      logDebug('AUDIO_MODE', 'Audio mode active and client sent audio - keeping audio mode');
       return true;
     }
 
-    // If current message is audio and voice is enabled, respond in audio
-    if (currentMessageType === 'audio') {
-      // Check if there were recent audio requests or reading difficulty mentions
-      const hasAccessibilityNeed = clientMessages.some((m: any) => {
-        const content = m.content?.toLowerCase() || '';
-        return content.includes('não sei ler') || 
-               content.includes('não consigo ler') ||
-               content.includes('dificuldade') ||
-               content.includes('não enxergo');
-      });
+    // 6. Default: return current state from database
+    logDebug('AUDIO_MODE', 'Using persisted audio state', { 
+      conversationId, 
+      result: currentAudioEnabled 
+    });
+    return currentAudioEnabled;
 
-      if (hasAccessibilityNeed) {
-        logDebug('AUDIO_MODE', 'Client has accessibility needs, responding with audio');
-        return true;
-      }
-    }
-
-    return false;
   } catch (error) {
-    logDebug('AUDIO_MODE', 'Error checking audio preference', { error });
+    logDebug('AUDIO_MODE', 'Error in shouldRespondWithAudio', { error, conversationId });
     return false;
   }
 }
