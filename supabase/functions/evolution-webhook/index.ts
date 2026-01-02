@@ -32,6 +32,78 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper to get current billing period in YYYY-MM format
+function getCurrentBillingPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Record AI conversation usage when AI first assumes a conversation in current billing period.
+ * Business Rule: 1 conversation = 1 count, regardless of message count.
+ * Only counts once per conversation per billing period.
+ */
+async function recordAIConversationUsage(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string,
+  automationId: string,
+  automationName: string
+): Promise<boolean> {
+  const billingPeriod = getCurrentBillingPeriod();
+  
+  try {
+    // Check if this conversation was already counted this billing period
+    const { data: existingRecord } = await supabaseClient
+      .from('usage_records')
+      .select('id')
+      .eq('law_firm_id', lawFirmId)
+      .eq('usage_type', 'ai_conversation')
+      .eq('billing_period', billingPeriod)
+      .eq('metadata->>conversation_id', conversationId)
+      .limit(1);
+    
+    if (existingRecord && existingRecord.length > 0) {
+      logDebug('USAGE_TRACKING', 'Conversation already counted this period', { 
+        conversationId, 
+        billingPeriod 
+      });
+      return false; // Already counted
+    }
+    
+    // Record the usage - this conversation is being handled by AI for the first time this month
+    const { error } = await supabaseClient
+      .from('usage_records')
+      .insert({
+        law_firm_id: lawFirmId,
+        usage_type: 'ai_conversation',
+        count: 1,
+        billing_period: billingPeriod,
+        metadata: {
+          conversation_id: conversationId,
+          automation_id: automationId,
+          automation_name: automationName,
+          first_ai_response_at: new Date().toISOString(),
+        }
+      });
+    
+    if (error) {
+      logDebug('USAGE_TRACKING', 'Failed to record AI conversation usage', { error });
+      return false;
+    }
+    
+    logDebug('USAGE_TRACKING', 'AI conversation usage recorded', { 
+      conversationId, 
+      automationName,
+      billingPeriod 
+    });
+    return true;
+  } catch (err) {
+    logDebug('USAGE_TRACKING', 'Error recording usage', { error: err instanceof Error ? err.message : err });
+    return false;
+  }
+}
+
 // Evolution API event types - support both formats
 interface EvolutionEvent {
   event: string;
@@ -772,6 +844,15 @@ async function processWithGemini(
     });
 
     if (aiResponse) {
+      // CRITICAL: Record AI conversation usage (1 per conversation per billing period)
+      await recordAIConversationUsage(
+        supabaseClient,
+        context.lawFirmId,
+        context.conversationId,
+        automation.id,
+        automation.name
+      );
+
       // Get voice configuration from automation trigger_config
       const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
       const voiceConfig: VoiceConfig = {
@@ -936,6 +1017,15 @@ async function processWithGPT(
         responseLength: aiResponse.length,
         automationId: automation.id 
       });
+
+      // CRITICAL: Record AI conversation usage (1 per conversation per billing period)
+      await recordAIConversationUsage(
+        supabaseClient,
+        context.lawFirmId,
+        context.conversationId,
+        automation.id,
+        automation.name
+      );
 
       // Get voice configuration from automation trigger_config
       const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
