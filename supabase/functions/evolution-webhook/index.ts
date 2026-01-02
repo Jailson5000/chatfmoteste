@@ -515,6 +515,27 @@ function splitTextForTTS(text: string, maxChars = 3500): string[] {
   return chunks;
 }
 
+// Map Brazilian/custom voices to valid OpenAI TTS voices
+// OpenAI supports: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer
+const VOICE_MAPPING: Record<string, string> = {
+  // Brazilian female voices -> shimmer (clear female)
+  'renata': 'shimmer',
+  'natalia': 'nova',
+  'adriana': 'shimmer',
+  'carla': 'nova',
+  // Brazilian male voices -> onyx (professional male)
+  'rodrigo': 'onyx',
+  'paulo': 'echo',
+  'carlos': 'onyx',
+  // Default/existing OpenAI voices
+  'shimmer': 'shimmer',
+  'onyx': 'onyx',
+  'echo': 'echo',
+  'alloy': 'alloy',
+  'fable': 'fable',
+  'nova': 'nova',
+};
+
 // Helper function to generate TTS audio using OpenAI
 async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
   try {
@@ -525,8 +546,11 @@ async function generateTTSAudio(text: string, voiceId: string): Promise<string |
     }
 
     const trimmedText = text.trim().substring(0, 3900);
+    
+    // Map the voice to a valid OpenAI voice, fallback to 'shimmer'
+    const openaiVoice = VOICE_MAPPING[voiceId.toLowerCase()] || 'shimmer';
 
-    logDebug('TTS', `Generating audio with voice: ${voiceId}`, {
+    logDebug('TTS', `Generating audio with voice: ${voiceId} -> mapped to: ${openaiVoice}`, {
       textLength: trimmedText.length,
       truncated: trimmedText.length !== text.trim().length,
     });
@@ -540,7 +564,7 @@ async function generateTTSAudio(text: string, voiceId: string): Promise<string |
       body: JSON.stringify({
         model: 'tts-1-hd',
         input: trimmedText,
-        voice: voiceId,
+        voice: openaiVoice,
         response_format: 'mp3',
       }),
     });
