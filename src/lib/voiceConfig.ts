@@ -28,7 +28,7 @@ export const SPEAKTOR_VOICE_MAPPING: Record<string, string> = {
   'clara': 'Clara',
   'larissa': 'Larissa',
   'ines': 'Inês',
-  'vanessa': 'Vanessa',
+  'vanessa': 'Vanessa Morgan',
   'lucas': 'Lucas',
   'caio': 'Caio',
   'shimmer': 'Clara', // fallback para OpenAI
