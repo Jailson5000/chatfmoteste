@@ -32,7 +32,69 @@ interface CalendarActionRequest {
   };
 }
 
+const DEFAULT_TIME_ZONE = "America/Sao_Paulo";
+
+function hasTimeZoneOffset(value: string): boolean {
+  return /[zZ]$/.test(value) || /[+-]\d{2}:\d{2}$/.test(value) || /[+-]\d{4}$/.test(value);
+}
+
+function ensureTimeParts(value: string): string {
+  const v = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `${v}T00:00:00`;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return `${v}:00`;
+  return v;
+}
+
+function getOffsetString(date: Date, timeZone: string): string {
+  // Works without relying on host timezone
+  const local = new Date(date.toLocaleString("en-US", { timeZone }));
+  const utc = new Date(date.toLocaleString("en-US", { timeZone: "UTC" }));
+  const offsetMinutes = Math.round((local.getTime() - utc.getTime()) / 60000);
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${sign}${hh}:${mm}`;
+}
+
+function toTimeZoneRFC3339(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const m: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== "literal") m[p.type] = p.value;
+  }
+
+  const offset = getOffsetString(date, timeZone);
+  return `${m.year}-${m.month}-${m.day}T${m.hour}:${m.minute}:${m.second}${offset}`;
+}
+
+function normalizeSaoPauloDateTime(value: string): { date: Date; rfc3339: string } | null {
+  const normalized = ensureTimeParts(value);
+  const candidate = hasTimeZoneOffset(normalized)
+    ? normalized
+    : `${normalized}${getOffsetString(new Date(), DEFAULT_TIME_ZONE)}`;
+
+  const date = new Date(candidate);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return {
+    date,
+    rfc3339: toTimeZoneRFC3339(date, DEFAULT_TIME_ZONE),
+  };
+}
+
 // Refresh access token if expired
+
 async function refreshTokenIfNeeded(
   supabase: any,
   integration: any
@@ -126,15 +188,21 @@ async function createEvent(
     return { success: false, error: "Título e horário de início são obrigatórios" };
   }
 
-  // Calculate end time if only duration provided
-  let endTime = eventData.end_time;
-  if (!endTime && eventData.duration_minutes) {
-    const start = new Date(eventData.start_time);
-    endTime = new Date(start.getTime() + eventData.duration_minutes * 60000).toISOString();
-  } else if (!endTime) {
-    // Default 1 hour
-    const start = new Date(eventData.start_time);
-    endTime = new Date(start.getTime() + 60 * 60000).toISOString();
+  const start = normalizeSaoPauloDateTime(eventData.start_time);
+  if (!start) {
+    return { success: false, error: "start_time inválido. Use ISO 8601 (ex: 2026-01-09T10:00:00)" };
+  }
+
+  const durationMinutes = eventData.duration_minutes ?? 60;
+
+  let end = eventData.end_time ? normalizeSaoPauloDateTime(eventData.end_time) : null;
+  if (!end) {
+    const endDate = new Date(start.date.getTime() + durationMinutes * 60000);
+    end = { date: endDate, rfc3339: toTimeZoneRFC3339(endDate, DEFAULT_TIME_ZONE) };
+  }
+
+  if (end.date <= start.date) {
+    return { success: false, error: "Horário final deve ser após o horário inicial" };
   }
 
   const event = {
@@ -142,14 +210,14 @@ async function createEvent(
     description: eventData.description || "",
     location: eventData.location || "",
     start: {
-      dateTime: eventData.start_time,
-      timeZone: "America/Sao_Paulo",
+      dateTime: start.rfc3339,
+      timeZone: DEFAULT_TIME_ZONE,
     },
     end: {
-      dateTime: endTime,
-      timeZone: "America/Sao_Paulo",
+      dateTime: end.rfc3339,
+      timeZone: DEFAULT_TIME_ZONE,
     },
-    attendees: eventData.attendees?.map(email => ({ email })) || [],
+    attendees: eventData.attendees?.map((email) => ({ email })) || [],
     reminders: {
       useDefault: true,
     },
@@ -209,24 +277,42 @@ async function updateEvent(
     location: eventData.location || existingEvent.location,
   };
 
-  if (eventData.start_time) {
+  const start = eventData.start_time ? normalizeSaoPauloDateTime(eventData.start_time) : null;
+  if (eventData.start_time && !start) {
+    return { success: false, error: "start_time inválido" };
+  }
+
+  const end = eventData.end_time ? normalizeSaoPauloDateTime(eventData.end_time) : null;
+  if (eventData.end_time && !end) {
+    return { success: false, error: "end_time inválido" };
+  }
+
+  if (start) {
     updatedEvent.start = {
-      dateTime: eventData.start_time,
-      timeZone: "America/Sao_Paulo",
+      dateTime: start.rfc3339,
+      timeZone: DEFAULT_TIME_ZONE,
     };
   }
 
-  if (eventData.end_time) {
+  if (end) {
     updatedEvent.end = {
-      dateTime: eventData.end_time,
-      timeZone: "America/Sao_Paulo",
+      dateTime: end.rfc3339,
+      timeZone: DEFAULT_TIME_ZONE,
     };
-  } else if (eventData.start_time && eventData.duration_minutes) {
-    const start = new Date(eventData.start_time);
+  } else if (start && eventData.duration_minutes) {
+    const endDate = new Date(start.date.getTime() + eventData.duration_minutes * 60000);
     updatedEvent.end = {
-      dateTime: new Date(start.getTime() + eventData.duration_minutes * 60000).toISOString(),
-      timeZone: "America/Sao_Paulo",
+      dateTime: toTimeZoneRFC3339(endDate, DEFAULT_TIME_ZONE),
+      timeZone: DEFAULT_TIME_ZONE,
     };
+  }
+
+  if (updatedEvent.start?.dateTime && updatedEvent.end?.dateTime) {
+    const s = new Date(updatedEvent.start.dateTime);
+    const e = new Date(updatedEvent.end.dateTime);
+    if (!Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime()) && e <= s) {
+      return { success: false, error: "Horário final deve ser após o horário inicial" };
+    }
   }
 
   const response = await fetch(
@@ -279,8 +365,22 @@ async function listEvents(
   query?: CalendarActionRequest["query"]
 ): Promise<{ success: boolean; events?: any[]; error?: string }> {
   const now = new Date();
-  const timeMin = query?.time_min || now.toISOString();
-  const timeMax = query?.time_max || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  let timeMin = query?.time_min || now.toISOString();
+  let timeMax = query?.time_max || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Normalize when caller passes date-times without timezone
+  const nm = query?.time_min ? normalizeSaoPauloDateTime(query.time_min) : null;
+  const nx = query?.time_max ? normalizeSaoPauloDateTime(query.time_max) : null;
+  if (nm) timeMin = nm.rfc3339;
+  if (nx) timeMax = nx.rfc3339;
+
+  // Guard: Google rejects empty/invalid ranges
+  const minD = new Date(timeMin);
+  const maxD = new Date(timeMax);
+  if (!Number.isNaN(minD.getTime()) && !Number.isNaN(maxD.getTime()) && maxD <= minD) {
+    timeMax = new Date(minD.getTime() + 60 * 60 * 1000).toISOString();
+  }
 
   const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
   url.searchParams.set("timeMin", timeMin);
