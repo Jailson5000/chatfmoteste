@@ -32,6 +32,45 @@ export function useGoogleCalendar() {
   const queryClient = useQueryClient();
   const [isConnecting, setIsConnecting] = useState(false);
 
+  // Listen for OAuth completion (popup writes to localStorage)
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "google_calendar_oauth_result" || !event.newValue) return;
+
+      try {
+        const payload = JSON.parse(event.newValue) as {
+          status: "success" | "error";
+          email?: string;
+          message?: string;
+          ts?: number;
+        };
+
+        // cleanup
+        localStorage.removeItem("google_calendar_oauth_result");
+        setIsConnecting(false);
+
+        if (payload.status === "success") {
+          queryClient.invalidateQueries({ queryKey: ["google-calendar-integration"] });
+          toast({
+            title: "Google Calendar conectado",
+            description: payload.email ? `Conta: ${payload.email}` : "Conexão concluída com sucesso.",
+          });
+        } else {
+          toast({
+            title: "Erro ao conectar",
+            description: payload.message || "Não foi possível conectar ao Google Calendar.",
+            variant: "destructive",
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [queryClient, toast]);
+
   // Fetch current integration status
   const { data: integration, isLoading, refetch } = useQuery({
     queryKey: ["google-calendar-integration", lawFirm?.id],
@@ -136,8 +175,7 @@ export function useGoogleCalendar() {
     },
   });
 
-  // Connect with Google - uses full-page redirect (not popup)
-  // Google blocks OAuth in popups opened asynchronously
+  // Connect with Google - uses popup to avoid iframe restrictions (Lovable preview runs in an iframe)
   const connect = async () => {
     if (!lawFirm?.id) {
       toast({
@@ -150,15 +188,21 @@ export function useGoogleCalendar() {
 
     setIsConnecting(true);
 
+    // Open popup synchronously (prevents popup blockers and avoids loading Google inside an iframe)
+    const popup = window.open(
+      "about:blank",
+      "google_calendar_oauth",
+      "popup=yes,width=520,height=680"
+    );
+
     try {
-      // ALWAYS use production URL for OAuth - Google doesn't allow wildcards
-      // Must match exactly what's registered in Google Cloud Console
-      const redirectUrl = "https://www.miauchat.com.br/integrations/google-calendar/callback";
-      
-      // Store return URL so we can redirect back after OAuth
-      sessionStorage.setItem('google_calendar_return_url', window.location.href);
-      
-      // Call edge function to initiate OAuth
+      // Callback URL must match EXACTLY what is configured in Google Cloud Console
+      const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
+
+      // Store return URL so we can redirect back after OAuth (non-popup flows)
+      sessionStorage.setItem("google_calendar_return_url", window.location.href);
+
+      // Call backend function to initiate OAuth
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
         body: {
           action: "get_auth_url",
@@ -168,11 +212,17 @@ export function useGoogleCalendar() {
       });
 
       if (error) throw error;
-      
+
       if (data?.auth_url) {
         console.log("[GoogleCalendar] Redirecting to OAuth URL:", data.auth_url);
-        // Use full-page redirect instead of popup to avoid ERR_BLOCKED_BY_RESPONSE
-        window.location.assign(data.auth_url);
+
+        if (popup && !popup.closed) {
+          popup.location.href = data.auth_url;
+          popup.focus();
+        } else {
+          // If popup was blocked, open a new tab as fallback (still avoids iframe)
+          window.open(data.auth_url, "_blank");
+        }
       } else {
         throw new Error("URL de autenticação não recebida");
       }
@@ -183,6 +233,13 @@ export function useGoogleCalendar() {
         description: error.message || "Não foi possível iniciar a conexão com o Google Calendar",
         variant: "destructive",
       });
+
+      try {
+        popup?.close();
+      } catch {
+        // ignore
+      }
+
       setIsConnecting(false);
     }
   };
