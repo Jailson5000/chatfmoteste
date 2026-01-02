@@ -7,10 +7,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ElevenLabs voice mapping
+// ElevenLabs voice mapping - synchronized with src/lib/voiceConfig.ts
 const ELEVENLABS_VOICES: Record<string, string> = {
   'el_laura': 'sLEZIrFwEyhMIH1ALLIQ',
+  'el_felipe': 'GxZ0UJKPezKah8TMxZZM',
+  'el_eloisa': '4JmPeXyyRsHSbtyiCSrt',
 };
+
+// Default fallback voice (used when no voice is configured anywhere)
+const TECHNICAL_FALLBACK_VOICE = 'el_laura';
 
 // OpenAI TTS voices
 const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
@@ -24,6 +29,7 @@ interface TenantAIConfig {
   elevenLabsEnabled: boolean;
   openaiEnabled: boolean;
   elevenLabsVoice: string | null;
+  globalDefaultVoice: string | null;
 }
 
 async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
@@ -37,11 +43,13 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
         elevenLabsEnabled: true,
         openaiEnabled: true,
         elevenLabsVoice: null,
+        globalDefaultVoice: null,
       };
     }
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Fetch tenant settings (empresa)
     const { data: settings, error } = await supabase
       .from('law_firm_settings')
       .select('ai_capabilities')
@@ -52,12 +60,23 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
       console.log('[TTS] Error fetching tenant settings:', error.message);
     }
 
+    // Fetch global default voice from system_settings
+    const { data: globalSettings } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'tts_elevenlabs_voice')
+      .single();
+
+    const globalDefaultVoice = globalSettings?.value as string || null;
+    console.log('[TTS] Global default voice from system_settings:', globalDefaultVoice);
+
     const caps = settings?.ai_capabilities as Record<string, unknown> | null;
     
     return {
       elevenLabsEnabled: caps?.elevenlabs_active !== false,
       openaiEnabled: true,
       elevenLabsVoice: (caps?.elevenlabs_voice as string) || null,
+      globalDefaultVoice,
     };
   } catch (error) {
     console.error('[TTS] Error in getTenantAIConfig:', error instanceof Error ? error.message : error);
@@ -65,6 +84,7 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
       elevenLabsEnabled: true,
       openaiEnabled: true,
       elevenLabsVoice: null,
+      globalDefaultVoice: null,
     };
   }
 }
@@ -249,6 +269,7 @@ serve(async (req) => {
       elevenLabsEnabled: true,
       openaiEnabled: true,
       elevenLabsVoice: null,
+      globalDefaultVoice: null,
     };
 
     if (lawFirmId) {
@@ -258,11 +279,28 @@ serve(async (req) => {
       console.log('[TTS] No lawFirmId, using defaults');
     }
 
-    const effectiveVoiceId = config.elevenLabsVoice || voiceId;
-    console.log('[TTS] Effective voice:', effectiveVoiceId);
+    // Voice precedence: request voiceId → tenant voice → global default → technical fallback
+    // CRITICAL: This implements the correct multi-tenant voice resolution
+    const resolvedVoice = voiceId || config.elevenLabsVoice || config.globalDefaultVoice || TECHNICAL_FALLBACK_VOICE;
+    const voiceSource = voiceId 
+      ? 'request' 
+      : config.elevenLabsVoice 
+        ? 'empresa' 
+        : config.globalDefaultVoice 
+          ? 'global' 
+          : 'fallback';
+    
+    console.log(`[TTS] Voice resolution: lawFirmId=${lawFirmId} voice=${resolvedVoice} source=${voiceSource}`);
+    console.log('[TTS] Voice precedence details:', {
+      requestVoiceId: voiceId,
+      tenantVoice: config.elevenLabsVoice,
+      globalVoice: config.globalDefaultVoice,
+      resolved: resolvedVoice,
+      source: voiceSource,
+    });
 
     // If voice is explicitly OpenAI, use OpenAI directly
-    if (isOpenAIVoice(effectiveVoiceId)) {
+    if (isOpenAIVoice(resolvedVoice)) {
       console.log('[TTS] Using OpenAI (voice is OpenAI type)');
       const result = await generateOpenAIAudio(text, 'nova');
       
@@ -273,6 +311,7 @@ serve(async (req) => {
             audioContent: result.audioContent,
             mimeType: "audio/mpeg",
             provider: "openai",
+            voiceSource,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -288,7 +327,7 @@ serve(async (req) => {
     // Priority: ElevenLabs > OpenAI > Error
     if (config.elevenLabsEnabled) {
       console.log('[TTS] Trying ElevenLabs first...');
-      const result = await generateElevenLabsAudio(text, effectiveVoiceId);
+      const result = await generateElevenLabsAudio(text, resolvedVoice);
       
       if (result.success) {
         console.log('[TTS] ElevenLabs SUCCESS');
