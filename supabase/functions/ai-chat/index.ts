@@ -464,6 +464,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
           model: "google/gemini-2.5-flash",
           messages,
           temperature,
+          max_tokens: context?.audioRequested ? 900 : 400,
         }),
       });
     }
