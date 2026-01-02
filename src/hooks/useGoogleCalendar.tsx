@@ -151,8 +151,9 @@ export function useGoogleCalendar() {
     setIsConnecting(true);
 
     try {
-      // Get the callback URL - this must match exactly what's in Google OAuth console
-      const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
+      // ALWAYS use production URL for OAuth - Google doesn't allow wildcards
+      // Must match exactly what's registered in Google Cloud Console
+      const redirectUrl = "https://www.miauchat.com.br/integrations/google-calendar/callback";
       
       // Store return URL so we can redirect back after OAuth
       sessionStorage.setItem('google_calendar_return_url', window.location.href);
