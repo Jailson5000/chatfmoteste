@@ -136,7 +136,8 @@ export function useGoogleCalendar() {
     },
   });
 
-  // Connect with Google - opens popup for OAuth
+  // Connect with Google - uses full-page redirect (not popup)
+  // Google blocks OAuth in popups opened asynchronously
   const connect = async () => {
     if (!lawFirm?.id) {
       toast({
@@ -153,6 +154,9 @@ export function useGoogleCalendar() {
       // Get the callback URL - this must match exactly what's in Google OAuth console
       const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
       
+      // Store return URL so we can redirect back after OAuth
+      sessionStorage.setItem('google_calendar_return_url', window.location.href);
+      
       // Call edge function to initiate OAuth
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
         body: {
@@ -165,26 +169,11 @@ export function useGoogleCalendar() {
       if (error) throw error;
       
       if (data?.auth_url) {
-        // Open Google OAuth in a popup
-        const width = 500;
-        const height = 600;
-        const left = window.screen.width / 2 - width / 2;
-        const top = window.screen.height / 2 - height / 2;
-        
-        const popup = window.open(
-          data.auth_url,
-          "google-calendar-auth",
-          `width=${width},height=${height},left=${left},top=${top}`
-        );
-
-        // Listen for the popup to close
-        const checkPopup = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(checkPopup);
-            setIsConnecting(false);
-            refetch();
-          }
-        }, 1000);
+        console.log("[GoogleCalendar] Redirecting to OAuth URL:", data.auth_url);
+        // Use full-page redirect instead of popup to avoid ERR_BLOCKED_BY_RESPONSE
+        window.location.assign(data.auth_url);
+      } else {
+        throw new Error("URL de autenticação não recebida");
       }
     } catch (error: any) {
       console.error("Error connecting to Google Calendar:", error);
