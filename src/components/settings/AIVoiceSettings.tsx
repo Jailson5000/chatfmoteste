@@ -15,9 +15,10 @@ const AVAILABLE_VOICES = [
   // Speaktor Pro voices - Brasileiras (PT-BR)
   { id: "renata", name: "Renata", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
   { id: "natalia", name: "Natália", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
+  { id: "adriana", name: "Adriana", gender: "female", description: "Voz feminina brasileira adulto", provider: "speaktor" },
+  { id: "carla", name: "Carla", gender: "female", description: "Voz feminina brasileira adulto", provider: "speaktor" },
   { id: "rodrigo", name: "Rodrigo", gender: "male", description: "Voz masculina brasileira jovem adulto", provider: "speaktor" },
   { id: "paulo", name: "Paulo", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
-  { id: "alexandre", name: "Alexandre", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
   { id: "carlos", name: "Carlos", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
   // OpenAI voices (fallback)
   { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara (OpenAI)", provider: "openai" },

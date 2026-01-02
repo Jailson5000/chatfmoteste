@@ -30,9 +30,10 @@ const SPEAKTOR_VOICES: Record<string, string> = {
   // Speaktor Pro voices - Brasileiras (PT-BR)
   'renata': 'Renata',
   'natalia': 'Natália',
+  'adriana': 'Adriana',
+  'carla': 'Carla',
   'rodrigo': 'Rodrigo',
   'paulo': 'Paulo',
-  'alexandre': 'Alexandre',
   'carlos': 'Carlos',
   // OpenAI voice fallback mapping
   'shimmer': 'Renata',
