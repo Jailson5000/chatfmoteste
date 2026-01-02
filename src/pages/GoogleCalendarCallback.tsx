@@ -31,11 +31,23 @@ export default function GoogleCalendarCallback() {
   }, [searchParams]);
 
   const redirectBack = (delay: number) => {
+    const isPopup = window.name === "google_calendar_oauth";
+
     // Try to get the stored return URL
-    const returnUrl = sessionStorage.getItem('google_calendar_return_url');
-    sessionStorage.removeItem('google_calendar_return_url');
-    
+    const returnUrl = sessionStorage.getItem("google_calendar_return_url");
+    sessionStorage.removeItem("google_calendar_return_url");
+
     setTimeout(() => {
+      if (isPopup) {
+        // Popup flow: close window after signaling result via localStorage
+        try {
+          window.close();
+          return;
+        } catch {
+          // ignore
+        }
+      }
+
       if (returnUrl) {
         window.location.href = returnUrl;
       } else {
@@ -47,13 +59,15 @@ export default function GoogleCalendarCallback() {
   const handleOAuthCallback = async (code: string, lawFirmId: string) => {
     try {
       console.log("[GoogleCalendarCallback] Exchanging code for law_firm:", lawFirmId);
-      
+
+      const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
+
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
         body: {
           action: "exchange_code",
           code,
           law_firm_id: lawFirmId,
-          redirect_url: `${window.location.origin}/integrations/google-calendar/callback`,
+          redirect_url: redirectUrl,
         },
       });
 
@@ -62,7 +76,18 @@ export default function GoogleCalendarCallback() {
       if (data?.success) {
         setStatus("success");
         setMessage(`Google Calendar conectado com sucesso! (${data.email})`);
-        redirectBack(2000);
+
+        // Signal result to opener (works even with noopener via storage event)
+        try {
+          localStorage.setItem(
+            "google_calendar_oauth_result",
+            JSON.stringify({ status: "success", email: data.email, ts: Date.now() })
+          );
+        } catch {
+          // ignore
+        }
+
+        redirectBack(1200);
       } else {
         throw new Error(data?.error || "Erro desconhecido");
       }
@@ -70,7 +95,17 @@ export default function GoogleCalendarCallback() {
       console.error("[GoogleCalendarCallback] Error:", error);
       setStatus("error");
       setMessage(error.message || "Erro ao conectar com o Google Calendar.");
-      redirectBack(3000);
+
+      try {
+        localStorage.setItem(
+          "google_calendar_oauth_result",
+          JSON.stringify({ status: "error", message: error.message, ts: Date.now() })
+        );
+      } catch {
+        // ignore
+      }
+
+      redirectBack(1500);
     }
   };
 
