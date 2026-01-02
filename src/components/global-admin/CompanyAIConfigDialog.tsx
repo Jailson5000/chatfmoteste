@@ -31,22 +31,6 @@ interface CompanyAIConfigDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-interface AISettings {
-  ai_provider: string;
-  ia_site_active: boolean;
-  openai_active: boolean;
-  n8n_webhook_url: string;
-  n8n_webhook_secret: string;
-  ai_capabilities: {
-    auto_reply: boolean;
-    summary: boolean;
-    transcription: boolean;
-    classification: boolean;
-    image_analysis: boolean;
-    audio_response: boolean;
-  };
-}
-
 export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAIConfigDialogProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,8 +40,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
   const [n8nEnabled, setN8nEnabled] = useState(false);
   
-  // OpenAI uses global system key - no per-company config needed
-  
   // N8N config
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState("");
   const [n8nSecret, setN8nSecret] = useState("");
@@ -65,11 +47,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Speaktor TTS config (per-company)
-  const [speaktorEnabled, setSpeaktorEnabled] = useState(false);
-  const [speaktorVoice, setSpeaktorVoice] = useState(DEFAULT_VOICE_ID);
+  // ElevenLabs TTS config (per-company)
+  const [elevenLabsVoice, setElevenLabsVoice] = useState(DEFAULT_VOICE_ID);
 
-  // AI Capabilities - image and audio are INDEPENDENT
+  // AI Capabilities
   const [capabilities, setCapabilities] = useState({
     auto_reply: true,
     summary: true,
@@ -103,12 +84,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         const caps = data.ai_capabilities as any;
         
         // Support new simultaneous AI activation model
-        // Check if new fields exist, otherwise fallback to legacy provider field
         if (caps?.ia_site_active !== undefined || caps?.openai_active !== undefined) {
           setInternalEnabled(caps?.ia_site_active ?? true);
           setOpenaiEnabled(caps?.openai_active ?? false);
         } else {
-          // Legacy: convert from ai_provider field
           const provider = data.ai_provider || "internal";
           setInternalEnabled(provider === "internal");
           setOpenaiEnabled(provider === "openai");
@@ -128,9 +107,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
             audio_response: caps.audio_response ?? true,
           });
           
-          // Speaktor per-company settings
-          setSpeaktorEnabled(caps.speaktor_enabled ?? false);
-          setSpeaktorVoice(caps.speaktor_voice ?? DEFAULT_VOICE_ID);
+          // ElevenLabs voice
+          setElevenLabsVoice(caps.elevenlabs_voice ?? DEFAULT_VOICE_ID);
         }
       }
     } catch (error) {
@@ -149,22 +127,15 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
     setSaving(true);
     try {
-      // Determine primary provider for legacy compatibility
-      // Priority: n8n > openai > internal
-      // Note: When both IA do Site and OpenAI are active, we store 'internal' for legacy
-      // The actual activation flags are in ai_capabilities (ia_site_active, openai_active)
       let activeProvider = "internal";
       if (n8nEnabled) activeProvider = "n8n";
       else if (openaiEnabled && !internalEnabled) activeProvider = "openai";
-      // When both active, keep 'internal' as legacy value - actual logic uses ai_capabilities flags
 
-      // Store activation flags in ai_capabilities for new model
       const enhancedCapabilities = {
         ...capabilities,
         ia_site_active: internalEnabled,
         openai_active: openaiEnabled,
-        speaktor_enabled: speaktorEnabled,
-        speaktor_voice: speaktorVoice,
+        elevenlabs_voice: elevenLabsVoice,
       };
 
       const settingsData = {
@@ -176,7 +147,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         ai_settings_updated_at: new Date().toISOString(),
       };
 
-      // Check if settings exist
       const { data: existing } = await supabase
         .from("law_firm_settings")
         .select("id")
@@ -246,52 +216,43 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
     }
   };
 
-  // Allow IA do Site and OpenAI to be ACTIVE SIMULTANEOUSLY
-  // n8n is exclusive (disables others)
   const handleProviderChange = (provider: "internal" | "openai" | "n8n", enabled: boolean) => {
     if (provider === "internal") {
       setInternalEnabled(enabled);
-      // Don't disable OpenAI - they can be active together
       if (enabled) setN8nEnabled(false);
     } else if (provider === "openai") {
       setOpenaiEnabled(enabled);
-      // Don't disable IA do Site - they can be active together
       if (enabled) setN8nEnabled(false);
     } else if (provider === "n8n") {
       setN8nEnabled(enabled);
       if (enabled) {
-        // n8n is exclusive
         setInternalEnabled(false);
         setOpenaiEnabled(false);
       }
     }
   };
 
-  // Compute which AI handles what based on current state
   const getAIResponsibilities = () => {
     const bothActive = internalEnabled && openaiEnabled;
-    
-    // Audio/TTS depends on Speaktor setting
-    const audioProvider = speaktorEnabled ? "Speaktor" : (openaiEnabled ? "OpenAI" : "IA do Site");
     
     if (bothActive) {
       return {
         chat: "OpenAI",
-        audio: audioProvider,
+        audio: "ElevenLabs",
         transcription: "OpenAI",
         image: "IA do Site"
       };
     } else if (openaiEnabled) {
       return {
         chat: "OpenAI",
-        audio: audioProvider,
+        audio: "ElevenLabs",
         transcription: "OpenAI",
         image: "Indisponível"
       };
     } else {
       return {
         chat: "IA do Site",
-        audio: audioProvider,
+        audio: "ElevenLabs",
         transcription: "IA do Site",
         image: "IA do Site"
       };
@@ -322,7 +283,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         ) : (
           <ScrollArea className="max-h-[60vh] pr-4">
             <div className="space-y-6">
-              {/* Internal AI - Simple toggle like requested */}
+              {/* Internal AI */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -346,7 +307,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 </div>
               </div>
 
-              {/* OpenAI - Uses global system key, just toggle on/off */}
+              {/* OpenAI */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -355,9 +316,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     </div>
                     <div>
                       <p className="font-medium text-white">OpenAI API</p>
-                      <p className="text-xs text-white/50">
-                        Usa a chave global do sistema
-                      </p>
+                      <p className="text-xs text-white/50">Usa a chave global do sistema</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -371,7 +330,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   </div>
                 </div>
 
-                {/* Show info when OpenAI is enabled */}
                 {openaiEnabled && (
                   <div className="flex items-center gap-2 text-sm text-green-400 pt-2">
                     <CheckCircle2 className="h-4 w-4" />
@@ -380,7 +338,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 )}
               </div>
 
-              {/* AI Responsibilities Summary - Show when both IAs are active */}
+              {/* AI Responsibilities Summary */}
               {(internalEnabled || openaiEnabled) && !n8nEnabled && (
                 <div className="p-4 rounded-lg bg-gradient-to-r from-blue-500/10 to-emerald-500/10 border border-white/10 space-y-3">
                   <div className="flex items-center gap-2">
@@ -399,10 +357,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     </div>
                     <div className="flex items-center gap-2 p-2 rounded bg-white/5">
                       <span className="text-white/60">🎙️ Áudio/TTS:</span>
-                      <span className={`font-medium ${
-                        responsibilities.audio === "Speaktor" ? "text-purple-400" :
-                        responsibilities.audio === "OpenAI" ? "text-emerald-400" : "text-blue-400"
-                      }`}>
+                      <span className="font-medium text-emerald-400">
                         {responsibilities.audio}
                       </span>
                     </div>
@@ -422,16 +377,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                       </span>
                     </div>
                   </div>
-                  
-                  {internalEnabled && openaiEnabled && (
-                    <p className="text-xs text-white/50">
-                      Quando ambas IAs estão ativas, OpenAI processa conversação e áudio, enquanto IA do Site analisa imagens.
-                    </p>
-                  )}
                 </div>
               )}
 
-              {/* N8N - Same pattern */}
+              {/* N8N */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -468,7 +417,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                         />
                         <Button
                           variant="outline"
-                          size="sm"
                           onClick={handleTestN8n}
                           disabled={testingN8n || !n8nWebhookUrl}
                           className="border-white/10 text-white hover:bg-white/10"
@@ -477,8 +425,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                         </Button>
                       </div>
                       {n8nTestResult && (
-                        <div className={`flex items-center gap-2 text-xs ${n8nTestResult.success ? "text-green-400" : "text-red-400"}`}>
-                          {n8nTestResult.success ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                        <div className={`flex items-center gap-2 text-sm ${n8nTestResult.success ? "text-green-400" : "text-red-400"}`}>
+                          {n8nTestResult.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                           {n8nTestResult.message}
                         </div>
                       )}
@@ -491,7 +439,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                           type={showN8nSecret ? "text" : "password"}
                           value={n8nSecret}
                           onChange={(e) => setN8nSecret(e.target.value)}
-                          placeholder="Token de autenticação"
+                          placeholder="Chave secreta para autenticação"
                           className="bg-white/5 border-white/10 text-white pr-10"
                         />
                         <Button
@@ -509,70 +457,44 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 )}
               </div>
 
-              {/* Speaktor TTS - Per-company voice configuration */}
+              {/* ElevenLabs Voice Selection */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-purple-500/20">
-                      <Volume2 className="h-4 w-4 text-purple-400" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-white">Speaktor TTS</p>
-                      <p className="text-xs text-white/50">Vozes brasileiras de alta qualidade</p>
-                    </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-500/20">
+                    <Volume2 className="h-4 w-4 text-emerald-400" />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={speaktorEnabled ? "bg-purple-600" : "bg-white/20"}>
-                      {speaktorEnabled ? "Ativo" : "OpenAI TTS"}
-                    </Badge>
-                    <Switch
-                      checked={speaktorEnabled}
-                      onCheckedChange={setSpeaktorEnabled}
-                    />
+                  <div>
+                    <p className="font-medium text-white">ElevenLabs TTS</p>
+                    <p className="text-xs text-white/50">Voz padrão para respostas por áudio</p>
                   </div>
                 </div>
 
-                {speaktorEnabled && (
-                  <div className="space-y-3 pt-2">
-                    <div className="space-y-2">
-                      <Label className="text-white/70 text-sm">Voz Padrão da Empresa</Label>
-                      <Select value={speaktorVoice} onValueChange={setSpeaktorVoice}>
-                        <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#1a1a1a] border-white/10">
-                          {AVAILABLE_VOICES.filter(v => v.provider === "speaktor").map((voice) => (
-                            <SelectItem key={voice.id} value={voice.id}>
-                              {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-white/40">
-                        A voz configurada no agente tem prioridade sobre esta voz padrão.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                  <Volume2 className="h-4 w-4 text-purple-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-purple-200/80">
-                    {speaktorEnabled 
-                      ? "Speaktor ativo: Áudio TTS será gerado com vozes brasileiras de alta qualidade."
-                      : "Speaktor desativado: Áudio TTS será gerado via OpenAI (vozes em inglês)."
-                    }
+                <div className="space-y-2">
+                  <Label className="text-white/70 text-sm">Voz Padrão da Empresa</Label>
+                  <Select value={elevenLabsVoice} onValueChange={setElevenLabsVoice}>
+                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1a1a] border-white/10">
+                      {AVAILABLE_VOICES.map((voice) => (
+                        <SelectItem key={voice.id} value={voice.id}>
+                          {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-white/40">
+                    A voz configurada no agente tem prioridade sobre esta voz padrão.
                   </p>
                 </div>
               </div>
 
-              {/* AI Capabilities - Image and Audio are INDEPENDENT */}
+              {/* AI Capabilities */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
                 <p className="font-medium text-white">Funcionalidades de IA</p>
                 <p className="text-xs text-white/50">Capacidades podem ser ativadas simultaneamente</p>
                 
                 <div className="grid grid-cols-2 gap-4">
-                  {/* Core capabilities */}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Switch
                       checked={capabilities.auto_reply}
@@ -603,7 +525,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   </label>
                 </div>
 
-                {/* Independent Image and Audio capabilities */}
                 <div className="border-t border-white/10 pt-4 mt-4 space-y-3">
                   <p className="text-sm text-white/70 font-medium">Capacidades Paralelas</p>
                   <div className="grid grid-cols-2 gap-4">
@@ -613,7 +534,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                       </div>
                       <div className="flex-1">
                         <p className="text-sm text-white font-medium">Análise de Imagens</p>
-                        <p className="text-xs text-white/50">Sempre ativa</p>
                       </div>
                       <Switch
                         checked={capabilities.image_analysis}
@@ -626,7 +546,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                       </div>
                       <div className="flex-1">
                         <p className="text-sm text-white font-medium">Resposta por Áudio</p>
-                        <p className="text-xs text-white/50">Sempre ativa</p>
                       </div>
                       <Switch
                         checked={capabilities.audio_response}
@@ -634,9 +553,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-white/40 italic">
-                    Imagem e áudio funcionam de forma independente e podem estar ativas simultaneamente
-                  </p>
                 </div>
               </div>
 
