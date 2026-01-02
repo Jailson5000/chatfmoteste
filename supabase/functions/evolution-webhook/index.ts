@@ -485,6 +485,36 @@ async function shouldRespondWithAudio(
   }
 }
 
+// Helper to split text into safe chunks for TTS (OpenAI input limit ~4096 chars)
+function splitTextForTTS(text: string, maxChars = 3500): string[] {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= maxChars) return [cleaned];
+
+  const chunks: string[] = [];
+  let remaining = cleaned;
+
+  while (remaining.length > maxChars) {
+    // Prefer splitting at sentence boundaries near the max limit
+    const slice = remaining.slice(0, maxChars);
+    const lastSentenceBreak = Math.max(
+      slice.lastIndexOf('. '),
+      slice.lastIndexOf('! '),
+      slice.lastIndexOf('? '),
+      slice.lastIndexOf('; '),
+      slice.lastIndexOf(': ')
+    );
+
+    const cutAt = lastSentenceBreak > 200 ? lastSentenceBreak + 1 : maxChars; // keep punctuation
+    const part = remaining.slice(0, cutAt).trim();
+    if (part) chunks.push(part);
+
+    remaining = remaining.slice(cutAt).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 // Helper function to generate TTS audio using OpenAI
 async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
   try {
@@ -494,10 +524,12 @@ async function generateTTSAudio(text: string, voiceId: string): Promise<string |
       return null;
     }
 
-    // Limit text length for TTS (OpenAI has 4096 char limit)
-    const trimmedText = text.substring(0, 4000);
-    
-    logDebug('TTS', `Generating audio with voice: ${voiceId}`, { textLength: trimmedText.length });
+    const trimmedText = text.trim().substring(0, 3900);
+
+    logDebug('TTS', `Generating audio with voice: ${voiceId}`, {
+      textLength: trimmedText.length,
+      truncated: trimmedText.length !== text.trim().length,
+    });
 
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
@@ -820,14 +852,36 @@ async function sendAIResponseToWhatsApp(
         return true;
       }
 
-      logDebug('TTS_FLOW', 'Generating audio', { textLength: fullText.length, voiceId: voiceConfig!.voiceId });
-      const audioBase64 = await generateTTSAudio(fullText, voiceConfig!.voiceId);
+      const chunks = splitTextForTTS(fullText, 3500);
+      logDebug('TTS_FLOW', 'Generating audio chunks', {
+        totalLength: fullText.length,
+        chunks: chunks.length,
+        voiceId: voiceConfig!.voiceId,
+      });
 
-      if (audioBase64) {
-        logDebug('TTS_FLOW', 'Audio generated successfully, sending to WhatsApp', { 
-          audioSize: audioBase64.length 
+      let sentAnyAudio = false;
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i];
+        logDebug('TTS_FLOW', 'Generating audio chunk', {
+          index: i + 1,
+          total: chunks.length,
+          textLength: chunkText.length,
         });
-        
+
+        const audioBase64 = await generateTTSAudio(chunkText, voiceConfig!.voiceId);
+
+        if (!audioBase64) {
+          logDebug('TTS_FLOW', 'FAILED to generate TTS audio chunk, falling back to text', { index: i + 1 });
+          await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
+          return true;
+        }
+
+        logDebug('TTS_FLOW', 'Audio chunk generated, sending to WhatsApp', {
+          index: i + 1,
+          audioSize: audioBase64.length,
+        });
+
         const audioResult = await sendAudioToWhatsApp(
           apiUrl,
           instance.instance_name,
@@ -836,47 +890,60 @@ async function sendAIResponseToWhatsApp(
           audioBase64
         );
 
-        if (audioResult.success && audioResult.messageId) {
-          // Save audio message to database with the text content for reference
-          await supabaseClient
-            .from('messages')
-            .insert({
-              conversation_id: context.conversationId,
-              whatsapp_message_id: audioResult.messageId,
-              content: fullText, // Store the text content that was converted to audio
-              message_type: 'audio',
-              is_from_me: true,
-              sender_type: 'system',
-              ai_generated: true,
-              media_mime_type: 'audio/mpeg',
-            });
-
-          logDebug('SEND_RESPONSE', 'Audio response sent and saved successfully', {
-            messageId: audioResult.messageId,
-            textLength: fullText.length
-          });
-          
-          // Update conversation timestamp
-          await supabaseClient
-            .from('conversations')
-            .update({ 
-              last_message_at: new Date().toISOString(),
-              n8n_last_response_at: new Date().toISOString(),
-            })
-            .eq('id', context.conversationId);
-            
-          return true;
-        } else {
-          logDebug('TTS_FLOW', 'FAILED to send audio to WhatsApp, falling back to text', { 
-            audioResult 
+        if (!audioResult.success || !audioResult.messageId) {
+          logDebug('TTS_FLOW', 'FAILED to send audio chunk to WhatsApp, falling back to text', {
+            index: i + 1,
+            audioResult,
           });
           await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
+          return true;
         }
-      } else {
-        logDebug('TTS_FLOW', 'FAILED to generate TTS audio, falling back to text');
-        await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
+
+        sentAnyAudio = true;
+
+        // Save each audio chunk to DB (keeps transcript aligned with the audio that was sent)
+        await supabaseClient
+          .from('messages')
+          .insert({
+            conversation_id: context.conversationId,
+            whatsapp_message_id: audioResult.messageId,
+            content: chunkText,
+            message_type: 'audio',
+            is_from_me: true,
+            sender_type: 'system',
+            ai_generated: true,
+            media_mime_type: 'audio/mpeg',
+          });
+
+        logDebug('SEND_RESPONSE', 'Audio chunk sent and saved successfully', {
+          messageId: audioResult.messageId,
+          chunkIndex: i + 1,
+          chunksTotal: chunks.length,
+          textLength: chunkText.length,
+        });
+
+        // Small pacing between multiple audios
+        if (i < chunks.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
-    } else {
+
+      if (sentAnyAudio) {
+        // Update conversation timestamp
+        await supabaseClient
+          .from('conversations')
+          .update({
+            last_message_at: new Date().toISOString(),
+            n8n_last_response_at: new Date().toISOString(),
+          })
+          .eq('id', context.conversationId);
+
+        return true;
+      }
+
+      // Fallback (shouldn't happen)
+      await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
+      return true;
       // Normal text-only flow
       let lastWhatsappMessageId: string | null = null;
 
@@ -1015,6 +1082,14 @@ async function processWithGemini(
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
+    // Decide audio mode BEFORE calling AI (so the model can answer in a single complete shot)
+    const audioRequestedForThisMessage = await shouldRespondWithAudio(
+      supabaseClient,
+      context.conversationId,
+      context.messageContent,
+      context.messageType
+    );
+
     // Call internal ai-chat edge function with automationId (REQUIRED)
     const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
       method: 'POST',
@@ -1031,6 +1106,7 @@ async function processWithGemini(
           clientPhone: context.contactPhone,
           lawFirmId: context.lawFirmId,
           clientId: context.clientId, // Pass clientId for memory support
+          audioRequested: audioRequestedForThisMessage,
         },
       }),
     });
@@ -1178,12 +1254,22 @@ async function processWithGPT(
     // Agent prompt is the SINGLE SOURCE OF TRUTH - no fallbacks
     const systemPrompt = automation.ai_prompt;
 
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      // Add behavioral instruction for human-like responses
-      { 
-        role: 'system', 
-        content: `REGRA CRÍTICA DE COMUNICAÇÃO:
+    // Decide audio mode BEFORE calling GPT (so the model doesn't do step-by-step)
+    const audioRequestedForThisMessage = await shouldRespondWithAudio(
+      supabaseClient,
+      context.conversationId,
+      context.messageContent,
+      context.messageType
+    );
+
+    const behaviorInstruction = audioRequestedForThisMessage
+      ? `REGRA CRÍTICA (MODO ÁUDIO):
+- O cliente pediu/precisa de resposta em áudio.
+- Responda com a RESPOSTA COMPLETA em UMA única mensagem (curta, mas completa).
+- NÃO peça para aguardar, NÃO diga que vai continuar depois, NÃO quebre em etapas.
+- NÃO anuncie áudio (o sistema converte automaticamente sua resposta em áudio).
+`
+      : `REGRA CRÍTICA DE COMUNICAÇÃO:
 - Responda como uma pessoa real em atendimento
 - Envie mensagens CURTAS e OBJETIVAS (máximo 2-3 frases por vez)
 - Faça UMA pergunta ou informação por mensagem
@@ -1208,8 +1294,11 @@ QUANDO O CLIENTE PEDIR RESPOSTA POR ÁUDIO/VOZ:
 O SISTEMA CONVERTE AUTOMATICAMENTE SUA RESPOSTA DE TEXTO EM ÁUDIO.
 Se você enviar apenas um "aviso", o cliente receberá um áudio dizendo "vou mandar áudio" - o que é inútil.
 
-RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!${clientMemoriesText}${summaryText}` 
-      },
+RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'system', content: `${behaviorInstruction}${clientMemoriesText}${summaryText}` },
       ...(recentMessages?.reverse() || []).map((msg: any) => ({
         role: msg.is_from_me ? 'assistant' : 'user',
         content: msg.content || ''
@@ -1228,7 +1317,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!${clientMemoriesText}${su
         model: 'gpt-4o-mini',
         messages,
         temperature: automation.ai_temperature || 0.7,
-        max_tokens: 300, // Limit response length for shorter messages
+        max_tokens: audioRequestedForThisMessage ? 900 : 300,
       }),
     });
 

@@ -17,6 +17,7 @@ interface ChatRequest {
     previousMessages?: Array<{ role: string; content: string }>;
     clientId?: string;
     lawFirmId?: string;
+    audioRequested?: boolean;
   };
 }
 
@@ -447,6 +448,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
           model: "gpt-4o-mini",
           messages,
           temperature,
+          max_tokens: context?.audioRequested ? 900 : 400,
         }),
       });
     } else {
