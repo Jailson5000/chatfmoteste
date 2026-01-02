@@ -19,6 +19,10 @@ interface TrayIntegration {
   deactivated_at: string | null;
   deactivated_by: string | null;
   first_use_at: string | null;
+  // New default settings
+  default_department_id: string | null;
+  default_status_id: string | null;
+  default_automation_id: string | null;
 }
 
 // Generate snippet code from widget key
@@ -64,11 +68,14 @@ export function useTrayIntegration() {
 
       if (!data) return null;
 
+      // Cast to include new columns (since types might not be updated yet)
+      const integrationData = data as TrayIntegration;
+
       // Add snippet_code dynamically
       return {
-        ...data,
-        is_enabled: data.is_active,
-        snippet_code: generateSnippetCode(data.widget_key),
+        ...integrationData,
+        is_enabled: integrationData.is_active,
+        snippet_code: generateSnippetCode(integrationData.widget_key),
       };
     },
     enabled: !!user,
@@ -154,10 +161,43 @@ export function useTrayIntegration() {
     },
   });
 
+  // Mutation to update default settings
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (settings: {
+      default_department_id?: string | null;
+      default_status_id?: string | null;
+      default_automation_id?: string | null;
+    }) => {
+      if (!integration?.id) {
+        throw new Error("Integration not found");
+      }
+
+      const { data, error } = await supabase
+        .from("tray_chat_integrations")
+        .update(settings)
+        .eq("id", integration.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tray-integration"] });
+      toast.success("Configuração atualizada!");
+    },
+    onError: (error) => {
+      console.error("Error updating Tray settings:", error);
+      toast.error("Erro ao atualizar configuração");
+    },
+  });
+
   return {
     integration,
     isLoading,
     toggleIntegration: toggleMutation.mutateAsync,
     isToggling: toggleMutation.isPending,
+    updateSettings: updateSettingsMutation.mutate,
+    isUpdatingSettings: updateSettingsMutation.isPending,
   };
 }

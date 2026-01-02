@@ -9,6 +9,7 @@ import {
   Loader2,
   Globe,
   Settings,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,12 +21,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useWhatsAppInstances, WhatsAppInstance } from "@/hooks/useWhatsAppInstances";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useLawFirmSettings } from "@/hooks/useLawFirmSettings";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useAutomations } from "@/hooks/useAutomations";
 import { useToast } from "@/hooks/use-toast";
 import { useTrayIntegration } from "@/hooks/useTrayIntegration";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
@@ -42,7 +52,14 @@ export default function Connections() {
   const { evolutionApiUrl, evolutionApiKey, isConfigured: isApiConfigured } = useLawFirmSettings();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
-  const { integration: trayIntegration, isLoading: trayLoading } = useTrayIntegration();
+  const { statuses } = useCustomStatuses();
+  const { automations } = useAutomations();
+  const { 
+    integration: trayIntegration, 
+    isLoading: trayLoading, 
+    updateSettings: updateTraySettings,
+    isUpdatingSettings: isUpdatingTraySettings 
+  } = useTrayIntegration();
   
   const {
     instances,
@@ -347,10 +364,7 @@ export default function Connections() {
             <tbody className="divide-y divide-border">
               {/* Tray Chat Integration Row */}
               {trayIntegration?.is_enabled && (
-                <tr
-                  className="hover:bg-muted/20 cursor-pointer transition-colors bg-gradient-to-r from-orange-500/5 to-transparent"
-                  onClick={() => navigate("/settings?tab=integrations")}
-                >
+                <tr className="hover:bg-muted/20 transition-colors bg-gradient-to-r from-orange-500/5 to-transparent">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-orange-500/10 flex items-center justify-center">
@@ -367,14 +381,86 @@ export default function Connections() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">—</td>
-                  <td className="px-4 py-3 text-muted-foreground">—</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">
-                        IA
-                      </Badge>
-                    </div>
+                    <Select
+                      value={trayIntegration.default_status_id || "none"}
+                      onValueChange={(value) => {
+                        updateTraySettings({ 
+                          default_status_id: value === "none" ? null : value 
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[140px] text-xs" onClick={(e) => e.stopPropagation()}>
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum</SelectItem>
+                        {statuses.map((status) => (
+                          <SelectItem key={status.id} value={status.id}>
+                            <div className="flex items-center gap-2">
+                              <span 
+                                className="w-2 h-2 rounded-full" 
+                                style={{ backgroundColor: status.color }} 
+                              />
+                              {status.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Select
+                      value={trayIntegration.default_department_id || "none"}
+                      onValueChange={(value) => {
+                        updateTraySettings({ 
+                          default_department_id: value === "none" ? null : value 
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[140px] text-xs" onClick={(e) => e.stopPropagation()}>
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum</SelectItem>
+                        {departments.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.id}>
+                            <div className="flex items-center gap-2">
+                              <span 
+                                className="w-2 h-2 rounded-full" 
+                                style={{ backgroundColor: dept.color }} 
+                              />
+                              {dept.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Select
+                      value={trayIntegration.default_automation_id || "none"}
+                      onValueChange={(value) => {
+                        updateTraySettings({ 
+                          default_automation_id: value === "none" ? null : value 
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[160px] text-xs" onClick={(e) => e.stopPropagation()}>
+                        <SelectValue placeholder="Selecione IA..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum</SelectItem>
+                        {automations.filter(a => a.is_active).map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            <div className="flex items-center gap-2">
+                              <Bot className="h-3 w-3 text-blue-500" />
+                              {agent.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
                     {trayIntegration.activated_at 

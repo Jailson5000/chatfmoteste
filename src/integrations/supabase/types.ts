@@ -2269,6 +2269,9 @@ export type Database = {
           created_at: string
           deactivated_at: string | null
           deactivated_by: string | null
+          default_automation_id: string | null
+          default_department_id: string | null
+          default_status_id: string | null
           first_use_at: string | null
           id: string
           is_active: boolean
@@ -2286,6 +2289,9 @@ export type Database = {
           created_at?: string
           deactivated_at?: string | null
           deactivated_by?: string | null
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_status_id?: string | null
           first_use_at?: string | null
           id?: string
           is_active?: boolean
@@ -2303,6 +2309,9 @@ export type Database = {
           created_at?: string
           deactivated_at?: string | null
           deactivated_by?: string | null
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_status_id?: string | null
           first_use_at?: string | null
           id?: string
           is_active?: boolean
@@ -2315,6 +2324,27 @@ export type Database = {
           widget_position?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tray_chat_integrations_default_automation_id_fkey"
+            columns: ["default_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tray_chat_integrations_default_department_id_fkey"
+            columns: ["default_department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tray_chat_integrations_default_status_id_fkey"
+            columns: ["default_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tray_chat_integrations_law_firm_id_fkey"
             columns: ["law_firm_id"]
