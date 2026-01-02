@@ -311,7 +311,7 @@ serve(async (req) => {
   }
 
   try {
-    const { conversationId, message, automationId, source, context }: ChatRequest = await req.json();
+    let { conversationId, message, automationId, source, context }: ChatRequest = await req.json();
 
     if (!conversationId || !message) {
       return new Response(
@@ -334,6 +334,32 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Get Tray Chat integration settings if source is web/TRAY
+    let traySettings: any = null;
+    if ((source === 'web' || source === 'TRAY') && context?.lawFirmId) {
+      const { data: trayIntegration } = await supabase
+        .from("tray_chat_integrations")
+        .select("default_automation_id, default_department_id, default_status_id, is_active")
+        .eq("law_firm_id", context.lawFirmId)
+        .eq("is_active", true)
+        .maybeSingle();
+      
+      if (trayIntegration) {
+        traySettings = trayIntegration;
+        console.log(`[AI Chat] Loaded Tray settings for law_firm ${context.lawFirmId}:`, {
+          default_automation_id: traySettings.default_automation_id,
+          default_department_id: traySettings.default_department_id,
+          default_status_id: traySettings.default_status_id
+        });
+        
+        // Use Tray's default automation if no automationId was provided
+        if (!automationId && traySettings.default_automation_id) {
+          automationId = traySettings.default_automation_id;
+          console.log(`[AI Chat] Using Tray default automation: ${automationId}`);
+        }
+      }
+    }
 
     // Determine which AI to use based on law_firm_settings
     let useOpenAI = false;
@@ -376,7 +402,7 @@ serve(async (req) => {
     if (!automationId) {
       console.error("[AI Chat] CRITICAL: automationId is required for proper AI behavior");
       return new Response(
-        JSON.stringify({ error: "automationId is required" }),
+        JSON.stringify({ error: "automationId is required. Configure an AI agent in Tray settings or provide automationId." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -614,12 +640,24 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
       }).catch(err => console.error("[AI Chat] Failed to trigger fact extraction:", err));
     }
 
+    // Include Tray settings in response so caller can apply department/status
+    const responsePayload: any = {
+      success: true,
+      response: aiResponse,
+      conversationId,
+    };
+    
+    // Include Tray default settings for the caller to use
+    if (traySettings) {
+      responsePayload.trayDefaults = {
+        default_department_id: traySettings.default_department_id,
+        default_status_id: traySettings.default_status_id,
+        default_automation_id: traySettings.default_automation_id,
+      };
+    }
+
     return new Response(
-      JSON.stringify({
-        success: true,
-        response: aiResponse,
-        conversationId,
-      }),
+      JSON.stringify(responsePayload),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
