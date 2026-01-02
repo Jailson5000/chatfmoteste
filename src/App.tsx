@@ -69,7 +69,7 @@ const App = () => (
           <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
-          <Route path="/integrations/google-calendar/callback" element={<ProtectedRoute><GoogleCalendarCallback /></ProtectedRoute>} />
+          <Route path="/integrations/google-calendar/callback" element={<GoogleCalendarCallback />} />
           
           {/* Protected routes with AppLayout */}
           <Route
