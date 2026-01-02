@@ -9,22 +9,16 @@ const corsHeaders = {
 
 // ElevenLabs voice mapping
 const ELEVENLABS_VOICES: Record<string, string> = {
-  'el_sarah': 'EXAVITQu4vr4xnSDxMaL',
   'el_laura': 'FGY2WhTYpPnrIDTdsKH5',
-  'el_alice': 'Xb7hH8MSUJpSbSDYk0k2',
-  'el_jessica': 'cgSgspJ2msm6clMCkdW9',
-  'el_lily': 'pFZP5JQG7iQjIQuC4Bku',
-  'el_matilda': 'XrExE9yKIg1WjnnlVkGX',
-  'el_roger': 'CwhRBWXzGAHq8TQ4Fs17',
-  'el_charlie': 'IKne3meq5aSn9XLyUdCD',
-  'el_george': 'JBFqnCBsd6RMkjVDRZzb',
-  'el_daniel': 'onwK4e9ZLuTAKqWW03F9',
-  'el_brian': 'nPczCjzI2devNBz1zQrb',
-  'el_liam': 'TX3LPaxmHKxFdv7VOQHJ',
 };
 
-// OpenAI TTS voices for fallback
+// OpenAI TTS voices
 const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+
+// Check if voice is OpenAI
+function isOpenAIVoice(voiceId: string): boolean {
+  return voiceId === 'openai_nova' || OPENAI_VOICES.includes(voiceId);
+}
 
 interface TenantAIConfig {
   elevenLabsEnabled: boolean;
@@ -68,14 +62,14 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
     return { success: false, error: "ElevenLabs API key not configured" };
   }
 
-  // Resolve voice ID
+  // Resolve voice ID - default to Laura
   let resolvedVoiceId: string;
   if (ELEVENLABS_VOICES[voiceId]) {
     resolvedVoiceId = ELEVENLABS_VOICES[voiceId];
   } else if (voiceId.length > 15) {
     resolvedVoiceId = voiceId;
   } else {
-    resolvedVoiceId = ELEVENLABS_VOICES['el_sarah'];
+    resolvedVoiceId = ELEVENLABS_VOICES['el_laura'];
   }
 
   console.log(`[TTS-ElevenLabs] Generating audio - voice: ${voiceId} -> ${resolvedVoiceId}`);
@@ -158,7 +152,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text, voiceId = 'el_sarah', lawFirmId } = await req.json();
+    const { text, voiceId = 'el_laura', lawFirmId } = await req.json();
 
     if (!text) {
       return new Response(
@@ -181,6 +175,29 @@ serve(async (req) => {
 
     // Determine which voice to use (tenant default or request parameter)
     const effectiveVoiceId = config.elevenLabsVoice || voiceId;
+
+    // If voice is explicitly OpenAI, use OpenAI directly
+    if (isOpenAIVoice(effectiveVoiceId)) {
+      console.log(`[TTS] Voice is OpenAI type, using OpenAI directly`);
+      const result = await generateOpenAIAudio(text, 'nova');
+      
+      if (result.success) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            audioContent: result.audioContent,
+            mimeType: "audio/mpeg",
+            provider: "openai",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      return new Response(
+        JSON.stringify({ error: result.error || "OpenAI TTS generation failed" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Priority: ElevenLabs > OpenAI > Error
     if (config.elevenLabsEnabled) {
