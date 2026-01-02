@@ -20,6 +20,7 @@ import {
   Mic,
   Pencil,
   Loader2,
+  Plug,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ import { ColorPicker } from "@/components/ui/color-picker";
 import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
 import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
+import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
 
@@ -298,7 +300,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="status">
-        <TabsList className="grid w-full max-w-4xl grid-cols-9">
+        <TabsList className="grid w-full max-w-5xl grid-cols-10">
           <TabsTrigger value="status">
             <Layers className="h-4 w-4 mr-2" />
             Status
@@ -314,6 +316,10 @@ export default function Settings() {
           <TabsTrigger value="templates">
             <MessageSquareText className="h-4 w-4 mr-2" />
             Templates
+          </TabsTrigger>
+          <TabsTrigger value="integrations">
+            <Plug className="h-4 w-4 mr-2" />
+            Integrações
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
@@ -775,6 +781,12 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Integrations Settings */}
+        <TabsContent value="integrations" className="space-y-6 mt-6">
+          <IntegrationsSettings />
+        </TabsContent>
+
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">
           <Card>
