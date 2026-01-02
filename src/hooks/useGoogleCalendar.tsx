@@ -150,8 +150,8 @@ export function useGoogleCalendar() {
     setIsConnecting(true);
 
     try {
-      // Get the current URL for callback
-      const redirectUrl = `${window.location.origin}/settings?tab=integrations&gcal_callback=true`;
+      // Get the callback URL - this must match exactly what's in Google OAuth console
+      const redirectUrl = `${window.location.origin}/integrations/google-calendar/callback`;
       
       // Call edge function to initiate OAuth
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
@@ -197,47 +197,7 @@ export function useGoogleCalendar() {
     }
   };
 
-  // Handle OAuth callback
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get("code");
-    const gcalCallback = urlParams.get("gcal_callback");
-
-    if (code && gcalCallback && lawFirm?.id) {
-      handleOAuthCallback(code);
-      // Clean up URL
-      window.history.replaceState({}, "", "/settings?tab=integrations");
-    }
-  }, [lawFirm?.id]);
-
-  const handleOAuthCallback = async (code: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
-        body: {
-          action: "exchange_code",
-          code,
-          law_firm_id: lawFirm?.id,
-          redirect_url: `${window.location.origin}/settings?tab=integrations&gcal_callback=true`,
-        },
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Conectado!",
-        description: "Google Calendar conectado com sucesso.",
-      });
-
-      refetch();
-    } catch (error: any) {
-      console.error("Error in OAuth callback:", error);
-      toast({
-        title: "Erro na autenticação",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
+  // Note: OAuth callback is now handled by GoogleCalendarCallback page
 
   // Sync now
   const syncNow = useMutation({

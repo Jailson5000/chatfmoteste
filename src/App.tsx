@@ -29,6 +29,7 @@ import AIVoice from "./pages/AIVoice";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
+import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
   GlobalAdminAuth,
@@ -68,6 +69,7 @@ const App = () => (
           <Route path="/register" element={<Register />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
+          <Route path="/integrations/google-calendar/callback" element={<ProtectedRoute><GoogleCalendarCallback /></ProtectedRoute>} />
           
           {/* Protected routes with AppLayout */}
           <Route
