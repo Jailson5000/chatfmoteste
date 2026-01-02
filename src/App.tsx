@@ -29,6 +29,7 @@ import AIVoice from "./pages/AIVoice";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
+import Calendar from "./pages/Calendar";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
@@ -180,6 +181,17 @@ const App = () => (
             }
           >
             <Route index element={<AIVoice />} />
+          </Route>
+          
+          <Route
+            path="/calendar"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Calendar />} />
           </Route>
           
           <Route
