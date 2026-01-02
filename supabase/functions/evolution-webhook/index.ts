@@ -377,6 +377,81 @@ async function getAIProviderConfig(
 interface VoiceConfig {
   enabled: boolean;
   voiceId: string;
+  source?: 'agente' | 'empresa' | 'global' | 'fallback';
+}
+
+// ElevenLabs voice mapping - synchronized with src/lib/voiceConfig.ts
+const VOICE_MAP: Record<string, string> = {
+  'el_laura': 'sLEZIrFwEyhMIH1ALLIQ',
+  'el_felipe': 'GxZ0UJKPezKah8TMxZZM',
+  'el_eloisa': '4JmPeXyyRsHSbtyiCSrt',
+};
+
+// Technical fallback voice when nothing is configured
+const TECHNICAL_FALLBACK_VOICE = 'el_laura';
+
+// =============================================================================
+// VOICE RESOLUTION WITH CORRECT PRECEDENCE (MULTI-TENANT)
+// =============================================================================
+// Priority order:
+// 1. Agent (automation.trigger_config.voice_id)
+// 2. Tenant (law_firm_settings.ai_capabilities.elevenlabs_voice)
+// 3. Global (system_settings.tts_elevenlabs_voice)
+// 4. Technical fallback (el_laura)
+// =============================================================================
+
+async function resolveVoiceWithPrecedence(
+  supabaseClient: any,
+  lawFirmId: string,
+  agentVoiceId: string | null
+): Promise<{ voiceId: string; source: 'agente' | 'empresa' | 'global' | 'fallback' }> {
+  try {
+    // 1. Agent voice (highest priority)
+    if (agentVoiceId && agentVoiceId.trim() !== '') {
+      logDebug('VOICE_RESOLUTION', `Using agent voice: ${agentVoiceId}`, { lawFirmId, source: 'agente' });
+      return { voiceId: agentVoiceId, source: 'agente' };
+    }
+
+    // 2. Tenant voice (empresa)
+    const { data: tenantSettings } = await supabaseClient
+      .from('law_firm_settings')
+      .select('ai_capabilities')
+      .eq('law_firm_id', lawFirmId)
+      .single();
+
+    const tenantCaps = tenantSettings?.ai_capabilities as Record<string, unknown> | null;
+    const tenantVoice = tenantCaps?.elevenlabs_voice as string | null;
+    
+    if (tenantVoice && tenantVoice.trim() !== '') {
+      logDebug('VOICE_RESOLUTION', `Using tenant voice: ${tenantVoice}`, { lawFirmId, source: 'empresa' });
+      return { voiceId: tenantVoice, source: 'empresa' };
+    }
+
+    // 3. Global default voice
+    const { data: globalSettings } = await supabaseClient
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'tts_elevenlabs_voice')
+      .single();
+
+    const globalVoice = globalSettings?.value as string | null;
+    
+    if (globalVoice && globalVoice.trim() !== '') {
+      logDebug('VOICE_RESOLUTION', `Using global voice: ${globalVoice}`, { lawFirmId, source: 'global' });
+      return { voiceId: globalVoice, source: 'global' };
+    }
+
+    // 4. Technical fallback
+    logDebug('VOICE_RESOLUTION', `Using technical fallback: ${TECHNICAL_FALLBACK_VOICE}`, { lawFirmId, source: 'fallback' });
+    return { voiceId: TECHNICAL_FALLBACK_VOICE, source: 'fallback' };
+
+  } catch (error) {
+    logDebug('VOICE_RESOLUTION', 'Error resolving voice, using fallback', { 
+      error: error instanceof Error ? error.message : error,
+      lawFirmId 
+    });
+    return { voiceId: TECHNICAL_FALLBACK_VOICE, source: 'fallback' };
+  }
 }
 
 // Only respond with audio when the CLIENT explicitly requests it or indicates reading difficulty.
@@ -1181,14 +1256,22 @@ async function processWithGemini(
         automation.name
       );
 
-      // Get voice configuration from automation trigger_config
+      // Get voice configuration with proper precedence: agente → empresa → global → fallback
       const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
+      const agentVoiceId = triggerConfig?.voice_id as string | null;
+      const resolvedVoice = await resolveVoiceWithPrecedence(supabaseClient, context.lawFirmId, agentVoiceId);
+      
       const voiceConfig: VoiceConfig = {
         enabled: Boolean(triggerConfig?.voice_enabled),
-        voiceId: (triggerConfig?.voice_id as string) || 'shimmer',
+        voiceId: resolvedVoice.voiceId,
+        source: resolvedVoice.source,
       };
 
-      logDebug('AI_PROVIDER', 'Voice config', { voiceConfig });
+      logDebug('AI_PROVIDER', 'Voice config (with precedence)', { 
+        voiceConfig,
+        agentVoiceId,
+        lawFirmId: context.lawFirmId,
+      });
 
       // Send the response back to WhatsApp (with optional voice)
       await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
@@ -1387,14 +1470,22 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`;
         automation.name
       );
 
-      // Get voice configuration from automation trigger_config
+      // Get voice configuration with proper precedence: agente → empresa → global → fallback
       const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
+      const agentVoiceId = triggerConfig?.voice_id as string | null;
+      const resolvedVoice = await resolveVoiceWithPrecedence(supabaseClient, context.lawFirmId, agentVoiceId);
+      
       const voiceConfig: VoiceConfig = {
         enabled: Boolean(triggerConfig?.voice_enabled),
-        voiceId: (triggerConfig?.voice_id as string) || 'shimmer',
+        voiceId: resolvedVoice.voiceId,
+        source: resolvedVoice.source,
       };
 
-      logDebug('AI_MATRIX', 'Voice config', { voiceConfig });
+      logDebug('AI_MATRIX', 'Voice config (with precedence)', { 
+        voiceConfig,
+        agentVoiceId,
+        lawFirmId: context.lawFirmId,
+      });
 
       // Send the response back to WhatsApp (with optional voice)
       await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
