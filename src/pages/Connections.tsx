@@ -151,22 +151,17 @@ export default function Connections() {
   }, [instances, searchQuery]);
 
   const handleCreateInstance = async (displayName: string, instanceName: string) => {
-    if (!isApiConfigured) {
-      toast({
-        title: "API não configurada",
-        description: "Configure a Evolution API nas configurações primeiro.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     try {
       // Use the random instanceName for Evolution API, displayName for user display
+      // apiUrl and apiKey are now optional - edge function will use default connection
       const result = await createInstance.mutateAsync({
         instanceName, // Technical ID for Evolution API
         displayName,  // User-friendly name
-        apiUrl: evolutionApiUrl,
-        apiKey: evolutionApiKey,
+        // If tenant has configured their own API, use it; otherwise edge function uses global default
+        ...(evolutionApiUrl && evolutionApiKey ? {
+          apiUrl: evolutionApiUrl,
+          apiKey: evolutionApiKey,
+        } : {}),
       });
 
       setIsNewInstanceOpen(false);
@@ -312,7 +307,7 @@ export default function Connections() {
             </p>
           </div>
 
-          <Button onClick={() => setIsNewInstanceOpen(true)} disabled={!isApiConfigured}>
+          <Button onClick={() => setIsNewInstanceOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Nova Conexão
           </Button>

@@ -342,17 +342,50 @@ serve(async (req) => {
       }
 
       case "create_instance": {
-        if (!body.instanceName || !body.apiUrl || !body.apiKey) {
-          throw new Error("instanceName, apiUrl, and apiKey are required");
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
         }
 
-        const apiUrl = normalizeUrl(body.apiUrl);
+        // If apiUrl/apiKey not provided, fetch from default Evolution API connection
+        let apiUrl = body.apiUrl ? normalizeUrl(body.apiUrl) : "";
+        let apiKey = body.apiKey || "";
+
+        if (!apiUrl || !apiKey) {
+          console.log("[Evolution API] No API credentials provided, fetching default connection");
+          const { data: defaultConnection, error: connError } = await supabaseClient
+            .from("evolution_api_connections")
+            .select("api_url, api_key")
+            .eq("is_active", true)
+            .eq("is_default", true)
+            .single();
+
+          if (connError || !defaultConnection) {
+            // Try to get any active connection if no default
+            const { data: anyConnection, error: anyConnError } = await supabaseClient
+              .from("evolution_api_connections")
+              .select("api_url, api_key")
+              .eq("is_active", true)
+              .limit(1)
+              .single();
+
+            if (anyConnError || !anyConnection) {
+              throw new Error("Nenhuma conexão Evolution API configurada. Configure uma conexão no painel de administração global.");
+            }
+
+            apiUrl = normalizeUrl(anyConnection.api_url);
+            apiKey = anyConnection.api_key;
+          } else {
+            apiUrl = normalizeUrl(defaultConnection.api_url);
+            apiKey = defaultConnection.api_key;
+          }
+          console.log(`[Evolution API] Using default connection: ${apiUrl}`);
+        }
         console.log(`[Evolution API] Creating instance: ${body.instanceName} at ${apiUrl}`);
 
         const createResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
           method: "POST",
           headers: {
-            apikey: body.apiKey,
+            apikey: apiKey,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -397,7 +430,7 @@ serve(async (req) => {
             display_name: body.displayName || body.instanceName,
             instance_id: instanceId,
             api_url: apiUrl,
-            api_key: body.apiKey,
+            api_key: apiKey,
             status: qrCode ? "awaiting_qr" : "disconnected",
           })
           .select()
