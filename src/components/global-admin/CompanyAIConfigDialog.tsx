@@ -238,7 +238,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
   const getAIResponsibilities = () => {
     const bothActive = internalEnabled && openaiEnabled;
-    const audioProvider = elevenLabsEnabled ? "ElevenLabs" : "Desativado";
+    // Prioridade: ElevenLabs > OpenAI > Desativado
+    const audioProvider = elevenLabsEnabled ? "ElevenLabs" : (openaiEnabled ? "OpenAI" : "Desativado");
     
     if (bothActive) {
       return {
