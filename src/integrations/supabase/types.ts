@@ -1646,6 +1646,7 @@ export type Database = {
           ai_voice_enabled: boolean | null
           ai_voice_id: string | null
           created_at: string
+          default_automation_id: string | null
           evolution_api_key: string | null
           evolution_api_url: string | null
           id: string
@@ -1667,6 +1668,7 @@ export type Database = {
           ai_voice_enabled?: boolean | null
           ai_voice_id?: string | null
           created_at?: string
+          default_automation_id?: string | null
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
@@ -1688,6 +1690,7 @@ export type Database = {
           ai_voice_enabled?: boolean | null
           ai_voice_id?: string | null
           created_at?: string
+          default_automation_id?: string | null
           evolution_api_key?: string | null
           evolution_api_url?: string | null
           id?: string
@@ -1702,6 +1705,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "law_firm_settings_default_automation_id_fkey"
+            columns: ["default_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "law_firm_settings_law_firm_id_fkey"
             columns: ["law_firm_id"]
@@ -3074,6 +3084,7 @@ export type Database = {
           api_url: string
           created_at: string
           default_assigned_to: string | null
+          default_automation_id: string | null
           default_department_id: string | null
           default_status_id: string | null
           disconnected_since: string | null
@@ -3095,6 +3106,7 @@ export type Database = {
           api_url: string
           created_at?: string
           default_assigned_to?: string | null
+          default_automation_id?: string | null
           default_department_id?: string | null
           default_status_id?: string | null
           disconnected_since?: string | null
@@ -3116,6 +3128,7 @@ export type Database = {
           api_url?: string
           created_at?: string
           default_assigned_to?: string | null
+          default_automation_id?: string | null
           default_department_id?: string | null
           default_status_id?: string | null
           disconnected_since?: string | null
@@ -3137,6 +3150,13 @@ export type Database = {
             columns: ["default_assigned_to"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_default_automation_id_fkey"
+            columns: ["default_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
             referencedColumns: ["id"]
           },
           {

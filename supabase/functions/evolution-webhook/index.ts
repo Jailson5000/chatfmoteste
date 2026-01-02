@@ -170,6 +170,116 @@ async function recordAIConversationUsage(
   }
 }
 
+/**
+ * Resolve which automation to use for a conversation.
+ * Priority order:
+ * 1. WhatsApp instance default_automation_id (if conversation has whatsapp_instance_id)
+ * 2. Company-wide default_automation_id from law_firm_settings
+ * 3. First active automation with prompt configured
+ */
+async function resolveAutomationForConversation(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string
+): Promise<{ id: string; ai_prompt: string; ai_temperature: number | null; name: string; trigger_config: any } | null> {
+  try {
+    // Step 1: Get conversation to find whatsapp_instance_id
+    const { data: conversation } = await supabaseClient
+      .from('conversations')
+      .select('whatsapp_instance_id')
+      .eq('id', conversationId)
+      .single();
+
+    // Step 2: Check if instance has a default automation
+    if (conversation?.whatsapp_instance_id) {
+      const { data: instance } = await supabaseClient
+        .from('whatsapp_instances')
+        .select('default_automation_id')
+        .eq('id', conversation.whatsapp_instance_id)
+        .single();
+
+      if (instance?.default_automation_id) {
+        const { data: automation } = await supabaseClient
+          .from('automations')
+          .select('id, ai_prompt, ai_temperature, name, trigger_config')
+          .eq('id', instance.default_automation_id)
+          .eq('is_active', true)
+          .not('ai_prompt', 'is', null)
+          .single();
+
+        if (automation && automation.ai_prompt?.trim()) {
+          logDebug('AUTOMATION_RESOLVE', 'Using instance default automation', { 
+            automationId: automation.id, 
+            automationName: automation.name,
+            source: 'whatsapp_instance' 
+          });
+          return automation;
+        }
+      }
+    }
+
+    // Step 3: Check company-wide default from law_firm_settings
+    const { data: settings } = await supabaseClient
+      .from('law_firm_settings')
+      .select('default_automation_id')
+      .eq('law_firm_id', lawFirmId)
+      .single();
+
+    if (settings?.default_automation_id) {
+      const { data: automation } = await supabaseClient
+        .from('automations')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config')
+        .eq('id', settings.default_automation_id)
+        .eq('is_active', true)
+        .not('ai_prompt', 'is', null)
+        .single();
+
+      if (automation && automation.ai_prompt?.trim()) {
+        logDebug('AUTOMATION_RESOLVE', 'Using company default automation', { 
+          automationId: automation.id, 
+          automationName: automation.name,
+          source: 'law_firm_settings' 
+        });
+        return automation;
+      }
+    }
+
+    // Step 4: Fallback to first active automation (ordered by position, then created_at)
+    const { data: automations, error: autoError } = await supabaseClient
+      .from('automations')
+      .select('id, ai_prompt, ai_temperature, name, trigger_config')
+      .eq('law_firm_id', lawFirmId)
+      .eq('is_active', true)
+      .not('ai_prompt', 'is', null)
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (autoError || !automations || automations.length === 0) {
+      logDebug('AUTOMATION_RESOLVE', 'No valid automation found', { lawFirmId });
+      return null;
+    }
+
+    const automation = automations[0];
+    if (!automation.ai_prompt?.trim()) {
+      logDebug('AUTOMATION_RESOLVE', 'Fallback automation has no prompt', { automationId: automation.id });
+      return null;
+    }
+
+    logDebug('AUTOMATION_RESOLVE', 'Using fallback automation (first active)', { 
+      automationId: automation.id, 
+      automationName: automation.name,
+      source: 'fallback_first_active' 
+    });
+    return automation;
+  } catch (error) {
+    logDebug('AUTOMATION_RESOLVE', 'Error resolving automation', { 
+      error: error instanceof Error ? error.message : error 
+    });
+    return null;
+  }
+}
+
 // Evolution API event types - support both formats
 interface EvolutionEvent {
   event: string;
@@ -1240,32 +1350,18 @@ async function processWithGemini(
   logDebug('AI_MATRIX', `Processing with GEMINI (Plan: ${aiConfig.planType})`, { conversationId: context.conversationId });
 
   try {
-    // CRITICAL: Get the CORRECT automation for this tenant
-    // Only use automations that are:
-    // 1. From the same law_firm_id
-    // 2. Active
-    // 3. Have a configured ai_prompt (required!)
-    const { data: automations, error: autoError } = await supabaseClient
-      .from('automations')
-      .select('id, ai_prompt, ai_temperature, name, trigger_config')
-      .eq('law_firm_id', context.lawFirmId)
-      .eq('is_active', true)
-      .not('ai_prompt', 'is', null)
-      .limit(1);
+    // CRITICAL: Use the new resolution logic with priority:
+    // 1. Instance default -> 2. Company default -> 3. First active
+    const automation = await resolveAutomationForConversation(
+      supabaseClient,
+      context.lawFirmId,
+      context.conversationId
+    );
 
-    if (autoError || !automations || automations.length === 0) {
-      logDebug('AI_PROVIDER', 'No valid automation found with prompt configured', { 
+    if (!automation) {
+      logDebug('AI_PROVIDER', 'No valid automation found after resolution', { 
         lawFirmId: context.lawFirmId,
-        error: autoError 
-      });
-      return;
-    }
-
-    const automation = automations[0];
-    
-    if (!automation.ai_prompt || automation.ai_prompt.trim() === '') {
-      logDebug('AI_PROVIDER', 'Automation has no prompt configured, cannot proceed', { 
-        automationId: automation.id 
+        conversationId: context.conversationId 
       });
       return;
     }
@@ -1394,24 +1490,19 @@ async function processWithGPT(
   logDebug('AI_MATRIX', `Processing with GPT (Plan: ${aiConfig.planType})`, { conversationId: context.conversationId });
 
   try {
-    // CRITICAL: Get the CORRECT automation for this tenant
-    const { data: automations, error: autoError } = await supabaseClient
-      .from('automations')
-      .select('id, ai_prompt, ai_temperature, name, trigger_config')
-      .eq('law_firm_id', context.lawFirmId)
-      .eq('is_active', true)
-      .not('ai_prompt', 'is', null)
-      .limit(1);
+    // CRITICAL: Use the new resolution logic with priority:
+    // 1. Instance default -> 2. Company default -> 3. First active
+    const automation = await resolveAutomationForConversation(
+      supabaseClient,
+      context.lawFirmId,
+      context.conversationId
+    );
 
-    if (autoError || !automations || automations.length === 0) {
-      logDebug('AI_MATRIX', 'No valid automation found with prompt configured', { lawFirmId: context.lawFirmId });
-      return;
-    }
-
-    const automation = automations[0];
-    
-    if (!automation.ai_prompt || automation.ai_prompt.trim() === '') {
-      logDebug('AI_MATRIX', 'Automation has no prompt configured, cannot proceed', { automationId: automation.id });
+    if (!automation) {
+      logDebug('AI_MATRIX', 'No valid automation found after resolution', { 
+        lawFirmId: context.lawFirmId,
+        conversationId: context.conversationId 
+      });
       return;
     }
 
