@@ -42,6 +42,14 @@ function DocuSignIcon() {
   );
 }
 
+function TrayIcon() {
+  return (
+    <div className="w-10 h-10 rounded-lg bg-[#00A651] flex items-center justify-center">
+      <Briefcase className="h-5 w-5 text-white" />
+    </div>
+  );
+}
+
 export function IntegrationsSettings() {
   const [infoOpen, setInfoOpen] = useState(false);
 
@@ -109,6 +117,13 @@ export function IntegrationsSettings() {
           icon={<DocuSignIcon />}
           title="DocuSign"
           description="A DocuSign é o padrão global para gestão de transações digitais com milhões de usuários em mais de 188 países."
+          isComingSoon
+        />
+        
+        <IntegrationCard
+          icon={<TrayIcon />}
+          title="Tray"
+          description="Plataforma completa de e-commerce. Gerencie sua loja virtual, produtos, pedidos e integre com marketplaces."
           isComingSoon
         />
       </div>
