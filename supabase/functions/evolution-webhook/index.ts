@@ -1310,72 +1310,73 @@ async function sendAIResponseToWhatsApp(
       // Fallback (shouldn't happen)
       await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
       return true;
-      // Normal text-only flow
-      let lastWhatsappMessageId: string | null = null;
+    }
 
-      for (let i = 0; i < messageParts.length; i++) {
-        const part = sanitizeText(messageParts[i]);
+    // Normal text-only flow
+    let lastWhatsappMessageId: string | null = null;
 
-        // If sanitization removed everything, skip
-        if (!part) {
-          logDebug('SEND_RESPONSE', `Skipping empty message part ${i + 1}/${messageParts.length} after sanitization`);
-          continue;
-        }
+    for (let i = 0; i < messageParts.length; i++) {
+      const part = sanitizeText(messageParts[i]);
 
-        // Add delay between messages (simulate typing)
-        if (i > 0) {
-          const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
-          await new Promise((resolve) => setTimeout(resolve, typingDelay));
-        }
+      // If sanitization removed everything, skip
+      if (!part) {
+        logDebug('SEND_RESPONSE', `Skipping empty message part ${i + 1}/${messageParts.length} after sanitization`);
+        continue;
+      }
 
-        logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
-          partLength: part.length,
+      // Add delay between messages (simulate typing)
+      if (i > 0) {
+        const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
+        await new Promise((resolve) => setTimeout(resolve, typingDelay));
+      }
+
+      logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
+        partLength: part.length,
+      });
+
+      const sendResponse = await fetch(sendUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': instance.api_key || '',
+        },
+        body: JSON.stringify({
+          number: context.remoteJid,
+          text: part,
+        }),
+      });
+
+      if (!sendResponse.ok) {
+        const errorText = await sendResponse.text();
+        logDebug('SEND_RESPONSE', `Evolution API send failed for part ${i + 1}`, {
+          status: sendResponse.status,
+          error: errorText,
+        });
+        continue; // Try to send remaining parts
+      }
+
+      const sendResult = await sendResponse.json();
+      lastWhatsappMessageId = sendResult?.key?.id;
+
+      logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, {
+        whatsappMessageId: lastWhatsappMessageId,
+      });
+
+      // Save each message part to the database
+      const { error: saveError } = await supabaseClient
+        .from('messages')
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: lastWhatsappMessageId,
+          content: part,
+          message_type: 'text',
+          is_from_me: true,
+          sender_type: 'system',
+          ai_generated: true,
         });
 
-        const sendResponse = await fetch(sendUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': instance.api_key || '',
-          },
-          body: JSON.stringify({
-            number: context.remoteJid,
-            text: part,
-          }),
-        });
-
-        if (!sendResponse.ok) {
-          const errorText = await sendResponse.text();
-          logDebug('SEND_RESPONSE', `Evolution API send failed for part ${i + 1}`, { 
-            status: sendResponse.status, 
-            error: errorText 
-          });
-          continue; // Try to send remaining parts
-        }
-
-        const sendResult = await sendResponse.json();
-        lastWhatsappMessageId = sendResult?.key?.id;
-
-        logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, { 
-          whatsappMessageId: lastWhatsappMessageId 
-        });
-
-        // Save each message part to the database
-        const { error: saveError } = await supabaseClient
-          .from('messages')
-          .insert({
-            conversation_id: context.conversationId,
-            whatsapp_message_id: lastWhatsappMessageId,
-            content: part,
-            message_type: 'text',
-            is_from_me: true,
-            sender_type: 'system',
-            ai_generated: true,
-          });
-
-        if (saveError) {
-          logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
-        }
+      if (saveError) {
+        logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
       }
     }
 
