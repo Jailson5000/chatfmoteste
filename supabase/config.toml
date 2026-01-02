@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.create-global-admin]
 verify_jwt = false
+
+[functions.sync-evolution-instances]
+verify_jwt = false
