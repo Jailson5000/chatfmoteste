@@ -129,8 +129,15 @@ export function useGlobalAdminInstances() {
         .from("evolution_api_connections")
         .select("id, name, api_url");
 
-      // Helper to normalize URL for comparison
-      const normalizeUrl = (url: string) => url?.replace(/\/+$/, "").replace(/\/manager$/i, "").toLowerCase();
+      // Helper to normalize URL for comparison - removes trailing slashes, /manager suffix, and lowercases
+      const normalizeUrl = (url: string | null | undefined): string => {
+        if (!url) return "";
+        return url
+          .trim()
+          .replace(/\/+$/, "")  // Remove trailing slashes
+          .replace(/\/manager$/i, "")  // Remove /manager suffix
+          .toLowerCase();
+      };
 
       // Map instances with company info
       const instancesWithCompany: InstanceWithCompany[] = (instancesData || []).map(
@@ -139,9 +146,20 @@ export function useGlobalAdminInstances() {
           const company = companies?.find((c) => c.law_firm_id === instance.law_firm_id);
           
           // Find matching evolution connection by api_url
-          const evoConnection = evoConnections?.find(
-            (ec) => normalizeUrl(ec.api_url) === normalizeUrl(instance.api_url)
-          );
+          const instanceUrlNormalized = normalizeUrl(instance.api_url);
+          const evoConnection = evoConnections?.find((ec) => {
+            const connectionUrlNormalized = normalizeUrl(ec.api_url);
+            return connectionUrlNormalized === instanceUrlNormalized;
+          });
+
+          if (!evoConnection) {
+            console.log("[useGlobalAdminInstances] No connection match for instance:", {
+              instanceName: instance.instance_name,
+              instanceUrl: instance.api_url,
+              normalizedInstanceUrl: instanceUrlNormalized,
+              availableConnections: evoConnections?.map(ec => ({ id: ec.id, url: ec.api_url, normalized: normalizeUrl(ec.api_url) }))
+            });
+          }
 
           return {
             ...instance,
@@ -155,7 +173,11 @@ export function useGlobalAdminInstances() {
         }
       );
 
-      console.log("[useGlobalAdminInstances] Fetched:", instancesWithCompany.length);
+      console.log("[useGlobalAdminInstances] Fetched:", instancesWithCompany.length, "instances");
+      console.log("[useGlobalAdminInstances] By connection:", Object.keys(instancesWithCompany.reduce((acc, i) => { 
+        acc[i.evolution_connection_id || "unknown"] = true; 
+        return acc; 
+      }, {} as Record<string, boolean>)));
       return instancesWithCompany;
     },
   });

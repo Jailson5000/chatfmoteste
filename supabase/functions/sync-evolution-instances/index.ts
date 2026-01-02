@@ -39,9 +39,10 @@ interface SyncResult {
 }
 
 function normalizeUrl(url: string): string {
-  let normalized = url.replace(/\/+$/, "");
+  if (!url) return "";
+  let normalized = url.trim().replace(/\/+$/, "");
   normalized = normalized.replace(/\/manager$/i, "");
-  return normalized;
+  return normalized.toLowerCase();
 }
 
 async function fetchEvolutionInstances(
