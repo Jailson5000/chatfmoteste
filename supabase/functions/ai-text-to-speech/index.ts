@@ -39,7 +39,8 @@ const SPEAKTOR_VOICES: Record<string, string> = {
   'shimmer': 'Renata',
 };
 
-async function getSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; apiKey: string; voice: string }> {
+// Get global Speaktor settings from system_settings
+async function getGlobalSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; apiKey: string; voice: string }> {
   const { data: settings } = await supabase
     .from('system_settings')
     .select('key, value')
@@ -55,6 +56,25 @@ async function getSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; a
     enabled: enabled === true || enabled === 'true',
     apiKey: getSetting('tts_speaktor_api_key', ''),
     voice: getSetting('tts_speaktor_voice', 'renata'),
+  };
+}
+
+// Get per-company Speaktor settings from law_firm_settings.ai_capabilities
+async function getCompanySpeaktorSettings(supabase: any, lawFirmId: string): Promise<{ enabled: boolean; voice: string } | null> {
+  const { data, error } = await supabase
+    .from('law_firm_settings')
+    .select('ai_capabilities')
+    .eq('law_firm_id', lawFirmId)
+    .maybeSingle();
+
+  if (error || !data?.ai_capabilities) {
+    return null;
+  }
+
+  const caps = data.ai_capabilities as any;
+  return {
+    enabled: caps.speaktor_enabled === true,
+    voice: caps.speaktor_voice || 'renata',
   };
 }
 
@@ -159,7 +179,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text, voiceId = 'shimmer' } = await req.json();
+    const { text, voiceId = 'shimmer', lawFirmId } = await req.json();
 
     if (!text) {
       return new Response(
@@ -173,14 +193,39 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Check if Speaktor is enabled
-    const speaktorSettings = await getSpeaktorSettings(supabase);
+    // Get global Speaktor settings (contains API key)
+    const globalSettings = await getGlobalSpeaktorSettings(supabase);
+    
+    // Get company-specific Speaktor settings if lawFirmId provided
+    let companySpeaktorEnabled = false;
+    let companySpeaktorVoice = 'renata';
+    
+    if (lawFirmId) {
+      const companySettings = await getCompanySpeaktorSettings(supabase, lawFirmId);
+      if (companySettings) {
+        companySpeaktorEnabled = companySettings.enabled;
+        companySpeaktorVoice = companySettings.voice;
+        console.log(`[TTS] Company ${lawFirmId} Speaktor settings: enabled=${companySpeaktorEnabled}, voice=${companySpeaktorVoice}`);
+      }
+    }
+    
+    // Determine if Speaktor should be used:
+    // 1. Global Speaktor must be enabled with API key
+    // 2. Company must have Speaktor enabled (if lawFirmId provided)
+    // 3. If no lawFirmId, use global settings
+    const useGlobalSpeaktor = globalSettings.enabled && globalSettings.apiKey;
+    const useSpeaktor = useGlobalSpeaktor && (lawFirmId ? companySpeaktorEnabled : true);
+    
+    // Determine voice priority: agent voiceId > company voice > global voice
+    const effectiveVoice = voiceId && SPEAKTOR_VOICES[voiceId.toLowerCase()] 
+      ? voiceId 
+      : (companySpeaktorVoice || globalSettings.voice);
     
     let result: { success: boolean; audioContent?: string; error?: string };
 
-    if (speaktorSettings.enabled && speaktorSettings.apiKey) {
-      console.log("[TTS] Using Speaktor as TTS provider");
-      result = await generateWithSpeaktor(text, voiceId, speaktorSettings.apiKey, speaktorSettings.voice);
+    if (useSpeaktor) {
+      console.log(`[TTS] Using Speaktor as TTS provider (company: ${lawFirmId || 'global'}, voice: ${effectiveVoice})`);
+      result = await generateWithSpeaktor(text, effectiveVoice, globalSettings.apiKey, globalSettings.voice);
       
       // Fallback to OpenAI if Speaktor fails
       if (!result.success) {
@@ -188,7 +233,7 @@ serve(async (req) => {
         result = await generateWithOpenAI(text, voiceId);
       }
     } else {
-      console.log("[TTS] Using OpenAI as TTS provider");
+      console.log(`[TTS] Using OpenAI as TTS provider (company Speaktor: ${companySpeaktorEnabled}, global: ${globalSettings.enabled})`);
       result = await generateWithOpenAI(text, voiceId);
     }
 
