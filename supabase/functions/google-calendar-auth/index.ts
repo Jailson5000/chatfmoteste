@@ -44,19 +44,31 @@ serve(async (req) => {
           "https://www.googleapis.com/auth/userinfo.email",
         ].join(" ");
 
+        // Use centralized callback URL on main domain for scalability
+        // This way we only need ONE redirect URI registered in Google Console
+        const centralizedCallbackUrl = "https://www.miauchat.com.br/integrations/google-calendar/callback";
+        
+        // Encode both law_firm_id and original subdomain in state for redirect after OAuth
+        const stateData = JSON.stringify({
+          law_firm_id,
+          return_origin: redirect_url ? new URL(redirect_url).origin : null
+        });
+        const encodedState = btoa(stateData);
+
         const params = new URLSearchParams({
           client_id: GOOGLE_CLIENT_ID,
-          redirect_uri: redirect_url,
+          redirect_uri: centralizedCallbackUrl,
           response_type: "code",
           scope: scopes,
           access_type: "offline",
           prompt: "consent",
-          state: law_firm_id, // Pass law_firm_id in state
+          state: encodedState,
         });
 
         const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
         console.log(`[google-calendar-auth] Generated auth URL for law_firm: ${law_firm_id}`);
+        console.log(`[google-calendar-auth] Using centralized callback: ${centralizedCallbackUrl}`);
 
         return new Response(
           JSON.stringify({ auth_url: authUrl }),
@@ -72,6 +84,9 @@ serve(async (req) => {
           );
         }
 
+        // Always use centralized callback URL for token exchange (must match auth URL)
+        const centralizedCallbackUrl = "https://www.miauchat.com.br/integrations/google-calendar/callback";
+
         // Exchange code for tokens
         const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
           method: "POST",
@@ -81,7 +96,7 @@ serve(async (req) => {
             client_secret: GOOGLE_CLIENT_SECRET,
             code,
             grant_type: "authorization_code",
-            redirect_uri: redirect_url,
+            redirect_uri: centralizedCallbackUrl,
           }),
         });
 
