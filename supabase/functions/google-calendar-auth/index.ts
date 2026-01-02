@@ -24,6 +24,7 @@ serve(async (req) => {
     const { action, law_firm_id, redirect_url, code } = await req.json();
 
     console.log(`[google-calendar-auth] Action: ${action}, Law Firm: ${law_firm_id}`);
+    console.log(`[google-calendar-auth] Redirect URL received: ${redirect_url}`);
 
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       console.error("[google-calendar-auth] Missing Google OAuth credentials");
