@@ -799,9 +799,9 @@ export default function AIAgents() {
         <div className="flex items-center gap-2">
           <span className="font-medium">{agent.name}</span>
           {isPrimaryAgent(agent) && (
-            <Badge variant="secondary" className="text-xs">
+            <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
               Primário
-            </Badge>
+            </span>
           )}
         </div>
         <p className="text-sm text-muted-foreground truncate">
@@ -1060,9 +1060,9 @@ export default function AIAgents() {
                                     style={{ color: folder.color }}
                                   />
                                   <span className="font-medium">{folder.name}</span>
-                                  <Badge variant="secondary" className="text-xs">
+                                  <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground">
                                     {folderAgents.length} agente{folderAgents.length !== 1 ? "s" : ""}
-                                  </Badge>
+                                  </span>
                                 </div>
                                 
                                 <div></div>
@@ -1524,7 +1524,7 @@ export default function AIAgents() {
         <div className="flex items-center justify-between mt-4 text-sm">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">Versão do prompt:</span>
-            <Badge variant="secondary">Versão {promptVersion} - v{promptVersion}</Badge>
+            <span className="inline-flex items-center rounded-md bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">v{promptVersion}</span>
           </div>
           {lastUpdated && (
             <span className="text-muted-foreground">
@@ -1789,7 +1789,7 @@ Regras:
                     <SelectContent>
                       {AVAILABLE_VOICES.map((voice) => (
                         <SelectItem key={voice.id} value={voice.id}>
-                          {voice.name} ({voice.description})
+                          <span>{voice.name} ({voice.description})</span>
                         </SelectItem>
                       ))}
                     </SelectContent>
