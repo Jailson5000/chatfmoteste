@@ -19,6 +19,9 @@ export interface InstanceWithCompany {
   company_name?: string;
   company_id?: string;
   subdomain?: string;
+  // Evolution connection info
+  evolution_connection_id?: string;
+  evolution_connection_name?: string;
 }
 
 export interface EvolutionHealthStatus {
@@ -35,9 +38,59 @@ export interface EvolutionHealthStatus {
   };
 }
 
+export interface MatchedInstance {
+  instance_name: string;
+  db_id: string | null;
+  company_name: string | null;
+  law_firm_name: string | null;
+  phone_number: string | null;
+  status: string;
+  is_orphan: boolean;
+  is_stale: boolean;
+}
+
+export interface SyncResult {
+  connection_id: string;
+  connection_name: string;
+  api_url: string;
+  matched_instances: MatchedInstance[];
+  total_evolution: number;
+  total_db: number;
+  orphan_count: number;
+  stale_count: number;
+}
+
+export interface EvolutionConnection {
+  id: string;
+  name: string;
+  api_url: string;
+  is_active: boolean;
+  is_default: boolean;
+  health_status: string | null;
+  health_latency_ms: number | null;
+  last_health_check_at: string | null;
+}
+
 export function useGlobalAdminInstances() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Fetch Evolution API connections
+  const {
+    data: evolutionConnections = [],
+    isLoading: isConnectionsLoading,
+  } = useQuery({
+    queryKey: ["evolution-api-connections"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("evolution_api_connections")
+        .select("*")
+        .order("is_default", { ascending: false });
+
+      if (error) throw error;
+      return data as EvolutionConnection[];
+    },
+  });
 
   // Fetch all instances with company info
   const {
@@ -71,11 +124,24 @@ export function useGlobalAdminInstances() {
         .from("companies")
         .select("id, name, law_firm_id");
 
+      // Fetch evolution connections for mapping
+      const { data: evoConnections } = await supabase
+        .from("evolution_api_connections")
+        .select("id, name, api_url");
+
+      // Helper to normalize URL for comparison
+      const normalizeUrl = (url: string) => url?.replace(/\/+$/, "").replace(/\/manager$/i, "").toLowerCase();
+
       // Map instances with company info
       const instancesWithCompany: InstanceWithCompany[] = (instancesData || []).map(
         (instance) => {
           const lawFirm = lawFirms?.find((lf) => lf.id === instance.law_firm_id);
           const company = companies?.find((c) => c.law_firm_id === instance.law_firm_id);
+          
+          // Find matching evolution connection by api_url
+          const evoConnection = evoConnections?.find(
+            (ec) => normalizeUrl(ec.api_url) === normalizeUrl(instance.api_url)
+          );
 
           return {
             ...instance,
@@ -83,6 +149,8 @@ export function useGlobalAdminInstances() {
             subdomain: lawFirm?.subdomain || null,
             company_name: company?.name || "Sem empresa",
             company_id: company?.id || null,
+            evolution_connection_id: evoConnection?.id || null,
+            evolution_connection_name: evoConnection?.name || "Conexão não identificada",
           };
         }
       );
@@ -271,8 +339,74 @@ export function useGlobalAdminInstances() {
     },
   });
 
+  // Sync instances from Evolution API
+  const syncEvolutionInstances = useMutation({
+    mutationFn: async (connectionId?: string) => {
+      console.log("[useGlobalAdminInstances] Syncing Evolution instances...");
+      const { data, error } = await supabase.functions.invoke("sync-evolution-instances", {
+        body: connectionId ? { connectionId } : {},
+      });
+
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Failed to sync instances");
+
+      return data as {
+        success: boolean;
+        message: string;
+        results: SyncResult[];
+        synced_at: string;
+      };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+      queryClient.invalidateQueries({ queryKey: ["evolution-api-connections"] });
+      refetchHealth();
+      
+      const totalOrphans = data.results.reduce((acc, r) => acc + r.orphan_count, 0);
+      const totalStale = data.results.reduce((acc, r) => acc + r.stale_count, 0);
+      
+      let description = `${data.results.length} conexões sincronizadas`;
+      if (totalOrphans > 0) {
+        description += `. ${totalOrphans} instância(s) órfã(s) encontrada(s)`;
+      }
+      if (totalStale > 0) {
+        description += `. ${totalStale} instância(s) obsoleta(s)`;
+      }
+      
+      toast({
+        title: "Sincronização concluída",
+        description,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro na sincronização",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Group instances by Evolution connection
+  const instancesByConnection = instances.reduce((acc, instance) => {
+    const connectionId = instance.evolution_connection_id || "unknown";
+    if (!acc[connectionId]) {
+      acc[connectionId] = {
+        connectionId,
+        connectionName: instance.evolution_connection_name || "Conexão desconhecida",
+        apiUrl: instance.api_url,
+        instances: [],
+      };
+    }
+    acc[connectionId].instances.push(instance);
+    return acc;
+  }, {} as Record<string, { connectionId: string; connectionName: string; apiUrl: string; instances: InstanceWithCompany[] }>);
+
   return {
     instances,
+    instancesByConnection,
+    evolutionConnections,
+    isConnectionsLoading,
     isLoading,
     error,
     refetch,
@@ -284,5 +418,6 @@ export function useGlobalAdminInstances() {
     suspendInstance,
     reactivateInstance,
     refreshAllStatuses,
+    syncEvolutionInstances,
   };
 }
