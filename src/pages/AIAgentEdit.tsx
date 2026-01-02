@@ -41,11 +41,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 // Available voices
-const AVAILABLE_VOICES = [
-  { id: "shimmer", name: "Shimmer", gender: "female", description: "Feminina" },
-  { id: "onyx", name: "Onyx", gender: "male", description: "Masculina grave" },
-  { id: "echo", name: "Echo", gender: "male", description: "Masculina clara" },
-] as const;
+// Vozes importadas do arquivo centralizado
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 const TRIGGER_TYPES = [
   { value: 'new_message', label: 'Nova Mensagem Recebida' },
@@ -88,7 +85,7 @@ export default function AIAgentEdit() {
   
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceId, setVoiceId] = useState('shimmer');
+  const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -119,7 +116,7 @@ export default function AIAgentEdit() {
         const triggerConfig = found.trigger_config as Record<string, unknown> | null;
         if (triggerConfig) {
           setVoiceEnabled(Boolean(triggerConfig.voice_enabled));
-          setVoiceId((triggerConfig.voice_id as string) || 'shimmer');
+          setVoiceId((triggerConfig.voice_id as string) || DEFAULT_VOICE_ID);
         }
       }
     }
@@ -223,7 +220,7 @@ export default function AIAgentEdit() {
     editedTriggerType !== automation.trigger_type ||
     isActive !== automation.is_active ||
     voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
-    voiceId !== ((currentTriggerConfig?.voice_id as string) || 'shimmer');
+    voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID);
 
   const handleSave = async () => {
     if (isOverLimit) {
