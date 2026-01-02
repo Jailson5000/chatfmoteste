@@ -929,6 +929,8 @@ export type Database = {
           law_firm_id: string
           n8n_last_response_at: string | null
           needs_human_handoff: boolean | null
+          origin: string | null
+          origin_metadata: Json | null
           priority: number
           remote_jid: string
           status: Database["public"]["Enums"]["case_status"]
@@ -953,6 +955,8 @@ export type Database = {
           law_firm_id: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
+          origin?: string | null
+          origin_metadata?: Json | null
           priority?: number
           remote_jid: string
           status?: Database["public"]["Enums"]["case_status"]
@@ -977,6 +981,8 @@ export type Database = {
           law_firm_id?: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
+          origin?: string | null
+          origin_metadata?: Json | null
           priority?: number
           remote_jid?: string
           status?: Database["public"]["Enums"]["case_status"]
@@ -2203,6 +2209,113 @@ export type Database = {
             foreignKeyName: "templates_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tray_chat_audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          integration_id: string
+          law_firm_id: string
+          metadata: Json | null
+          performed_by: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          integration_id: string
+          law_firm_id: string
+          metadata?: Json | null
+          performed_by?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          integration_id?: string
+          law_firm_id?: string
+          metadata?: Json | null
+          performed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tray_chat_audit_logs_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "tray_chat_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tray_chat_audit_logs_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tray_chat_integrations: {
+        Row: {
+          activated_at: string | null
+          activated_by: string | null
+          created_at: string
+          deactivated_at: string | null
+          deactivated_by: string | null
+          first_use_at: string | null
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          offline_message: string | null
+          updated_at: string
+          welcome_message: string | null
+          widget_color: string | null
+          widget_key: string
+          widget_position: string | null
+        }
+        Insert: {
+          activated_at?: string | null
+          activated_by?: string | null
+          created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
+          first_use_at?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          offline_message?: string | null
+          updated_at?: string
+          welcome_message?: string | null
+          widget_color?: string | null
+          widget_key: string
+          widget_position?: string | null
+        }
+        Update: {
+          activated_at?: string | null
+          activated_by?: string | null
+          created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
+          first_use_at?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          offline_message?: string | null
+          updated_at?: string
+          welcome_message?: string | null
+          widget_color?: string | null
+          widget_key?: string
+          widget_position?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tray_chat_integrations_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
             referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },

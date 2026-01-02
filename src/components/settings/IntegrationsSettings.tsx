@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Info, Link2, FileText, PenTool, Briefcase, ChevronDown } from "lucide-react";
+import { Info, Link2, FileText, PenTool, ChevronDown } from "lucide-react";
 import { GoogleCalendarIntegration } from "./integrations/GoogleCalendarIntegration";
+import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { IntegrationCard } from "./IntegrationCard";
 import {
   Collapsible,
@@ -42,13 +43,6 @@ function DocuSignIcon() {
   );
 }
 
-function TrayIcon() {
-  return (
-    <div className="w-10 h-10 rounded-lg bg-[#00A651] flex items-center justify-center">
-      <Briefcase className="h-5 w-5 text-white" />
-    </div>
-  );
-}
 
 export function IntegrationsSettings() {
   const [infoOpen, setInfoOpen] = useState(false);
@@ -120,12 +114,7 @@ export function IntegrationsSettings() {
           isComingSoon
         />
         
-        <IntegrationCard
-          icon={<TrayIcon />}
-          title="Tray"
-          description="Integre o chat do seu e-commerce Tray diretamente com a plataforma. Atenda clientes e gerencie conversas em um só lugar."
-          isComingSoon
-        />
+        <TrayChatIntegration />
       </div>
     </div>
   );
