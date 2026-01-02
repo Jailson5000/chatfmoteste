@@ -377,6 +377,54 @@ export function useConversations() {
     },
   });
 
+  // Update audio mode state for a conversation (SINGLE SOURCE OF TRUTH)
+  const updateConversationAudioMode = useMutation({
+    mutationFn: async ({ 
+      conversationId, 
+      enabled, 
+      reason = 'manual_toggle' 
+    }: { 
+      conversationId: string; 
+      enabled: boolean;
+      reason?: 'user_request' | 'text_message_received' | 'manual_toggle' | 'accessibility_need';
+    }) => {
+      const now = new Date().toISOString();
+      const updateData: Record<string, any> = {
+        ai_audio_enabled: enabled,
+        ai_audio_enabled_by: reason,
+      };
+      
+      if (enabled) {
+        updateData.ai_audio_last_enabled_at = now;
+      } else {
+        updateData.ai_audio_last_disabled_at = now;
+      }
+
+      const { error } = await supabase
+        .from("conversations")
+        .update(updateData)
+        .eq("id", conversationId);
+      
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast({
+        title: variables.enabled ? "Áudio ativado" : "Áudio desativado",
+        description: variables.enabled 
+          ? "A IA responderá por áudio nesta conversa." 
+          : "A IA voltará a responder por texto nesta conversa.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao alterar modo de áudio",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     conversations,
     isLoading,
@@ -386,6 +434,7 @@ export function useConversations() {
     updateConversationDepartment,
     updateConversationTags,
     updateClientStatus,
+    updateConversationAudioMode,
     transferHandler,
   };
 }

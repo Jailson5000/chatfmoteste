@@ -917,6 +917,10 @@ export type Database = {
       }
       conversations: {
         Row: {
+          ai_audio_enabled: boolean | null
+          ai_audio_enabled_by: string | null
+          ai_audio_last_disabled_at: string | null
+          ai_audio_last_enabled_at: string | null
           ai_summary: string | null
           assigned_to: string | null
           client_id: string | null
@@ -943,6 +947,10 @@ export type Database = {
           whatsapp_instance_id: string | null
         }
         Insert: {
+          ai_audio_enabled?: boolean | null
+          ai_audio_enabled_by?: string | null
+          ai_audio_last_disabled_at?: string | null
+          ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
           assigned_to?: string | null
           client_id?: string | null
@@ -969,6 +977,10 @@ export type Database = {
           whatsapp_instance_id?: string | null
         }
         Update: {
+          ai_audio_enabled?: boolean | null
+          ai_audio_enabled_by?: string | null
+          ai_audio_last_disabled_at?: string | null
+          ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
           assigned_to?: string | null
           client_id?: string | null
