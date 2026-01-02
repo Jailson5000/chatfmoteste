@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.ai-text-to-speech]
 verify_jwt = false
+
+[functions.google-calendar-actions]
+verify_jwt = false
