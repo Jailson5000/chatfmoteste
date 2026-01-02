@@ -27,20 +27,15 @@ const OPENAI_VOICES: Record<string, { name: string; gender: string; description:
 
 // Speaktor voice mapping (voiceId -> Speaktor voice name)
 const SPEAKTOR_VOICES: Record<string, string> = {
-  // Speaktor Pro voices
-  'vanessa_morgan': 'Vanessa Morgan',
-  'elena_watson': 'Elena Watson',
-  'laura_mitchell': 'Laura Mitchell',
-  'emma_reed': 'Emma Reed',
-  'ravi_ananda': 'Ravi Ananda',
-  'julian_hale': 'Julian Hale',
-  'jack_wilder': 'Jack Wilder',
-  'victor_moreau': 'Victor Moreau',
-  'nathan_drake': 'Nathan Drake',
+  // Speaktor Pro voices - Brasileiras (PT-BR)
+  'renata': 'Renata',
+  'natalia': 'Natália',
+  'rodrigo': 'Rodrigo',
+  'paulo': 'Paulo',
+  'alexandre': 'Alexandre',
+  'carlos': 'Carlos',
   // OpenAI voice fallback mapping
-  'shimmer': 'Vanessa Morgan',
-  'onyx': 'Ravi Ananda', 
-  'echo': 'Julian Hale',
+  'shimmer': 'Renata',
 };
 
 async function getSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; apiKey: string; voice: string }> {

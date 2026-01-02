@@ -12,16 +12,13 @@ import { supabase } from "@/integrations/supabase/client";
 
 // Available voices with descriptions
 const AVAILABLE_VOICES = [
-  // Speaktor Pro voices (premium - better quality and emotional tones)
-  { id: "vanessa_morgan", name: "Vanessa Morgan", gender: "female", description: "Voz feminina brasileira natural e expressiva", provider: "speaktor" },
-  { id: "elena_watson", name: "Elena Watson", gender: "female", description: "Voz feminina suave e profissional", provider: "speaktor" },
-  { id: "laura_mitchell", name: "Laura Mitchell", gender: "female", description: "Voz feminina clara e acolhedora", provider: "speaktor" },
-  { id: "emma_reed", name: "Emma Reed", gender: "female", description: "Voz feminina jovem e dinâmica", provider: "speaktor" },
-  { id: "ravi_ananda", name: "Ravi Ananda", gender: "male", description: "Voz masculina grave e profissional", provider: "speaktor" },
-  { id: "julian_hale", name: "Julian Hale", gender: "male", description: "Voz masculina clara e amigável", provider: "speaktor" },
-  { id: "jack_wilder", name: "Jack Wilder", gender: "male", description: "Voz masculina enérgica e confiante", provider: "speaktor" },
-  { id: "victor_moreau", name: "Victor Moreau", gender: "male", description: "Voz masculina sofisticada e elegante", provider: "speaktor" },
-  { id: "nathan_drake", name: "Nathan Drake", gender: "male", description: "Voz masculina jovem e casual", provider: "speaktor" },
+  // Speaktor Pro voices - Brasileiras (PT-BR)
+  { id: "renata", name: "Renata", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
+  { id: "natalia", name: "Natália", gender: "female", description: "Voz feminina brasileira jovem adulto", provider: "speaktor" },
+  { id: "rodrigo", name: "Rodrigo", gender: "male", description: "Voz masculina brasileira jovem adulto", provider: "speaktor" },
+  { id: "paulo", name: "Paulo", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
+  { id: "alexandre", name: "Alexandre", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
+  { id: "carlos", name: "Carlos", gender: "male", description: "Voz masculina brasileira adulto", provider: "speaktor" },
   // OpenAI voices (fallback)
   { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara (OpenAI)", provider: "openai" },
 ] as const;
