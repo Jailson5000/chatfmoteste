@@ -1482,10 +1482,13 @@ async function processWithGemini(
 
     const result = await response.json();
     const aiResponse = result.response;
+    const toolCallsExecuted = result.toolCallsExecuted || [];
+    
     logDebug('AI_PROVIDER', 'Internal AI response received', { 
       hasResponse: !!aiResponse, 
       responseLength: aiResponse?.length,
-      automationId: automation.id 
+      automationId: automation.id,
+      toolCallsCount: toolCallsExecuted.length
     });
 
     if (aiResponse) {
@@ -1519,7 +1522,7 @@ async function processWithGemini(
       await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
     }
 
-    // Log the AI processing
+    // Log the AI processing with tool calls
     await supabaseClient
       .from('webhook_logs')
       .insert({
@@ -1531,6 +1534,7 @@ async function processWithGemini(
           conversation_id: context.conversationId,
           message: context.messageContent,
           response_sent: !!aiResponse,
+          tool_calls_executed: toolCallsExecuted,
         },
         status_code: 200,
       });
@@ -1542,6 +1546,7 @@ async function processWithGemini(
 
 // Process messages with GPT (Professional/Enterprise plans)
 // CRITICAL: Must have valid automation with prompt - no fallbacks allowed
+// Uses ai-chat edge function for consistent function calling support
 async function processWithGPT(
   supabaseClient: any, 
   context: AutomationContext, 
@@ -1576,47 +1581,16 @@ async function processWithGPT(
       return;
     }
 
-    logDebug('AI_MATRIX', `Using agent: ${automation.name}`, { automationId: automation.id });
+    logDebug('AI_MATRIX', `Using agent: ${automation.name}`, { 
+      automationId: automation.id,
+      version: automation.version,
+      updatedAt: automation.updated_at
+    });
 
-    // Get recent messages for context - increased to 25 for better context retention
-    const { data: recentMessages } = await supabaseClient
-      .from('messages')
-      .select('content, is_from_me, message_type, created_at')
-      .eq('conversation_id', context.conversationId)
-      .order('created_at', { ascending: false })
-      .limit(25);
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-    // Get client memories if clientId is available
-    let clientMemoriesText = '';
-    if (context.clientId) {
-      const { data: memories } = await supabaseClient
-        .from('client_memories')
-        .select('fact_type, content, importance')
-        .eq('client_id', context.clientId)
-        .eq('is_active', true)
-        .order('importance', { ascending: false })
-        .limit(15);
-      
-      if (memories && memories.length > 0) {
-        clientMemoriesText = `\n\n📝 MEMÓRIA DO CLIENTE (fatos importantes já conhecidos):\n` +
-          memories.map((m: any) => `- [${m.fact_type}] ${m.content}`).join('\n');
-      }
-    }
-
-    // Get conversation summary if available
-    const { data: convData } = await supabaseClient
-      .from('conversations')
-      .select('ai_summary')
-      .eq('id', context.conversationId)
-      .single();
-    
-    const summaryText = convData?.ai_summary ? 
-      `\n\n📋 RESUMO DA CONVERSA ANTERIOR:\n${convData.ai_summary}` : '';
-
-    // Agent prompt is the SINGLE SOURCE OF TRUTH - no fallbacks
-    const systemPrompt = automation.ai_prompt;
-
-    // Decide audio mode BEFORE calling GPT (so the model doesn't do step-by-step)
+    // Decide audio mode BEFORE calling AI (so the model doesn't do step-by-step)
     const audioRequestedForThisMessage = await shouldRespondWithAudio(
       supabaseClient,
       context.conversationId,
@@ -1624,78 +1598,48 @@ async function processWithGPT(
       context.messageType
     );
 
-    const behaviorInstruction = audioRequestedForThisMessage
-      ? `REGRA CRÍTICA (MODO ÁUDIO):
-- O cliente pediu/precisa de resposta em áudio.
-- Responda com a RESPOSTA COMPLETA em UMA única mensagem (curta, mas completa).
-- NÃO peça para aguardar, NÃO diga que vai continuar depois, NÃO quebre em etapas.
-- NÃO anuncie áudio (o sistema converte automaticamente sua resposta em áudio).
-`
-      : `REGRA CRÍTICA DE COMUNICAÇÃO:
-- Responda como uma pessoa real em atendimento
-- Envie mensagens CURTAS e OBJETIVAS (máximo 2-3 frases por vez)
-- Faça UMA pergunta ou informação por mensagem
-- NÃO envie textos longos ou explicações extensas
-- Use linguagem natural e profissional
-- Aguarde a resposta do cliente antes de continuar
-
-🚨 REGRA ABSOLUTAMENTE CRÍTICA SOBRE PEDIDOS DE ÁUDIO 🚨
-ATENÇÃO: Esta regra é OBRIGATÓRIA e sua violação causa falha total no sistema!
-
-QUANDO O CLIENTE PEDIR RESPOSTA POR ÁUDIO/VOZ:
-✅ CORRETO: Responda diretamente com a informação solicitada em texto
-   Exemplo: "Você vai precisar de RG, CPF e comprovante de residência."
-
-❌ PROIBIDO (causa erro crítico no sistema):
-   - "Vou ativar o áudio..."
-   - "Vou mandar por áudio..."
-   - "Um momento, vou gravar..."
-   - "Claro, vou te explicar por áudio..."
-   - Qualquer frase anunciando que vai enviar áudio
-
-O SISTEMA CONVERTE AUTOMATICAMENTE SUA RESPOSTA DE TEXTO EM ÁUDIO.
-Se você enviar apenas um "aviso", o cliente receberá um áudio dizendo "vou mandar áudio" - o que é inútil.
-
-RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`;
-
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'system', content: `${behaviorInstruction}${clientMemoriesText}${summaryText}` },
-      ...(recentMessages?.reverse() || []).map((msg: any) => ({
-        role: msg.is_from_me ? 'assistant' : 'user',
-        content: msg.content || ''
-      })),
-      { role: 'user', content: context.messageContent }
-    ];
-
-    // Call OpenAI API with GPT-4o-mini
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Call internal ai-chat edge function with automationId (REQUIRED)
+    // ai-chat handles: prompt loading, knowledge base, memory, function calling
+    const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${aiConfig.openaiApiKey}`,
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages,
-        temperature: automation.ai_temperature || 0.7,
-        max_tokens: audioRequestedForThisMessage ? 900 : 300,
+        conversationId: context.conversationId,
+        message: context.messageContent,
+        automationId: automation.id, // REQUIRED for proper isolation
+        source: 'whatsapp',
+        context: {
+          clientName: context.contactName,
+          clientPhone: context.contactPhone,
+          lawFirmId: context.lawFirmId,
+          clientId: context.clientId, // Pass clientId for memory support
+          audioRequested: audioRequestedForThisMessage,
+        },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      logDebug('AI_MATRIX', 'GPT API call failed', { status: response.status, error: errorText });
+      logDebug('AI_MATRIX', 'ai-chat call failed for GPT', { 
+        status: response.status, 
+        error: errorText,
+        automationId: automation.id 
+      });
       return;
     }
 
     const result = await response.json();
-    const aiResponse = result.choices?.[0]?.message?.content;
+    const aiResponse = result.response;
+    const toolCallsExecuted = result.toolCallsExecuted || [];
 
     if (aiResponse) {
-      logDebug('AI_MATRIX', 'GPT response received', { 
+      logDebug('AI_MATRIX', 'GPT response received via ai-chat', { 
         responseLength: aiResponse.length,
-        automationId: automation.id 
+        automationId: automation.id,
+        toolCallsCount: toolCallsExecuted.length
       });
 
       // CRITICAL: Record AI conversation usage (1 per conversation per billing period)
@@ -1727,7 +1671,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`;
       // Send the response back to WhatsApp (with optional voice)
       await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
 
-      // Log the AI processing
+      // Log the AI processing with tool calls
       await supabaseClient
         .from('webhook_logs')
         .insert({
@@ -1737,10 +1681,12 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`;
             provider: 'gpt',
             plan_type: aiConfig.planType,
             automation_name: automation.name,
+            automation_version: automation.version,
             conversation_id: context.conversationId,
             message: context.messageContent,
             model: 'gpt-4o-mini',
             response_sent: true,
+            tool_calls_executed: toolCallsExecuted,
           },
           status_code: 200,
         });

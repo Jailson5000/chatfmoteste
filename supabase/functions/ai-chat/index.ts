@@ -22,6 +22,280 @@ interface ChatRequest {
   };
 }
 
+// Google Calendar tools definition for function calling
+const CALENDAR_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "check_availability",
+      description: "Verifica os horários disponíveis para agendamento em uma data específica",
+      parameters: {
+        type: "object",
+        properties: {
+          date: {
+            type: "string",
+            description: "Data para verificar disponibilidade no formato YYYY-MM-DD (ex: 2025-01-15)"
+          }
+        },
+        required: ["date"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_event",
+      description: "Agenda um novo compromisso/consulta no calendário",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Título do evento (ex: 'Consulta com João Silva')"
+          },
+          start_time: {
+            type: "string",
+            description: "Data e hora de início no formato ISO 8601 (ex: 2025-01-15T14:00:00)"
+          },
+          duration_minutes: {
+            type: "number",
+            description: "Duração em minutos (padrão: 60)"
+          },
+          description: {
+            type: "string",
+            description: "Descrição ou observações do evento"
+          },
+          location: {
+            type: "string",
+            description: "Local do evento (opcional)"
+          }
+        },
+        required: ["title", "start_time"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_events",
+      description: "Lista os próximos eventos/compromissos agendados",
+      parameters: {
+        type: "object",
+        properties: {
+          time_min: {
+            type: "string",
+            description: "Data inicial no formato ISO 8601"
+          },
+          time_max: {
+            type: "string",
+            description: "Data final no formato ISO 8601"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_event",
+      description: "Atualiza/remarca um evento existente",
+      parameters: {
+        type: "object",
+        properties: {
+          event_id: {
+            type: "string",
+            description: "ID do evento a ser atualizado"
+          },
+          title: {
+            type: "string",
+            description: "Novo título (opcional)"
+          },
+          start_time: {
+            type: "string",
+            description: "Nova data/hora de início no formato ISO 8601"
+          },
+          duration_minutes: {
+            type: "number",
+            description: "Nova duração em minutos"
+          }
+        },
+        required: ["event_id"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_event",
+      description: "Cancela/remove um evento do calendário",
+      parameters: {
+        type: "object",
+        properties: {
+          event_id: {
+            type: "string",
+            description: "ID do evento a ser cancelado"
+          }
+        },
+        required: ["event_id"]
+      }
+    }
+  }
+];
+
+// Check if Google Calendar integration is active for law firm
+async function checkCalendarIntegration(supabase: any, lawFirmId: string): Promise<{
+  active: boolean;
+  permissions: {
+    read: boolean;
+    create: boolean;
+    edit: boolean;
+    delete: boolean;
+  };
+}> {
+  const { data: integration } = await supabase
+    .from("google_calendar_integrations")
+    .select("is_active, allow_read_events, allow_create_events, allow_edit_events, allow_delete_events")
+    .eq("law_firm_id", lawFirmId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!integration) {
+    return { active: false, permissions: { read: false, create: false, edit: false, delete: false } };
+  }
+
+  return {
+    active: true,
+    permissions: {
+      read: integration.allow_read_events ?? false,
+      create: integration.allow_create_events ?? false,
+      edit: integration.allow_edit_events ?? false,
+      delete: integration.allow_delete_events ?? false,
+    }
+  };
+}
+
+// Filter tools based on permissions
+function getAvailableTools(permissions: { read: boolean; create: boolean; edit: boolean; delete: boolean }) {
+  const tools: typeof CALENDAR_TOOLS = [];
+  
+  if (permissions.read) {
+    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "check_availability")!);
+    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "list_events")!);
+  }
+  if (permissions.create) {
+    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "create_event")!);
+  }
+  if (permissions.edit) {
+    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "update_event")!);
+  }
+  if (permissions.delete) {
+    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "delete_event")!);
+  }
+  
+  return tools.filter(Boolean);
+}
+
+// Execute calendar tool call
+async function executeCalendarTool(
+  supabase: any,
+  supabaseUrl: string,
+  supabaseKey: string,
+  lawFirmId: string,
+  conversationId: string,
+  clientId: string | undefined,
+  automationId: string,
+  toolCall: { name: string; arguments: string }
+): Promise<string> {
+  try {
+    const args = JSON.parse(toolCall.arguments);
+    
+    console.log(`[AI Chat] Executing calendar tool: ${toolCall.name}`, args);
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/google-calendar-actions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify({
+        action: toolCall.name,
+        law_firm_id: lawFirmId,
+        conversation_id: conversationId,
+        client_id: clientId,
+        agent_id: automationId,
+        event_data: toolCall.name === "create_event" || toolCall.name === "update_event" || toolCall.name === "delete_event" 
+          ? {
+              title: args.title,
+              start_time: args.start_time,
+              end_time: args.end_time,
+              duration_minutes: args.duration_minutes || 60,
+              description: args.description,
+              location: args.location,
+              event_id: args.event_id,
+            }
+          : undefined,
+        query: toolCall.name === "check_availability" || toolCall.name === "list_events"
+          ? {
+              date: args.date,
+              time_min: args.time_min,
+              time_max: args.time_max,
+            }
+          : undefined,
+      }),
+    });
+
+    const result = await response.json();
+    
+    if (!result.success) {
+      return JSON.stringify({ error: result.error || "Falha na operação" });
+    }
+
+    // Format response for the AI
+    switch (toolCall.name) {
+      case "check_availability":
+        if (result.available_slots?.length > 0) {
+          return JSON.stringify({
+            available_slots: result.available_slots,
+            message: `Horários disponíveis: ${result.available_slots.join(", ")}`
+          });
+        }
+        return JSON.stringify({ message: "Não há horários disponíveis nesta data." });
+        
+      case "create_event":
+        return JSON.stringify({
+          success: true,
+          event_id: result.event?.id,
+          event_link: result.event?.htmlLink,
+          message: `Evento "${args.title}" criado com sucesso para ${args.start_time}`
+        });
+        
+      case "list_events":
+        return JSON.stringify({
+          events: result.events,
+          count: result.events?.length || 0
+        });
+        
+      case "update_event":
+        return JSON.stringify({
+          success: true,
+          message: "Evento atualizado com sucesso"
+        });
+        
+      case "delete_event":
+        return JSON.stringify({
+          success: true,
+          message: "Evento cancelado com sucesso"
+        });
+        
+      default:
+        return JSON.stringify(result);
+    }
+  } catch (error) {
+    console.error(`[AI Chat] Calendar tool error:`, error);
+    return JSON.stringify({ error: "Erro ao executar ação do calendário" });
+  }
+}
+
 // Get current billing period in YYYY-MM format
 function getCurrentBillingPeriod(): string {
   const now = new Date();
@@ -408,9 +682,10 @@ serve(async (req) => {
     }
 
     // Fetch agent configuration - the ONLY source of behavior
+    // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
-      .select("ai_prompt, ai_temperature, name, law_firm_id")
+      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at")
       .eq("id", automationId)
       .eq("is_active", true)
       .single();
@@ -441,7 +716,15 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[AI Chat] Using EXCLUSIVE prompt from agent: ${automationName}`);
+    // CRITICAL LOG: Track which prompt version is being used
+    console.log(`[AI Chat] AGENT LOADED - SINGLE SOURCE OF TRUTH`, {
+      agentId: automation.id,
+      agentName: automationName,
+      lawFirmId: agentLawFirmId,
+      promptVersion: automation.version,
+      promptUpdatedAt: automation.updated_at,
+      promptLength: systemPrompt.length,
+    });
 
     // ONLY load knowledge bases that are EXPLICITLY LINKED to this agent
     // This ensures complete tenant and agent isolation
@@ -493,6 +776,36 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
       messages.push({ role: "system", content: knowledgeText });
     }
 
+    // Check Google Calendar integration and add instructions
+    const effectiveLawFirmIdForCalendar = agentLawFirmId || context?.lawFirmId;
+    if (effectiveLawFirmIdForCalendar) {
+      const calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmIdForCalendar);
+      if (calendarIntegration.active && calendarIntegration.permissions.read) {
+        let calendarInstructions = `\n\n📅 GOOGLE CALENDAR INTEGRADO - VOCÊ TEM ACESSO PARA:`;
+        if (calendarIntegration.permissions.read) {
+          calendarInstructions += `\n- Verificar horários disponíveis (use a função check_availability)`;
+          calendarInstructions += `\n- Listar eventos agendados (use a função list_events)`;
+        }
+        if (calendarIntegration.permissions.create) {
+          calendarInstructions += `\n- Criar novos agendamentos (use a função create_event)`;
+        }
+        if (calendarIntegration.permissions.edit) {
+          calendarInstructions += `\n- Remarcar compromissos (use a função update_event)`;
+        }
+        if (calendarIntegration.permissions.delete) {
+          calendarInstructions += `\n- Cancelar compromissos (use a função delete_event)`;
+        }
+        calendarInstructions += `\n\nQUANDO O CLIENTE QUISER AGENDAR, REMARCAR OU CANCELAR CONSULTAS:
+1. Use as funções do calendário SEMPRE que identificar intenção de agendamento
+2. Confirme os dados com o cliente antes de criar o evento
+3. Após executar a ação, confirme o sucesso ao cliente
+4. Se o cliente não especificar horário, verifique disponibilidade primeiro`;
+        
+        messages.push({ role: "system", content: calendarInstructions });
+        console.log(`[AI Chat] Added calendar instructions for law_firm ${effectiveLawFirmIdForCalendar}`);
+      }
+    }
+
     // Add client memories if clientId is provided
     let clientMemoriesText = "";
     if (context?.clientId) {
@@ -535,48 +848,69 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
     // Add the current message
     messages.push({ role: "user", content: message });
 
+    // Check Google Calendar integration and get available tools
+    const effectiveLawFirmId = agentLawFirmId || context?.lawFirmId;
+    let calendarTools: any[] = [];
+    let calendarIntegration = { active: false, permissions: { read: false, create: false, edit: false, delete: false } };
+    
+    if (effectiveLawFirmId) {
+      calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmId);
+      if (calendarIntegration.active) {
+        calendarTools = getAvailableTools(calendarIntegration.permissions);
+        console.log(`[AI Chat] Google Calendar active with ${calendarTools.length} tools`, calendarIntegration.permissions);
+      }
+    }
+
     console.log(`[AI Chat] Processing message for conversation ${conversationId}, useOpenAI: ${useOpenAI}`);
-    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}`);
+    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}, CalendarTools: ${calendarTools.length}`);
+
+    // Build request body with optional tools
+    const requestBody: any = {
+      messages,
+      temperature,
+      max_tokens: context?.audioRequested ? 900 : 400,
+    };
+
+    // Add tools if calendar integration is active
+    if (calendarTools.length > 0) {
+      requestBody.tools = calendarTools;
+      requestBody.tool_choice = "auto";
+    }
 
     let response;
+    let aiProvider = "";
     
     if (useOpenAI && OPENAI_API_KEY) {
       // Use OpenAI API
-      console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini)");
+      aiProvider = "OpenAI";
+      console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini) with tools:", calendarTools.length);
+      requestBody.model = "gpt-4o-mini";
       response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages,
-          temperature,
-          max_tokens: context?.audioRequested ? 900 : 400,
-        }),
+        body: JSON.stringify(requestBody),
       });
     } else {
       // Use Lovable AI (IA do Site / Internal)
-      console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash)");
+      aiProvider = "Lovable AI";
+      console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash) with tools:", calendarTools.length);
+      requestBody.model = "google/gemini-2.5-flash";
       response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages,
-          temperature,
-          max_tokens: context?.audioRequested ? 900 : 400,
-        }),
+        body: JSON.stringify(requestBody),
       });
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[AI Chat] ${useOpenAI ? "OpenAI" : "Lovable AI"} error:`, response.status, errorText);
+      console.error(`[AI Chat] ${aiProvider} error:`, response.status, errorText);
 
       if (response.status === 429) {
         return new Response(
@@ -599,16 +933,96 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
     }
 
     const data = await response.json();
-    const aiResponse = data.choices?.[0]?.message?.content;
+    let aiMessage = data.choices?.[0]?.message;
+    let aiResponse = aiMessage?.content || "";
+    let toolCallsExecuted: any[] = [];
 
-    if (!aiResponse) {
+    // Handle tool calls if present
+    if (aiMessage?.tool_calls && aiMessage.tool_calls.length > 0) {
+      console.log(`[AI Chat] Processing ${aiMessage.tool_calls.length} tool calls`);
+      
+      // Execute each tool call
+      const toolResults: Array<{ role: string; tool_call_id: string; content: string }> = [];
+      
+      for (const toolCall of aiMessage.tool_calls) {
+        const toolName = toolCall.function.name;
+        const toolArgs = toolCall.function.arguments;
+        
+        console.log(`[AI Chat] Executing tool: ${toolName}`, toolArgs);
+        
+        const result = await executeCalendarTool(
+          supabase,
+          supabaseUrl,
+          supabaseKey,
+          effectiveLawFirmId!,
+          conversationId,
+          context?.clientId,
+          automationId!,
+          { name: toolName, arguments: toolArgs }
+        );
+        
+        toolResults.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: result,
+        });
+        
+        toolCallsExecuted.push({
+          tool: toolName,
+          args: JSON.parse(toolArgs),
+          result: JSON.parse(result),
+        });
+      }
+      
+      // Add assistant message with tool calls and tool results
+      messages.push({
+        role: "assistant",
+        content: aiMessage.content || "",
+        tool_calls: aiMessage.tool_calls,
+      } as any);
+      
+      for (const tr of toolResults) {
+        messages.push(tr as any);
+      }
+      
+      // Call AI again with tool results to get final response
+      console.log(`[AI Chat] Calling ${aiProvider} again with tool results`);
+      
+      const finalRequestBody = {
+        model: requestBody.model,
+        messages,
+        temperature,
+        max_tokens: 500,
+      };
+      
+      const finalResponse = await fetch(
+        useOpenAI && OPENAI_API_KEY 
+          ? "https://api.openai.com/v1/chat/completions"
+          : "https://ai.gateway.lovable.dev/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${useOpenAI && OPENAI_API_KEY ? OPENAI_API_KEY : LOVABLE_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(finalRequestBody),
+        }
+      );
+      
+      if (finalResponse.ok) {
+        const finalData = await finalResponse.json();
+        aiResponse = finalData.choices?.[0]?.message?.content || aiResponse;
+        console.log(`[AI Chat] Final response after tool execution, length: ${aiResponse.length}`);
+      }
+    }
+
+    if (!aiResponse && toolCallsExecuted.length === 0) {
       throw new Error("No response generated");
     }
 
-    console.log(`[AI Chat] Response generated by ${useOpenAI ? "OpenAI" : "Lovable AI"}, length: ${aiResponse.length}`);
+    console.log(`[AI Chat] Response generated by ${aiProvider}, length: ${aiResponse.length}, toolCalls: ${toolCallsExecuted.length}`);
 
     // Record AI conversation usage for billing (uses agent's law_firm_id)
-    const effectiveLawFirmId = agentLawFirmId || context?.lawFirmId;
     const effectiveSource = source || 'web';
     
     if (effectiveLawFirmId && automationId) {
@@ -617,7 +1031,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
         supabase,
         effectiveLawFirmId,
         conversationId,
-        automationId,
+        automationId!,
         automationName,
         effectiveSource
       ).catch(err => console.error('[AI Chat] Failed to record AI usage:', err));
@@ -645,6 +1059,7 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
       success: true,
       response: aiResponse,
       conversationId,
+      toolCallsExecuted: toolCallsExecuted.length > 0 ? toolCallsExecuted : undefined,
     };
     
     // Include Tray default settings for the caller to use
