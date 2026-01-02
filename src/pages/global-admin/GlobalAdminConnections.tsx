@@ -57,7 +57,7 @@ import {
   History,
   Bell,
 } from "lucide-react";
-import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
+import { useGlobalAdminInstances, InstanceWithCompany, EvolutionConnection } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
 import { InstanceHealthSummary } from "@/components/connections/InstanceHealthSummary";
 import { EvolutionApiConnectionsCard } from "@/components/global-admin/EvolutionApiConnectionsCard";
@@ -68,6 +68,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 type StatusFilter = "all" | "problems" | "connected" | "disconnected" | "awaiting_qr" | "suspended";
+type ViewMode = "grouped" | "list";
 
 interface WebhookLog {
   id: string;
@@ -173,6 +174,8 @@ export default function GlobalAdminConnections() {
   const { toast } = useToast();
   const {
     instances,
+    instancesByConnection,
+    evolutionConnections,
     isLoading,
     evolutionHealth,
     isHealthLoading,
@@ -182,10 +185,12 @@ export default function GlobalAdminConnections() {
     suspendInstance,
     reactivateInstance,
     refreshAllStatuses,
+    syncEvolutionInstances,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("grouped");
   const [selectedInstance, setSelectedInstance] = useState<InstanceWithCompany | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -324,6 +329,22 @@ export default function GlobalAdminConnections() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => syncEvolutionInstances.mutate(undefined)}
+                  disabled={syncEvolutionInstances.isPending}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${syncEvolutionInstances.isPending ? "animate-spin" : ""}`} />
+                  Sincronizar Evolution
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Buscar todas as instâncias reais do Evolution API e sincronizar com o banco</p>
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -468,6 +489,234 @@ export default function GlobalAdminConnections() {
 
         {/* Evolution API Connections */}
         <EvolutionApiConnectionsCard />
+
+        {/* Grouped Instances by Evolution Connection */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                Empresas por Conexão Evolution
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant={viewMode === "grouped" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("grouped")}
+                >
+                  Agrupado
+                </Button>
+                <Button
+                  variant={viewMode === "list" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setViewMode("list")}
+                >
+                  Lista
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : viewMode === "grouped" ? (
+              <div className="space-y-6">
+                {evolutionConnections.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Globe className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                    <p>Nenhuma conexão Evolution API configurada</p>
+                    <p className="text-sm mt-1">Configure uma conexão no card acima para começar</p>
+                  </div>
+                ) : (
+                  evolutionConnections.map((connection) => {
+                    const connectionInstances = instancesByConnection[connection.id]?.instances || [];
+                    const connectedCount = connectionInstances.filter(i => i.status === "connected").length;
+                    const disconnectedCount = connectionInstances.filter(i => ["disconnected", "error", "suspended"].includes(i.status)).length;
+                    
+                    return (
+                      <div key={connection.id} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-full ${
+                              connection.health_status === "online" 
+                                ? "bg-green-500/10" 
+                                : connection.health_status === "offline"
+                                ? "bg-destructive/10"
+                                : "bg-muted"
+                            }`}>
+                              {connection.health_status === "online" ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              ) : connection.health_status === "offline" ? (
+                                <XCircle className="h-5 w-5 text-destructive" />
+                              ) : (
+                                <Activity className="h-5 w-5 text-muted-foreground" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-semibold">{connection.name}</h4>
+                                {connection.is_default && (
+                                  <Badge variant="secondary" className="text-xs">Padrão</Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground font-mono">{connection.api_url}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <div className="flex items-center gap-1">
+                              <Wifi className="h-4 w-4 text-green-500" />
+                              <span className="font-medium">{connectedCount}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <WifiOff className="h-4 w-4 text-destructive" />
+                              <span className="font-medium">{disconnectedCount}</span>
+                            </div>
+                            <Badge variant="outline">
+                              {connectionInstances.length} instância(s)
+                            </Badge>
+                          </div>
+                        </div>
+                        
+                        {connectionInstances.length === 0 ? (
+                          <div className="text-center py-4 text-muted-foreground text-sm bg-muted/30 rounded-md">
+                            Nenhuma empresa conectada nesta API
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Empresa</TableHead>
+                                <TableHead>Instância</TableHead>
+                                <TableHead>Número</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Último Evento</TableHead>
+                                <TableHead className="text-right">Ações</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {connectionInstances.map((instance) => (
+                                <TableRow key={instance.id}>
+                                  <TableCell>
+                                    <div className="flex flex-col">
+                                      <span className="font-medium">{instance.company_name}</span>
+                                      {instance.subdomain && (
+                                        <span className="text-xs text-muted-foreground">{instance.subdomain}</span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`h-2 w-2 rounded-full ${
+                                        instance.status === "connected" ? "bg-green-500" :
+                                        instance.status === "connecting" || instance.status === "awaiting_qr" ? "bg-yellow-500" :
+                                        "bg-destructive"
+                                      }`} />
+                                      <span className="font-mono text-sm">{instance.instance_name}</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      <Phone className="h-3 w-3 text-muted-foreground" />
+                                      {instance.phone_number || "-"}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant={statusColors[instance.status] || "outline"}>
+                                      {statusLabels[instance.status] || instance.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {instance.last_webhook_at ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        {formatDistanceToNow(new Date(instance.last_webhook_at), {
+                                          addSuffix: true,
+                                          locale: ptBR,
+                                        })}
+                                      </span>
+                                    ) : "-"}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                          <MoreVertical className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleViewDetails(instance)}>
+                                          <Eye className="h-4 w-4 mr-2" />
+                                          Ver Detalhes
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                          onClick={() => refreshInstanceStatus.mutate(instance.id)}
+                                          disabled={refreshInstanceStatus.isPending}
+                                        >
+                                          <RefreshCw className="h-4 w-4 mr-2" />
+                                          Atualizar Status
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+                
+                {/* Orphan instances (not matched to any connection) */}
+                {instancesByConnection["unknown"]?.instances?.length > 0 && (
+                  <div className="border border-yellow-500/30 rounded-lg p-4 bg-yellow-500/5">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 rounded-full bg-yellow-500/10">
+                        <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">Instâncias sem Conexão Identificada</h4>
+                        <p className="text-xs text-muted-foreground">
+                          Estas instâncias não estão vinculadas a nenhuma conexão Evolution cadastrada
+                        </p>
+                      </div>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Empresa</TableHead>
+                          <TableHead>Instância</TableHead>
+                          <TableHead>API URL</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {instancesByConnection["unknown"].instances.map((instance) => (
+                          <TableRow key={instance.id}>
+                            <TableCell>{instance.company_name}</TableCell>
+                            <TableCell className="font-mono text-sm">{instance.instance_name}</TableCell>
+                            <TableCell className="font-mono text-xs">{instance.api_url}</TableCell>
+                            <TableCell>
+                              <Badge variant={statusColors[instance.status] || "outline"}>
+                                {statusLabels[instance.status] || instance.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-center py-4">
+                Use o modo "Lista" abaixo para visualização tradicional
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Health Summary & Uptime Chart */}
         <div className="grid gap-6 lg:grid-cols-2">
