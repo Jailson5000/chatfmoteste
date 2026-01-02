@@ -50,7 +50,7 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
     console.log('[TTS] Error fetching tenant config, using defaults:', error);
     return {
       elevenLabsEnabled: true,
-      openaiEnabled: false,
+      openaiEnabled: true, // OpenAI is ALWAYS available as fallback
       elevenLabsVoice: null,
     };
   }

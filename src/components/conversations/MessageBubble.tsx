@@ -1230,8 +1230,10 @@ export function MessageBubble({
             ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
             : isFromMe
               ? aiGenerated
-                ? "bg-purple-100 text-foreground rounded-br-md dark:bg-purple-900/30"
-                : "bg-green-500 text-white rounded-br-md dark:bg-green-600"
+                ? "bg-purple-100 text-purple-900 rounded-br-md dark:bg-purple-900/30 dark:text-purple-100"
+                : status === "error"
+                  ? "bg-red-100 text-red-900 rounded-br-md dark:bg-red-900/30 dark:text-red-100 border border-red-300 dark:border-red-700"
+                  : "bg-green-100 text-green-900 rounded-br-md dark:bg-green-900/30 dark:text-green-100"
               : "bg-muted rounded-bl-md",
           isHighlighted && "ring-2 ring-yellow-400 ring-offset-2"
         )}
