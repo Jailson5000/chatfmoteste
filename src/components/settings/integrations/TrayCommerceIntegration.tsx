@@ -209,7 +209,7 @@ function ConnectionCard({
   isDisconnecting 
 }: { 
   connection: TrayCommerceConnection;
-  onToggle: (connectionId: string, isActive: boolean) => Promise<void>;
+  onToggle: (params: { connectionId: string; isActive: boolean }) => Promise<void>;
   onDisconnect: (connectionId: string) => Promise<void>;
   onUpdateSettings: (connectionId: string, settings: Record<string, boolean>) => Promise<void>;
   isToggling: boolean;
@@ -217,7 +217,7 @@ function ConnectionCard({
 }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showData, setShowData] = useState(false);
-  const syncState = connection.tray_commerce_sync_state?.[0];
+  const syncState = connection.tray_commerce_sync_state;
 
   const { syncProducts, syncOrders, syncCoupons, isSyncingProducts, isSyncingOrders, isSyncingCoupons } = 
     useTrayCommerceSync(connection.id);
@@ -260,7 +260,7 @@ function ConnectionCard({
           <Switch
             id={`active-${connection.id}`}
             checked={connection.is_active}
-            onCheckedChange={(checked) => onToggle(connection.id, checked)}
+            onCheckedChange={(checked) => onToggle({ connectionId: connection.id, isActive: checked })}
             disabled={isToggling || connection.connection_status !== "connected"}
           />
         </div>
@@ -303,7 +303,7 @@ function ConnectionCard({
           <Button 
             variant="outline" 
             size="sm" 
-            onClick={() => syncOrders()}
+            onClick={() => syncOrders(undefined)}
             disabled={!connection.is_active || isSyncingOrders || !connection.sync_orders}
           >
             <RefreshCw className={`h-3 w-3 mr-1 ${isSyncingOrders ? 'animate-spin' : ''}`} />

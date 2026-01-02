@@ -23,7 +23,7 @@ export interface TrayCommerceConnection {
   connected_at: string | null;
   created_at: string;
   updated_at: string;
-  tray_commerce_sync_state?: TrayCommerceSyncState[];
+  tray_commerce_sync_state?: TrayCommerceSyncState | null;
 }
 
 export interface TrayCommerceSyncState {
@@ -114,7 +114,11 @@ export function useTrayCommerceConnections() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return data as TrayCommerceConnection[];
+      // Transform data to match our interface
+      return (data || []).map((conn: Record<string, unknown>) => ({
+        ...conn,
+        tray_commerce_sync_state: conn.tray_commerce_sync_state as TrayCommerceSyncState | null
+      })) as TrayCommerceConnection[];
     },
     enabled: !!user,
   });

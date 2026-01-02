@@ -4,6 +4,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// deno-lint-ignore no-explicit-any
+type SupabaseAny = ReturnType<typeof createClient<any>>;
+
 interface TrayWebhookPayload {
   scopeName?: string;
   scope_name?: string;
@@ -20,7 +23,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabase: SupabaseAny = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const url = new URL(req.url);
     const pathParts = url.pathname.split("/").filter(Boolean);
 
@@ -38,7 +41,7 @@ Deno.serve(async (req) => {
     }
 
     // Try to get connection
-    let connection = null;
+    let connection: Record<string, unknown> | null = null;
     if (connectionId) {
       const { data } = await supabase
         .from("tray_commerce_connections")
@@ -82,7 +85,7 @@ Deno.serve(async (req) => {
       },
       raw_payload: payload,
       processed: false,
-    });
+    } as Record<string, unknown>);
 
     // If connection is not active, just log and return
     if (!connection || !connection.is_active) {
@@ -142,14 +145,14 @@ Deno.serve(async (req) => {
         processed,
         processed_at: processed ? new Date().toISOString() : null,
         error: processingError,
-      })
+      } as Record<string, unknown>)
       .eq("id", webhookLogId);
 
     // Update sync state last webhook time
     if (processed) {
       await supabase
         .from("tray_commerce_sync_state")
-        .update({ last_webhook_at: new Date().toISOString() })
+        .update({ last_webhook_at: new Date().toISOString() } as Record<string, unknown>)
         .eq("connection_id", connection.id);
     }
 
@@ -170,7 +173,7 @@ Deno.serve(async (req) => {
 });
 
 async function processOrderWebhook(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAny,
   connection: Record<string, unknown>,
   payload: TrayWebhookPayload
 ) {
@@ -189,6 +192,8 @@ async function processOrderWebhook(
     .eq("connection_id", connection.id)
     .eq("tray_order_id", orderId)
     .maybeSingle();
+
+  const existingOrderData = existingOrder as Record<string, unknown> | null;
 
   // Upsert the order
   await supabase.from("tray_order_map").upsert({
@@ -209,7 +214,7 @@ async function processOrderWebhook(
     tracking_code: orderData.tracking as string,
     order_date: orderData.date as string,
     last_synced_at: new Date().toISOString(),
-  }, {
+  } as Record<string, unknown>, {
     onConflict: "connection_id,tray_order_id",
   });
 
@@ -217,23 +222,23 @@ async function processOrderWebhook(
   await supabase.from("tray_commerce_audit_logs").insert({
     connection_id: connection.id as string,
     law_firm_id: connection.law_firm_id as string,
-    action: existingOrder ? "order_updated_via_webhook" : "order_created_via_webhook",
+    action: existingOrderData ? "order_updated_via_webhook" : "order_created_via_webhook",
     entity_type: "order",
     entity_id: orderId,
-    old_values: existingOrder ? { status: existingOrder.tray_status } : null,
+    old_values: existingOrderData ? { status: existingOrderData.tray_status } : null,
     new_values: { status: orderData.status },
     source: "webhook",
-  });
+  } as Record<string, unknown>);
 
   // Optionally create/update a conversation for the order
-  if (!existingOrder) {
+  if (!existingOrderData) {
     // New order - could create a conversation here
     console.log("New order received via webhook:", orderId);
   }
 }
 
 async function processProductWebhook(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAny,
   connection: Record<string, unknown>,
   payload: TrayWebhookPayload
 ) {
@@ -255,7 +260,7 @@ async function processProductWebhook(
     stock: parseInt(String(productData.stock)) || 0,
     is_active: productData.available === "1",
     last_synced_at: new Date().toISOString(),
-  }, {
+  } as Record<string, unknown>, {
     onConflict: "connection_id,tray_product_id",
   });
 
@@ -267,11 +272,11 @@ async function processProductWebhook(
     entity_id: productId,
     new_values: { stock: productData.stock, price: productData.price },
     source: "webhook",
-  });
+  } as Record<string, unknown>);
 }
 
 async function processCouponWebhook(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAny,
   connection: Record<string, unknown>,
   payload: TrayWebhookPayload
 ) {
@@ -297,7 +302,7 @@ async function processCouponWebhook(
     starts_at: couponData.start_date as string,
     expires_at: couponData.end_date as string,
     last_synced_at: new Date().toISOString(),
-  }, {
+  } as Record<string, unknown>, {
     onConflict: "connection_id,tray_coupon_id",
   });
 
@@ -309,5 +314,5 @@ async function processCouponWebhook(
     entity_id: couponId,
     new_values: couponData,
     source: "webhook",
-  });
+  } as Record<string, unknown>);
 }

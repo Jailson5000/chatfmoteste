@@ -1,12 +1,8 @@
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, handleCorsPreflightRequest, createCorsResponse } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-// Helper to bypass TypeScript for new tables not in generated types
-// deno-lint-ignore no-explicit-any
-type AnySupabase = SupabaseClient<any, any, any>;
 
 // Tray API base URLs pattern: https://{store}.tray.com.br/web_api/
 interface TrayConnection {
@@ -30,6 +26,9 @@ interface TrayConnection {
   sync_shipping: boolean;
   read_only_mode: boolean;
 }
+
+// deno-lint-ignore no-explicit-any
+type SupabaseAny = ReturnType<typeof createClient<any>>;
 
 // Helper to make Tray API calls
 async function trayApiCall(
@@ -74,7 +73,7 @@ async function trayApiCall(
 
 // Refresh token if expired
 async function refreshTokenIfNeeded(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAny,
   connection: TrayConnection
 ): Promise<TrayConnection> {
   if (!connection.token_expires_at || !connection.refresh_token) {
@@ -108,7 +107,7 @@ async function refreshTokenIfNeeded(
           token_expires_at: expiresAt.toISOString(),
           connection_status: "connected",
           last_error: null,
-        })
+        } as Record<string, unknown>)
         .eq("id", connection.id);
 
       return {
@@ -125,7 +124,7 @@ async function refreshTokenIfNeeded(
       .update({
         connection_status: "token_expired",
         last_error: "Failed to refresh token",
-      })
+      } as Record<string, unknown>)
       .eq("id", connection.id);
   }
 
@@ -134,7 +133,7 @@ async function refreshTokenIfNeeded(
 
 // Validate tenant access
 async function validateTenantAccess(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   connectionId: string,
   lawFirmId: string
 ): Promise<{ valid: boolean; connection?: TrayConnection; error?: string }> {
@@ -154,7 +153,7 @@ async function validateTenantAccess(
 
 // Log audit action
 async function logAudit(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   connectionId: string | null,
   lawFirmId: string,
   action: string,
@@ -175,12 +174,12 @@ async function logAudit(
     new_values: newValues,
     performed_by: performedBy,
     source,
-  });
+  } as Record<string, unknown>);
 }
 
 // Handlers
 async function handleListConnections(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string
 ) {
   const { data, error } = await supabase
@@ -200,7 +199,7 @@ async function handleListConnections(
 }
 
 async function handleConnect(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   userId: string,
   body: {
@@ -282,7 +281,7 @@ async function handleConnect(
       connection_status: accessToken ? "connected" : "disconnected",
       connected_at: accessToken ? new Date().toISOString() : null,
       connected_by: userId,
-    })
+    } as Record<string, unknown>)
     .select()
     .single();
 
@@ -308,7 +307,7 @@ async function handleConnect(
 }
 
 async function handleDisconnect(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   userId: string
@@ -344,7 +343,7 @@ async function handleDisconnect(
 }
 
 async function handleToggle(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   userId: string,
@@ -357,7 +356,7 @@ async function handleToggle(
 
   const { error } = await supabase
     .from("tray_commerce_connections")
-    .update({ is_active: body.is_active })
+    .update({ is_active: body.is_active } as Record<string, unknown>)
     .eq("id", connectionId);
 
   if (error) {
@@ -381,7 +380,7 @@ async function handleToggle(
 }
 
 async function handleUpdateSettings(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   userId: string,
@@ -402,7 +401,7 @@ async function handleUpdateSettings(
 
   const { error } = await supabase
     .from("tray_commerce_connections")
-    .update(body)
+    .update(body as Record<string, unknown>)
     .eq("id", connectionId);
 
   if (error) {
@@ -426,7 +425,7 @@ async function handleUpdateSettings(
 }
 
 async function handleSyncProducts(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string
 ) {
@@ -435,7 +434,7 @@ async function handleSyncProducts(
     return { success: false, error: validation.error };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   if (!connection.sync_products) {
     return { success: false, error: "Product sync is disabled" };
@@ -444,7 +443,7 @@ async function handleSyncProducts(
   // Mark sync in progress
   await supabase
     .from("tray_commerce_sync_state")
-    .update({ sync_in_progress: true, sync_started_at: new Date().toISOString() })
+    .update({ sync_in_progress: true, sync_started_at: new Date().toISOString() } as Record<string, unknown>)
     .eq("connection_id", connectionId);
 
   try {
@@ -480,7 +479,7 @@ async function handleSyncProducts(
           stock: parseInt(String(productData.stock)) || 0,
           is_active: productData.available === "1",
           last_synced_at: new Date().toISOString(),
-        }, {
+        } as Record<string, unknown>, {
           onConflict: "connection_id,tray_product_id",
         });
         
@@ -499,7 +498,7 @@ async function handleSyncProducts(
         last_products_sync_at: new Date().toISOString(),
         products_synced_count: totalSynced,
         last_sync_error: null,
-      })
+      } as Record<string, unknown>)
       .eq("connection_id", connectionId);
 
     return { success: true, synced: totalSynced };
@@ -511,7 +510,7 @@ async function handleSyncProducts(
       .update({
         sync_in_progress: false,
         last_sync_error: error instanceof Error ? error.message : "Unknown error",
-      })
+      } as Record<string, unknown>)
       .eq("connection_id", connectionId);
 
     return { success: false, error: error instanceof Error ? error.message : "Sync failed" };
@@ -519,7 +518,7 @@ async function handleSyncProducts(
 }
 
 async function handleSyncOrders(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   status?: string
@@ -529,7 +528,7 @@ async function handleSyncOrders(
     return { success: false, error: validation.error };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   if (!connection.sync_orders) {
     return { success: false, error: "Order sync is disabled" };
@@ -578,7 +577,7 @@ async function handleSyncOrders(
           tracking_code: orderData.tracking as string,
           order_date: orderData.date as string,
           last_synced_at: new Date().toISOString(),
-        }, {
+        } as Record<string, unknown>, {
           onConflict: "connection_id,tray_order_id",
         });
         
@@ -595,7 +594,7 @@ async function handleSyncOrders(
       .update({
         last_orders_sync_at: new Date().toISOString(),
         orders_synced_count: totalSynced,
-      })
+      } as Record<string, unknown>)
       .eq("connection_id", connectionId);
 
     return { success: true, synced: totalSynced };
@@ -606,7 +605,7 @@ async function handleSyncOrders(
 }
 
 async function handleSyncCoupons(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string
 ) {
@@ -615,7 +614,7 @@ async function handleSyncCoupons(
     return { success: false, error: validation.error };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   if (!connection.sync_coupons) {
     return { success: false, error: "Coupon sync is disabled" };
@@ -649,7 +648,7 @@ async function handleSyncCoupons(
         starts_at: couponData.start_date as string,
         expires_at: couponData.end_date as string,
         last_synced_at: new Date().toISOString(),
-      }, {
+      } as Record<string, unknown>, {
         onConflict: "connection_id,tray_coupon_id",
       });
       
@@ -661,7 +660,7 @@ async function handleSyncCoupons(
       .update({
         last_coupons_sync_at: new Date().toISOString(),
         coupons_synced_count: totalSynced,
-      })
+      } as Record<string, unknown>)
       .eq("connection_id", connectionId);
 
     return { success: true, synced: totalSynced };
@@ -672,7 +671,7 @@ async function handleSyncCoupons(
 }
 
 async function handleGetProducts(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   page: number = 1,
@@ -698,7 +697,7 @@ async function handleGetProducts(
 }
 
 async function handleGetOrders(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   status?: string,
@@ -731,7 +730,7 @@ async function handleGetOrders(
 }
 
 async function handleGetCoupons(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string
 ) {
@@ -754,7 +753,7 @@ async function handleGetCoupons(
 }
 
 async function handleUpdateOrderStatus(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   trayOrderId: string,
@@ -770,7 +769,7 @@ async function handleUpdateOrderStatus(
     return { success: false, error: "Connection is in read-only mode" };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   const updateData: Record<string, unknown> = {
     Order: { status: body.status },
@@ -792,7 +791,7 @@ async function handleUpdateOrderStatus(
       tray_status: body.status,
       tracking_code: body.tracking_code || null,
       last_synced_at: new Date().toISOString(),
-    })
+    } as Record<string, unknown>)
     .eq("connection_id", connectionId)
     .eq("tray_order_id", trayOrderId);
 
@@ -813,7 +812,7 @@ async function handleUpdateOrderStatus(
 }
 
 async function handleUpdateProductStock(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   trayProductId: string,
@@ -829,7 +828,7 @@ async function handleUpdateProductStock(
     return { success: false, error: "Connection is in read-only mode" };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   const updateData: Record<string, unknown> = { Product: {} };
   if (body.stock !== undefined) {
@@ -873,7 +872,7 @@ async function handleUpdateProductStock(
 }
 
 async function handleCreateCoupon(
-  supabase: AnySupabase,
+  supabase: SupabaseAny,
   lawFirmId: string,
   connectionId: string,
   userId: string,
@@ -896,7 +895,7 @@ async function handleCreateCoupon(
     return { success: false, error: "Connection is in read-only mode" };
   }
 
-  let connection = await refreshTokenIfNeeded(supabase, validation.connection);
+  const connection = await refreshTokenIfNeeded(supabase, validation.connection);
 
   const couponData = {
     Coupon: {
@@ -932,7 +931,7 @@ async function handleCreateCoupon(
       is_active: true,
       starts_at: body.starts_at,
       expires_at: body.expires_at,
-    });
+    } as Record<string, unknown>);
   }
 
   await logAudit(
@@ -1071,19 +1070,19 @@ Deno.serve(async (req) => {
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
-    // PUT /tray-commerce-api/:connectionId/orders/:orderId/status
+    // PUT /tray-commerce-api/:connectionId/orders/:trayOrderId/status
     if (method === "PUT" && pathParts[2] === "orders" && pathParts[4] === "status") {
-      const orderId = pathParts[3];
+      const trayOrderId = pathParts[3];
       const body = await req.json();
-      const result = await handleUpdateOrderStatus(supabase, lawFirmId, connectionId, orderId, user.id, body);
+      const result = await handleUpdateOrderStatus(supabase, lawFirmId, connectionId, trayOrderId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
-    // PUT /tray-commerce-api/:connectionId/products/:productId
-    if (method === "PUT" && pathParts[2] === "products" && pathParts[3]) {
-      const productId = pathParts[3];
+    // PUT /tray-commerce-api/:connectionId/products/:trayProductId/stock
+    if (method === "PUT" && pathParts[2] === "products" && pathParts[4] === "stock") {
+      const trayProductId = pathParts[3];
       const body = await req.json();
-      const result = await handleUpdateProductStock(supabase, lawFirmId, connectionId, productId, user.id, body);
+      const result = await handleUpdateProductStock(supabase, lawFirmId, connectionId, trayProductId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
@@ -1098,7 +1097,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("Tray Commerce API error:", error);
     return createCorsResponse(
-      { error: error instanceof Error ? error.message : "Internal error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       500,
       req
     );
