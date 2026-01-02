@@ -515,22 +515,36 @@ function splitTextForTTS(text: string, maxChars = 3500): string[] {
   return chunks;
 }
 
-// Helper function to generate TTS audio using ai-text-to-speech edge function (supports Speaktor + OpenAI fallback)
+// Helper function to generate TTS audio using ai-text-to-speech edge function (supports ElevenLabs + OpenAI fallback)
 async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: string): Promise<string | null> {
   try {
     const trimmedText = text.trim().substring(0, 3900);
 
-    logDebug('TTS', `Generating audio with voice: ${voiceId} via ai-text-to-speech`, {
+    logDebug('TTS_GENERATE', 'Starting TTS audio generation', {
+      voiceId,
       textLength: trimmedText.length,
+      originalLength: text.trim().length,
       truncated: trimmedText.length !== text.trim().length,
       lawFirmId: lawFirmId || 'not provided',
     });
 
-    // Call the ai-text-to-speech edge function which handles Speaktor/OpenAI logic
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    // Verify environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     
-    const response = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, {
+    if (!supabaseUrl || !supabaseKey) {
+      logDebug('TTS_GENERATE', 'CRITICAL: Missing environment variables', {
+        hasSupabaseUrl: !!supabaseUrl,
+        hasSupabaseKey: !!supabaseKey,
+      });
+      return null;
+    }
+    
+    const ttsEndpoint = `${supabaseUrl}/functions/v1/ai-text-to-speech`;
+    logDebug('TTS_GENERATE', 'Calling TTS endpoint', { endpoint: ttsEndpoint });
+    
+    const startTime = Date.now();
+    const response = await fetch(ttsEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -539,27 +553,61 @@ async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: strin
       body: JSON.stringify({
         text: trimmedText,
         voiceId: voiceId,
-        lawFirmId: lawFirmId, // Pass company ID for per-company Speaktor settings
+        lawFirmId: lawFirmId,
       }),
+    });
+    
+    const elapsed = Date.now() - startTime;
+
+    logDebug('TTS_GENERATE', 'TTS endpoint response', {
+      status: response.status,
+      statusText: response.statusText,
+      elapsedMs: elapsed,
+      contentType: response.headers.get('content-type'),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      logDebug('TTS', 'ai-text-to-speech error', { status: response.status, error: errorText });
+      logDebug('TTS_GENERATE', 'TTS endpoint ERROR', { 
+        status: response.status, 
+        error: errorText,
+        elapsedMs: elapsed,
+      });
       return null;
     }
 
     const data = await response.json();
     
-    if (!data.success || !data.audioContent) {
-      logDebug('TTS', 'No audio content in response', { data });
+    logDebug('TTS_GENERATE', 'TTS response data', {
+      success: data.success,
+      hasAudioContent: !!data.audioContent,
+      audioContentLength: data.audioContent?.length || 0,
+      provider: data.provider || 'unknown',
+      error: data.error || null,
+    });
+    
+    if (!data.success) {
+      logDebug('TTS_GENERATE', 'TTS generation FAILED', { error: data.error });
+      return null;
+    }
+    
+    if (!data.audioContent) {
+      logDebug('TTS_GENERATE', 'TTS response missing audioContent');
       return null;
     }
 
-    logDebug('TTS', `Audio generated successfully via ai-text-to-speech`);
+    logDebug('TTS_GENERATE', 'Audio generated SUCCESS', {
+      provider: data.provider,
+      audioSize: data.audioContent.length,
+      elapsedMs: elapsed,
+    });
+    
     return data.audioContent;
   } catch (error) {
-    logDebug('TTS', 'Error generating TTS audio', { error: error instanceof Error ? error.message : error });
+    logDebug('TTS_GENERATE', 'EXCEPTION in generateTTSAudio', { 
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return null;
   }
 }

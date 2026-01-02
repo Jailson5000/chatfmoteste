@@ -28,46 +28,65 @@ interface TenantAIConfig {
 
 async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('[TTS] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured');
+      return {
+        elevenLabsEnabled: true,
+        openaiEnabled: true,
+        elevenLabsVoice: null,
+      };
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { data: settings } = await supabase
+    const { data: settings, error } = await supabase
       .from('law_firm_settings')
       .select('ai_capabilities')
       .eq('law_firm_id', lawFirmId)
       .single();
 
+    if (error) {
+      console.log('[TTS] Error fetching tenant settings:', error.message);
+    }
+
     const caps = settings?.ai_capabilities as Record<string, unknown> | null;
     
     return {
-      // Default: ElevenLabs enabled, OpenAI as fallback (always enabled)
-      elevenLabsEnabled: caps?.elevenlabs_active !== false, // true by default
-      openaiEnabled: true, // OpenAI is ALWAYS available as fallback
+      elevenLabsEnabled: caps?.elevenlabs_active !== false,
+      openaiEnabled: true,
       elevenLabsVoice: (caps?.elevenlabs_voice as string) || null,
     };
   } catch (error) {
-    console.log('[TTS] Error fetching tenant config, using defaults:', error);
+    console.error('[TTS] Error in getTenantAIConfig:', error instanceof Error ? error.message : error);
     return {
       elevenLabsEnabled: true,
-      openaiEnabled: true, // OpenAI is ALWAYS available as fallback
+      openaiEnabled: true,
       elevenLabsVoice: null,
     };
   }
 }
 
 async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
+  console.log('[TTS-ElevenLabs] Starting audio generation...');
+  
   const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+  
+  // Log API key status (never log the actual value)
+  console.log('[TTS-ElevenLabs] API key configured:', !!ELEVENLABS_API_KEY);
+  
   if (!ELEVENLABS_API_KEY) {
+    console.error('[TTS-ElevenLabs] CRITICAL: ELEVENLABS_API_KEY is not set');
     return { success: false, error: "ElevenLabs API key not configured" };
   }
 
-  // Resolve voice ID - default to Laura, handle legacy el_sarah
+  // Resolve voice ID
   let resolvedVoiceId: string;
   if (ELEVENLABS_VOICES[voiceId]) {
     resolvedVoiceId = ELEVENLABS_VOICES[voiceId];
   } else if (voiceId === 'el_sarah') {
-    // Legacy: redirect el_sarah to el_laura
     resolvedVoiceId = ELEVENLABS_VOICES['el_laura'];
   } else if (voiceId.length > 15) {
     resolvedVoiceId = voiceId;
@@ -75,11 +94,14 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
     resolvedVoiceId = ELEVENLABS_VOICES['el_laura'];
   }
 
-  console.log(`[TTS-ElevenLabs] Generating audio - voice: ${voiceId} -> ${resolvedVoiceId}`);
+  console.log(`[TTS-ElevenLabs] Voice mapping: ${voiceId} -> ${resolvedVoiceId}`);
+  console.log(`[TTS-ElevenLabs] Text length: ${text.length} chars`);
 
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`,
-    {
+  try {
+    const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`;
+    console.log(`[TTS-ElevenLabs] Calling API: ${apiUrl.split('?')[0]}`);
+    
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "xi-api-key": ELEVENLABS_API_KEY,
@@ -95,71 +117,129 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
           use_speaker_boost: true,
         },
       }),
+    });
+
+    console.log(`[TTS-ElevenLabs] Response status: ${response.status} ${response.statusText}`);
+    console.log(`[TTS-ElevenLabs] Response headers:`, {
+      contentType: response.headers.get('content-type'),
+      contentLength: response.headers.get('content-length'),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[TTS-ElevenLabs] API ERROR ${response.status}:`, errorText);
+      
+      // Log specific error types for debugging
+      if (response.status === 401) {
+        console.error('[TTS-ElevenLabs] ERROR TYPE: Invalid API key');
+      } else if (response.status === 403) {
+        console.error('[TTS-ElevenLabs] ERROR TYPE: Forbidden - check API key permissions');
+      } else if (response.status === 429) {
+        console.error('[TTS-ElevenLabs] ERROR TYPE: Rate limit exceeded');
+      } else if (response.status === 422) {
+        console.error('[TTS-ElevenLabs] ERROR TYPE: Invalid parameters');
+      }
+      
+      return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
     }
-  );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[TTS-ElevenLabs] API error:", response.status, errorText);
-    return { success: false, error: `ElevenLabs API error: ${response.status}` };
+    // Read as binary (arrayBuffer)
+    const audioBuffer = await response.arrayBuffer();
+    console.log(`[TTS-ElevenLabs] Audio buffer size: ${audioBuffer.byteLength} bytes`);
+    
+    if (audioBuffer.byteLength === 0) {
+      console.error('[TTS-ElevenLabs] ERROR: Empty audio buffer received');
+      return { success: false, error: 'Empty audio buffer received from ElevenLabs' };
+    }
+    
+    const base64Audio = base64Encode(audioBuffer);
+    console.log(`[TTS-ElevenLabs] Base64 audio length: ${base64Audio.length} chars`);
+    console.log(`[TTS-ElevenLabs] SUCCESS: Audio generated`);
+    
+    return { success: true, audioContent: base64Audio };
+  } catch (error) {
+    console.error('[TTS-ElevenLabs] EXCEPTION:', error instanceof Error ? error.message : error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
-
-  const audioBuffer = await response.arrayBuffer();
-  const base64Audio = base64Encode(audioBuffer);
-  
-  console.log(`[TTS-ElevenLabs] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
-  return { success: true, audioContent: base64Audio };
 }
 
 async function generateOpenAIAudio(text: string, voice: string = 'nova'): Promise<{ success: boolean; audioContent?: string; error?: string }> {
+  console.log('[TTS-OpenAI] Starting audio generation...');
+  
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+  
+  console.log('[TTS-OpenAI] API key configured:', !!OPENAI_API_KEY);
+  
   if (!OPENAI_API_KEY) {
+    console.error('[TTS-OpenAI] CRITICAL: OPENAI_API_KEY is not set');
     return { success: false, error: "OpenAI API key not configured" };
   }
 
-  // Validate/default voice
   const validVoice = OPENAI_VOICES.includes(voice) ? voice : 'nova';
+  console.log(`[TTS-OpenAI] Voice: ${validVoice}, Text length: ${text.length} chars`);
 
-  console.log(`[TTS-OpenAI] Generating audio - voice: ${validVoice}`);
+  try {
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'tts-1-hd',
+        input: text,
+        voice: validVoice,
+        response_format: 'mp3',
+      }),
+    });
 
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'tts-1-hd',
-      input: text,
-      voice: validVoice,
-      response_format: 'mp3',
-    }),
-  });
+    console.log(`[TTS-OpenAI] Response status: ${response.status} ${response.statusText}`);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[TTS-OpenAI] API error:", response.status, errorText);
-    return { success: false, error: `OpenAI API error: ${response.status}` };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[TTS-OpenAI] API ERROR ${response.status}:`, errorText);
+      return { success: false, error: `OpenAI API error: ${response.status}` };
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    console.log(`[TTS-OpenAI] Audio buffer size: ${audioBuffer.byteLength} bytes`);
+    
+    if (audioBuffer.byteLength === 0) {
+      console.error('[TTS-OpenAI] ERROR: Empty audio buffer received');
+      return { success: false, error: 'Empty audio buffer received from OpenAI' };
+    }
+    
+    const base64Audio = base64Encode(audioBuffer);
+    console.log(`[TTS-OpenAI] SUCCESS: Audio generated`);
+    
+    return { success: true, audioContent: base64Audio };
+  } catch (error) {
+    console.error('[TTS-OpenAI] EXCEPTION:', error instanceof Error ? error.message : error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
-
-  const audioBuffer = await response.arrayBuffer();
-  const base64Audio = base64Encode(audioBuffer);
-  
-  console.log(`[TTS-OpenAI] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
-  return { success: true, audioContent: base64Audio };
 }
 
 serve(async (req) => {
+  console.log('[TTS] Request received:', req.method);
+  
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { text, voiceId = 'el_laura', lawFirmId } = await req.json();
+    const body = await req.json();
+    const { text, voiceId = 'el_laura', lawFirmId } = body;
+    
+    console.log('[TTS] Request params:', {
+      textLength: text?.length || 0,
+      voiceId,
+      lawFirmId: lawFirmId || 'not provided',
+    });
 
     if (!text) {
+      console.error('[TTS] ERROR: No text provided');
       return new Response(
-        JSON.stringify({ error: "Text is required" }),
+        JSON.stringify({ success: false, error: "Text is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -167,21 +247,23 @@ serve(async (req) => {
     // Get tenant-specific AI configuration
     let config: TenantAIConfig = {
       elevenLabsEnabled: true,
-      openaiEnabled: false,
+      openaiEnabled: true,
       elevenLabsVoice: null,
     };
 
     if (lawFirmId) {
       config = await getTenantAIConfig(lawFirmId);
-      console.log(`[TTS] Tenant config for ${lawFirmId}:`, config);
+      console.log('[TTS] Tenant config:', config);
+    } else {
+      console.log('[TTS] No lawFirmId, using defaults');
     }
 
-    // Determine which voice to use (tenant default or request parameter)
     const effectiveVoiceId = config.elevenLabsVoice || voiceId;
+    console.log('[TTS] Effective voice:', effectiveVoiceId);
 
     // If voice is explicitly OpenAI, use OpenAI directly
     if (isOpenAIVoice(effectiveVoiceId)) {
-      console.log(`[TTS] Voice is OpenAI type, using OpenAI directly`);
+      console.log('[TTS] Using OpenAI (voice is OpenAI type)');
       const result = await generateOpenAIAudio(text, 'nova');
       
       if (result.success) {
@@ -196,18 +278,20 @@ serve(async (req) => {
         );
       }
       
+      console.error('[TTS] OpenAI failed:', result.error);
       return new Response(
-        JSON.stringify({ error: result.error || "OpenAI TTS generation failed" }),
+        JSON.stringify({ success: false, error: result.error || "OpenAI TTS generation failed" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // Priority: ElevenLabs > OpenAI > Error
     if (config.elevenLabsEnabled) {
-      console.log(`[TTS] Using ElevenLabs (enabled for tenant)`);
+      console.log('[TTS] Trying ElevenLabs first...');
       const result = await generateElevenLabsAudio(text, effectiveVoiceId);
       
       if (result.success) {
+        console.log('[TTS] ElevenLabs SUCCESS');
         return new Response(
           JSON.stringify({
             success: true,
@@ -219,11 +303,11 @@ serve(async (req) => {
         );
       }
       
-      // ElevenLabs failed, ALWAYS try OpenAI as fallback
-      console.log(`[TTS] ElevenLabs failed, falling back to OpenAI...`);
+      console.log('[TTS] ElevenLabs FAILED, trying OpenAI fallback...');
       const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
       if (openaiResult.success) {
+        console.log('[TTS] OpenAI fallback SUCCESS');
         return new Response(
           JSON.stringify({
             success: true,
@@ -235,15 +319,21 @@ serve(async (req) => {
         );
       }
       
-      // Both failed
+      console.error('[TTS] BOTH PROVIDERS FAILED');
+      console.error('[TTS] ElevenLabs error:', result.error);
+      console.error('[TTS] OpenAI error:', openaiResult.error);
+      
       return new Response(
-        JSON.stringify({ error: result.error || "TTS generation failed" }),
+        JSON.stringify({ 
+          success: false, 
+          error: `All TTS providers failed. ElevenLabs: ${result.error}. OpenAI: ${openaiResult.error}` 
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // ElevenLabs disabled, use OpenAI directly
-    console.log(`[TTS] ElevenLabs disabled, using OpenAI`);
+    console.log('[TTS] ElevenLabs disabled, using OpenAI');
     const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
     if (openaiResult.success) {
@@ -258,15 +348,17 @@ serve(async (req) => {
       );
     }
       
+    console.error('[TTS] OpenAI FAILED:', openaiResult.error);
     return new Response(
-      JSON.stringify({ error: openaiResult.error || "OpenAI TTS generation failed" }),
+      JSON.stringify({ success: false, error: openaiResult.error || "OpenAI TTS generation failed" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
-    console.error("[TTS] Error:", error);
+    console.error("[TTS] CRITICAL ERROR:", error instanceof Error ? error.message : error);
+    console.error("[TTS] Stack:", error instanceof Error ? error.stack : 'N/A');
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

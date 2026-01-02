@@ -8,7 +8,6 @@ const corsHeaders = {
 
 // ElevenLabs top voices
 const ELEVENLABS_VOICES: Record<string, { name: string; voiceId: string }> = {
-  // Default recommended voices
   'roger': { name: 'Roger', voiceId: 'CwhRBWXzGAHq8TQ4Fs17' },
   'sarah': { name: 'Sarah', voiceId: 'EXAVITQu4vr4xnSDxMaL' },
   'laura': { name: 'Laura', voiceId: 'FGY2WhTYpPnrIDTdsKH5' },
@@ -27,80 +26,128 @@ const ELEVENLABS_VOICES: Record<string, { name: string; voiceId: string }> = {
   'daniel': { name: 'Daniel', voiceId: 'onwK4e9ZLuTAKqWW03F9' },
   'lily': { name: 'Lily', voiceId: 'pFZP5JQG7iQjIQuC4Bku' },
   'bill': { name: 'Bill', voiceId: 'pqHfZKP75CvOlQylNhV4' },
+  // Custom voice Laura (sLEZIrFwEyhMIH1ALLIQ)
+  'el_laura': { name: 'Laura (Custom)', voiceId: 'sLEZIrFwEyhMIH1ALLIQ' },
 };
 
 serve(async (req) => {
+  console.log('[ElevenLabs-TTS] Request received:', req.method);
+  
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { text, voiceId = 'sarah', model = 'eleven_multilingual_v2' } = await req.json();
+    const body = await req.json();
+    const { text, voiceId = 'sarah', model = 'eleven_multilingual_v2' } = body;
+    
+    console.log('[ElevenLabs-TTS] Request params:', {
+      textLength: text?.length || 0,
+      voiceId,
+      model,
+    });
 
     if (!text) {
+      console.error('[ElevenLabs-TTS] ERROR: No text provided');
       return new Response(
-        JSON.stringify({ error: "Text is required" }),
+        JSON.stringify({ success: false, error: "Text is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+    
+    // Log API key status (never log the actual value)
+    console.log('[ElevenLabs-TTS] API key configured:', !!ELEVENLABS_API_KEY);
+    
     if (!ELEVENLABS_API_KEY) {
-      console.error("[ElevenLabs-TTS] ELEVENLABS_API_KEY is not configured");
+      console.error("[ElevenLabs-TTS] CRITICAL: ELEVENLABS_API_KEY is not set");
       return new Response(
-        JSON.stringify({ error: "ElevenLabs API key not configured" }),
+        JSON.stringify({ success: false, error: "ElevenLabs API key not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // Resolve voice ID - can be internal name or direct ElevenLabs voice ID
     let resolvedVoiceId: string;
-    if (ELEVENLABS_VOICES[voiceId.toLowerCase()]) {
-      resolvedVoiceId = ELEVENLABS_VOICES[voiceId.toLowerCase()].voiceId;
+    const voiceLower = voiceId.toLowerCase();
+    
+    if (ELEVENLABS_VOICES[voiceLower]) {
+      resolvedVoiceId = ELEVENLABS_VOICES[voiceLower].voiceId;
+      console.log(`[ElevenLabs-TTS] Voice mapped: ${voiceId} -> ${ELEVENLABS_VOICES[voiceLower].name} (${resolvedVoiceId})`);
     } else if (voiceId.length > 15) {
       // Assume it's a direct ElevenLabs voice ID
       resolvedVoiceId = voiceId;
+      console.log(`[ElevenLabs-TTS] Using direct voice ID: ${resolvedVoiceId}`);
     } else {
       // Default to Sarah
       resolvedVoiceId = ELEVENLABS_VOICES['sarah'].voiceId;
+      console.log(`[ElevenLabs-TTS] Unknown voice "${voiceId}", defaulting to Sarah`);
     }
 
-    console.log(`[ElevenLabs-TTS] Generating audio - voice: ${voiceId} (${resolvedVoiceId}), model: ${model}, text length: ${text.length}`);
+    const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`;
+    console.log(`[ElevenLabs-TTS] Calling API...`);
 
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: model,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.5,
+          use_speaker_boost: true,
         },
-        body: JSON.stringify({
-          text,
-          model_id: model,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.5,
-            use_speaker_boost: true,
-          },
-        }),
-      }
-    );
+      }),
+    });
+
+    console.log(`[ElevenLabs-TTS] Response status: ${response.status} ${response.statusText}`);
+    console.log(`[ElevenLabs-TTS] Response headers:`, {
+      contentType: response.headers.get('content-type'),
+      contentLength: response.headers.get('content-length'),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[ElevenLabs-TTS] API error:", response.status, errorText);
+      console.error(`[ElevenLabs-TTS] API ERROR ${response.status}:`, errorText);
+      
+      // Log specific error types
+      if (response.status === 401) {
+        console.error('[ElevenLabs-TTS] ERROR TYPE: Invalid API key');
+      } else if (response.status === 403) {
+        console.error('[ElevenLabs-TTS] ERROR TYPE: Forbidden - check API key permissions');
+      } else if (response.status === 429) {
+        console.error('[ElevenLabs-TTS] ERROR TYPE: Rate limit exceeded');
+      } else if (response.status === 422) {
+        console.error('[ElevenLabs-TTS] ERROR TYPE: Invalid parameters');
+      }
+      
       return new Response(
-        JSON.stringify({ error: `ElevenLabs API error: ${response.status}` }),
+        JSON.stringify({ success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // Read as binary (arrayBuffer) - NEVER use res.json() or res.text() for audio
     const audioBuffer = await response.arrayBuffer();
-    const base64Audio = base64Encode(audioBuffer);
+    console.log(`[ElevenLabs-TTS] Audio buffer size: ${audioBuffer.byteLength} bytes`);
     
-    console.log(`[ElevenLabs-TTS] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
+    if (audioBuffer.byteLength === 0) {
+      console.error('[ElevenLabs-TTS] ERROR: Empty audio buffer received');
+      return new Response(
+        JSON.stringify({ success: false, error: "Empty audio buffer received from ElevenLabs" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    const base64Audio = base64Encode(audioBuffer);
+    console.log(`[ElevenLabs-TTS] Base64 audio length: ${base64Audio.length} chars`);
+    console.log(`[ElevenLabs-TTS] SUCCESS: Audio generated`);
 
     return new Response(
       JSON.stringify({
@@ -112,9 +159,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("[ElevenLabs-TTS] Error:", error);
+    console.error("[ElevenLabs-TTS] CRITICAL ERROR:", error instanceof Error ? error.message : error);
+    console.error("[ElevenLabs-TTS] Stack:", error instanceof Error ? error.stack : 'N/A');
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
