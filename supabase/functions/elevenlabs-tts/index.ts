@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ElevenLabs top voices
+// ElevenLabs top voices - synchronized with src/lib/voiceConfig.ts
 const ELEVENLABS_VOICES: Record<string, { name: string; voiceId: string }> = {
   'roger': { name: 'Roger', voiceId: 'CwhRBWXzGAHq8TQ4Fs17' },
   'sarah': { name: 'Sarah', voiceId: 'EXAVITQu4vr4xnSDxMaL' },
@@ -26,8 +26,10 @@ const ELEVENLABS_VOICES: Record<string, { name: string; voiceId: string }> = {
   'daniel': { name: 'Daniel', voiceId: 'onwK4e9ZLuTAKqWW03F9' },
   'lily': { name: 'Lily', voiceId: 'pFZP5JQG7iQjIQuC4Bku' },
   'bill': { name: 'Bill', voiceId: 'pqHfZKP75CvOlQylNhV4' },
-  // Custom voice Laura (sLEZIrFwEyhMIH1ALLIQ)
+  // Custom voices - synchronized with src/lib/voiceConfig.ts
   'el_laura': { name: 'Laura (Custom)', voiceId: 'sLEZIrFwEyhMIH1ALLIQ' },
+  'el_felipe': { name: 'Felipe (Custom)', voiceId: 'GxZ0UJKPezKah8TMxZZM' },
+  'el_eloisa': { name: 'Eloisa (Custom)', voiceId: '4JmPeXyyRsHSbtyiCSrt' },
 };
 
 serve(async (req) => {
