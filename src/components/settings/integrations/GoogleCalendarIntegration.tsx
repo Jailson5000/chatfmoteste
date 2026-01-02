@@ -26,16 +26,15 @@ import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { IntegrationCard } from "../IntegrationCard";
+import googleCalendarIcon from "@/assets/google-calendar-icon.png";
 
 function GoogleCalendarIcon() {
   return (
-    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 via-green-500 to-yellow-500 p-0.5">
-      <div className="w-full h-full rounded-[6px] bg-background flex items-center justify-center">
-        <div className="w-7 h-7 rounded bg-white flex items-center justify-center text-blue-600 font-bold text-xs">
-          31
-        </div>
-      </div>
-    </div>
+    <img 
+      src={googleCalendarIcon} 
+      alt="Google Calendar" 
+      className="w-10 h-10 rounded-lg object-contain"
+    />
   );
 }
 
