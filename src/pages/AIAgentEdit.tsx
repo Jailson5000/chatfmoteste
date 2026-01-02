@@ -330,8 +330,12 @@ export default function AIAgentEdit() {
     try {
       const testText = "Olá! Esta é uma demonstração da voz selecionada.";
       
+      // Get ElevenLabs voice ID
+      const voice = AVAILABLE_VOICES.find(v => v.id === voiceId);
+      const voiceIdToSend = voice?.externalId || voiceId;
+      
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-text-to-speech`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`,
         {
           method: "POST",
           headers: {
@@ -340,7 +344,7 @@ export default function AIAgentEdit() {
           },
           body: JSON.stringify({ 
             text: testText,
-            voiceId: voiceId,
+            voiceId: voiceIdToSend,
           }),
         }
       );

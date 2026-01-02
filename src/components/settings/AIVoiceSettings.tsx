@@ -11,8 +11,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { 
   AVAILABLE_VOICES, 
   DEFAULT_VOICE_ID, 
-  getProviderBadge, 
-  isElevenLabsVoice,
   getElevenLabsVoiceId 
 } from "@/lib/voiceConfig";
 
@@ -140,17 +138,11 @@ export function AIVoiceSettings() {
     try {
       const testText = "Olá! Esta é uma demonstração da voz selecionada para as respostas da inteligência artificial.";
       
-      // Determine which endpoint to use based on voice provider
-      const isElevenlabs = isElevenLabsVoice(settings.ai_voice_id);
-      const endpoint = isElevenlabs ? 'elevenlabs-tts' : 'ai-text-to-speech';
-      
-      // For ElevenLabs, use the external voice ID
-      const voiceIdToSend = isElevenlabs 
-        ? getElevenLabsVoiceId(settings.ai_voice_id) || settings.ai_voice_id
-        : settings.ai_voice_id;
+      // Get ElevenLabs voice ID
+      const voiceIdToSend = getElevenLabsVoiceId(settings.ai_voice_id);
       
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${endpoint}`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`,
         {
           method: "POST",
           headers: {
@@ -218,13 +210,6 @@ export function AIVoiceSettings() {
     );
   }
 
-  // Group voices by provider
-  const voicesByProvider = {
-    elevenlabs: AVAILABLE_VOICES.filter(v => v.provider === 'elevenlabs'),
-    speaktor: AVAILABLE_VOICES.filter(v => v.provider === 'speaktor'),
-    openai: AVAILABLE_VOICES.filter(v => v.provider === 'openai'),
-  };
-
   return (
     <Card>
       <CardHeader>
@@ -260,68 +245,30 @@ export function AIVoiceSettings() {
           />
         </div>
 
-        {/* Voice Selection by Provider */}
-        <div className="space-y-6">
+        {/* Voice Selection */}
+        <div className="space-y-4">
           <Label className="text-base font-medium">Escolher Voz</Label>
           
-          {/* ElevenLabs Voices */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className={getProviderBadge('elevenlabs').className}>
-                ElevenLabs
-              </Badge>
-              <span className="text-sm text-muted-foreground">Alta qualidade multilíngue</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {voicesByProvider.elevenlabs.map((voice) => (
-                <VoiceCard
-                  key={voice.id}
-                  voice={voice}
-                  isSelected={settings.ai_voice_id === voice.id}
-                  onClick={() => setSettings({ ...settings, ai_voice_id: voice.id })}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Speaktor Voices */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className={getProviderBadge('speaktor').className}>
-                Speaktor
-              </Badge>
-              <span className="text-sm text-muted-foreground">Vozes brasileiras PT-BR</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {voicesByProvider.speaktor.map((voice) => (
-                <VoiceCard
-                  key={voice.id}
-                  voice={voice}
-                  isSelected={settings.ai_voice_id === voice.id}
-                  onClick={() => setSettings({ ...settings, ai_voice_id: voice.id })}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* OpenAI Voices */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className={getProviderBadge('openai').className}>
-                OpenAI
-              </Badge>
-              <span className="text-sm text-muted-foreground">Fallback</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {voicesByProvider.openai.map((voice) => (
-                <VoiceCard
-                  key={voice.id}
-                  voice={voice}
-                  isSelected={settings.ai_voice_id === voice.id}
-                  onClick={() => setSettings({ ...settings, ai_voice_id: voice.id })}
-                />
-              ))}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {AVAILABLE_VOICES.map((voice) => (
+              <div
+                key={voice.id}
+                className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                  settings.ai_voice_id === voice.id
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : "hover:border-primary/50"
+                }`}
+                onClick={() => setSettings({ ...settings, ai_voice_id: voice.id })}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-sm">{voice.name}</span>
+                  <Badge variant={voice.gender === "female" ? "default" : "secondary"} className="text-xs">
+                    {voice.gender === "female" ? "F" : "M"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-1">{voice.description}</p>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -353,35 +300,5 @@ export function AIVoiceSettings() {
 
       </CardContent>
     </Card>
-  );
-}
-
-// Voice Card Component
-interface VoiceCardProps {
-  voice: typeof AVAILABLE_VOICES[0];
-  isSelected: boolean;
-  onClick: () => void;
-}
-
-function VoiceCard({ voice, isSelected, onClick }: VoiceCardProps) {
-  const badge = getProviderBadge(voice.provider);
-  
-  return (
-    <div
-      className={`p-3 border rounded-lg cursor-pointer transition-all ${
-        isSelected
-          ? "border-primary bg-primary/5 ring-1 ring-primary"
-          : "hover:border-primary/50"
-      }`}
-      onClick={onClick}
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-medium text-sm">{voice.name}</span>
-        <Badge variant={voice.gender === "female" ? "default" : "secondary"} className="text-xs">
-          {voice.gender === "female" ? "F" : "M"}
-        </Badge>
-      </div>
-      <p className="text-xs text-muted-foreground line-clamp-1">{voice.description}</p>
-    </div>
   );
 }

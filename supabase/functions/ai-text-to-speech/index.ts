@@ -1,176 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-// Helper function to encode ArrayBuffer to base64
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000; // Process in chunks to avoid stack overflow
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode.apply(null, Array.from(chunk));
-  }
-  return btoa(binary);
-}
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Available voices for OpenAI TTS
-const OPENAI_VOICES: Record<string, { name: string; gender: string; description: string }> = {
-  'shimmer': { name: 'Shimmer', gender: 'female', description: 'Voz feminina clara e expressiva' },
-  'onyx': { name: 'Onyx', gender: 'male', description: 'Voz masculina grave e profissional' },
-  'echo': { name: 'Echo', gender: 'male', description: 'Voz masculina clara e amigável' },
+// ElevenLabs voice mapping
+const ELEVENLABS_VOICES: Record<string, string> = {
+  'el_sarah': 'EXAVITQu4vr4xnSDxMaL',
+  'el_laura': 'FGY2WhTYpPnrIDTdsKH5',
+  'el_alice': 'Xb7hH8MSUJpSbSDYk0k2',
+  'el_jessica': 'cgSgspJ2msm6clMCkdW9',
+  'el_lily': 'pFZP5JQG7iQjIQuC4Bku',
+  'el_matilda': 'XrExE9yKIg1WjnnlVkGX',
+  'el_roger': 'CwhRBWXzGAHq8TQ4Fs17',
+  'el_charlie': 'IKne3meq5aSn9XLyUdCD',
+  'el_george': 'JBFqnCBsd6RMkjVDRZzb',
+  'el_daniel': 'onwK4e9ZLuTAKqWW03F9',
+  'el_brian': 'nPczCjzI2devNBz1zQrb',
+  'el_liam': 'TX3LPaxmHKxFdv7VOQHJ',
 };
-
-// Speaktor voice mapping (voiceId -> Speaktor voice name)
-const SPEAKTOR_VOICES: Record<string, string> = {
-  // Speaktor Pro voices - Brasileiras (PT-BR)
-  'clara': 'Clara',
-  'larissa': 'Larissa',
-  'ines': 'Inês',
-  'vanessa': 'Vanessa Morgan',
-  'lucas': 'Lucas',
-  'caio': 'Caio',
-  // OpenAI voice fallback mapping
-  'shimmer': 'Clara',
-};
-
-// Get global Speaktor settings from system_settings
-async function getGlobalSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; apiKey: string; voice: string }> {
-  const { data: settings } = await supabase
-    .from('system_settings')
-    .select('key, value')
-    .in('key', ['tts_speaktor_enabled', 'tts_speaktor_api_key', 'tts_speaktor_voice']);
-
-  const getSetting = (key: string, defaultValue: any) => {
-    const setting = settings?.find((s: any) => s.key === key);
-    return setting?.value ?? defaultValue;
-  };
-
-  const enabled = getSetting('tts_speaktor_enabled', false);
-  return {
-    enabled: enabled === true || enabled === 'true',
-    apiKey: getSetting('tts_speaktor_api_key', ''),
-    voice: getSetting('tts_speaktor_voice', 'renata'),
-  };
-}
-
-// Get per-company Speaktor settings from law_firm_settings.ai_capabilities
-async function getCompanySpeaktorSettings(supabase: any, lawFirmId: string): Promise<{ enabled: boolean; voice: string } | null> {
-  const { data, error } = await supabase
-    .from('law_firm_settings')
-    .select('ai_capabilities')
-    .eq('law_firm_id', lawFirmId)
-    .maybeSingle();
-
-  if (error || !data?.ai_capabilities) {
-    return null;
-  }
-
-  const caps = data.ai_capabilities as any;
-  return {
-    enabled: caps.speaktor_enabled === true,
-    voice: caps.speaktor_voice || 'renata',
-  };
-}
-
-async function generateWithSpeaktor(text: string, voiceId: string, apiKey: string, defaultVoice: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
-  // Map voiceId to Speaktor voice name
-  // If voiceId is in our mapping, use the mapped name; otherwise check if defaultVoice is in mapping
-  let speaktorVoice: string;
-  
-  if (voiceId && SPEAKTOR_VOICES[voiceId.toLowerCase()]) {
-    speaktorVoice = SPEAKTOR_VOICES[voiceId.toLowerCase()];
-  } else if (defaultVoice && SPEAKTOR_VOICES[defaultVoice.toLowerCase()]) {
-    speaktorVoice = SPEAKTOR_VOICES[defaultVoice.toLowerCase()];
-  } else {
-    // Fallback to Renata if nothing matches
-    speaktorVoice = 'Renata';
-  }
-  
-  console.log(`[TTS-Speaktor] Generating audio with voice: ${speaktorVoice} (voiceId: ${voiceId}, defaultVoice: ${defaultVoice}), text length: ${text.length}`);
-
-  const response = await fetch("https://api.tor.app/developer/text_to_speech", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      text: text,
-      language: "pt-BR",
-      voice_name: speaktorVoice,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[TTS-Speaktor] API error:", response.status, errorText);
-    return { success: false, error: `Speaktor API error: ${response.status}` };
-  }
-
-  const data = await response.json();
-  
-  // Speaktor returns audioUrl, we need to fetch the audio
-  if (data.audioUrl) {
-    console.log(`[TTS-Speaktor] Audio URL received, fetching audio...`);
-    const audioResponse = await fetch(data.audioUrl);
-    if (!audioResponse.ok) {
-      return { success: false, error: "Failed to fetch audio from Speaktor URL" };
-    }
-    const audioBuffer = await audioResponse.arrayBuffer();
-    const base64Audio = arrayBufferToBase64(audioBuffer);
-    console.log(`[TTS-Speaktor] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
-    return { success: true, audioContent: base64Audio };
-  }
-
-  // If direct audio content is returned
-  if (data.audio || data.audioContent) {
-    return { success: true, audioContent: data.audio || data.audioContent };
-  }
-
-  return { success: false, error: "No audio content in Speaktor response" };
-}
-
-async function generateWithOpenAI(text: string, voiceId: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
-  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-  if (!OPENAI_API_KEY) {
-    console.error("[TTS-OpenAI] OPENAI_API_KEY is not configured");
-    return { success: false, error: "OpenAI TTS service not configured" };
-  }
-
-  const voice = voiceId in OPENAI_VOICES ? voiceId : 'shimmer';
-  console.log(`[TTS-OpenAI] Generating audio with voice: ${voice}, text length: ${text.length}`);
-
-  const response = await fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "tts-1-hd",
-      input: text,
-      voice: voice,
-      response_format: "mp3",
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[TTS-OpenAI] API error:", response.status, errorText);
-    return { success: false, error: "Failed to generate audio with OpenAI" };
-  }
-
-  const audioBuffer = await response.arrayBuffer();
-  const base64Audio = arrayBufferToBase64(audioBuffer);
-  console.log(`[TTS-OpenAI] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
-  
-  return { success: true, audioContent: base64Audio };
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -178,7 +28,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text, voiceId = 'shimmer', lawFirmId } = await req.json();
+    const { text, voiceId = 'el_sarah' } = await req.json();
 
     if (!text) {
       return new Response(
@@ -187,67 +37,67 @@ serve(async (req) => {
       );
     }
 
-    // Initialize Supabase client to check settings
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get global Speaktor settings (contains API key)
-    const globalSettings = await getGlobalSpeaktorSettings(supabase);
-    
-    // Get company-specific Speaktor settings if lawFirmId provided
-    let companySpeaktorEnabled = false;
-    let companySpeaktorVoice = 'renata';
-    
-    if (lawFirmId) {
-      const companySettings = await getCompanySpeaktorSettings(supabase, lawFirmId);
-      if (companySettings) {
-        companySpeaktorEnabled = companySettings.enabled;
-        companySpeaktorVoice = companySettings.voice;
-        console.log(`[TTS] Company ${lawFirmId} Speaktor settings: enabled=${companySpeaktorEnabled}, voice=${companySpeaktorVoice}`);
-      }
-    }
-    
-    // Determine if Speaktor should be used:
-    // 1. Global Speaktor must be enabled with API key
-    // 2. Company must have Speaktor enabled (if lawFirmId provided)
-    // 3. If no lawFirmId, use global settings
-    const useGlobalSpeaktor = globalSettings.enabled && globalSettings.apiKey;
-    const useSpeaktor = useGlobalSpeaktor && (lawFirmId ? companySpeaktorEnabled : true);
-    
-    // Determine voice priority: agent voiceId > company voice > global voice
-    const effectiveVoice = voiceId && SPEAKTOR_VOICES[voiceId.toLowerCase()] 
-      ? voiceId 
-      : (companySpeaktorVoice || globalSettings.voice);
-    
-    let result: { success: boolean; audioContent?: string; error?: string };
-
-    if (useSpeaktor) {
-      console.log(`[TTS] Using Speaktor as TTS provider (company: ${lawFirmId || 'global'}, voice: ${effectiveVoice})`);
-      result = await generateWithSpeaktor(text, effectiveVoice, globalSettings.apiKey, globalSettings.voice);
-      
-      // Fallback to OpenAI if Speaktor fails
-      if (!result.success) {
-        console.log("[TTS] Speaktor failed, falling back to OpenAI");
-        result = await generateWithOpenAI(text, voiceId);
-      }
-    } else {
-      console.log(`[TTS] Using OpenAI as TTS provider (company Speaktor: ${companySpeaktorEnabled}, global: ${globalSettings.enabled})`);
-      result = await generateWithOpenAI(text, voiceId);
-    }
-
-    if (!result.success) {
+    const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+    if (!ELEVENLABS_API_KEY) {
+      console.error("[TTS] ELEVENLABS_API_KEY is not configured");
       return new Response(
-        JSON.stringify({ error: result.error || "Failed to generate audio" }),
+        JSON.stringify({ error: "ElevenLabs API key not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // Resolve voice ID
+    let resolvedVoiceId: string;
+    if (ELEVENLABS_VOICES[voiceId]) {
+      resolvedVoiceId = ELEVENLABS_VOICES[voiceId];
+    } else if (voiceId.length > 15) {
+      resolvedVoiceId = voiceId;
+    } else {
+      resolvedVoiceId = ELEVENLABS_VOICES['el_sarah'];
+    }
+
+    console.log(`[TTS] Generating audio - voice: ${voiceId} -> ${resolvedVoiceId}, text length: ${text.length}`);
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.5,
+            use_speaker_boost: true,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[TTS] ElevenLabs API error:", response.status, errorText);
+      return new Response(
+        JSON.stringify({ error: `ElevenLabs API error: ${response.status}` }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    const base64Audio = base64Encode(audioBuffer);
+    
+    console.log(`[TTS] Audio generated successfully, size: ${audioBuffer.byteLength} bytes`);
+
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: true,
-        audioContent: result.audioContent,
-        mimeType: "audio/mpeg"
+        audioContent: base64Audio,
+        mimeType: "audio/mpeg",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
