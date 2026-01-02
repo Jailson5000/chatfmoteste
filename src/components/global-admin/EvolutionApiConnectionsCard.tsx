@@ -173,19 +173,22 @@ export function EvolutionApiConnectionsCard() {
     },
   });
 
-  // Test connection mutation
+  // Test connection mutation - uses edge function to avoid CORS issues
   const testConnectionMutation = useMutation({
     mutationFn: async (connection: EvolutionConnection) => {
       const startTime = Date.now();
-      const response = await fetch(`${connection.api_url}/instance/fetchInstances`, {
-        method: "GET",
-        headers: {
-          "apikey": connection.api_key,
+      
+      // Use the edge function to test connection (avoids CORS)
+      const { data, error } = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "test_connection",
+          apiUrl: connection.api_url,
+          apiKey: connection.api_key,
         },
       });
+      
       const latency = Date.now() - startTime;
-
-      const status = response.ok ? "online" : "offline";
+      const status = error ? "offline" : "online";
 
       // Update in database
       await supabase
@@ -197,16 +200,17 @@ export function EvolutionApiConnectionsCard() {
         })
         .eq("id", connection.id);
 
+      if (error) {
+        throw new Error(error.message || "Falha na conexão");
+      }
+
       return { status, latency };
     },
     onSuccess: (data, connection) => {
       queryClient.invalidateQueries({ queryKey: ["evolution-api-connections"] });
       toast({
-        title: data.status === "online" ? "Conexão OK" : "Conexão falhou",
-        description: data.status === "online"
-          ? `${connection.name}: ${data.latency}ms`
-          : `${connection.name}: API não responde`,
-        variant: data.status === "online" ? "default" : "destructive",
+        title: "Conexão OK",
+        description: `${connection.name}: ${data.latency}ms`,
       });
     },
     onError: (error: Error, connection) => {
@@ -220,8 +224,8 @@ export function EvolutionApiConnectionsCard() {
 
       queryClient.invalidateQueries({ queryKey: ["evolution-api-connections"] });
       toast({
-        title: "Erro no teste",
-        description: error.message,
+        title: "Conexão falhou",
+        description: error.message || "API não responde",
         variant: "destructive",
       });
     },
