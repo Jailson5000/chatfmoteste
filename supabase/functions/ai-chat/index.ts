@@ -360,7 +360,16 @@ serve(async (req) => {
 - Faça UMA pergunta ou informação por mensagem
 - NÃO envie textos longos ou explicações extensas
 - Use linguagem natural e profissional
-- Aguarde a resposta do cliente antes de continuar` 
+- Aguarde a resposta do cliente antes de continuar
+
+REGRA CRÍTICA SOBRE PEDIDOS DE ÁUDIO:
+- Se o cliente pedir resposta por áudio/voz, você DEVE responder NORMALMENTE com o conteúdo da resposta em TEXTO
+- O sistema converterá automaticamente sua resposta em áudio e enviará ao cliente
+- NUNCA diga "vou mandar por áudio", "vou ativar áudio", "vou gravar um áudio" ou frases similares
+- NUNCA envie "[Mensagem de áudio]" ou placeholders - responda com o conteúdo real
+- Simplesmente responda à pergunta do cliente como se fosse texto normal
+- Exemplo correto: Cliente pergunta "quais documentos preciso? pode ser por áudio?" - você responde: "Você vai precisar de RG, CPF e comprovante de residência."
+- O sistema cuida do envio do áudio automaticamente, você só precisa fornecer o conteúdo` 
     });
 
     // Add knowledge base as context (if linked to this agent)
