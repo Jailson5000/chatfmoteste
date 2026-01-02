@@ -1207,6 +1207,301 @@ export type Database = {
         }
         Relationships: []
       }
+      google_calendar_ai_logs: {
+        Row: {
+          action_type: string
+          ai_agent_id: string | null
+          client_id: string | null
+          conversation_id: string | null
+          created_at: string
+          error_message: string | null
+          event_end: string | null
+          event_id: string | null
+          event_start: string | null
+          event_title: string | null
+          id: string
+          integration_id: string
+          ip_address: string | null
+          law_firm_id: string
+          performed_by: string
+          request_description: string | null
+          response_summary: string | null
+          success: boolean
+          user_agent: string | null
+        }
+        Insert: {
+          action_type: string
+          ai_agent_id?: string | null
+          client_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_end?: string | null
+          event_id?: string | null
+          event_start?: string | null
+          event_title?: string | null
+          id?: string
+          integration_id: string
+          ip_address?: string | null
+          law_firm_id: string
+          performed_by?: string
+          request_description?: string | null
+          response_summary?: string | null
+          success?: boolean
+          user_agent?: string | null
+        }
+        Update: {
+          action_type?: string
+          ai_agent_id?: string | null
+          client_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          event_end?: string | null
+          event_id?: string | null
+          event_start?: string | null
+          event_title?: string | null
+          id?: string
+          integration_id?: string
+          ip_address?: string | null
+          law_firm_id?: string
+          performed_by?: string
+          request_description?: string | null
+          response_summary?: string | null
+          success?: boolean
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_calendar_ai_logs_ai_agent_id_fkey"
+            columns: ["ai_agent_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_ai_logs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_ai_logs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_ai_logs_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "google_calendar_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_ai_logs_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_calendar_events: {
+        Row: {
+          attendees: Json | null
+          calendar_id: string
+          client_id: string | null
+          conversation_id: string | null
+          created_at: string
+          created_by_ai: boolean | null
+          description: string | null
+          end_time: string
+          etag: string | null
+          google_event_id: string
+          html_link: string | null
+          id: string
+          integration_id: string
+          is_all_day: boolean | null
+          last_synced_at: string | null
+          law_firm_id: string
+          location: string | null
+          meet_link: string | null
+          recurrence_rule: string | null
+          recurring_event_id: string | null
+          start_time: string
+          status: string | null
+          timezone: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          attendees?: Json | null
+          calendar_id: string
+          client_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by_ai?: boolean | null
+          description?: string | null
+          end_time: string
+          etag?: string | null
+          google_event_id: string
+          html_link?: string | null
+          id?: string
+          integration_id: string
+          is_all_day?: boolean | null
+          last_synced_at?: string | null
+          law_firm_id: string
+          location?: string | null
+          meet_link?: string | null
+          recurrence_rule?: string | null
+          recurring_event_id?: string | null
+          start_time: string
+          status?: string | null
+          timezone?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          attendees?: Json | null
+          calendar_id?: string
+          client_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by_ai?: boolean | null
+          description?: string | null
+          end_time?: string
+          etag?: string | null
+          google_event_id?: string
+          html_link?: string | null
+          id?: string
+          integration_id?: string
+          is_all_day?: boolean | null
+          last_synced_at?: string | null
+          law_firm_id?: string
+          location?: string | null
+          meet_link?: string | null
+          recurrence_rule?: string | null
+          recurring_event_id?: string | null
+          start_time?: string
+          status?: string | null
+          timezone?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_calendar_events_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_events_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "google_calendar_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_events_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_calendar_integrations: {
+        Row: {
+          access_token: string
+          allow_create_events: boolean
+          allow_delete_events: boolean
+          allow_edit_events: boolean
+          allow_read_events: boolean
+          connected_at: string
+          connected_by: string | null
+          created_at: string
+          default_calendar_id: string | null
+          default_calendar_name: string | null
+          google_account_id: string | null
+          google_email: string
+          id: string
+          is_active: boolean
+          last_sync_at: string | null
+          law_firm_id: string
+          next_sync_at: string | null
+          refresh_token: string
+          sync_token: string | null
+          token_expires_at: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          allow_create_events?: boolean
+          allow_delete_events?: boolean
+          allow_edit_events?: boolean
+          allow_read_events?: boolean
+          connected_at?: string
+          connected_by?: string | null
+          created_at?: string
+          default_calendar_id?: string | null
+          default_calendar_name?: string | null
+          google_account_id?: string | null
+          google_email: string
+          id?: string
+          is_active?: boolean
+          last_sync_at?: string | null
+          law_firm_id: string
+          next_sync_at?: string | null
+          refresh_token: string
+          sync_token?: string | null
+          token_expires_at: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          allow_create_events?: boolean
+          allow_delete_events?: boolean
+          allow_edit_events?: boolean
+          allow_read_events?: boolean
+          connected_at?: string
+          connected_by?: string | null
+          created_at?: string
+          default_calendar_id?: string | null
+          default_calendar_name?: string | null
+          google_account_id?: string | null
+          google_email?: string
+          id?: string
+          is_active?: boolean
+          last_sync_at?: string | null
+          law_firm_id?: string
+          next_sync_at?: string | null
+          refresh_token?: string
+          sync_token?: string | null
+          token_expires_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_calendar_integrations_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       instance_status_history: {
         Row: {
           changed_at: string
