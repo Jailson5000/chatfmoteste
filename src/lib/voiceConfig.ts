@@ -12,8 +12,8 @@ export interface VoiceConfig {
 
 // ElevenLabs voices - High quality multilingual
 export const AVAILABLE_VOICES: VoiceConfig[] = [
-  { id: "el_laura", name: "Laura (ElevenLabs)", gender: "female", description: "Voz feminina profissional de alta qualidade", externalId: "FGY2WhTYpPnrIDTdsKH5" },
-  { id: "openai_nova", name: "Nova (OpenAI)", gender: "female", description: "Voz feminina padrão OpenAI", externalId: "nova" },
+  { id: "el_laura", name: "Laura (ElevenLabs)", gender: "female", description: "Voz feminina profissional de alta qualidade", externalId: "sLEZIrFwEyhMIH1ALLIQ" },
+  { id: "openai_shimmer", name: "Shimmer (OpenAI)", gender: "female", description: "Voz feminina padrão OpenAI", externalId: "shimmer" },
 ];
 
 export const DEFAULT_VOICE_ID = "el_laura";
