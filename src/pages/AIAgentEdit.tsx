@@ -715,7 +715,9 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                 <div className="space-y-3">
                   <Select value={voiceId} onValueChange={setVoiceId}>
                     <SelectTrigger className="w-full">
-                      <SelectValue />
+                      <SelectValue>
+                        {AVAILABLE_VOICES.find(v => v.id === voiceId)?.name || "Selecione uma voz"} ({AVAILABLE_VOICES.find(v => v.id === voiceId)?.gender === "female" ? "Feminina" : "Masculina"})
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {AVAILABLE_VOICES.map((voice) => (
@@ -723,7 +725,7 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                           <span className="flex items-center gap-2">
                             {voice.name}
                             <Badge variant="secondary" className="text-xs">
-                              {voice.description}
+                              {voice.gender === "female" ? "Feminina" : "Masculina"}
                             </Badge>
                           </span>
                         </SelectItem>
