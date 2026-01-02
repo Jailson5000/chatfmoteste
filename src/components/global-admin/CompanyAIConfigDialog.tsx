@@ -12,10 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic } from "lucide-react";
+import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic, Volume2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 interface Company {
   id: string;
@@ -62,6 +64,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [showN8nSecret, setShowN8nSecret] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Speaktor TTS config (per-company)
+  const [speaktorEnabled, setSpeaktorEnabled] = useState(false);
+  const [speaktorVoice, setSpeaktorVoice] = useState(DEFAULT_VOICE_ID);
 
   // AI Capabilities - image and audio are INDEPENDENT
   const [capabilities, setCapabilities] = useState({
@@ -121,6 +127,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
             image_analysis: caps.image_analysis ?? true,
             audio_response: caps.audio_response ?? true,
           });
+          
+          // Speaktor per-company settings
+          setSpeaktorEnabled(caps.speaktor_enabled ?? false);
+          setSpeaktorVoice(caps.speaktor_voice ?? DEFAULT_VOICE_ID);
         }
       }
     } catch (error) {
@@ -153,6 +163,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         ...capabilities,
         ia_site_active: internalEnabled,
         openai_active: openaiEnabled,
+        speaktor_enabled: speaktorEnabled,
+        speaktor_voice: speaktorVoice,
       };
 
       const settingsData = {
@@ -259,24 +271,27 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const getAIResponsibilities = () => {
     const bothActive = internalEnabled && openaiEnabled;
     
+    // Audio/TTS depends on Speaktor setting
+    const audioProvider = speaktorEnabled ? "Speaktor" : (openaiEnabled ? "OpenAI" : "IA do Site");
+    
     if (bothActive) {
       return {
         chat: "OpenAI",
-        audio: "OpenAI",
+        audio: audioProvider,
         transcription: "OpenAI",
         image: "IA do Site"
       };
     } else if (openaiEnabled) {
       return {
         chat: "OpenAI",
-        audio: "OpenAI",
+        audio: audioProvider,
         transcription: "OpenAI",
         image: "Indisponível"
       };
     } else {
       return {
         chat: "IA do Site",
-        audio: "IA do Site",
+        audio: audioProvider,
         transcription: "IA do Site",
         image: "IA do Site"
       };
@@ -384,7 +399,10 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     </div>
                     <div className="flex items-center gap-2 p-2 rounded bg-white/5">
                       <span className="text-white/60">🎙️ Áudio/TTS:</span>
-                      <span className={`font-medium ${responsibilities.audio === "OpenAI" ? "text-emerald-400" : "text-blue-400"}`}>
+                      <span className={`font-medium ${
+                        responsibilities.audio === "Speaktor" ? "text-purple-400" :
+                        responsibilities.audio === "OpenAI" ? "text-emerald-400" : "text-blue-400"
+                      }`}>
                         {responsibilities.audio}
                       </span>
                     </div>
@@ -489,6 +507,63 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Speaktor TTS - Per-company voice configuration */}
+              <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-purple-500/20">
+                      <Volume2 className="h-4 w-4 text-purple-400" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-white">Speaktor TTS</p>
+                      <p className="text-xs text-white/50">Vozes brasileiras de alta qualidade</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={speaktorEnabled ? "bg-purple-600" : "bg-white/20"}>
+                      {speaktorEnabled ? "Ativo" : "OpenAI TTS"}
+                    </Badge>
+                    <Switch
+                      checked={speaktorEnabled}
+                      onCheckedChange={setSpeaktorEnabled}
+                    />
+                  </div>
+                </div>
+
+                {speaktorEnabled && (
+                  <div className="space-y-3 pt-2">
+                    <div className="space-y-2">
+                      <Label className="text-white/70 text-sm">Voz Padrão da Empresa</Label>
+                      <Select value={speaktorVoice} onValueChange={setSpeaktorVoice}>
+                        <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1a] border-white/10">
+                          {AVAILABLE_VOICES.filter(v => v.provider === "speaktor").map((voice) => (
+                            <SelectItem key={voice.id} value={voice.id}>
+                              {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-white/40">
+                        A voz configurada no agente tem prioridade sobre esta voz padrão.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                  <Volume2 className="h-4 w-4 text-purple-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-purple-200/80">
+                    {speaktorEnabled 
+                      ? "Speaktor ativo: Áudio TTS será gerado com vozes brasileiras de alta qualidade."
+                      : "Speaktor desativado: Áudio TTS será gerado via OpenAI (vozes em inglês)."
+                    }
+                  </p>
+                </div>
               </div>
 
               {/* AI Capabilities - Image and Audio are INDEPENDENT */}

@@ -516,13 +516,14 @@ function splitTextForTTS(text: string, maxChars = 3500): string[] {
 }
 
 // Helper function to generate TTS audio using ai-text-to-speech edge function (supports Speaktor + OpenAI fallback)
-async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
+async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: string): Promise<string | null> {
   try {
     const trimmedText = text.trim().substring(0, 3900);
 
     logDebug('TTS', `Generating audio with voice: ${voiceId} via ai-text-to-speech`, {
       textLength: trimmedText.length,
       truncated: trimmedText.length !== text.trim().length,
+      lawFirmId: lawFirmId || 'not provided',
     });
 
     // Call the ai-text-to-speech edge function which handles Speaktor/OpenAI logic
@@ -538,6 +539,7 @@ async function generateTTSAudio(text: string, voiceId: string): Promise<string |
       body: JSON.stringify({
         text: trimmedText,
         voiceId: voiceId,
+        lawFirmId: lawFirmId, // Pass company ID for per-company Speaktor settings
       }),
     });
 
@@ -861,7 +863,7 @@ async function sendAIResponseToWhatsApp(
           textLength: chunkText.length,
         });
 
-        const audioBase64 = await generateTTSAudio(chunkText, voiceConfig!.voiceId);
+        const audioBase64 = await generateTTSAudio(chunkText, voiceConfig!.voiceId, context.lawFirmId);
 
         if (!audioBase64) {
           logDebug('TTS_FLOW', 'FAILED to generate TTS audio chunk, falling back to text', { index: i + 1 });
