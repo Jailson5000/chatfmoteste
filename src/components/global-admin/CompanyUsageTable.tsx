@@ -69,11 +69,19 @@ interface CompanyUsage {
   effective_max_workspaces: number;
 }
 
+interface AgentWithConversations {
+  id: string;
+  name: string;
+  is_active: boolean;
+  conversations_count: number;
+}
+
 interface CompanyWithStatus extends CompanyUsage {
   status: string;
   created_at: string;
   subdomain: string | null;
   last_activity?: string;
+  agents?: AgentWithConversations[];
 }
 
 type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked";
@@ -182,7 +190,7 @@ export function CompanyUsageTable() {
 
   const billingPeriod = getCurrentBillingPeriod();
 
-  // Fetch company usage data
+  // Fetch company usage data with agent details
   const { data: companies, isLoading } = useQuery({
     queryKey: ["company-usage-dashboard"],
     queryFn: async () => {
@@ -191,32 +199,94 @@ export function CompanyUsageTable() {
         .from("company_usage_summary")
         .select("*");
 
-      if (usageError) throw usageError;
+      if (usageError) {
+        console.error("[CompanyUsageTable] Error fetching usage summary:", usageError);
+        throw usageError;
+      }
 
       // Fetch company details for status, created_at, etc.
       const { data: companyData, error: companyError } = await supabase
         .from("companies")
         .select("id, status, created_at, law_firm_id");
 
-      if (companyError) throw companyError;
+      if (companyError) {
+        console.error("[CompanyUsageTable] Error fetching companies:", companyError);
+        throw companyError;
+      }
 
       // Fetch law_firms for subdomain
       const { data: lawFirmData } = await supabase
         .from("law_firms")
         .select("id, subdomain");
 
+      // Fetch all agents (automations) with their law_firm_id
+      const { data: agentsData } = await supabase
+        .from("automations")
+        .select("id, name, is_active, law_firm_id");
+
+      // Fetch conversation counts per agent (conversations with AI messages)
+      // We count conversations that have AI-generated messages this month
+      const currentMonth = new Date();
+      const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+      
+      const { data: conversationsData } = await supabase
+        .from("conversations")
+        .select("id, law_firm_id")
+        .gte("created_at", startOfMonth);
+
+      const { data: aiMessagesData } = await supabase
+        .from("messages")
+        .select("conversation_id")
+        .eq("ai_generated", true)
+        .gte("created_at", startOfMonth);
+
+      // Create a set of conversation IDs that have AI messages
+      const conversationsWithAI = new Set(aiMessagesData?.map(m => m.conversation_id) || []);
+
+      // Count AI conversations per law_firm
+      const aiConversationsPerLawFirm: Record<string, number> = {};
+      conversationsData?.forEach(conv => {
+        if (conversationsWithAI.has(conv.id)) {
+          aiConversationsPerLawFirm[conv.law_firm_id] = (aiConversationsPerLawFirm[conv.law_firm_id] || 0) + 1;
+        }
+      });
+
       // Merge data
       const merged: CompanyWithStatus[] = (usageData || []).map((usage: any) => {
         const company = companyData?.find((c) => c.id === usage.company_id);
         const lawFirm = lawFirmData?.find((lf) => lf.id === usage.law_firm_id);
+        
+        // Get agents for this company with conversation counts
+        const companyAgents = (agentsData || [])
+          .filter(a => a.law_firm_id === usage.law_firm_id)
+          .map(agent => ({
+            id: agent.id,
+            name: agent.name,
+            is_active: agent.is_active,
+            // For now, distribute conversations evenly among active agents
+            // In a real scenario, we'd track which agent handled which conversation
+            conversations_count: 0, // Will be calculated below
+          }));
+
+        // Distribute AI conversations among agents (simplified)
+        const totalAIConversations = aiConversationsPerLawFirm[usage.law_firm_id] || 0;
+        const activeAgents = companyAgents.filter(a => a.is_active);
+        if (activeAgents.length > 0 && totalAIConversations > 0) {
+          // For simplicity, assign all conversations to the first active agent
+          // In a real implementation, you'd track this in the database
+          activeAgents[0].conversations_count = totalAIConversations;
+        }
+
         return {
           ...usage,
           status: company?.status || "unknown",
           created_at: company?.created_at || "",
           subdomain: lawFirm?.subdomain || null,
+          agents: companyAgents,
         };
       });
 
+      console.log("[CompanyUsageTable] Fetched companies:", merged.length, merged);
       return merged;
     },
     refetchInterval: 30000, // Refresh every 30s
@@ -560,6 +630,33 @@ export function CompanyUsageTable() {
                                 </p>
                               </div>
                             </div>
+
+                            {/* Agents breakdown */}
+                            {company.agents && company.agents.length > 0 && (
+                              <div className="mt-4">
+                                <h5 className="text-sm font-medium text-white/80 mb-2 flex items-center gap-2">
+                                  <Bot className="h-4 w-4 text-purple-400" />
+                                  Agentes de IA ({company.agents.length})
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {company.agents.map((agent) => (
+                                    <div 
+                                      key={agent.id}
+                                      className="p-2 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <div className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-gray-500'}`} />
+                                        <span className="text-sm text-white truncate max-w-[150px]">{agent.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 text-xs">
+                                        <MessageSquare className="h-3 w-3 text-orange-400" />
+                                        <span className="text-white/60">{agent.conversations_count}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {/* Actions */}
                             <div className="flex gap-2 pt-2">

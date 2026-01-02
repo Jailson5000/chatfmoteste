@@ -8,7 +8,10 @@ import {
   ArrowDownRight,
   FileText,
   FileSpreadsheet,
-  AlertTriangle
+  AlertTriangle,
+  Users,
+  MessageSquare,
+  Mic
 } from "lucide-react";
 import { useSystemMetrics } from "@/hooks/useSystemMetrics";
 import { exportDashboardToPDF, exportToExcel, getFormattedDate } from "@/lib/exportUtils";
@@ -102,6 +105,16 @@ export default function GlobalAdminDashboard() {
       trendUp: true,
     },
     {
+      title: "Total de Usuários",
+      value: dashboardMetrics?.totalUsers || 0,
+      description: "Em todas as empresas",
+      icon: Users,
+      iconBg: "bg-blue-500/10",
+      iconColor: "text-blue-500",
+      trend: `${dashboardMetrics?.totalConnections || 0} conexões`,
+      trendUp: true,
+    },
+    {
       title: "Alertas de Limite",
       value: (alertsData?.warning || 0) + (alertsData?.critical || 0),
       description: `${alertsData?.critical || 0} críticos, ${alertsData?.warning || 0} avisos`,
@@ -110,16 +123,6 @@ export default function GlobalAdminDashboard() {
       iconColor: alertsData?.critical ? "text-red-500" : "text-yellow-500",
       trend: alertsData?.critical ? "Ação necessária" : "Monitorando",
       trendUp: false,
-    },
-    {
-      title: "Conexões Ativas",
-      value: dashboardMetrics?.activeConnections || 0,
-      description: "Funcionando normalmente",
-      icon: Link2,
-      iconBg: "bg-green-500/10",
-      iconColor: "text-green-500",
-      trend: "+15%",
-      trendUp: true,
     },
   ];
 
