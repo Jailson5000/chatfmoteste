@@ -781,6 +781,14 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
     if (effectiveLawFirmIdForCalendar) {
       const calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmIdForCalendar);
       if (calendarIntegration.active && calendarIntegration.permissions.read) {
+        // Get current date/time for context
+        const now = new Date();
+        const currentDate = now.toISOString().split('T')[0];
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        const currentDay = now.getDate();
+        const brazilTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        
         let calendarInstructions = `\n\n📅 GOOGLE CALENDAR INTEGRADO - VOCÊ TEM ACESSO PARA:`;
         if (calendarIntegration.permissions.read) {
           calendarInstructions += `\n- Verificar horários disponíveis (use a função check_availability)`;
@@ -795,11 +803,17 @@ RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!`
         if (calendarIntegration.permissions.delete) {
           calendarInstructions += `\n- Cancelar compromissos (use a função delete_event)`;
         }
-        calendarInstructions += `\n\nQUANDO O CLIENTE QUISER AGENDAR, REMARCAR OU CANCELAR CONSULTAS:
-1. Use as funções do calendário SEMPRE que identificar intenção de agendamento
-2. Confirme os dados com o cliente antes de criar o evento
-3. Após executar a ação, confirme o sucesso ao cliente
-4. Se o cliente não especificar horário, verifique disponibilidade primeiro`;
+        calendarInstructions += `\n\n⚠️ DATA E HORA ATUAL: ${brazilTime} (Fuso: America/Sao_Paulo)
+📆 DATA ATUAL: ${currentDate} (Ano: ${currentYear}, Mês: ${currentMonth}, Dia: ${currentDay})
+
+REGRAS CRÍTICAS PARA AGENDAMENTO:
+1. SEMPRE use o ano ${currentYear} ou posterior para datas futuras
+2. Se o cliente disser "segunda-feira" ou "próxima semana", calcule a partir de HOJE (${currentDate})
+3. NUNCA use datas no passado - sempre verifique se start_time é MAIOR que ${now.toISOString()}
+4. Use as funções do calendário SEMPRE que identificar intenção de agendamento
+5. Confirme os dados com o cliente ANTES de criar o evento
+6. Após executar a ação, confirme o sucesso ao cliente
+7. Se o cliente não especificar horário, verifique disponibilidade primeiro usando check_availability`;
         
         messages.push({ role: "system", content: calendarInstructions });
         console.log(`[AI Chat] Added calendar instructions for law_firm ${effectiveLawFirmIdForCalendar}`);
