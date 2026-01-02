@@ -294,6 +294,7 @@ export default function AIAgentEdit() {
         is_active: isActive,
         updated_at: new Date().toISOString(),
         last_prompt: automation.ai_prompt, // Previous prompt is now last_prompt
+        version: (automation.version || 1) + 1, // Increment version
       });
     } catch (error) {
       console.error('Error saving:', error);
@@ -453,6 +454,11 @@ export default function AIAgentEdit() {
                 {editedDescription || 'Agente de IA'}
               </p>
             </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Versão do prompt:</span>
+            <Badge variant="secondary">Versão {automation.version || 1} - v{automation.version || 1}</Badge>
           </div>
         </div>
 

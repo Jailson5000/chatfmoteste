@@ -364,6 +364,7 @@ export type Database = {
           trigger_config: Json | null
           trigger_type: string
           updated_at: string
+          version: number
           webhook_url: string
         }
         Insert: {
@@ -381,6 +382,7 @@ export type Database = {
           trigger_config?: Json | null
           trigger_type: string
           updated_at?: string
+          version?: number
           webhook_url: string
         }
         Update: {
@@ -398,6 +400,7 @@ export type Database = {
           trigger_config?: Json | null
           trigger_type?: string
           updated_at?: string
+          version?: number
           webhook_url?: string
         }
         Relationships: [

@@ -28,6 +28,7 @@ export interface Automation {
   created_at: string;
   updated_at: string;
   last_prompt: string | null;
+  version: number;
 }
 
 export interface CreateAutomationParams {
@@ -127,8 +128,20 @@ export function useAutomations() {
     mutationFn: async (params: UpdateAutomationParams) => {
       const { id, ...updateData } = params;
 
+      // First, get current version
+      const { data: currentData, error: fetchError } = await supabase
+        .from("automations")
+        .select("version")
+        .eq("id", id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentVersion = (currentData?.version as number) || 1;
+
       const updatePayload: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
+        version: currentVersion + 1, // Increment version on each update
       };
 
       if (updateData.name !== undefined) updatePayload.name = updateData.name;

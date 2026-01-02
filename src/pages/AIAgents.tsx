@@ -39,6 +39,7 @@ import { useAgentFolders, AgentFolder } from "@/hooks/useAgentFolders";
 import { useKnowledgeItems } from "@/hooks/useKnowledgeItems";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useDepartments } from "@/hooks/useDepartments";
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -108,7 +109,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-const MAX_PROMPT_LENGTH = 5000;
+const MAX_PROMPT_LENGTH = 10000;
 
 type ChannelType = "all" | "instance" | "department";
 type ViewMode = "list" | "editor";
@@ -275,19 +276,14 @@ export default function AIAgents() {
   const [isActive, setIsActive] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [promptVersion, setPromptVersion] = useState(1);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceId, setVoiceId] = useState("shimmer");
+  const [voiceId, setVoiceId] = useState("renata");
 
-// Available voices
-const AVAILABLE_VOICES = [
-  { id: "shimmer", name: "Shimmer", description: "Feminina" },
-  { id: "onyx", name: "Onyx", description: "Masculina grave" },
-  { id: "echo", name: "Echo", description: "Masculina clara" },
-];
+  // Get version from selected agent
+  const promptVersion = selectedAgent?.version || 1;
 
   // Load agent data when selected
   useEffect(() => {
@@ -305,9 +301,8 @@ const AVAILABLE_VOICES = [
       
       // Load voice settings
       setVoiceEnabled(Boolean(config?.voice_enabled));
-      setVoiceId((config?.voice_id as string) || "shimmer");
+      setVoiceId((config?.voice_id as string) || DEFAULT_VOICE_ID);
       
-      setPromptVersion(1);
       setHasChanges(false);
     }
   }, [selectedAgent]);
@@ -705,13 +700,14 @@ const AVAILABLE_VOICES = [
 
       setHasChanges(false);
       setLastUpdated(new Date());
-      setPromptVersion(prev => prev + 1);
       
+      // Update selected agent with new version from refetched data
       setSelectedAgent({
         ...selectedAgent,
         ai_prompt: prompt,
         is_active: isActive,
         trigger_config: triggerConfig,
+        version: (selectedAgent.version || 1) + 1,
       });
       
       toast({
