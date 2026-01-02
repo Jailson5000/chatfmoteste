@@ -54,15 +54,25 @@ async function getSpeaktorSettings(supabase: any): Promise<{ enabled: boolean; a
   return {
     enabled: enabled === true || enabled === 'true',
     apiKey: getSetting('tts_speaktor_api_key', ''),
-    voice: getSetting('tts_speaktor_voice', 'Vanessa Morgan'),
+    voice: getSetting('tts_speaktor_voice', 'renata'),
   };
 }
 
 async function generateWithSpeaktor(text: string, voiceId: string, apiKey: string, defaultVoice: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
-  // Map voiceId to Speaktor voice, fallback to default configured voice
-  const speaktorVoice = SPEAKTOR_VOICES[voiceId] || defaultVoice;
+  // Map voiceId to Speaktor voice name
+  // If voiceId is in our mapping, use the mapped name; otherwise check if defaultVoice is in mapping
+  let speaktorVoice: string;
   
-  console.log(`[TTS-Speaktor] Generating audio with voice: ${speaktorVoice} (from voiceId: ${voiceId}), text length: ${text.length}`);
+  if (voiceId && SPEAKTOR_VOICES[voiceId.toLowerCase()]) {
+    speaktorVoice = SPEAKTOR_VOICES[voiceId.toLowerCase()];
+  } else if (defaultVoice && SPEAKTOR_VOICES[defaultVoice.toLowerCase()]) {
+    speaktorVoice = SPEAKTOR_VOICES[defaultVoice.toLowerCase()];
+  } else {
+    // Fallback to Renata if nothing matches
+    speaktorVoice = 'Renata';
+  }
+  
+  console.log(`[TTS-Speaktor] Generating audio with voice: ${speaktorVoice} (voiceId: ${voiceId}, defaultVoice: ${defaultVoice}), text length: ${text.length}`);
 
   const response = await fetch("https://api.tor.app/developer/text_to_speech", {
     method: "POST",
