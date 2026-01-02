@@ -28,15 +28,14 @@ const OPENAI_VOICES: Record<string, { name: string; gender: string; description:
 // Speaktor voice mapping (voiceId -> Speaktor voice name)
 const SPEAKTOR_VOICES: Record<string, string> = {
   // Speaktor Pro voices - Brasileiras (PT-BR)
-  'renata': 'Renata',
-  'natalia': 'Natália',
-  'adriana': 'Adriana',
-  'carla': 'Carla',
-  'rodrigo': 'Rodrigo',
-  'paulo': 'Paulo',
-  'carlos': 'Carlos',
+  'clara': 'Clara',
+  'larissa': 'Larissa',
+  'ines': 'Inês',
+  'vanessa': 'Vanessa Morgan',
+  'lucas': 'Lucas',
+  'caio': 'Caio',
   // OpenAI voice fallback mapping
-  'shimmer': 'Renata',
+  'shimmer': 'Clara',
 };
 
 // Get global Speaktor settings from system_settings
