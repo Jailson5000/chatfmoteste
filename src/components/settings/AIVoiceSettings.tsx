@@ -12,9 +12,12 @@ import { supabase } from "@/integrations/supabase/client";
 
 // Available voices with descriptions
 const AVAILABLE_VOICES = [
-  { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara e expressiva" },
-  { id: "onyx", name: "Onyx", gender: "male", description: "Voz masculina grave e profissional" },
-  { id: "echo", name: "Echo", gender: "male", description: "Voz masculina clara e amigável" },
+  // Speaktor voices (premium - better quality and emotional tones)
+  { id: "vanessa_morgan", name: "Vanessa Morgan", gender: "female", description: "Voz feminina brasileira natural e expressiva (Speaktor)", provider: "speaktor" },
+  // OpenAI voices (fallback)
+  { id: "shimmer", name: "Shimmer", gender: "female", description: "Voz feminina clara e expressiva", provider: "openai" },
+  { id: "onyx", name: "Onyx", gender: "male", description: "Voz masculina grave e profissional", provider: "openai" },
+  { id: "echo", name: "Echo", gender: "male", description: "Voz masculina clara e amigável", provider: "openai" },
 ] as const;
 
 interface VoiceSettings {
@@ -33,7 +36,7 @@ export function AIVoiceSettings() {
   
   const [settings, setSettings] = useState<VoiceSettings>({
     ai_voice_enabled: false,
-    ai_voice_id: "shimmer",
+    ai_voice_id: "vanessa_morgan", // Default to Speaktor voice
   });
 
   // Load settings on mount
@@ -54,7 +57,7 @@ export function AIVoiceSettings() {
         if (data) {
           setSettings({
             ai_voice_enabled: data.ai_voice_enabled || false,
-            ai_voice_id: data.ai_voice_id || "shimmer",
+            ai_voice_id: data.ai_voice_id || "vanessa_morgan",
           });
         }
       } catch (error) {
@@ -261,7 +264,14 @@ export function AIVoiceSettings() {
                 onClick={() => setSettings({ ...settings, ai_voice_id: voice.id })}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium">{voice.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{voice.name}</span>
+                    {voice.provider === "speaktor" && (
+                      <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-600 border-purple-500/30">
+                        Premium
+                      </Badge>
+                    )}
+                  </div>
                   <Badge variant={voice.gender === "female" ? "default" : "secondary"}>
                     {voice.gender === "female" ? "Feminina" : "Masculina"}
                   </Badge>
