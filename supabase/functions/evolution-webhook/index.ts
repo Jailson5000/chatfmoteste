@@ -381,7 +381,7 @@ interface VoiceConfig {
 
 // Only respond with audio when the CLIENT explicitly requests it or indicates reading difficulty.
 // (voiceConfig.enabled is just a permission toggle)
-function isAudioRequested(userText: string): boolean {
+function isAudioRequestedFromText(userText: string): boolean {
   if (!userText) return false;
   const t = userText.toLowerCase();
 
@@ -408,6 +408,81 @@ function isAudioRequested(userText: string): boolean {
 
   return explicitAudioPatterns.some((p) => p.test(t)) || 
          readingDifficultyPatterns.some((p) => p.test(t));
+}
+
+// Check if audio mode should be active based on:
+// 1. Current message explicitly requests audio
+// 2. Client indicated reading difficulty in recent messages
+// 3. Client has been sending audio messages (prefers audio communication)
+async function shouldRespondWithAudio(
+  supabaseClient: any,
+  conversationId: string,
+  currentMessageText: string,
+  currentMessageType: string
+): Promise<boolean> {
+  // Check current message first
+  if (isAudioRequestedFromText(currentMessageText)) {
+    logDebug('AUDIO_MODE', 'Audio requested in current message');
+    return true;
+  }
+
+  try {
+    // Get recent messages to check for audio preference pattern
+    const { data: recentMessages } = await supabaseClient
+      .from('messages')
+      .select('content, message_type, is_from_me, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    if (!recentMessages || recentMessages.length === 0) {
+      return false;
+    }
+
+    // Count client audio messages (indicates preference for audio communication)
+    const clientAudioCount = recentMessages.filter(
+      (m: any) => !m.is_from_me && m.message_type === 'audio'
+    ).length;
+
+    // Check if client requested audio in any recent message
+    const clientMessages = recentMessages.filter((m: any) => !m.is_from_me && m.content);
+    const hasRecentAudioRequest = clientMessages.some((m: any) => 
+      isAudioRequestedFromText(m.content || '')
+    );
+
+    if (hasRecentAudioRequest) {
+      logDebug('AUDIO_MODE', 'Client requested audio in recent messages');
+      return true;
+    }
+
+    // If client is predominantly sending audio messages (3+ in last 15), respond with audio
+    if (clientAudioCount >= 3) {
+      logDebug('AUDIO_MODE', `Client prefers audio communication (${clientAudioCount} audio messages)`);
+      return true;
+    }
+
+    // If current message is audio and voice is enabled, respond in audio
+    if (currentMessageType === 'audio') {
+      // Check if there were recent audio requests or reading difficulty mentions
+      const hasAccessibilityNeed = clientMessages.some((m: any) => {
+        const content = m.content?.toLowerCase() || '';
+        return content.includes('não sei ler') || 
+               content.includes('não consigo ler') ||
+               content.includes('dificuldade') ||
+               content.includes('não enxergo');
+      });
+
+      if (hasAccessibilityNeed) {
+        logDebug('AUDIO_MODE', 'Client has accessibility needs, responding with audio');
+        return true;
+      }
+    }
+
+    return false;
+  } catch (error) {
+    logDebug('AUDIO_MODE', 'Error checking audio preference', { error });
+    return false;
+  }
 }
 
 // Helper function to generate TTS audio using OpenAI
@@ -682,11 +757,18 @@ async function sendAIResponseToWhatsApp(
     });
 
     // Check BEFORE sending if audio was requested - if so, skip text and send ONLY audio
-    const audioRequested = isAudioRequested(context.messageContent);
+    // Uses enhanced detection that checks recent messages for audio preference/accessibility needs
+    const audioRequested = await shouldRespondWithAudio(
+      supabaseClient,
+      context.conversationId,
+      context.messageContent,
+      context.messageType
+    );
     const shouldSendOnlyAudio = voiceConfig?.enabled && audioRequested;
 
     logDebug('SEND_RESPONSE', 'Audio detection', { 
       userMessage: context.messageContent.substring(0, 100),
+      messageType: context.messageType,
       audioRequested, 
       voiceEnabled: voiceConfig?.enabled,
       shouldSendOnlyAudio 
