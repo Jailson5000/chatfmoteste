@@ -123,7 +123,7 @@ export function IntegrationsSettings() {
         <IntegrationCard
           icon={<TrayIcon />}
           title="Tray"
-          description="Plataforma completa de e-commerce. Gerencie sua loja virtual, produtos, pedidos e integre com marketplaces."
+          description="Integre o chat do seu e-commerce Tray diretamente com a plataforma. Atenda clientes e gerencie conversas em um só lugar."
           isComingSoon
         />
       </div>
