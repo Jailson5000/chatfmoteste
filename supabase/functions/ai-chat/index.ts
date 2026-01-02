@@ -362,14 +362,24 @@ serve(async (req) => {
 - Use linguagem natural e profissional
 - Aguarde a resposta do cliente antes de continuar
 
-REGRA CRÍTICA SOBRE PEDIDOS DE ÁUDIO:
-- Se o cliente pedir resposta por áudio/voz, você DEVE responder NORMALMENTE com o conteúdo da resposta em TEXTO
-- O sistema converterá automaticamente sua resposta em áudio e enviará ao cliente
-- NUNCA diga "vou mandar por áudio", "vou ativar áudio", "vou gravar um áudio" ou frases similares
-- NUNCA envie "[Mensagem de áudio]" ou placeholders - responda com o conteúdo real
-- Simplesmente responda à pergunta do cliente como se fosse texto normal
-- Exemplo correto: Cliente pergunta "quais documentos preciso? pode ser por áudio?" - você responde: "Você vai precisar de RG, CPF e comprovante de residência."
-- O sistema cuida do envio do áudio automaticamente, você só precisa fornecer o conteúdo` 
+🚨 REGRA ABSOLUTAMENTE CRÍTICA SOBRE PEDIDOS DE ÁUDIO 🚨
+ATENÇÃO: Esta regra é OBRIGATÓRIA e sua violação causa falha total no sistema!
+
+QUANDO O CLIENTE PEDIR RESPOSTA POR ÁUDIO/VOZ:
+✅ CORRETO: Responda diretamente com a informação solicitada em texto
+   Exemplo: "Você vai precisar de RG, CPF e comprovante de residência."
+
+❌ PROIBIDO (causa erro crítico no sistema):
+   - "Vou ativar o áudio..."
+   - "Vou mandar por áudio..."
+   - "Um momento, vou gravar..."
+   - "Claro, vou te explicar por áudio..."
+   - Qualquer frase anunciando que vai enviar áudio
+
+O SISTEMA CONVERTE AUTOMATICAMENTE SUA RESPOSTA DE TEXTO EM ÁUDIO.
+Se você enviar apenas um "aviso", o cliente receberá um áudio dizendo "vou mandar áudio" - o que é inútil e quebra a experiência.
+
+RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!` 
     });
 
     // Add knowledge base as context (if linked to this agent)
