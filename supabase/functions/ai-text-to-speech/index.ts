@@ -9,7 +9,7 @@ const corsHeaders = {
 
 // ElevenLabs voice mapping
 const ELEVENLABS_VOICES: Record<string, string> = {
-  'el_laura': 'FGY2WhTYpPnrIDTdsKH5',
+  'el_laura': 'sLEZIrFwEyhMIH1ALLIQ',
 };
 
 // OpenAI TTS voices
@@ -17,7 +17,7 @@ const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 
 // Check if voice is OpenAI
 function isOpenAIVoice(voiceId: string): boolean {
-  return voiceId === 'openai_nova' || OPENAI_VOICES.includes(voiceId);
+  return voiceId === 'openai_shimmer' || OPENAI_VOICES.includes(voiceId);
 }
 
 interface TenantAIConfig {
