@@ -39,7 +39,7 @@ export function AIVoiceSettings() {
   
   const [settings, setSettings] = useState<VoiceSettings>({
     ai_voice_enabled: false,
-    ai_voice_id: "vanessa_morgan", // Default to Speaktor voice
+    ai_voice_id: "renata", // Default to Brazilian Speaktor voice
   });
 
   // Load settings on mount
