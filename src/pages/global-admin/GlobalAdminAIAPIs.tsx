@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 interface AIProvider {
   id: string;
@@ -45,7 +46,7 @@ export default function GlobalAdminAIAPIs() {
   // Speaktor config
   const [speaktorEnabled, setSpeaktorEnabled] = useState(false);
   const [speaktorApiKey, setSpeaktorApiKey] = useState("");
-  const [speaktorVoice, setSpeaktorVoice] = useState("Vanessa Morgan");
+  const [speaktorVoice, setSpeaktorVoice] = useState(DEFAULT_VOICE_ID);
   const [showSpeaktorKey, setShowSpeaktorKey] = useState(false);
   const [testingSpeaktor, setTestingSpeaktor] = useState(false);
   const [speaktorTestResult, setSpeaktorTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -71,7 +72,7 @@ export default function GlobalAdminAIAPIs() {
       // Speaktor settings
       setSpeaktorEnabled(getSetting("tts_speaktor_enabled", false) === true || getSetting("tts_speaktor_enabled", false) === "true");
       setSpeaktorApiKey(getSetting("tts_speaktor_api_key", ""));
-      setSpeaktorVoice(getSetting("tts_speaktor_voice", "Vanessa Morgan"));
+      setSpeaktorVoice(getSetting("tts_speaktor_voice", DEFAULT_VOICE_ID));
     }
   }, [settings]);
 
@@ -562,19 +563,22 @@ export default function GlobalAdminAIAPIs() {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="speaktor-voice" className="text-white/70">Voz Padrão</Label>
+                <Label htmlFor="speaktor-voice" className="text-white/70">Voz Padrão do Sistema</Label>
                 <Select value={speaktorVoice} onValueChange={setSpeaktorVoice} disabled={!speaktorEnabled}>
                   <SelectTrigger className="bg-white/5 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-[#1a1a1a] border-white/10">
-                    <SelectItem value="Vanessa Morgan">Vanessa Morgan (Feminina - PT-BR)</SelectItem>
-                    <SelectItem value="Laura Mitchell">Laura Mitchell (Feminina - EN)</SelectItem>
-                    <SelectItem value="Ravi Ananda">Ravi Ananda (Masculina - EN)</SelectItem>
-                    <SelectItem value="Elena Watson">Elena Watson (Feminina - EN)</SelectItem>
-                    <SelectItem value="Julian Hale">Julian Hale (Masculina - EN)</SelectItem>
+                    {AVAILABLE_VOICES.filter(v => v.provider === "speaktor").map((voice) => (
+                      <SelectItem key={voice.id} value={voice.id}>
+                        {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"}) - {voice.description}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-white/40">
+                  Esta voz é usada apenas quando o agente não tem uma voz específica configurada.
+                </p>
               </div>
             </div>
             
