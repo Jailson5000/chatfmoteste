@@ -13,6 +13,7 @@ export interface VoiceConfig {
 // Available TTS voices
 export const AVAILABLE_VOICES: VoiceConfig[] = [
   { id: "el_laura", name: "Laura", gender: "female", description: "Voz feminina profissional de alta qualidade", externalId: "sLEZIrFwEyhMIH1ALLIQ" },
+  { id: "el_felipe", name: "Felipe", gender: "male", description: "Voz masculina profissional de alta qualidade", externalId: "GxZ0UJKPezKah8TMxZZM" },
   { id: "openai_shimmer", name: "Shimmer", gender: "female", description: "Voz feminina padrão", externalId: "shimmer" },
 ];
 
