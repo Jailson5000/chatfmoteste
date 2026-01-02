@@ -9,8 +9,8 @@ export type WhatsAppInstance = Tables<"whatsapp_instances">;
 interface CreateInstanceParams {
   instanceName: string;
   displayName: string;
-  apiUrl: string;
-  apiKey: string;
+  apiUrl?: string;
+  apiKey?: string;
 }
 
 interface SetSettingsParams {
@@ -110,14 +110,19 @@ export function useWhatsAppInstances() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
+      // Build request body - apiUrl and apiKey are optional, edge function will use default connection
+      const requestBody: any = {
+        action: "create_instance",
+        instanceName,
+        displayName,
+      };
+
+      // Only include apiUrl/apiKey if provided (for backwards compatibility)
+      if (apiUrl) requestBody.apiUrl = normalizeApiUrl(apiUrl);
+      if (apiKey) requestBody.apiKey = apiKey;
+
       const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
-        body: {
-          action: "create_instance",
-          instanceName,
-          displayName,
-          apiUrl: normalizeApiUrl(apiUrl),
-          apiKey,
-        },
+        body: requestBody,
       });
 
       console.log("[useWhatsAppInstances] Create instance response:", response);
