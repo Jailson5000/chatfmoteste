@@ -76,6 +76,7 @@ export default function Connections() {
     updateDefaultDepartment,
     updateDefaultStatus,
     updateDefaultAssigned,
+    updateDefaultAutomation,
   } = useWhatsAppInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -623,6 +624,10 @@ export default function Connections() {
               onUpdateDefaultAssigned={(userId) => {
                 updateDefaultAssigned.mutate({ instanceId: selectedInstance.id, userId });
               }}
+              onUpdateDefaultAutomation={(automationId) => {
+                updateDefaultAutomation.mutate({ instanceId: selectedInstance.id, automationId });
+              }}
+              automations={automations?.filter(a => a.is_active && a.ai_prompt) || []}
               isLoading={{
                 status: refreshStatus.isPending,
                 phone: refreshPhone.isPending,

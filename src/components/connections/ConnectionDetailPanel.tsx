@@ -50,6 +50,7 @@ interface ConnectionDetailPanelProps {
     default_department_id?: string | null;
     default_status_id?: string | null;
     default_assigned_to?: string | null;
+    default_automation_id?: string | null;
   };
   onClose: () => void;
   onConnect: (instance: WhatsAppInstance) => void;
@@ -62,6 +63,8 @@ interface ConnectionDetailPanelProps {
   onUpdateDefaultDepartment: (departmentId: string | null) => void;
   onUpdateDefaultStatus: (statusId: string | null) => void;
   onUpdateDefaultAssigned: (userId: string | null) => void;
+  onUpdateDefaultAutomation: (automationId: string | null) => void;
+  automations?: { id: string; name: string }[];
   isLoading: {
     status: boolean;
     phone: boolean;
@@ -84,6 +87,8 @@ export function ConnectionDetailPanel({
   onUpdateDefaultDepartment,
   onUpdateDefaultStatus,
   onUpdateDefaultAssigned,
+  onUpdateDefaultAutomation,
+  automations = [],
   isLoading,
 }: ConnectionDetailPanelProps) {
   const { toast } = useToast();
@@ -312,8 +317,35 @@ export function ConnectionDetailPanel({
                 </Select>
               </div>
 
+              {/* Agente IA Padrão */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <TrendingUp className="h-4 w-4" />
+                  <span>Agente IA Padrão</span>
+                </div>
+                <Select
+                  value={instance.default_automation_id || "none"}
+                  onValueChange={(value) => onUpdateDefaultAutomation(value === "none" ? null : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecionar agente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum (usa padrão da empresa)</SelectItem>
+                    {automations.map((automation) => (
+                      <SelectItem key={automation.id} value={automation.id}>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-primary" />
+                          {automation.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <p className="text-xs text-muted-foreground">
-                Novos clientes desta instância serão vinculados automaticamente a esses valores.
+                Novos clientes desta instância serão vinculados automaticamente a esses valores. O Agente IA define qual prompt será usado para responder.
               </p>
             </div>
 

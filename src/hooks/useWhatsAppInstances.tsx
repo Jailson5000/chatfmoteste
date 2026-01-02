@@ -470,6 +470,31 @@ export function useWhatsAppInstances() {
     },
   });
 
+  const updateDefaultAutomation = useMutation({
+    mutationFn: async ({ instanceId, automationId }: { instanceId: string; automationId: string | null }) => {
+      const { error } = await supabase
+        .from("whatsapp_instances")
+        .update({ default_automation_id: automationId } as any)
+        .eq("id", instanceId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Agente IA atualizado",
+        description: "O agente de IA padrão foi configurado com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar agente IA",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     isLoading,
@@ -488,5 +513,6 @@ export function useWhatsAppInstances() {
     updateDefaultDepartment,
     updateDefaultStatus,
     updateDefaultAssigned,
+    updateDefaultAutomation,
   };
 }
