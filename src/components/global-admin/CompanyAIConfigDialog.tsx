@@ -38,6 +38,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   // AI Settings state
   const [internalEnabled, setInternalEnabled] = useState(true);
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
+  const [elevenLabsEnabled, setElevenLabsEnabled] = useState(true);
   const [n8nEnabled, setN8nEnabled] = useState(false);
   
   // N8N config
@@ -87,10 +88,12 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         if (caps?.ia_site_active !== undefined || caps?.openai_active !== undefined) {
           setInternalEnabled(caps?.ia_site_active ?? true);
           setOpenaiEnabled(caps?.openai_active ?? false);
+          setElevenLabsEnabled(caps?.elevenlabs_active ?? true);
         } else {
           const provider = data.ai_provider || "internal";
           setInternalEnabled(provider === "internal");
           setOpenaiEnabled(provider === "openai");
+          setElevenLabsEnabled(true);
         }
         
         setN8nEnabled(data.ai_provider === "n8n");
@@ -135,6 +138,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         ...capabilities,
         ia_site_active: internalEnabled,
         openai_active: openaiEnabled,
+        elevenlabs_active: elevenLabsEnabled,
         elevenlabs_voice: elevenLabsVoice,
       };
 
@@ -234,25 +238,26 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
   const getAIResponsibilities = () => {
     const bothActive = internalEnabled && openaiEnabled;
+    const audioProvider = elevenLabsEnabled ? "ElevenLabs" : "Desativado";
     
     if (bothActive) {
       return {
         chat: "OpenAI",
-        audio: "ElevenLabs",
+        audio: audioProvider,
         transcription: "OpenAI",
         image: "IA do Site"
       };
     } else if (openaiEnabled) {
       return {
         chat: "OpenAI",
-        audio: "ElevenLabs",
+        audio: audioProvider,
         transcription: "OpenAI",
         image: "Indisponível"
       };
     } else {
       return {
         chat: "IA do Site",
-        audio: "ElevenLabs",
+        audio: audioProvider,
         transcription: "IA do Site",
         image: "IA do Site"
       };
@@ -334,6 +339,51 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                   <div className="flex items-center gap-2 text-sm text-green-400 pt-2">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>Usando chave OpenAI global configurada no sistema</span>
+                  </div>
+                )}
+              </div>
+
+              {/* ElevenLabs TTS */}
+              <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-emerald-500/20">
+                      <Volume2 className="h-4 w-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-white">ElevenLabs TTS</p>
+                      <p className="text-xs text-white/50">Text-to-Speech para respostas por áudio</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={elevenLabsEnabled ? "bg-green-600" : "bg-white/20"}>
+                      {elevenLabsEnabled ? "Ativo" : "Inativo"}
+                    </Badge>
+                    <Switch
+                      checked={elevenLabsEnabled}
+                      onCheckedChange={setElevenLabsEnabled}
+                    />
+                  </div>
+                </div>
+
+                {elevenLabsEnabled && (
+                  <div className="space-y-2 pt-2 border-t border-white/10">
+                    <Label className="text-white/70 text-sm">Voz Padrão da Empresa</Label>
+                    <Select value={elevenLabsVoice} onValueChange={setElevenLabsVoice}>
+                      <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#1a1a1a] border-white/10">
+                        {AVAILABLE_VOICES.map((voice) => (
+                          <SelectItem key={voice.id} value={voice.id}>
+                            {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-white/40">
+                      A voz configurada no agente tem prioridade sobre esta voz padrão.
+                    </p>
                   </div>
                 )}
               </div>
@@ -457,37 +507,6 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 )}
               </div>
 
-              {/* ElevenLabs Voice Selection */}
-              <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-emerald-500/20">
-                    <Volume2 className="h-4 w-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-white">ElevenLabs TTS</p>
-                    <p className="text-xs text-white/50">Voz padrão para respostas por áudio</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-white/70 text-sm">Voz Padrão da Empresa</Label>
-                  <Select value={elevenLabsVoice} onValueChange={setElevenLabsVoice}>
-                    <SelectTrigger className="bg-white/5 border-white/10 text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#1a1a1a] border-white/10">
-                      {AVAILABLE_VOICES.map((voice) => (
-                        <SelectItem key={voice.id} value={voice.id}>
-                          {voice.name} ({voice.gender === "female" ? "Feminina" : "Masculina"})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-white/40">
-                    A voz configurada no agente tem prioridade sobre esta voz padrão.
-                  </p>
-                </div>
-              </div>
 
               {/* AI Capabilities */}
               <div className="p-4 rounded-lg bg-white/5 border border-white/10 space-y-4">
