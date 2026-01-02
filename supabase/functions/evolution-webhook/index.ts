@@ -515,79 +515,47 @@ function splitTextForTTS(text: string, maxChars = 3500): string[] {
   return chunks;
 }
 
-// Map Brazilian/custom voices to valid OpenAI TTS voices
-// OpenAI supports: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer
-const VOICE_MAPPING: Record<string, string> = {
-  // Brazilian female voices -> shimmer (clear female)
-  'renata': 'shimmer',
-  'natalia': 'nova',
-  'adriana': 'shimmer',
-  'carla': 'nova',
-  // Brazilian male voices -> onyx (professional male)
-  'rodrigo': 'onyx',
-  'paulo': 'echo',
-  'carlos': 'onyx',
-  // Default/existing OpenAI voices
-  'shimmer': 'shimmer',
-  'onyx': 'onyx',
-  'echo': 'echo',
-  'alloy': 'alloy',
-  'fable': 'fable',
-  'nova': 'nova',
-};
-
-// Helper function to generate TTS audio using OpenAI
+// Helper function to generate TTS audio using ai-text-to-speech edge function (supports Speaktor + OpenAI fallback)
 async function generateTTSAudio(text: string, voiceId: string): Promise<string | null> {
   try {
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      logDebug('TTS', 'OPENAI_API_KEY not configured');
-      return null;
-    }
-
     const trimmedText = text.trim().substring(0, 3900);
-    
-    // Map the voice to a valid OpenAI voice, fallback to 'shimmer'
-    const openaiVoice = VOICE_MAPPING[voiceId.toLowerCase()] || 'shimmer';
 
-    logDebug('TTS', `Generating audio with voice: ${voiceId} -> mapped to: ${openaiVoice}`, {
+    logDebug('TTS', `Generating audio with voice: ${voiceId} via ai-text-to-speech`, {
       textLength: trimmedText.length,
       truncated: trimmedText.length !== text.trim().length,
     });
 
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+    // Call the ai-text-to-speech edge function which handles Speaktor/OpenAI logic
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
       },
       body: JSON.stringify({
-        model: 'tts-1-hd',
-        input: trimmedText,
-        voice: openaiVoice,
-        response_format: 'mp3',
+        text: trimmedText,
+        voiceId: voiceId,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      logDebug('TTS', 'OpenAI TTS API error', { status: response.status, error: errorText });
+      logDebug('TTS', 'ai-text-to-speech error', { status: response.status, error: errorText });
       return null;
     }
 
-    // Convert to base64
-    const audioBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(audioBuffer);
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    const data = await response.json();
+    
+    if (!data.success || !data.audioContent) {
+      logDebug('TTS', 'No audio content in response', { data });
+      return null;
     }
-    const base64Audio = btoa(binary);
 
-    logDebug('TTS', `Audio generated successfully`, { size: audioBuffer.byteLength });
-    return base64Audio;
+    logDebug('TTS', `Audio generated successfully via ai-text-to-speech`);
+    return data.audioContent;
   } catch (error) {
     logDebug('TTS', 'Error generating TTS audio', { error: error instanceof Error ? error.message : error });
     return null;
