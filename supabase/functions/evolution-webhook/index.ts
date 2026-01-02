@@ -508,6 +508,95 @@ async function sendAudioToWhatsApp(
   }
 }
 
+// Helper function to send text fallback when audio fails
+async function sendTextFallbackWithWarning(
+  supabaseClient: any,
+  context: AutomationContext,
+  sendUrl: string,
+  instance: { api_key: string | null; instance_name: string },
+  messageParts: string[],
+  sanitizeText: (value: string) => string,
+  includeWarning: boolean
+): Promise<void> {
+  logDebug('FALLBACK', 'Sending text fallback for failed audio', { 
+    includeWarning,
+    partsCount: messageParts.length 
+  });
+
+  // First send the content
+  for (let i = 0; i < messageParts.length; i++) {
+    const part = sanitizeText(messageParts[i]);
+    if (!part) continue;
+
+    // Add delay between messages
+    if (i > 0) {
+      const typingDelay = Math.min(part.length * 15, 2000);
+      await new Promise((resolve) => setTimeout(resolve, typingDelay));
+    }
+
+    const sendResponse = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': instance.api_key || '',
+      },
+      body: JSON.stringify({
+        number: context.remoteJid,
+        text: part,
+      }),
+    });
+
+    if (sendResponse.ok) {
+      const sendResult = await sendResponse.json();
+      await supabaseClient
+        .from('messages')
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: sendResult?.key?.id,
+          content: part,
+          message_type: 'text',
+          is_from_me: true,
+          sender_type: 'system',
+          ai_generated: true,
+        });
+    }
+  }
+
+  // Then send warning message if requested
+  if (includeWarning) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const warningText = '⚠️ Não consegui enviar por áudio no momento, mas aí está a resposta em texto.';
+    
+    const warnResponse = await fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': instance.api_key || '',
+      },
+      body: JSON.stringify({
+        number: context.remoteJid,
+        text: warningText,
+      }),
+    });
+
+    if (warnResponse.ok) {
+      const warnResult = await warnResponse.json();
+      await supabaseClient
+        .from('messages')
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: warnResult?.key?.id,
+          content: warningText,
+          message_type: 'text',
+          is_from_me: true,
+          sender_type: 'system',
+          ai_generated: false, // This is a system warning, not AI content
+        });
+      logDebug('FALLBACK', 'Warning message sent');
+    }
+  }
+}
+
 // Helper function to send AI response back to WhatsApp and save to database
 // Splits response into paragraphs and sends them separately for natural feel
 // If voice is enabled, also sends audio response
@@ -596,16 +685,41 @@ async function sendAIResponseToWhatsApp(
     const audioRequested = isAudioRequested(context.messageContent);
     const shouldSendOnlyAudio = voiceConfig?.enabled && audioRequested;
 
+    logDebug('SEND_RESPONSE', 'Audio detection', { 
+      userMessage: context.messageContent.substring(0, 100),
+      audioRequested, 
+      voiceEnabled: voiceConfig?.enabled,
+      shouldSendOnlyAudio 
+    });
+
     if (shouldSendOnlyAudio) {
-      logDebug('SEND_RESPONSE', 'Audio requested - sending ONLY audio, skipping text messages', { 
-        voiceId: voiceConfig?.voiceId 
+      logDebug('SEND_RESPONSE', 'Audio requested - attempting to send audio response', { 
+        voiceId: voiceConfig?.voiceId,
+        textLength: sanitizedResponse.length
       });
 
       // Combine all text parts for audio
-      const fullText = messageParts.join(' ');
+      const fullText = messageParts.join(' ').trim();
+      
+      // Validate we have actual content to convert to audio
+      if (!fullText || fullText.length < 5) {
+        logDebug('SEND_RESPONSE', 'CRITICAL: Text too short for TTS, falling back to text', { 
+          textLength: fullText.length,
+          text: fullText
+        });
+        // Force text fallback with warning
+        await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
+        return true;
+      }
+
+      logDebug('TTS_FLOW', 'Generating audio', { textLength: fullText.length, voiceId: voiceConfig!.voiceId });
       const audioBase64 = await generateTTSAudio(fullText, voiceConfig!.voiceId);
 
       if (audioBase64) {
+        logDebug('TTS_FLOW', 'Audio generated successfully, sending to WhatsApp', { 
+          audioSize: audioBase64.length 
+        });
+        
         const audioResult = await sendAudioToWhatsApp(
           apiUrl,
           instance.instance_name,
@@ -615,13 +729,13 @@ async function sendAIResponseToWhatsApp(
         );
 
         if (audioResult.success && audioResult.messageId) {
-          // Save audio message to database
+          // Save audio message to database with the text content for reference
           await supabaseClient
             .from('messages')
             .insert({
               conversation_id: context.conversationId,
               whatsapp_message_id: audioResult.messageId,
-              content: null,
+              content: fullText, // Store the text content that was converted to audio
               message_type: 'audio',
               is_from_me: true,
               sender_type: 'system',
@@ -629,42 +743,30 @@ async function sendAIResponseToWhatsApp(
               media_mime_type: 'audio/mpeg',
             });
 
-          logDebug('SEND_RESPONSE', 'Audio-only response sent and saved');
+          logDebug('SEND_RESPONSE', 'Audio response sent and saved successfully', {
+            messageId: audioResult.messageId,
+            textLength: fullText.length
+          });
+          
+          // Update conversation timestamp
+          await supabaseClient
+            .from('conversations')
+            .update({ 
+              last_message_at: new Date().toISOString(),
+              n8n_last_response_at: new Date().toISOString(),
+            })
+            .eq('id', context.conversationId);
+            
+          return true;
+        } else {
+          logDebug('TTS_FLOW', 'FAILED to send audio to WhatsApp, falling back to text', { 
+            audioResult 
+          });
+          await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
         }
       } else {
-        logDebug('SEND_RESPONSE', 'TTS generation failed, falling back to text');
-        // Fallback: send text if audio generation fails
-        for (let i = 0; i < messageParts.length; i++) {
-          const part = sanitizeText(messageParts[i]);
-          if (!part) continue;
-
-          const sendResponse = await fetch(sendUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': instance.api_key || '',
-            },
-            body: JSON.stringify({
-              number: context.remoteJid,
-              text: part,
-            }),
-          });
-
-          if (sendResponse.ok) {
-            const sendResult = await sendResponse.json();
-            await supabaseClient
-              .from('messages')
-              .insert({
-                conversation_id: context.conversationId,
-                whatsapp_message_id: sendResult?.key?.id,
-                content: part,
-                message_type: 'text',
-                is_from_me: true,
-                sender_type: 'system',
-                ai_generated: true,
-              });
-          }
-        }
+        logDebug('TTS_FLOW', 'FAILED to generate TTS audio, falling back to text');
+        await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
       }
     } else {
       // Normal text-only flow
@@ -979,7 +1081,14 @@ async function processWithGPT(
 - Faça UMA pergunta ou informação por mensagem
 - NÃO envie textos longos ou explicações extensas
 - Use linguagem natural e profissional
-- Aguarde a resposta do cliente antes de continuar${clientMemoriesText}${summaryText}` 
+- Aguarde a resposta do cliente antes de continuar
+
+REGRA CRÍTICA SOBRE PEDIDOS DE ÁUDIO:
+- Se o cliente pedir resposta por áudio/voz, você DEVE responder NORMALMENTE com o conteúdo da resposta em TEXTO
+- O sistema converterá automaticamente sua resposta em áudio e enviará ao cliente
+- NUNCA diga "vou mandar por áudio", "vou ativar áudio", "vou gravar um áudio" ou frases similares
+- NUNCA envie "[Mensagem de áudio]" ou placeholders - responda com o conteúdo real
+- Simplesmente responda à pergunta do cliente como se fosse texto normal${clientMemoriesText}${summaryText}` 
       },
       ...(recentMessages?.reverse() || []).map((msg: any) => ({
         role: msg.is_from_me ? 'assistant' : 'user',
