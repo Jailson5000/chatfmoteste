@@ -82,8 +82,9 @@ export function IntegrationsSettings() {
 
       {/* Integrations Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Active Integrations */}
+        {/* Active Integrations - Available first */}
         <GoogleCalendarIntegration />
+        <TrayChatIntegration />
         
         {/* Coming Soon Integrations */}
         <IntegrationCard
@@ -113,8 +114,6 @@ export function IntegrationsSettings() {
           description="A DocuSign é o padrão global para gestão de transações digitais com milhões de usuários em mais de 188 países."
           isComingSoon
         />
-        
-        <TrayChatIntegration />
       </div>
     </div>
   );

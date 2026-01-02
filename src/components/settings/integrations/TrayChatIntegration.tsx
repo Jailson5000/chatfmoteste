@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+
 import { Textarea } from "@/components/ui/textarea";
 import { useTrayIntegration } from "@/hooks/useTrayIntegration";
 import { toast } from "sonner";
@@ -75,9 +75,9 @@ export function TrayChatIntegration() {
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="font-medium text-sm">Chat no Site (Tray)</h3>
                 {isEnabled && (
-                  <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600 border-green-500/20">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 border border-green-500/20">
                     Ativo
-                  </Badge>
+                  </span>
                 )}
               </div>
               <p className="text-xs text-muted-foreground line-clamp-2">
