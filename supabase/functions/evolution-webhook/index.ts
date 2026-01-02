@@ -39,6 +39,72 @@ function getCurrentBillingPeriod(): string {
 }
 
 /**
+ * Record TTS audio usage for billing.
+ * Estimates duration based on text length (avg 150 words/min, 5 chars/word = 750 chars/min)
+ * @param textLength - Length of text that was converted to speech
+ * @returns Estimated duration in seconds
+ */
+function estimateAudioDuration(textLength: number): number {
+  // Average speaking rate: ~150 words per minute
+  // Average word length: ~5 characters
+  // So approximately 750 characters per minute = 12.5 chars per second
+  const CHARS_PER_SECOND = 12.5;
+  return Math.ceil(textLength / CHARS_PER_SECOND);
+}
+
+/**
+ * Record TTS audio usage for billing purposes.
+ * Each audio generated is recorded with its duration in seconds.
+ */
+async function recordTTSUsage(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string,
+  textLength: number,
+  voiceId: string,
+  voiceSource: string
+): Promise<boolean> {
+  const billingPeriod = getCurrentBillingPeriod();
+  const durationSeconds = estimateAudioDuration(textLength);
+  
+  try {
+    const { error } = await supabaseClient
+      .from('usage_records')
+      .insert({
+        law_firm_id: lawFirmId,
+        usage_type: 'tts_audio',
+        count: 1,
+        duration_seconds: durationSeconds,
+        billing_period: billingPeriod,
+        metadata: {
+          conversation_id: conversationId,
+          text_length: textLength,
+          voice_id: voiceId,
+          voice_source: voiceSource,
+          generated_at: new Date().toISOString(),
+        }
+      });
+    
+    if (error) {
+      logDebug('USAGE_TRACKING', 'Failed to record TTS usage', { error, lawFirmId });
+      return false;
+    }
+    
+    logDebug('USAGE_TRACKING', 'TTS usage recorded', { 
+      lawFirmId,
+      durationSeconds,
+      textLength,
+      voiceId,
+      billingPeriod 
+    });
+    return true;
+  } catch (err) {
+    logDebug('USAGE_TRACKING', 'Error recording TTS usage', { error: err instanceof Error ? err.message : err });
+    return false;
+  }
+}
+
+/**
  * Record AI conversation usage when AI first assumes a conversation in current billing period.
  * Business Rule: 1 conversation = 1 count, regardless of message count.
  * Only counts once per conversation per billing period.
@@ -1032,7 +1098,17 @@ async function sendAIResponseToWhatsApp(
             media_mime_type: 'audio/mpeg',
           });
 
-        logDebug('SEND_RESPONSE', 'Audio chunk sent and saved successfully', {
+        // Record TTS usage for billing
+        await recordTTSUsage(
+          supabaseClient,
+          context.lawFirmId,
+          context.conversationId,
+          chunkText.length,
+          voiceConfig!.voiceId,
+          voiceConfig!.source || 'unknown'
+        );
+
+        logDebug('SEND_RESPONSE', 'Audio chunk sent, saved, and usage recorded', {
           messageId: audioResult.messageId,
           chunkIndex: i + 1,
           chunksTotal: chunks.length,
