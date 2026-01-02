@@ -27,8 +27,18 @@ const OPENAI_VOICES: Record<string, { name: string; gender: string; description:
 
 // Speaktor voice mapping (voiceId -> Speaktor voice name)
 const SPEAKTOR_VOICES: Record<string, string> = {
+  // Speaktor Pro voices
   'vanessa_morgan': 'Vanessa Morgan',
-  'shimmer': 'Vanessa Morgan', // Map OpenAI voices to Speaktor equivalents
+  'elena_watson': 'Elena Watson',
+  'laura_mitchell': 'Laura Mitchell',
+  'emma_reed': 'Emma Reed',
+  'ravi_ananda': 'Ravi Ananda',
+  'julian_hale': 'Julian Hale',
+  'jack_wilder': 'Jack Wilder',
+  'victor_moreau': 'Victor Moreau',
+  'nathan_drake': 'Nathan Drake',
+  // OpenAI voice fallback mapping
+  'shimmer': 'Vanessa Morgan',
   'onyx': 'Ravi Ananda', 
   'echo': 'Julian Hale',
 };
