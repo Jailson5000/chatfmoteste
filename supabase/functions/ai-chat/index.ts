@@ -6,6 +6,30 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Input validation constants
+const MAX_MESSAGE_LENGTH = 10000;
+const MAX_CONTEXT_STRING_LENGTH = 255;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api'];
+
+// Helper to generate error reference ID for tracking
+function generateErrorRef(): string {
+  return crypto.randomUUID().slice(0, 8);
+}
+
+// Helper to validate UUID format
+function isValidUUID(str: string | undefined | null): boolean {
+  if (!str) return false;
+  return UUID_REGEX.test(str);
+}
+
+// Sanitize string input (prevent XSS and limit length)
+function sanitizeString(str: string | undefined | null, maxLength: number = MAX_CONTEXT_STRING_LENGTH): string {
+  if (!str || typeof str !== 'string') return '';
+  // Trim and limit length
+  return str.trim().slice(0, maxLength);
+}
+
 interface ChatRequest {
   conversationId: string;
   message: string;
@@ -584,15 +608,101 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    let { conversationId, message, automationId, source, context }: ChatRequest = await req.json();
+  const errorRef = generateErrorRef();
 
-    if (!conversationId || !message) {
+  try {
+    // ============= INPUT PARSING AND VALIDATION =============
+    let requestBody;
+    try {
+      requestBody = await req.json();
+    } catch {
+      console.error(`[${errorRef}] Invalid JSON body`);
       return new Response(
-        JSON.stringify({ error: "conversationId and message are required" }),
+        JSON.stringify({ error: "Invalid request format", ref: errorRef }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    let { conversationId, message, automationId, source, context }: ChatRequest = requestBody;
+
+    // Validate required fields
+    if (!conversationId || !message) {
+      console.error(`[${errorRef}] Missing required fields`);
+      return new Response(
+        JSON.stringify({ error: "conversationId and message are required", ref: errorRef }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate conversationId UUID format
+    if (!isValidUUID(conversationId)) {
+      console.error(`[${errorRef}] Invalid conversationId format`);
+      return new Response(
+        JSON.stringify({ error: "Invalid request format", ref: errorRef }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate message (string and length)
+    if (typeof message !== 'string') {
+      console.error(`[${errorRef}] Invalid message type`);
+      return new Response(
+        JSON.stringify({ error: "Invalid message format", ref: errorRef }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      console.error(`[${errorRef}] Message too long: ${message.length} chars`);
+      return new Response(
+        JSON.stringify({ error: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters`, ref: errorRef }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate automationId if provided
+    if (automationId && !isValidUUID(automationId)) {
+      console.error(`[${errorRef}] Invalid automationId format`);
+      return new Response(
+        JSON.stringify({ error: "Invalid request format", ref: errorRef }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate source if provided
+    if (source && !VALID_SOURCES.includes(source)) {
+      console.error(`[${errorRef}] Invalid source: ${source}`);
+      source = 'web'; // Default to 'web' for invalid sources
+    }
+
+    // Validate and sanitize context
+    if (context) {
+      if (context.clientName) {
+        context.clientName = sanitizeString(context.clientName);
+      }
+      if (context.clientPhone) {
+        context.clientPhone = sanitizeString(context.clientPhone, 20);
+      }
+      if (context.currentStatus) {
+        context.currentStatus = sanitizeString(context.currentStatus, 50);
+      }
+      if (context.lawFirmId && !isValidUUID(context.lawFirmId)) {
+        console.error(`[${errorRef}] Invalid context.lawFirmId format`);
+        return new Response(
+          JSON.stringify({ error: "Invalid request format", ref: errorRef }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (context.clientId && !isValidUUID(context.clientId)) {
+        console.error(`[${errorRef}] Invalid context.clientId format`);
+        return new Response(
+          JSON.stringify({ error: "Invalid request format", ref: errorRef }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    console.log(`[AI Chat] Request validated - conversationId: ${conversationId}, messageLength: ${message.length}`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
@@ -674,9 +784,9 @@ serve(async (req) => {
 
     // automationId is REQUIRED for proper agent behavior
     if (!automationId) {
-      console.error("[AI Chat] CRITICAL: automationId is required for proper AI behavior");
+      console.error(`[${errorRef}] automationId is required for proper AI behavior`);
       return new Response(
-        JSON.stringify({ error: "automationId is required. Configure an AI agent in Tray settings or provide automationId." }),
+        JSON.stringify({ error: "AI agent configuration required", ref: errorRef }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -691,9 +801,9 @@ serve(async (req) => {
       .single();
 
     if (automationError || !automation) {
-      console.error("[AI_ISOLATION] ❌ Agent not found or inactive", { automationId, error: automationError });
+      console.error(`[${errorRef}] Agent not found or inactive:`, automationId);
       return new Response(
-        JSON.stringify({ error: "Agent not found or inactive" }),
+        JSON.stringify({ error: "AI agent not available", ref: errorRef }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -704,16 +814,9 @@ serve(async (req) => {
     // ========================================================================
     const contextLawFirmId = context?.lawFirmId;
     if (contextLawFirmId && automation.law_firm_id !== contextLawFirmId) {
-      console.error(`[AI_ISOLATION] ❌ SECURITY VIOLATION - Cross-tenant automation execution blocked!`, JSON.stringify({
-        expected_tenant: contextLawFirmId,
-        automation_tenant: automation.law_firm_id,
-        automation_id: automationId,
-        automation_name: automation.name,
-        conversation_id: conversationId,
-        timestamp: new Date().toISOString(),
-      }));
+      console.error(`[${errorRef}] SECURITY VIOLATION - Cross-tenant automation execution blocked`);
       return new Response(
-        JSON.stringify({ error: "Access denied: automation does not belong to this tenant" }),
+        JSON.stringify({ error: "Access denied", ref: errorRef }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -733,9 +836,9 @@ serve(async (req) => {
     const aiRole = (triggerConfig?.role as string) || 'default';
 
     if (!systemPrompt) {
-      console.error("[AI_ISOLATION] ❌ Agent has no prompt configured", { automationId });
+      console.error(`[${errorRef}] Agent has no prompt configured:`, automationId);
       return new Response(
-        JSON.stringify({ error: "Agent has no prompt configured" }),
+        JSON.stringify({ error: "AI agent not properly configured", ref: errorRef }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -909,7 +1012,7 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
     console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}, CalendarTools: ${calendarTools.length}`);
 
     // Build request body with optional tools
-    const requestBody: any = {
+    const aiRequestBody: any = {
       messages,
       temperature,
       max_tokens: context?.audioRequested ? 900 : 400,
@@ -917,8 +1020,8 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
 
     // Add tools if calendar integration is active
     if (calendarTools.length > 0) {
-      requestBody.tools = calendarTools;
-      requestBody.tool_choice = "auto";
+      aiRequestBody.tools = calendarTools;
+      aiRequestBody.tool_choice = "auto";
     }
 
     let response;
@@ -928,50 +1031,50 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
       // Use OpenAI API
       aiProvider = "OpenAI";
       console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini) with tools:", calendarTools.length);
-      requestBody.model = "gpt-4o-mini";
+      aiRequestBody.model = "gpt-4o-mini";
       response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(aiRequestBody),
       });
     } else {
       // Use Lovable AI (IA do Site / Internal)
       aiProvider = "Lovable AI";
       console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash) with tools:", calendarTools.length);
-      requestBody.model = "google/gemini-2.5-flash";
+      aiRequestBody.model = "google/gemini-2.5-flash";
       response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(aiRequestBody),
       });
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[AI Chat] ${aiProvider} error:`, response.status, errorText);
+      console.error(`[${errorRef}] ${aiProvider} error: ${response.status}`, errorText);
 
       if (response.status === 429) {
         return new Response(
-          JSON.stringify({ error: "Limite de requisições excedido. Tente novamente." }),
+          JSON.stringify({ error: "Rate limit exceeded. Please try again.", ref: errorRef }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       if (response.status === 402) {
         return new Response(
-          JSON.stringify({ error: "Créditos insuficientes. Adicione créditos ao workspace." }),
+          JSON.stringify({ error: "Service quota exceeded", ref: errorRef }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       return new Response(
-        JSON.stringify({ error: "Falha ao gerar resposta da IA" }),
+        JSON.stringify({ error: "Failed to generate AI response", ref: errorRef }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -1033,7 +1136,7 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
       console.log(`[AI Chat] Calling ${aiProvider} again with tool results`);
       
       const finalRequestBody = {
-        model: requestBody.model,
+        model: aiRequestBody.model,
         messages,
         temperature,
         max_tokens: 500,
@@ -1121,9 +1224,10 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
     );
 
   } catch (error) {
-    console.error("[AI Chat] Error:", error);
+    // Log actual error internally but return generic message
+    console.error(`[${errorRef}] AI Chat error:`, error instanceof Error ? error.message : error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Erro desconhecido" }),
+      JSON.stringify({ error: "An error occurred processing your request", ref: errorRef }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
