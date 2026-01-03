@@ -401,6 +401,8 @@ interface KanbanChatPanelProps {
   contactName: string | null;
   contactPhone: string | null;
   currentHandler: 'ai' | 'human';
+  /** The specific AI agent assigned to this conversation (source of truth for prompt selection) */
+  currentAutomationId?: string | null;
   assignedProfile?: { full_name: string } | null;
   clientId?: string | null;
   clientStatus?: string | null;
@@ -419,6 +421,7 @@ export function KanbanChatPanel({
   contactName,
   contactPhone,
   currentHandler,
+  currentAutomationId,
   assignedProfile,
   clientId,
   clientStatus,
@@ -435,7 +438,11 @@ export function KanbanChatPanel({
   const navigate = useNavigate();
   const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
   const { updateClientStatus } = useClients();
-  
+
+  const currentAutomation = currentAutomationId
+    ? (automations || []).find((a) => a.id === currentAutomationId) || null
+    : null;
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [messageInput, setMessageInput] = useState("");
@@ -853,14 +860,22 @@ export function KanbanChatPanel({
     });
   };
 
-  const handleTransferTo = (type: 'ai' | 'human', memberId?: string) => {
+  const handleTransferTo = (
+    type: 'ai' | 'human',
+    memberId?: string,
+    automationId?: string
+  ) => {
     transferHandler.mutate({
       conversationId,
       handlerType: type,
       assignedTo: memberId,
+      automationId: type === 'ai' ? automationId || null : null,
     }, {
       onSuccess: () => {
-        toast({ title: type === 'ai' ? "Transferido para IA" : "Transferido para atendente" });
+        toast({
+          title: type === 'ai' ? "Transferido para IA" : "Transferido para atendente",
+          description: type === 'ai' ? `IA ativa: ${automations.find(a => a.id === automationId)?.name || 'Selecionada'}` : undefined,
+        });
         setTransferOpen(false);
         setTransferSearch("");
       },
@@ -1133,7 +1148,11 @@ export function KanbanChatPanel({
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="h-7 gap-1.5">
                 <ArrowRightLeft className="h-3 w-3" />
-                <span className="text-xs">Transferir</span>
+                <span className="text-xs">
+                  {currentHandler === 'ai'
+                    ? `IA: ${currentAutomation?.name || '—'}`
+                    : `Humano: ${assignedProfile?.full_name || '—'}`}
+                </span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-64 p-0" align="start">
@@ -1152,14 +1171,14 @@ export function KanbanChatPanel({
                         <CommandItem
                           key={automation.id}
                           value={`ai-${automation.name}`}
-                          onSelect={() => handleTransferTo("ai")}
+                          onSelect={() => handleTransferTo("ai", undefined, automation.id)}
                           className="flex items-center gap-2"
                         >
                           <div className="w-6 h-6 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
                             <Zap className="h-3 w-3 text-purple-600" />
                           </div>
                           <span className="text-sm">{automation.name}</span>
-                          {currentHandler === "ai" && (
+                          {currentHandler === "ai" && currentAutomationId === automation.id && (
                             <Check className="h-3 w-3 ml-auto text-primary" />
                           )}
                         </CommandItem>
