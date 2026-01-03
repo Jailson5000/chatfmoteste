@@ -177,50 +177,108 @@ async function recordAIConversationUsage(
  * 2. Company-wide default_automation_id from law_firm_settings
  * 3. First active automation with prompt configured
  */
+// ============================================================================
+// CRITICAL: AI ISOLATION - CANONICAL IDENTITY RESOLUTION
+// ============================================================================
+// This function resolves which AI agent should handle a conversation.
+// 
+// SECURITY RULES (MANDATORY):
+// 1. NO FALLBACK TO "FIRST ACTIVE" - This was causing cross-AI contamination
+// 2. EXPLICIT CONFIGURATION REQUIRED - Either instance or company default must be set
+// 3. STRICT TENANT ISOLATION - Automation MUST belong to the same law_firm_id
+// 4. AUDIT TRAIL - Every resolution is logged with full identity context
+// ============================================================================
+
+interface AutomationIdentity {
+  id: string;
+  ai_prompt: string;
+  ai_temperature: number | null;
+  name: string;
+  trigger_config: any;
+  version: number;
+  updated_at: string;
+  law_firm_id: string;
+  // Canonical identity fields for audit
+  resolved_from: 'whatsapp_instance' | 'law_firm_settings';
+  resolution_timestamp: string;
+}
+
 async function resolveAutomationForConversation(
   supabaseClient: any,
   lawFirmId: string,
   conversationId: string
-): Promise<{ id: string; ai_prompt: string; ai_temperature: number | null; name: string; trigger_config: any; version: number; updated_at: string } | null> {
+): Promise<AutomationIdentity | null> {
+  const resolutionTimestamp = new Date().toISOString();
+  
   try {
+    // ========================================================================
     // Step 1: Get conversation to find whatsapp_instance_id
+    // ========================================================================
     const { data: conversation } = await supabaseClient
       .from('conversations')
       .select('whatsapp_instance_id')
       .eq('id', conversationId)
       .single();
 
-    // Step 2: Check if instance has a default automation
+    // ========================================================================
+    // Step 2: Check if instance has a default automation (HIGHEST PRIORITY)
+    // ========================================================================
     if (conversation?.whatsapp_instance_id) {
       const { data: instance } = await supabaseClient
         .from('whatsapp_instances')
-        .select('default_automation_id')
+        .select('default_automation_id, name')
         .eq('id', conversation.whatsapp_instance_id)
         .single();
 
       if (instance?.default_automation_id) {
         const { data: automation } = await supabaseClient
           .from('automations')
-          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
+          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
           .not('ai_prompt', 'is', null)
           .single();
 
-        if (automation && automation.ai_prompt?.trim()) {
-          logDebug('AUTOMATION_RESOLVE', 'Using instance default automation', { 
-            automationId: automation.id, 
-            automationName: automation.name,
-            version: automation.version,
-            updatedAt: automation.updated_at,
-            source: 'whatsapp_instance' 
-          });
-          return automation;
+        // CRITICAL: Validate tenant isolation - automation must belong to same tenant
+        if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
+          const identity: AutomationIdentity = {
+            ...automation,
+            resolved_from: 'whatsapp_instance',
+            resolution_timestamp: resolutionTimestamp,
+          };
+          
+          // AUDIT LOG: Canonical identity resolved
+          console.log(`[AI_ISOLATION] ✅ RESOLVED - Instance Default`, JSON.stringify({
+            tenant_id: lawFirmId,
+            ai_id: automation.id,
+            ai_name: automation.name,
+            ai_role: automation.trigger_config?.role || 'default',
+            prompt_version: automation.version,
+            prompt_updated_at: automation.updated_at,
+            resolved_from: 'whatsapp_instance',
+            instance_name: instance.name,
+            conversation_id: conversationId,
+            timestamp: resolutionTimestamp,
+          }));
+          
+          return identity;
+        } else if (automation && automation.law_firm_id !== lawFirmId) {
+          // SECURITY ALERT: Cross-tenant contamination attempt detected!
+          console.error(`[AI_ISOLATION] ❌ SECURITY VIOLATION - Cross-tenant automation detected!`, JSON.stringify({
+            expected_tenant: lawFirmId,
+            automation_tenant: automation.law_firm_id,
+            automation_id: automation.id,
+            conversation_id: conversationId,
+            timestamp: resolutionTimestamp,
+          }));
+          return null;
         }
       }
     }
 
-    // Step 3: Check company-wide default from law_firm_settings
+    // ========================================================================
+    // Step 3: Check company-wide default from law_firm_settings (SECONDARY)
+    // ========================================================================
     const { data: settings } = await supabaseClient
       .from('law_firm_settings')
       .select('default_automation_id')
@@ -230,58 +288,74 @@ async function resolveAutomationForConversation(
     if (settings?.default_automation_id) {
       const { data: automation } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
         .eq('id', settings.default_automation_id)
         .eq('is_active', true)
         .not('ai_prompt', 'is', null)
         .single();
 
-      if (automation && automation.ai_prompt?.trim()) {
-        logDebug('AUTOMATION_RESOLVE', 'Using company default automation', { 
-          automationId: automation.id, 
-          automationName: automation.name,
-          version: automation.version,
-          updatedAt: automation.updated_at,
-          source: 'law_firm_settings' 
-        });
-        return automation;
+      // CRITICAL: Validate tenant isolation - automation must belong to same tenant
+      if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
+        const identity: AutomationIdentity = {
+          ...automation,
+          resolved_from: 'law_firm_settings',
+          resolution_timestamp: resolutionTimestamp,
+        };
+        
+        // AUDIT LOG: Canonical identity resolved
+        console.log(`[AI_ISOLATION] ✅ RESOLVED - Company Default`, JSON.stringify({
+          tenant_id: lawFirmId,
+          ai_id: automation.id,
+          ai_name: automation.name,
+          ai_role: automation.trigger_config?.role || 'default',
+          prompt_version: automation.version,
+          prompt_updated_at: automation.updated_at,
+          resolved_from: 'law_firm_settings',
+          conversation_id: conversationId,
+          timestamp: resolutionTimestamp,
+        }));
+        
+        return identity;
+      } else if (automation && automation.law_firm_id !== lawFirmId) {
+        // SECURITY ALERT: Cross-tenant contamination attempt detected!
+        console.error(`[AI_ISOLATION] ❌ SECURITY VIOLATION - Cross-tenant automation detected!`, JSON.stringify({
+          expected_tenant: lawFirmId,
+          automation_tenant: automation.law_firm_id,
+          automation_id: automation.id,
+          conversation_id: conversationId,
+          timestamp: resolutionTimestamp,
+        }));
+        return null;
       }
     }
 
-    // Step 4: Fallback to first active automation (ordered by position, then created_at)
-    const { data: automations, error: autoError } = await supabaseClient
-      .from('automations')
-      .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at')
-      .eq('law_firm_id', lawFirmId)
-      .eq('is_active', true)
-      .not('ai_prompt', 'is', null)
-      .order('position', { ascending: true })
-      .order('created_at', { ascending: true })
-      .limit(1);
-
-    if (autoError || !automations || automations.length === 0) {
-      logDebug('AUTOMATION_RESOLVE', 'No valid automation found', { lawFirmId });
-      return null;
-    }
-
-    const automation = automations[0];
-    if (!automation.ai_prompt?.trim()) {
-      logDebug('AUTOMATION_RESOLVE', 'Fallback automation has no prompt', { automationId: automation.id });
-      return null;
-    }
-
-    logDebug('AUTOMATION_RESOLVE', 'Using fallback automation (first active)', { 
-      automationId: automation.id, 
-      automationName: automation.name,
-      version: automation.version,
-      updatedAt: automation.updated_at,
-      source: 'fallback_first_active' 
-    });
-    return automation;
+    // ========================================================================
+    // CRITICAL: NO FALLBACK TO "FIRST ACTIVE"
+    // ========================================================================
+    // This was the root cause of cross-AI contamination.
+    // If no explicit automation is configured, we BLOCK execution entirely.
+    // The admin MUST configure a default automation for the instance or company.
+    // ========================================================================
+    
+    console.warn(`[AI_ISOLATION] ⚠️ BLOCKED - No explicit automation configured`, JSON.stringify({
+      tenant_id: lawFirmId,
+      conversation_id: conversationId,
+      has_instance: !!conversation?.whatsapp_instance_id,
+      has_company_default: !!settings?.default_automation_id,
+      resolution: 'BLOCKED_NO_EXPLICIT_CONFIG',
+      recommendation: 'Configure default_automation_id in whatsapp_instances or law_firm_settings',
+      timestamp: resolutionTimestamp,
+    }));
+    
+    return null;
+    
   } catch (error) {
-    logDebug('AUTOMATION_RESOLVE', 'Error resolving automation', { 
-      error: error instanceof Error ? error.message : error 
-    });
+    console.error(`[AI_ISOLATION] ❌ ERROR - Resolution failed`, JSON.stringify({
+      tenant_id: lawFirmId,
+      conversation_id: conversationId,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: resolutionTimestamp,
+    }));
     return null;
   }
 }
