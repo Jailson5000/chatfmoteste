@@ -1624,7 +1624,7 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area Panel - Flexible */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1638,7 +1638,7 @@ export default function Conversations() {
         disabled={isSending || !selectedConversation}
       >
         <div
-          className="flex-1 flex flex-col bg-background min-h-0 min-w-0 overflow-hidden h-full"
+          className="flex-1 flex flex-col bg-background min-h-0 min-w-0 h-full"
         >
         {selectedConversation ? (
           <>
@@ -2275,7 +2275,7 @@ export default function Conversations() {
 
         {/* Contact Details Panel - Fixed width */}
         {showDetailsPanel && selectedConversation && (
-          <div className="w-72 h-full flex-shrink-0 bg-card border-l border-border overflow-hidden">
+          <div className="w-72 h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden">
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
