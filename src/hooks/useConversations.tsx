@@ -286,13 +286,34 @@ export function useConversations() {
       conversationId, 
       handlerType, 
       assignedTo,
-      automationId 
+      automationId,
+      reason 
     }: { 
       conversationId: string; 
       handlerType: 'ai' | 'human';
       assignedTo?: string | null;
       automationId?: string | null; // ID do agente de IA específico
+      reason?: string; // Motivo opcional da transferência
     }) => {
+      // ========================================================================
+      // CRITICAL: AI Transfer Logic - Prompt is determined by the ASSIGNED AI
+      // ========================================================================
+      // When transferring to a new AI, we update current_automation_id
+      // The next message will use the NEW AI's prompt, NOT the old one
+      // ========================================================================
+      
+      // First, get the current state of the conversation to log the transfer
+      const { data: currentConversation, error: fetchError } = await supabase
+        .from("conversations")
+        .select("current_automation_id, law_firm_id")
+        .eq("id", conversationId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+
+      const fromAutomationId = currentConversation?.current_automation_id;
+      const lawFirmId = currentConversation?.law_firm_id;
+
       const updateData: Record<string, any> = { 
         current_handler: handlerType,
         assigned_to: assignedTo || null 
@@ -300,8 +321,10 @@ export function useConversations() {
       
       // Se transferindo para IA, definir qual IA específica
       // Se transferindo para humano, limpar a IA atribuída
+      let toAutomationId: string | null = null;
       if (handlerType === 'ai' && automationId) {
         updateData.current_automation_id = automationId;
+        toAutomationId = automationId;
       } else if (handlerType === 'human') {
         updateData.current_automation_id = null;
       }
@@ -312,9 +335,70 @@ export function useConversations() {
         .eq("id", conversationId);
       
       if (error) throw error;
+
+      // ========================================================================
+      // AUDIT: Log the AI transfer for full traceability
+      // ========================================================================
+      if (toAutomationId && lawFirmId && toAutomationId !== fromAutomationId) {
+        // Get agent names for the log
+        const agentIds = [toAutomationId, fromAutomationId].filter(Boolean) as string[];
+        const { data: agents } = await supabase
+          .from("automations")
+          .select("id, name")
+          .in("id", agentIds);
+
+        const agentsMap = (agents || []).reduce((acc, a) => {
+          acc[a.id] = a.name;
+          return acc;
+        }, {} as Record<string, string>);
+
+        // Get current user for audit
+        const { data: { user } } = await supabase.auth.getUser();
+        let userName: string | null = null;
+        if (user?.id) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", user.id)
+            .single();
+          userName = profile?.full_name || null;
+        }
+
+        // Insert transfer log
+        await supabase.from("ai_transfer_logs").insert({
+          law_firm_id: lawFirmId,
+          conversation_id: conversationId,
+          from_agent_id: fromAutomationId,
+          to_agent_id: toAutomationId,
+          from_agent_name: fromAutomationId ? agentsMap[fromAutomationId] || null : null,
+          to_agent_name: agentsMap[toAutomationId] || "Unknown",
+          transferred_by: user?.id || null,
+          transferred_by_name: userName,
+          transfer_type: 'manual',
+          reason: reason || null,
+          metadata: {
+            handler_type: handlerType,
+            assigned_to: assignedTo,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        console.log(`[AI_TRANSFER] Conversation transferred`, {
+          conversation_id: conversationId,
+          from_agent: fromAutomationId,
+          from_agent_name: fromAutomationId ? agentsMap[fromAutomationId] : null,
+          to_agent: toAutomationId,
+          to_agent_name: agentsMap[toAutomationId],
+          transferred_by: user?.id,
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast({
+        title: "Transferência realizada",
+        description: "A conversa foi transferida com sucesso. O novo agente responderá com seu próprio prompt.",
+      });
     },
     onError: (error) => {
       toast({

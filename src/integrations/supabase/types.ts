@@ -306,6 +306,72 @@ export type Database = {
           },
         ]
       }
+      ai_transfer_logs: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          from_agent_id: string | null
+          from_agent_name: string | null
+          id: string
+          law_firm_id: string
+          metadata: Json | null
+          reason: string | null
+          to_agent_id: string
+          to_agent_name: string
+          transfer_type: string
+          transferred_at: string
+          transferred_by: string | null
+          transferred_by_name: string | null
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          from_agent_id?: string | null
+          from_agent_name?: string | null
+          id?: string
+          law_firm_id: string
+          metadata?: Json | null
+          reason?: string | null
+          to_agent_id: string
+          to_agent_name: string
+          transfer_type?: string
+          transferred_at?: string
+          transferred_by?: string | null
+          transferred_by_name?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          from_agent_id?: string | null
+          from_agent_name?: string | null
+          id?: string
+          law_firm_id?: string
+          metadata?: Json | null
+          reason?: string | null
+          to_agent_id?: string
+          to_agent_name?: string
+          transfer_type?: string
+          transferred_at?: string
+          transferred_by?: string | null
+          transferred_by_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_transfer_logs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_transfer_logs_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
