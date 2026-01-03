@@ -3376,6 +3376,8 @@ export type Database = {
         Args: { _conversation_id: string; _user_id: string }
         Returns: number
       }
+      normalize_phone: { Args: { phone: string }; Returns: string }
+      unify_duplicate_clients: { Args: { _law_firm_id: string }; Returns: Json }
       user_belongs_to_law_firm: {
         Args: { _law_firm_id: string; _user_id: string }
         Returns: boolean

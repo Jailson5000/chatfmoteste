@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Plus, Search, Upload, Download, User, SlidersHorizontal } from "lucide-react";
+import { Plus, Search, Upload, Download, User, SlidersHorizontal, MoreVertical, Trash2, Merge } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -24,8 +26,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -46,7 +59,7 @@ import { ptBR } from "date-fns/locale";
 import { exportToExcel, getFormattedDate } from "@/lib/exportUtils";
 
 export default function Contacts() {
-  const { clients, isLoading, createClient, deleteClient } = useClients();
+  const { clients, isLoading, createClient, deleteClient, unifyDuplicates } = useClients();
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
@@ -60,6 +73,15 @@ export default function Contacts() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDepartment, setFilterDepartment] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Delete confirmation state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [contactToDelete, setContactToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Bulk delete state
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -269,6 +291,27 @@ export default function Contacts() {
             Exportar
           </Button>
 
+          <Button 
+            variant="outline" 
+            className="gap-2" 
+            onClick={() => unifyDuplicates.mutate()}
+            disabled={unifyDuplicates.isPending}
+          >
+            <Merge className="h-4 w-4" />
+            {unifyDuplicates.isPending ? "Unificando..." : "Unificar Duplicados"}
+          </Button>
+
+          {selectedContacts.length > 0 && (
+            <Button 
+              variant="destructive" 
+              className="gap-2" 
+              onClick={() => setBulkDeleteDialogOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir ({selectedContacts.length})
+            </Button>
+          )}
+
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button className="gap-2">
@@ -390,6 +433,7 @@ export default function Contacts() {
                 <TableHead>Origem</TableHead>
                 <TableHead>Conexão</TableHead>
                 <TableHead>Criado Em</TableHead>
+                <TableHead className="w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -491,6 +535,27 @@ export default function Contacts() {
                         locale: ptBR 
                       }).replace('há cerca de ', 'há ').replace('há menos de ', 'há ')}
                     </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => {
+                              setContactToDelete({ id: client.id, name: client.name });
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Excluir contato
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -526,6 +591,90 @@ export default function Contacts() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Single Contact Confirmation */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir contato?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir <strong>{contactToDelete?.name}</strong>?
+              <br /><br />
+              <span className="text-destructive font-medium">
+                Esta ação irá remover permanentemente:
+              </span>
+              <ul className="list-disc list-inside mt-2 text-sm space-y-1">
+                <li>Todas as conversas do contato</li>
+                <li>Todas as mensagens salvas</li>
+                <li>Histórico de ações</li>
+                <li>Tags e memórias associadas</li>
+                <li>Casos e documentos vinculados</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={async () => {
+                if (!contactToDelete) return;
+                setIsDeleting(true);
+                try {
+                  await deleteClient.mutateAsync(contactToDelete.id);
+                  setDeleteDialogOpen(false);
+                  setContactToDelete(null);
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+            >
+              {isDeleting ? "Excluindo..." : "Excluir permanentemente"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir {selectedContacts.length} contatos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="text-destructive font-medium">
+                Esta ação irá remover permanentemente todos os contatos selecionados e seus dados associados:
+              </span>
+              <ul className="list-disc list-inside mt-2 text-sm space-y-1">
+                <li>Todas as conversas</li>
+                <li>Todas as mensagens</li>
+                <li>Histórico, tags, memórias, casos e documentos</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+              onClick={async () => {
+                setIsDeleting(true);
+                try {
+                  for (const id of selectedContacts) {
+                    await deleteClient.mutateAsync(id);
+                  }
+                  setSelectedContacts([]);
+                  setBulkDeleteDialogOpen(false);
+                  toast({ title: `${selectedContacts.length} contatos excluídos` });
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+            >
+              {isDeleting ? "Excluindo..." : `Excluir ${selectedContacts.length} contatos`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
