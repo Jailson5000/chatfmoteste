@@ -1642,80 +1642,80 @@ export default function Conversations() {
           <>
             {/* Chat Header */}
             <div className="p-4 border-b border-border flex-shrink-0">
-              <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden"
-                  onClick={() => setShowMobileChat(false)}
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="text-sm font-semibold text-primary">
-                    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase()}
-                  </span>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">
-                      {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden"
+                    onClick={() => setShowMobileChat(false)}
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </Button>
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-semibold text-primary">
+                      {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
+                        .split(" ")
+                        .map((n) => n[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="font-medium truncate">
+                        {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
+                      </p>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={openEditName}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground flex items-center gap-1 min-w-0">
+                      <Phone className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{selectedConversation.contact_phone || "---"}</span>
                     </p>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={openEditName}>
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">
-                    <Phone className="h-3 w-3" />
-                    {selectedConversation.contact_phone || "---"}
-                  </p>
-                  <div className="flex items-center gap-1 mt-1">
-                    <Inbox className="h-3 w-3 text-muted-foreground" />
-                    {connectedInstances.length > 1 ? (
-                      <Select
-                        value={selectedConversation.whatsapp_instance_id || ""}
-                        onValueChange={(value) => {
-                          if (value && selectedConversation?.id) {
-                            updateConversation.mutate({
-                              id: selectedConversation.id,
-                              whatsapp_instance_id: value,
-                            });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-[140px]">
-                          <SelectValue placeholder="Selecione um canal" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {whatsappInstances.map((inst) => {
-                            const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
-                            const isConnected = inst.status === "connected";
-                            return (
-                              <SelectItem key={inst.id} value={inst.id} className="text-xs">
-                                <span className="flex items-center gap-2">
-                                  <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                                  {inst.display_name || inst.instance_name}
-                                  {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
-                                </span>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 mt-1 min-w-0">
+                      <Inbox className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                      {connectedInstances.length > 1 ? (
+                        <Select
+                          value={selectedConversation.whatsapp_instance_id || ""}
+                          onValueChange={(value) => {
+                            if (value && selectedConversation?.id) {
+                              updateConversation.mutate({
+                                id: selectedConversation.id,
+                                whatsapp_instance_id: value,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px]">
+                            <SelectValue placeholder="Selecione um canal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {whatsappInstances.map((inst) => {
+                              const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
+                              const isConnected = inst.status === "connected";
+                              return (
+                                <SelectItem key={inst.id} value={inst.id} className="text-xs">
+                                  <span className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                                    {inst.display_name || inst.instance_name}
+                                    {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
+                                  </span>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground truncate">
+                          Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
               <div className="flex items-center gap-2">
                 {/* Audio Mode Indicator */}
                 {showAudioIndicator && selectedConversation && (
