@@ -1551,9 +1551,9 @@ export default function Conversations() {
         </ChatDropZone>
       </div>
 
-      <div className="hidden md:flex h-full w-full overflow-hidden">
+      <div className="hidden md:flex h-full w-full overflow-hidden" style={{ minWidth: 0 }}>
         {/* Conversations List Panel - Fixed width */}
-        <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden">
+        <div className="flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px', flexBasis: '320px' }}>
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
