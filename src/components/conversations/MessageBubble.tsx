@@ -301,16 +301,18 @@ function AudioPlayer({
 
   if (isDecrypting) {
     return (
-      <div className="flex items-center gap-3 min-w-[260px] max-w-[320px] p-3 rounded-xl bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 animate-in fade-in duration-300">
+      <div className="flex items-center gap-3 w-full min-w-0 max-w-[320px] p-3 rounded-xl bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 animate-in fade-in duration-300">
         <div className="relative h-12 w-12 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center flex-shrink-0">
           <Mic className="h-5 w-5 text-primary/60 animate-pulse" />
           <div className="absolute inset-0 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
         </div>
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2">
             <div className="h-2 flex-1 bg-muted/50 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-primary/60 via-primary/40 to-primary/60 rounded-full animate-shimmer" 
-                   style={{ backgroundSize: '200% 100%' }} />
+              <div
+                className="h-full bg-gradient-to-r from-primary/60 via-primary/40 to-primary/60 rounded-full animate-shimmer"
+                style={{ backgroundSize: "200% 100%" }}
+              />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -324,7 +326,7 @@ function AudioPlayer({
 
   if (error || (!audioSrc && needsDecryption)) {
     return (
-      <div className="flex items-center gap-3 min-w-[200px] p-2 rounded-xl bg-destructive/10">
+      <div className="flex items-center gap-3 w-full min-w-0 max-w-[320px] p-2 rounded-xl bg-destructive/10">
         <div className="h-10 w-10 rounded-full bg-destructive/20 flex items-center justify-center flex-shrink-0">
           <X className="h-5 w-5 text-destructive" />
         </div>
@@ -336,7 +338,7 @@ function AudioPlayer({
   return (
     <div className="space-y-2">
       <div className={cn(
-        "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
+        "flex items-center gap-3 w-full min-w-0 max-w-[320px] p-2 rounded-xl transition-all",
         isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
       )}>
         {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
@@ -367,7 +369,7 @@ function AudioPlayer({
         </Button>
         
         {/* Progress section */}
-        <div className="flex-1 space-y-1.5">
+        <div className="flex-1 min-w-0 space-y-1.5">
           {/* Waveform visualization */}
           <div 
             className="relative h-8 flex items-center gap-[2px] cursor-pointer group"
@@ -478,7 +480,7 @@ function AudioPlayer({
       {/* Transcription display */}
       {showTranscription && transcription && (
         <div className={cn(
-          "p-2 rounded-lg text-xs leading-relaxed max-w-[320px] animate-in fade-in slide-in-from-top-1 duration-200",
+          "p-2 rounded-lg text-xs leading-relaxed w-full min-w-0 max-w-[320px] animate-in fade-in slide-in-from-top-1 duration-200",
           isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
         )}>
           <div className="flex items-center gap-1 mb-1 text-muted-foreground">
@@ -649,7 +651,7 @@ function AIAudioPlayer({
 
   return (
     <div className={cn(
-      "flex items-center gap-3 min-w-[260px] max-w-[320px] p-2 rounded-xl transition-all",
+      "flex items-center gap-3 w-full min-w-0 max-w-[320px] p-2 rounded-xl transition-all",
       isFromMe ? "bg-primary-foreground/10" : "bg-background/30"
     )}>
       {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
@@ -682,7 +684,7 @@ function AIAudioPlayer({
       </Button>
       
       {/* Progress section */}
-      <div className="flex-1 space-y-1.5">
+      <div className="flex-1 min-w-0 space-y-1.5">
         {/* Waveform visualization */}
         <div 
           className="relative h-8 flex items-center gap-[2px] cursor-pointer group"
@@ -992,7 +994,7 @@ function VideoPlayer({
 
   if (isDecrypting) {
     return (
-      <div className="relative min-w-[240px] min-h-[140px] max-w-[280px] rounded-xl overflow-hidden bg-gradient-to-br from-muted/80 to-muted/40 border border-border/50 animate-in fade-in duration-300">
+      <div className="relative w-full min-w-0 max-w-[280px] min-h-[140px] rounded-xl overflow-hidden bg-gradient-to-br from-muted/80 to-muted/40 border border-border/50 animate-in fade-in duration-300">
         {/* Shimmer effect overlay */}
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" 
              style={{ backgroundSize: '200% 100%' }} />
@@ -1022,7 +1024,7 @@ function VideoPlayer({
 
   if (error || (!videoSrc && needsDecryption)) {
     return (
-      <div className="flex items-center justify-center min-w-[200px] min-h-[120px] bg-muted/50 rounded-lg">
+      <div className="flex items-center justify-center w-full min-w-0 max-w-[280px] min-h-[120px] bg-muted/50 rounded-lg">
         <span className="text-xs opacity-70">Vídeo não disponível</span>
       </div>
     );
@@ -1031,7 +1033,7 @@ function VideoPlayer({
   return (
     <video
       controls
-      className="max-w-[280px] max-h-[200px] rounded-lg"
+      className="w-full min-w-0 max-w-[280px] max-h-[200px] rounded-lg"
       preload="metadata"
     >
       <source src={videoSrc || src} type={mimeType || "video/mp4"} />

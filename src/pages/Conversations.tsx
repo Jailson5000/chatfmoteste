@@ -8,6 +8,7 @@ import {
   Send,
   Paperclip,
   MoreVertical,
+  Archive,
   ArrowLeft,
   Image,
   FileText,
@@ -1250,12 +1251,32 @@ export default function Conversations() {
     }
   };
 
+  const handleArchiveConversation = async () => {
+    if (!selectedConversation) return;
+
+    try {
+      await updateConversation.mutateAsync({
+        id: selectedConversation.id,
+        status: "archived" as any,
+      });
+
+      toast({ title: "Conversa arquivada" });
+      setSelectedConversationId(null);
+      setShowMobileChat(false);
+    } catch (error) {
+      toast({
+        title: "Erro ao arquivar",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return mappedConversations.filter(c => c.handler === "human" && c.assignedTo).length;
+        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo).length;
       case "ai":
-        return mappedConversations.filter(c => c.handler === "ai").length;
+        return mappedConversations.filter((c) => c.handler === "ai").length;
       case "queue":
         return mappedConversations.length;
     }
@@ -1841,8 +1862,8 @@ export default function Conversations() {
                 {/* Search Messages Button */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="icon"
                       className="text-muted-foreground/60 hover:text-muted-foreground"
                       onClick={() => setShowMessageSearch(true)}
@@ -1852,6 +1873,23 @@ export default function Conversations() {
                   </TooltipTrigger>
                   <TooltipContent>Buscar mensagens</TooltipContent>
                 </Tooltip>
+
+                {/* Archive (same behavior as Kanban) */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground/60 hover:text-muted-foreground"
+                      onClick={handleArchiveConversation}
+                      title="Arquivar"
+                    >
+                      <Archive className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Arquivar</TooltipContent>
+                </Tooltip>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon">
