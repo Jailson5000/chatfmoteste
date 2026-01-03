@@ -115,8 +115,13 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
         </Avatar>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className={cn("font-semibold text-sm truncate", conversation.unread > 0 && "font-bold")}>
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <h3
+              className={cn(
+                "min-w-0 font-semibold text-sm truncate",
+                conversation.unread > 0 && "font-bold"
+              )}
+            >
               {conversation.name}
             </h3>
             <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
@@ -124,15 +129,17 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
               <span className="tabular-nums">{conversation.time}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{formatBrazilianPhone(conversation.phone)}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {formatBrazilianPhone(conversation.phone)}
+          </p>
         </div>
       </div>
 
       {/* Message preview */}
-      <div className="mt-2">
+      <div className="mt-2 min-w-0">
         <p
           className={cn(
-            "text-xs text-muted-foreground line-clamp-2",
+            "text-xs text-muted-foreground line-clamp-2 [overflow-wrap:anywhere] [word-break:break-word]",
             conversation.unread > 0 && "text-foreground font-medium"
           )}
         >
