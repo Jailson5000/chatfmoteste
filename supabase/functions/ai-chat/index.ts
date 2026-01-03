@@ -685,16 +685,36 @@ serve(async (req) => {
     // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
-      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at")
+      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config")
       .eq("id", automationId)
       .eq("is_active", true)
       .single();
 
     if (automationError || !automation) {
-      console.error("[AI Chat] Agent not found or inactive", { automationId, error: automationError });
+      console.error("[AI_ISOLATION] ❌ Agent not found or inactive", { automationId, error: automationError });
       return new Response(
         JSON.stringify({ error: "Agent not found or inactive" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ========================================================================
+    // CRITICAL SECURITY CHECK: Validate tenant isolation
+    // If context includes lawFirmId, the automation MUST belong to that tenant
+    // ========================================================================
+    const contextLawFirmId = context?.lawFirmId;
+    if (contextLawFirmId && automation.law_firm_id !== contextLawFirmId) {
+      console.error(`[AI_ISOLATION] ❌ SECURITY VIOLATION - Cross-tenant automation execution blocked!`, JSON.stringify({
+        expected_tenant: contextLawFirmId,
+        automation_tenant: automation.law_firm_id,
+        automation_id: automationId,
+        automation_name: automation.name,
+        conversation_id: conversationId,
+        timestamp: new Date().toISOString(),
+      }));
+      return new Response(
+        JSON.stringify({ error: "Access denied: automation does not belong to this tenant" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -708,31 +728,41 @@ serve(async (req) => {
     // Get law_firm_id from automation (for usage tracking)
     agentLawFirmId = (automation as any).law_firm_id;
 
+    // Extract AI role from trigger_config for audit purposes
+    const triggerConfig = (automation as any).trigger_config as Record<string, unknown> | null;
+    const aiRole = (triggerConfig?.role as string) || 'default';
+
     if (!systemPrompt) {
-      console.error("[AI Chat] Agent has no prompt configured", { automationId });
+      console.error("[AI_ISOLATION] ❌ Agent has no prompt configured", { automationId });
       return new Response(
         JSON.stringify({ error: "Agent has no prompt configured" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // CRITICAL LOG: Track which prompt version is being used
-    console.log(`[AI Chat] AGENT LOADED - SINGLE SOURCE OF TRUTH`, {
-      agentId: automation.id,
-      agentName: automationName,
-      lawFirmId: agentLawFirmId,
-      promptVersion: automation.version,
-      promptUpdatedAt: automation.updated_at,
-      promptLength: systemPrompt.length,
-    });
+    // ========================================================================
+    // AUDIT LOG: Canonical identity for every AI execution
+    // ========================================================================
+    console.log(`[AI_ISOLATION] ✅ EXECUTION START - Canonical Identity Validated`, JSON.stringify({
+      tenant_id: agentLawFirmId,
+      ai_id: automation.id,
+      ai_name: automationName,
+      ai_role: aiRole,
+      prompt_version: automation.version,
+      prompt_updated_at: automation.updated_at,
+      prompt_length: systemPrompt.length,
+      conversation_id: conversationId,
+      context_tenant_validated: !!contextLawFirmId,
+      timestamp: new Date().toISOString(),
+    }));
 
     // ONLY load knowledge bases that are EXPLICITLY LINKED to this agent
     // This ensures complete tenant and agent isolation
     knowledgeText = await getAgentKnowledge(supabase, automationId);
     if (knowledgeText) {
-      console.log(`[AI Chat] Loaded knowledge base ONLY for agent ${automationId}`);
+      console.log(`[AI_ISOLATION] Knowledge base loaded ONLY for agent ${automationId} (tenant: ${agentLawFirmId})`);
     } else {
-      console.log(`[AI Chat] No knowledge base linked to agent ${automationId}`);
+      console.log(`[AI_ISOLATION] No knowledge base linked to agent ${automationId}`);
     }
 
     // Build messages array - agent prompt is the ONLY system instruction
