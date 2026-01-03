@@ -1552,7 +1552,7 @@ export default function Conversations() {
       </div>
 
       <div
-        className="hidden md:grid h-full w-full overflow-hidden grid-rows-1"
+        className="hidden md:grid h-full w-full min-h-0 overflow-hidden grid-rows-1"
         style={{
           minWidth: 0,
           gridTemplateColumns:
@@ -1562,7 +1562,7 @@ export default function Conversations() {
         }}
       >
         {/* Conversations List Panel - Fixed width */}
-        <div className="bg-card flex flex-col min-h-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px' }}>
+        <div className="bg-card flex flex-col min-h-0 min-w-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px' }}>
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1633,7 +1633,7 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area Panel - Flexible, shrinks to fit available space */}
-        <div className="min-h-0 min-w-0 overflow-hidden">
+        <div className="flex flex-col min-h-0 min-w-0 overflow-hidden h-full w-full">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1646,7 +1646,7 @@ export default function Conversations() {
         }}
         disabled={isSending || !selectedConversation}
       >
-        <div className="flex-1 flex flex-col bg-background min-h-0 w-full h-full overflow-hidden">
+        <div className="flex-1 flex flex-col bg-background min-h-0 min-w-0 w-full h-full overflow-hidden">
         {selectedConversation ? (
           <>
             {/* Chat Header */}
@@ -2282,7 +2282,7 @@ export default function Conversations() {
 
         {/* Contact Details Panel - Fixed width with explicit flex-basis */}
         {showDetailsPanel && selectedConversation && (
-          <div className="h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden" style={{ width: '320px', minWidth: '320px' }}>
+          <div className="h-full min-h-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden" style={{ width: '320px', minWidth: '320px' }}>
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
