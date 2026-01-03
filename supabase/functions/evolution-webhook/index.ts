@@ -311,6 +311,27 @@ async function resolveAutomationForConversation(
 
         // CRITICAL: Validate tenant isolation - automation must belong to same tenant
         if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
+          // PERSIST: Save the resolved automation to the conversation for future messages
+          // This ensures the same AI handles subsequent messages in this conversation
+          const { error: updateError } = await supabaseClient
+            .from('conversations')
+            .update({ current_automation_id: automation.id })
+            .eq('id', conversationId);
+          
+          if (updateError) {
+            console.warn(`[AI_ISOLATION] ⚠️ Failed to persist current_automation_id`, JSON.stringify({
+              conversation_id: conversationId,
+              automation_id: automation.id,
+              error: updateError.message,
+            }));
+          } else {
+            console.log(`[AI_ISOLATION] 💾 PERSISTED - current_automation_id saved`, JSON.stringify({
+              conversation_id: conversationId,
+              automation_id: automation.id,
+              automation_name: automation.name,
+            }));
+          }
+          
           const identity: AutomationIdentity = {
             ...automation,
             resolved_from: 'whatsapp_instance',
@@ -366,6 +387,26 @@ async function resolveAutomationForConversation(
 
       // CRITICAL: Validate tenant isolation - automation must belong to same tenant
       if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
+        // PERSIST: Save the resolved automation to the conversation for future messages
+        const { error: updateError } = await supabaseClient
+          .from('conversations')
+          .update({ current_automation_id: automation.id })
+          .eq('id', conversationId);
+        
+        if (updateError) {
+          console.warn(`[AI_ISOLATION] ⚠️ Failed to persist current_automation_id`, JSON.stringify({
+            conversation_id: conversationId,
+            automation_id: automation.id,
+            error: updateError.message,
+          }));
+        } else {
+          console.log(`[AI_ISOLATION] 💾 PERSISTED - current_automation_id saved`, JSON.stringify({
+            conversation_id: conversationId,
+            automation_id: automation.id,
+            automation_name: automation.name,
+          }));
+        }
+        
         const identity: AutomationIdentity = {
           ...automation,
           resolved_from: 'law_firm_settings',
