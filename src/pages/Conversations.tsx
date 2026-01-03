@@ -2062,8 +2062,8 @@ export default function Conversations() {
 
 
             {/* Messages */}
-            <div className="relative flex-1 min-h-0 min-w-0">
-              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full min-w-0">
+            <div className="relative flex-1 min-h-0 min-w-0 overflow-x-hidden">
+              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full min-w-0" viewportClassName="min-w-0 overflow-x-hidden">
                 <div className="py-4 space-y-4 w-full min-w-0 px-3 lg:px-4">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-8">
