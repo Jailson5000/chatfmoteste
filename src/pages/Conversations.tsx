@@ -2271,9 +2271,9 @@ export default function Conversations() {
           </ChatDropZone>
         </div>
 
-        {/* Contact Details Panel - Fixed width, min-width prevents collapse */}
+        {/* Contact Details Panel - Fixed width with explicit flex-basis */}
         {showDetailsPanel && selectedConversation && (
-          <div className="w-80 min-w-80 h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden">
+          <div className="h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden" style={{ width: '320px', minWidth: '320px', flexBasis: '320px' }}>
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
