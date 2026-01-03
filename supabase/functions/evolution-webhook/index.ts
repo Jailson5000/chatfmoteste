@@ -171,11 +171,72 @@ async function recordAIConversationUsage(
 }
 
 /**
+ * Log AI transfer/assignment for audit purposes.
+ * Records when an AI agent is assigned to a conversation.
+ */
+async function logAITransfer(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string,
+  fromAgentId: string | null,
+  toAgentId: string,
+  toAgentName: string,
+  transferType: 'manual' | 'auto_assignment' | 'escalation',
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    // Get from agent name if exists
+    let fromAgentName: string | null = null;
+    if (fromAgentId) {
+      const { data: fromAgent } = await supabaseClient
+        .from('automations')
+        .select('name')
+        .eq('id', fromAgentId)
+        .single();
+      fromAgentName = fromAgent?.name || null;
+    }
+
+    await supabaseClient.from('ai_transfer_logs').insert({
+      law_firm_id: lawFirmId,
+      conversation_id: conversationId,
+      from_agent_id: fromAgentId,
+      to_agent_id: toAgentId,
+      from_agent_name: fromAgentName,
+      to_agent_name: toAgentName,
+      transferred_by: null, // System/automatic
+      transferred_by_name: null,
+      transfer_type: transferType,
+      reason: transferType === 'auto_assignment' ? 'First AI assignment based on instance/company default' : null,
+      metadata: {
+        ...metadata,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    console.log(`[AI_TRANSFER] ${transferType.toUpperCase()}`, JSON.stringify({
+      conversation_id: conversationId,
+      from_agent: fromAgentId,
+      from_agent_name: fromAgentName,
+      to_agent: toAgentId,
+      to_agent_name: toAgentName,
+      transfer_type: transferType,
+    }));
+  } catch (error) {
+    console.warn(`[AI_TRANSFER] Failed to log transfer`, JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      conversation_id: conversationId,
+    }));
+  }
+}
+
+/**
  * Resolve which automation to use for a conversation.
  * Priority order:
- * 1. WhatsApp instance default_automation_id (if conversation has whatsapp_instance_id)
- * 2. Company-wide default_automation_id from law_firm_settings
- * 3. First active automation with prompt configured
+ * 1. Conversation's current_automation_id (highest - transfer or previous assignment)
+ * 2. WhatsApp instance default_automation_id
+ * 3. Company-wide default_automation_id from law_firm_settings
+ * 
+ * IMPORTANT: NO FALLBACK TO "FIRST ACTIVE" - explicit configuration required.
  */
 // ============================================================================
 // CRITICAL: AI ISOLATION - CANONICAL IDENTITY RESOLUTION
@@ -187,6 +248,7 @@ async function recordAIConversationUsage(
 // 2. EXPLICIT CONFIGURATION REQUIRED - Either instance or company default must be set
 // 3. STRICT TENANT ISOLATION - Automation MUST belong to the same law_firm_id
 // 4. AUDIT TRAIL - Every resolution is logged with full identity context
+// 5. PROMPT IS THE AI'S - The prompt used is ALWAYS from the resolved AI, never cached
 // ============================================================================
 
 interface AutomationIdentity {
@@ -330,6 +392,21 @@ async function resolveAutomationForConversation(
               automation_id: automation.id,
               automation_name: automation.name,
             }));
+
+            // LOG AUTO-ASSIGNMENT: First time AI is assigned to this conversation
+            await logAITransfer(
+              supabaseClient,
+              lawFirmId,
+              conversationId,
+              null, // No previous agent
+              automation.id,
+              automation.name,
+              'auto_assignment',
+              {
+                resolved_from: 'whatsapp_instance',
+                instance_name: instance.instance_name,
+              }
+            );
           }
           
           const identity: AutomationIdentity = {
@@ -405,6 +482,20 @@ async function resolveAutomationForConversation(
             automation_id: automation.id,
             automation_name: automation.name,
           }));
+
+          // LOG AUTO-ASSIGNMENT: First time AI is assigned to this conversation
+          await logAITransfer(
+            supabaseClient,
+            lawFirmId,
+            conversationId,
+            null, // No previous agent
+            automation.id,
+            automation.name,
+            'auto_assignment',
+            {
+              resolved_from: 'law_firm_settings',
+            }
+          );
         }
         
         const identity: AutomationIdentity = {
