@@ -1151,12 +1151,13 @@ export default function Conversations() {
     }
   };
 
-  const handleTransferHandler = (handler: "ai" | "human", assignedTo?: string | null) => {
+  const handleTransferHandler = (handler: "ai" | "human", assignedTo?: string | null, automationId?: string | null) => {
     if (selectedConversation) {
       transferHandler.mutate({
         conversationId: selectedConversation.id,
         handlerType: handler,
         assignedTo: assignedTo,
+        automationId: automationId,
       });
     }
   };
@@ -1702,7 +1703,7 @@ export default function Conversations() {
                                 variant={selectedConversation.current_handler === "ai" ? "secondary" : "ghost"}
                                 size="sm"
                                 className="w-full justify-start h-9"
-                                onClick={() => handleTransferHandler("ai")}
+                                onClick={() => handleTransferHandler("ai", null, automation.id)}
                               >
                                 <div className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mr-2">
                                   <Zap className="h-3.5 w-3.5 text-purple-600" />

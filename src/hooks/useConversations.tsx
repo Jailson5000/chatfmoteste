@@ -285,18 +285,30 @@ export function useConversations() {
     mutationFn: async ({ 
       conversationId, 
       handlerType, 
-      assignedTo 
+      assignedTo,
+      automationId 
     }: { 
       conversationId: string; 
       handlerType: 'ai' | 'human';
       assignedTo?: string | null;
+      automationId?: string | null; // ID do agente de IA específico
     }) => {
+      const updateData: Record<string, any> = { 
+        current_handler: handlerType,
+        assigned_to: assignedTo || null 
+      };
+      
+      // Se transferindo para IA, definir qual IA específica
+      // Se transferindo para humano, limpar a IA atribuída
+      if (handlerType === 'ai' && automationId) {
+        updateData.current_automation_id = automationId;
+      } else if (handlerType === 'human') {
+        updateData.current_automation_id = null;
+      }
+      
       const { error } = await supabase
         .from("conversations")
-        .update({ 
-          current_handler: handlerType,
-          assigned_to: assignedTo || null 
-        })
+        .update(updateData)
         .eq("id", conversationId);
       
       if (error) throw error;

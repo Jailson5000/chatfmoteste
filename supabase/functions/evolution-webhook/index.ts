@@ -199,7 +199,8 @@ interface AutomationIdentity {
   updated_at: string;
   law_firm_id: string;
   // Canonical identity fields for audit
-  resolved_from: 'whatsapp_instance' | 'law_firm_settings';
+  // Priority: conversation_transfer > whatsapp_instance > law_firm_settings
+  resolved_from: 'conversation_transfer' | 'whatsapp_instance' | 'law_firm_settings';
   resolution_timestamp: string;
 }
 
@@ -212,16 +213,66 @@ async function resolveAutomationForConversation(
   
   try {
     // ========================================================================
-    // Step 1: Get conversation to find whatsapp_instance_id
+    // Step 1: Get conversation to find whatsapp_instance_id AND current_automation_id
     // ========================================================================
     const { data: conversation } = await supabaseClient
       .from('conversations')
-      .select('whatsapp_instance_id')
+      .select('whatsapp_instance_id, current_automation_id')
       .eq('id', conversationId)
       .single();
 
     // ========================================================================
-    // Step 2: Check if instance has a default automation (HIGHEST PRIORITY)
+    // Step 2: HIGHEST PRIORITY - Check if conversation has a specific automation assigned
+    // This happens when a conversation is transferred to a specific AI agent
+    // ========================================================================
+    if (conversation?.current_automation_id) {
+      const { data: automation } = await supabaseClient
+        .from('automations')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
+        .eq('id', conversation.current_automation_id)
+        .eq('is_active', true)
+        .not('ai_prompt', 'is', null)
+        .single();
+
+      // CRITICAL: Validate tenant isolation - automation must belong to same tenant
+      if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
+        const identity: AutomationIdentity = {
+          ...automation,
+          resolved_from: 'conversation_transfer',
+          resolution_timestamp: resolutionTimestamp,
+        };
+        
+        // AUDIT LOG: Canonical identity resolved from conversation transfer
+        console.log(`[AI_ISOLATION] ✅ RESOLVED - Conversation Transfer (Priority 1)`, JSON.stringify({
+          tenant_id: lawFirmId,
+          ai_id: automation.id,
+          ai_name: automation.name,
+          ai_role: automation.trigger_config?.role || 'transferred',
+          prompt_version: automation.version,
+          prompt_updated_at: automation.updated_at,
+          resolved_from: 'conversation_transfer',
+          conversation_id: conversationId,
+          timestamp: resolutionTimestamp,
+        }));
+        
+        return identity;
+      } else if (automation && automation.law_firm_id !== lawFirmId) {
+        // SECURITY ALERT: Cross-tenant contamination attempt detected!
+        console.error(`[AI_ISOLATION] ❌ SECURITY VIOLATION - Cross-tenant automation in conversation!`, JSON.stringify({
+          expected_tenant: lawFirmId,
+          automation_tenant: automation.law_firm_id,
+          automation_id: automation.id,
+          conversation_id: conversationId,
+          timestamp: resolutionTimestamp,
+        }));
+        return null;
+      }
+      // If automation not found or inactive, fall through to next priority
+    }
+
+    // ========================================================================
+    // Step 3: Check if instance has a default automation (SECOND PRIORITY)
+    // Used for first contact / new conversations
     // ========================================================================
     if (conversation?.whatsapp_instance_id) {
       const { data: instance } = await supabaseClient

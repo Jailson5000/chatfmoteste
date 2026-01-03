@@ -97,7 +97,7 @@ interface ContactDetailsPanelProps {
   automations: Automation[];
   onClose: () => void;
   onEditName: () => void;
-  onTransferHandler: (handler: 'ai' | 'human', assignedTo?: string | null) => void;
+  onTransferHandler: (handler: 'ai' | 'human', assignedTo?: string | null, automationId?: string | null) => void;
   onChangeDepartment: (deptId: string | null) => void;
   onChangeStatus?: (statusId: string | null) => void;
   onChangeTags?: (tagNames: string[]) => void;
@@ -373,7 +373,7 @@ export function ContactDetailsPanel({
                               key={automation.id}
                               value={`ai-${automation.name}`}
                               onSelect={() => {
-                                onTransferHandler("ai", null);
+                                onTransferHandler("ai", null, automation.id);
                                 setAttendantPopoverOpen(false);
                                 setAttendantSearch("");
                               }}
