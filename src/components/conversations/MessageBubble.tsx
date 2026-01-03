@@ -896,13 +896,17 @@ function ImageViewer({
 
   return (
     <>
-      <img
-        src={imageSrc || src}
-        alt="Imagem"
-        className="max-w-[240px] max-h-[240px] rounded-lg cursor-pointer object-cover hover:opacity-90 transition-opacity"
+      <div 
+        className="max-w-[240px] max-h-[240px] rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity bg-muted/30"
         onClick={() => setImageOpen(true)}
-        onError={() => setError(true)}
-      />
+      >
+        <img
+          src={imageSrc || src}
+          alt="Imagem"
+          className="max-w-full max-h-[240px] object-contain"
+          onError={() => setError(true)}
+        />
+      </div>
       <Dialog open={imageOpen} onOpenChange={setImageOpen}>
         <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
           <img
