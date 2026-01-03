@@ -2558,18 +2558,54 @@ serve(async (req) => {
 
         // Update conversation last_message_at
         // IMPORTANT: Do NOT overwrite contact_name on outbound messages (fromMe), because pushName is our own display name.
+        // IMPORTANT: If conversation is archived (archived_at is not null), unarchive it when a new message arrives
+        const isArchived = conversation.archived_at !== null;
+        const updatePayload: Record<string, unknown> = {
+          last_message_at: new Date().toISOString(),
+          contact_name: !isFromMe ? (data.pushName || conversation.contact_name) : conversation.contact_name,
+        };
+
+        // If archived, unarchive and restore to appropriate handler
+        if (isArchived) {
+          updatePayload.archived_at = null;
+          updatePayload.archived_reason = null;
+          
+          // Restore handler based on archived_next_responsible settings
+          if (conversation.archived_next_responsible_type === 'ai' && conversation.archived_next_responsible_id) {
+            updatePayload.current_handler = 'ai';
+            updatePayload.current_automation_id = conversation.archived_next_responsible_id;
+            updatePayload.assigned_to = null;
+          } else if (conversation.archived_next_responsible_type === 'human' && conversation.archived_next_responsible_id) {
+            updatePayload.current_handler = 'human';
+            updatePayload.assigned_to = conversation.archived_next_responsible_id;
+            updatePayload.current_automation_id = null;
+          } else {
+            // No next responsible defined, default to AI if instance has default automation
+            updatePayload.current_handler = instance.default_assigned_to ? 'human' : 'ai';
+            updatePayload.assigned_to = instance.default_assigned_to || null;
+          }
+          
+          // Clear archived metadata
+          updatePayload.archived_next_responsible_type = null;
+          updatePayload.archived_next_responsible_id = null;
+          
+          logDebug('UNARCHIVE', `Unarchiving conversation due to new message`, { 
+            requestId, 
+            conversationId: conversation.id,
+            newHandler: updatePayload.current_handler,
+            restoredTo: updatePayload.assigned_to || updatePayload.current_automation_id
+          });
+        }
+
         const { error: updateConvError } = await supabaseClient
           .from('conversations')
-          .update({ 
-            last_message_at: new Date().toISOString(),
-            contact_name: !isFromMe ? (data.pushName || conversation.contact_name) : conversation.contact_name,
-          })
+          .update(updatePayload)
           .eq('id', conversation.id);
 
         if (updateConvError) {
-          logDebug('ERROR', `Failed to update conversation last_message_at`, { requestId, error: updateConvError });
+          logDebug('ERROR', `Failed to update conversation`, { requestId, error: updateConvError });
         } else {
-          logDebug('DB', `Updated conversation last_message_at`, { requestId, conversationId: conversation.id });
+          logDebug('DB', `Updated conversation${isArchived ? ' (unarchived)' : ''}`, { requestId, conversationId: conversation.id });
         }
 
         // ==== AUTOMATION: Check and forward to N8N if rules match ====
