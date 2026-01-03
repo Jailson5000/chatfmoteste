@@ -1719,8 +1719,8 @@ export default function Conversations() {
         </div>
 
         {/* Conversation List */}
-        <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+        <ScrollArea className="flex-1 min-w-0" viewportClassName="min-w-0">
+          <div className="p-2 space-y-1 min-w-0">
             {filteredConversations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
