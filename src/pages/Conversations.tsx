@@ -108,7 +108,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type ConversationTab = "chat" | "ai" | "queue";
+type ConversationTab = "chat" | "ai" | "queue" | "archived";
+
+// Archive reason options
+const ARCHIVE_REASONS = [
+  { value: "resolved", label: "Chat do cliente resolvido com sucesso." },
+  { value: "no_response", label: "Cliente não responde mais." },
+  { value: "opened_by_mistake", label: "Abri sem querer." },
+  { value: "other", label: "Outros." },
+] as const;
 
 interface Message {
   id: string;
@@ -213,8 +221,12 @@ export default function Conversations() {
   
   // Internal chat mode (messages only visible to team, not sent to WhatsApp)
   const [isInternalMode, setIsInternalMode] = useState(false);
-  
-  
+
+  // Archive dialog state
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiveReason, setArchiveReason] = useState<string>("resolved");
+  const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
+
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
   
@@ -676,12 +688,17 @@ export default function Conversations() {
       // Tab filter
       switch (activeTab) {
         case "chat":
-          // "Chat": Only show conversations assigned to current user (as human handler)
-          return conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
+          // "Chat": Only show conversations assigned to current user (as human handler), exclude archived
+          return (conv.status as string) !== "archived" && conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
         case "ai":
-          return conv.handler === "ai";
+          // Exclude archived from AI tab
+          return (conv.status as string) !== "archived" && conv.handler === "ai";
         case "queue":
-          return true;
+          // Exclude archived from Fila tab
+          return (conv.status as string) !== "archived";
+        case "archived":
+          // Only show archived conversations
+          return (conv.status as string) === "archived";
         default:
           return true;
       }
@@ -1251,6 +1268,13 @@ export default function Conversations() {
     }
   };
 
+  const openArchiveDialog = () => {
+    if (!selectedConversation) return;
+    setArchiveReason("resolved");
+    setArchiveNextResponsible(null);
+    setArchiveDialogOpen(true);
+  };
+
   const handleArchiveConversation = async () => {
     if (!selectedConversation) return;
 
@@ -1258,9 +1282,15 @@ export default function Conversations() {
       await updateConversation.mutateAsync({
         id: selectedConversation.id,
         status: "archived" as any,
+        // Optionally store archiveReason and archiveNextResponsible in internal_notes or a dedicated column
+        internal_notes: selectedConversation.internal_notes
+          ? `${selectedConversation.internal_notes}\n\n[Arquivado: ${ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason}]`
+          : `[Arquivado: ${ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason}]`,
+        ...(archiveNextResponsible && archiveNextResponsible !== "none" ? { assigned_to: archiveNextResponsible } : {}),
       });
 
       toast({ title: "Conversa arquivada" });
+      setArchiveDialogOpen(false);
       setSelectedConversationId(null);
       setShowMobileChat(false);
     } catch (error) {
@@ -1274,11 +1304,13 @@ export default function Conversations() {
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo).length;
+        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo && (c.status as string) !== "archived").length;
       case "ai":
-        return mappedConversations.filter((c) => c.handler === "ai").length;
+        return mappedConversations.filter((c) => c.handler === "ai" && (c.status as string) !== "archived").length;
       case "queue":
-        return mappedConversations.length;
+        return mappedConversations.filter((c) => (c.status as string) !== "archived").length;
+      case "archived":
+        return mappedConversations.filter((c) => (c.status as string) === "archived").length;
     }
   };
 
@@ -1338,9 +1370,23 @@ export default function Conversations() {
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("queue")}
                   </Badge>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {/* Archived button below tabs (mobile) */}
+          <Button
+            variant={activeTab === "archived" ? "secondary" : "ghost"}
+            size="sm"
+            className="w-full justify-start gap-2 h-8 text-xs"
+            onClick={() => setActiveTab("archived")}
+          >
+            <Archive className="h-3 w-3" />
+            Arquivados
+            <Badge variant="secondary" className="h-4 px-1 text-[10px] ml-auto">
+              {getTabCount("archived")}
+            </Badge>
+          </Button>
             <ConversationFilters
               filters={conversationFilters}
               onFiltersChange={setConversationFilters}
@@ -1615,6 +1661,20 @@ export default function Conversations() {
             </TabsList>
           </Tabs>
 
+          {/* Archived button below tabs */}
+          <Button
+            variant={activeTab === "archived" ? "secondary" : "ghost"}
+            size="sm"
+            className="w-full justify-start gap-2 h-8 text-xs"
+            onClick={() => setActiveTab("archived")}
+          >
+            <Archive className="h-3 w-3" />
+            Arquivados
+            <Badge variant="secondary" className="h-4 px-1 text-[10px] ml-auto">
+              {getTabCount("archived")}
+            </Badge>
+          </Button>
+
           <ConversationFilters
             filters={conversationFilters}
             onFiltersChange={setConversationFilters}
@@ -1874,14 +1934,14 @@ export default function Conversations() {
                   <TooltipContent>Buscar mensagens</TooltipContent>
                 </Tooltip>
 
-                {/* Archive (same behavior as Kanban) */}
+                {/* Archive button - opens dialog with reason selection */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground/60 hover:text-muted-foreground"
-                      onClick={handleArchiveConversation}
+                      onClick={openArchiveDialog}
                       title="Arquivar"
                     >
                       <Archive className="h-4 w-4" />
@@ -2430,6 +2490,100 @@ export default function Conversations() {
         previewUrl={mediaPreview.previewUrl}
         isSending={isSending}
       />
+
+      {/* Archive Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">Arquivamento do chat</DialogTitle>
+            <p className="text-sm text-muted-foreground text-center mt-1">
+              Selecione o motivo do arquivamento e o próximo responsável.
+              <br />
+              Pressione Enter para confirmar.
+            </p>
+          </DialogHeader>
+          <div className="space-y-6 mt-4">
+            {/* Archive Reason */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Motivo do arquivamento</Label>
+              <div className="space-y-2">
+                {ARCHIVE_REASONS.map((reason) => (
+                  <div
+                    key={reason.value}
+                    className={cn(
+                      "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                      archiveReason === reason.value
+                        ? "bg-muted"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={() => setArchiveReason(reason.value)}
+                  >
+                    <div
+                      className={cn(
+                        "w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                        archiveReason === reason.value
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground"
+                      )}
+                    >
+                      {archiveReason === reason.value && (
+                        <div className="w-2 h-2 bg-primary-foreground rounded-full" />
+                      )}
+                    </div>
+                    <span className="text-sm">{reason.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Next Responsible */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Próximo responsável</Label>
+              <Select
+                value={archiveNextResponsible || "none"}
+                onValueChange={(v) => setArchiveNextResponsible(v === "none" ? null : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    <SelectValue placeholder="Selecionar atendente" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Nenhum responsável</span>
+                  </SelectItem>
+                  {teamMembers.map((member) => (
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Este será o responsável quando o lead retornar. (Opcional)
+              </p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 mt-6">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setArchiveDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              onClick={handleArchiveConversation}
+            >
+              Arquivar chat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>
   );
