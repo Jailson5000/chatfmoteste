@@ -9,6 +9,7 @@ interface Conversation {
   contact_phone: string | null;
   status: string;
   current_handler: 'ai' | 'human';
+  current_automation_id?: string | null;
   last_message_at: string | null;
   tags: string[] | null;
   department_id: string | null;
