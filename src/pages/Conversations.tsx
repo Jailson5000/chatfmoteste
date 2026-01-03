@@ -467,11 +467,32 @@ export default function Conversations() {
           const newMsg = payload.new as Message;
           // Prevent duplicate messages - check if message already exists
           setMessages(prev => {
-            const exists = prev.some(m => m.id === newMsg.id || 
-              (m.content === newMsg.content && 
-               m.is_from_me === newMsg.is_from_me && 
-               Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000));
-            if (exists) return prev;
+            // Check for exact ID match
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            
+            // Check for optimistic message (temp ID) with same content that should be replaced
+            const optimisticIndex = prev.findIndex(m => 
+              m.is_from_me === newMsg.is_from_me && 
+              m.content === newMsg.content &&
+              (m.status === "sending" || m.status === "sent") &&
+              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 10000
+            );
+            
+            if (optimisticIndex !== -1) {
+              // Replace optimistic message with real one
+              const updated = [...prev];
+              updated[optimisticIndex] = { ...newMsg, status: "sent" as MessageStatus };
+              return updated;
+            }
+            
+            // Additional duplicate check for messages without optimistic matching
+            const isDuplicate = prev.some(m => 
+              m.content === newMsg.content && 
+              m.is_from_me === newMsg.is_from_me && 
+              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000
+            );
+            if (isDuplicate) return prev;
+            
             return [...prev, newMsg];
           });
 
@@ -711,6 +732,7 @@ export default function Conversations() {
           await transferHandler.mutateAsync({
             conversationId: selectedConversationId,
             handlerType: "human",
+            assignedTo: user?.id, // Atribuir ao usuário que está enviando a mensagem
           });
         }
         
