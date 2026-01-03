@@ -1214,7 +1214,6 @@ export function MessageBubble({
         "flex w-full min-w-0 group animate-fade-in",
         isFromMe ? "justify-end" : "justify-start"
       )}
-      style={{ maxWidth: '100%' }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
