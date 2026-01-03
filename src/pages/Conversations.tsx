@@ -234,6 +234,7 @@ export default function Conversations() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesScrollAreaRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
+  const pendingOutgoingRef = useRef<Array<{ tempId: string; content: string; sentAt: number }>>([]);
 
   // Media preview state
   const [mediaPreview, setMediaPreview] = useState<{
@@ -465,39 +466,55 @@ export default function Conversations() {
         },
         (payload) => {
           const newMsg = payload.new as Message;
-          // Prevent duplicate messages - check if message already exists
+
+          // Prevent duplicate messages / reconcile optimistic outgoing message with realtime insert
           setMessages(prev => {
-            // Check for exact ID match
+            // 1) Exact ID match
             if (prev.some(m => m.id === newMsg.id)) return prev;
-            
-            // Check for optimistic message (temp ID) with same content that should be replaced
-            // This handles the race condition where realtime arrives before API response
-            const optimisticIndex = prev.findIndex(m => 
-              m.is_from_me === newMsg.is_from_me && 
+
+            // 2) Race-condition fix: if this is an outgoing message, replace the pending optimistic one by tempId
+            if (newMsg.is_from_me) {
+              const pendingIdx = pendingOutgoingRef.current.findIndex(p =>
+                p.content === newMsg.content && (Date.now() - p.sentAt) < 5 * 60 * 1000
+              );
+
+              if (pendingIdx !== -1) {
+                const pending = pendingOutgoingRef.current[pendingIdx];
+                pendingOutgoingRef.current.splice(pendingIdx, 1);
+
+                const optimisticIdx = prev.findIndex(m => m.id === pending.tempId);
+                if (optimisticIdx !== -1) {
+                  const updated = [...prev];
+                  updated[optimisticIdx] = { ...newMsg, status: "sent" as MessageStatus };
+                  return updated;
+                }
+              }
+            }
+
+            // 3) Fallback: replace optimistic by content + direction within a wider window
+            const optimisticIndex = prev.findIndex(m =>
+              m.is_from_me === newMsg.is_from_me &&
               m.content === newMsg.content &&
-              // Match if status is sending/sent OR if it's a recent message with same content
               (m.status === "sending" || m.status === "sent" || !m.whatsapp_message_id) &&
-              // Use wider time window to account for server/client time differences
               Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
             );
-            
+
             if (optimisticIndex !== -1) {
-              // Replace optimistic message with real one from server
               const updated = [...prev];
               updated[optimisticIndex] = { ...newMsg, status: "sent" as MessageStatus };
               return updated;
             }
-            
-            // For is_from_me messages, always check for duplicates more aggressively
+
+            // 4) Last-resort duplicate guard
             if (newMsg.is_from_me) {
-              const isDuplicate = prev.some(m => 
-                m.content === newMsg.content && 
+              const isDuplicate = prev.some(m =>
+                m.content === newMsg.content &&
                 m.is_from_me === true &&
                 Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
               );
               if (isDuplicate) return prev;
             }
-            
+
             return [...prev, newMsg];
           });
 
@@ -708,6 +725,11 @@ export default function Conversations() {
     };
     
     setMessages(prev => [...prev, newMessage]);
+
+    if (!wasInternalMode) {
+      pendingOutgoingRef.current.push({ tempId, content: messageToSend, sentAt: Date.now() });
+      if (pendingOutgoingRef.current.length > 50) pendingOutgoingRef.current.shift();
+    }
     
     try {
       if (wasInternalMode) {
