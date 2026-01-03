@@ -63,17 +63,17 @@ export function AudioModeIndicator({
           <Badge
             variant="outline"
             className={cn(
-              "gap-1.5 cursor-pointer transition-colors",
+              "min-w-0 max-w-[16rem] gap-1.5 cursor-pointer transition-colors",
               "bg-violet-500/10 text-violet-600 border-violet-500/20 hover:bg-violet-500/20",
               "dark:bg-violet-500/20 dark:text-violet-400 dark:border-violet-500/30",
               className
             )}
             onClick={handleDisableClick}
           >
-            <Volume2 className="h-3 w-3 animate-pulse" />
-            <span className="text-xs">Áudio ativo</span>
+            <Volume2 className="h-3 w-3 animate-pulse flex-shrink-0" />
+            <span className="min-w-0 truncate text-xs">Áudio ativo</span>
             {voiceId && (
-              <span className="text-xs opacity-70">• {voiceName}</span>
+              <span className="min-w-0 truncate text-xs opacity-70 hidden lg:inline">• {voiceName}</span>
             )}
           </Badge>
         </TooltipTrigger>
