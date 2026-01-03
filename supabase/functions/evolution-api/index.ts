@@ -959,9 +959,16 @@ serve(async (req) => {
           }
 
           // Update conversation last_message_at
+          // If this conversation was archived, sending a message should also unarchive it
           await supabaseClient
             .from("conversations")
-            .update({ last_message_at: new Date().toISOString() })
+            .update({
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+              archived_next_responsible_type: null,
+              archived_next_responsible_id: null,
+            })
             .eq("id", conversationId);
         }
 
@@ -1120,7 +1127,13 @@ serve(async (req) => {
 
           await supabaseClient
             .from("conversations")
-            .update({ last_message_at: new Date().toISOString() })
+            .update({
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+              archived_next_responsible_type: null,
+              archived_next_responsible_id: null,
+            })
             .eq("id", conversationId);
         }
 
@@ -1360,7 +1373,13 @@ serve(async (req) => {
 
           await supabaseClient
             .from("conversations")
-            .update({ last_message_at: new Date().toISOString() })
+            .update({
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+              archived_next_responsible_type: null,
+              archived_next_responsible_id: null,
+            })
             .eq("id", conversationId);
         }
 
@@ -1941,9 +1960,13 @@ serve(async (req) => {
         // Update conversation
         await supabaseClient
           .from("conversations")
-          .update({ 
+          .update({
             last_message_at: new Date().toISOString(),
             n8n_last_response_at: new Date().toISOString(),
+            archived_at: null,
+            archived_reason: null,
+            archived_next_responsible_type: null,
+            archived_next_responsible_id: null,
           })
           .eq("id", body.conversationId);
 
