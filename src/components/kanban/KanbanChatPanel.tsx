@@ -1533,7 +1533,7 @@ export function KanbanChatPanel({
             ) : (
               <>
                 <User className="h-3 w-3 text-green-500" />
-                <span>{assignedProfile?.full_name || "Atendimento humano"}</span>
+                <span>Atendente · {assignedProfile?.full_name || "Humano"}</span>
               </>
             )}
           </div>

@@ -569,10 +569,13 @@ export default function Conversations() {
     }, {} as Record<string, string>);
 
     return conversations.map((conv) => {
-      // Get the specific AI agent name for THIS conversation
-      const aiAgentName = conv.current_automation_id 
-        ? automationMap[conv.current_automation_id] || "IA"
-        : "IA";
+      // Prefer the joined automation name from the conversation (backend source-of-truth)
+      const joinedAutomationName = (conv as any).current_automation?.name as string | undefined;
+      const aiAgentName = joinedAutomationName?.trim()
+        ? joinedAutomationName
+        : conv.current_automation_id
+          ? automationMap[conv.current_automation_id] || "IA"
+          : "IA";
 
       return {
         id: conv.id,

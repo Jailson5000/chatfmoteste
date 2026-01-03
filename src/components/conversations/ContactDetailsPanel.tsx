@@ -344,12 +344,15 @@ export function ContactDetailsPanel({
                       {conversation.current_handler === "ai" ? (
                         <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0">
                           <Bot className="h-3 w-3 mr-1" />
-                          {automations.find(a => a.id === conversation.current_automation_id)?.name || "IA"}
+                          {(() => {
+                            const name = automations.find(a => a.id === conversation.current_automation_id)?.name;
+                            return `IA · ${name || "Assistente"}`;
+                          })()}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">
                           <User className="h-3 w-3 mr-1" />
-                          {conversation.assigned_profile?.full_name || "Humano"}
+                          {`Atendente · ${conversation.assigned_profile?.full_name || "Humano"}`}
                         </Badge>
                       )}
                     </div>
