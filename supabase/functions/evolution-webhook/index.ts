@@ -275,20 +275,39 @@ async function resolveAutomationForConversation(
     // Used for first contact / new conversations
     // ========================================================================
     if (conversation?.whatsapp_instance_id) {
-      const { data: instance } = await supabaseClient
+      const { data: instance, error: instanceError } = await supabaseClient
         .from('whatsapp_instances')
-        .select('default_automation_id, name')
+        .select('default_automation_id, instance_name')
         .eq('id', conversation.whatsapp_instance_id)
         .single();
 
+      console.log(`[AI_ISOLATION] 🔍 DEBUG - Instance lookup`, JSON.stringify({
+        instance_id: conversation.whatsapp_instance_id,
+        instance_found: !!instance,
+        instance_error: instanceError?.message || null,
+        default_automation_id: instance?.default_automation_id || null,
+        instance_name: instance?.instance_name || null,
+      }));
+
       if (instance?.default_automation_id) {
-        const { data: automation } = await supabaseClient
+        const { data: automation, error: automationError } = await supabaseClient
           .from('automations')
           .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
           .not('ai_prompt', 'is', null)
           .single();
+
+        console.log(`[AI_ISOLATION] 🔍 DEBUG - Automation lookup`, JSON.stringify({
+          automation_id: instance.default_automation_id,
+          automation_found: !!automation,
+          automation_error: automationError?.message || null,
+          automation_name: automation?.name || null,
+          automation_law_firm_id: automation?.law_firm_id || null,
+          expected_law_firm_id: lawFirmId,
+          tenant_match: automation?.law_firm_id === lawFirmId,
+          has_prompt: !!automation?.ai_prompt?.trim(),
+        }));
 
         // CRITICAL: Validate tenant isolation - automation must belong to same tenant
         if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
@@ -307,7 +326,7 @@ async function resolveAutomationForConversation(
             prompt_version: automation.version,
             prompt_updated_at: automation.updated_at,
             resolved_from: 'whatsapp_instance',
-            instance_name: instance.name,
+            instance_name: instance.instance_name,
             conversation_id: conversationId,
             timestamp: resolutionTimestamp,
           }));
