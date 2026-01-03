@@ -62,6 +62,7 @@ export function ChatDropZone({ children, onFileDrop, disabled }: ChatDropZonePro
   return (
     <div
       className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full h-full"
+      style={{ maxWidth: '100%', overflow: 'hidden' }}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
