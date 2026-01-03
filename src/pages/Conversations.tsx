@@ -1551,7 +1551,7 @@ export default function Conversations() {
         </ChatDropZone>
       </div>
 
-      <div className="hidden md:flex h-full w-full min-w-0 overflow-hidden">
+      <div className="hidden md:flex h-full w-full overflow-hidden">
         {/* Conversations List Panel - Fixed width */}
         <div className="w-80 flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden">
         {/* Header */}
@@ -1623,8 +1623,8 @@ export default function Conversations() {
         </ScrollArea>
         </div>
 
-        {/* Chat Area Panel - Flexible */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+        {/* Chat Area Panel - Flexible, shrinks to fit available space */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" style={{ flexBasis: 0 }}>
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1637,9 +1637,7 @@ export default function Conversations() {
         }}
         disabled={isSending || !selectedConversation}
       >
-        <div
-          className="flex-1 flex flex-col bg-background min-h-0 min-w-0 h-full"
-        >
+        <div className="flex-1 flex flex-col bg-background min-h-0 w-full h-full overflow-hidden">
         {selectedConversation ? (
           <>
             {/* Chat Header */}
@@ -1923,9 +1921,9 @@ export default function Conversations() {
 
 
             {/* Messages */}
-            <div className="relative flex-1 min-h-0 overflow-hidden">
-              <ScrollArea ref={messagesScrollAreaRef} className="h-full">
-                <div className="py-4 space-y-4 w-full px-3 lg:px-4">
+            <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
+              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full">
+                <div className="py-4 space-y-4 w-full px-3 lg:px-4 overflow-hidden">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -2273,9 +2271,9 @@ export default function Conversations() {
           </ChatDropZone>
         </div>
 
-        {/* Contact Details Panel - Fixed width */}
+        {/* Contact Details Panel - Fixed width, min-width prevents collapse */}
         {showDetailsPanel && selectedConversation && (
-          <div className="w-72 h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden">
+          <div className="w-80 min-w-80 h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden">
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,
