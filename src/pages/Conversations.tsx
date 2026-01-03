@@ -471,27 +471,32 @@ export default function Conversations() {
             if (prev.some(m => m.id === newMsg.id)) return prev;
             
             // Check for optimistic message (temp ID) with same content that should be replaced
+            // This handles the race condition where realtime arrives before API response
             const optimisticIndex = prev.findIndex(m => 
               m.is_from_me === newMsg.is_from_me && 
               m.content === newMsg.content &&
-              (m.status === "sending" || m.status === "sent") &&
-              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 10000
+              // Match if status is sending/sent OR if it's a recent message with same content
+              (m.status === "sending" || m.status === "sent" || !m.whatsapp_message_id) &&
+              // Use wider time window to account for server/client time differences
+              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
             );
             
             if (optimisticIndex !== -1) {
-              // Replace optimistic message with real one
+              // Replace optimistic message with real one from server
               const updated = [...prev];
               updated[optimisticIndex] = { ...newMsg, status: "sent" as MessageStatus };
               return updated;
             }
             
-            // Additional duplicate check for messages without optimistic matching
-            const isDuplicate = prev.some(m => 
-              m.content === newMsg.content && 
-              m.is_from_me === newMsg.is_from_me && 
-              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 5000
-            );
-            if (isDuplicate) return prev;
+            // For is_from_me messages, always check for duplicates more aggressively
+            if (newMsg.is_from_me) {
+              const isDuplicate = prev.some(m => 
+                m.content === newMsg.content && 
+                m.is_from_me === true &&
+                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
+              );
+              if (isDuplicate) return prev;
+            }
             
             return [...prev, newMsg];
           });
