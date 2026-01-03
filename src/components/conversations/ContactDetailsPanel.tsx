@@ -74,6 +74,8 @@ interface ContactDetailsPanelProps {
     contact_phone: string | null;
     current_handler: 'ai' | 'human';
     current_automation_id?: string | null;
+    // Joined automation data - use this for name display instead of lookup
+    current_automation?: { id: string; name: string } | null;
     department_id: string | null;
     tags: string[] | null;
     created_at: string;
@@ -344,10 +346,8 @@ export function ContactDetailsPanel({
                       {conversation.current_handler === "ai" ? (
                         <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0">
                           <Bot className="h-3 w-3 mr-1" />
-                          {(() => {
-                            const name = automations.find(a => a.id === conversation.current_automation_id)?.name;
-                            return `IA · ${name || "Assistente"}`;
-                          })()}
+                          {/* Use current_automation from join (source of truth) with fallback to lookup */}
+                          {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">
