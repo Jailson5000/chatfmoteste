@@ -998,6 +998,10 @@ export type Database = {
           ai_audio_last_disabled_at: string | null
           ai_audio_last_enabled_at: string | null
           ai_summary: string | null
+          archived_at: string | null
+          archived_next_responsible_id: string | null
+          archived_next_responsible_type: string | null
+          archived_reason: string | null
           assigned_to: string | null
           client_id: string | null
           contact_name: string | null
@@ -1029,6 +1033,10 @@ export type Database = {
           ai_audio_last_disabled_at?: string | null
           ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
+          archived_at?: string | null
+          archived_next_responsible_id?: string | null
+          archived_next_responsible_type?: string | null
+          archived_reason?: string | null
           assigned_to?: string | null
           client_id?: string | null
           contact_name?: string | null
@@ -1060,6 +1068,10 @@ export type Database = {
           ai_audio_last_disabled_at?: string | null
           ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
+          archived_at?: string | null
+          archived_next_responsible_id?: string | null
+          archived_next_responsible_type?: string | null
+          archived_reason?: string | null
           assigned_to?: string | null
           client_id?: string | null
           contact_name?: string | null

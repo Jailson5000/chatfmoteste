@@ -99,6 +99,9 @@ export default function Kanban() {
   // Apply all filters
   const filteredConversations = useMemo(() => {
     return conversations.filter(conv => {
+      // Exclude archived conversations (those with archived_at set)
+      if ((conv as any).archived_at) return false;
+      
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
