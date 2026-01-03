@@ -163,18 +163,21 @@ export type Database = {
           created_at: string
           id: string
           knowledge_item_id: string
+          law_firm_id: string
         }
         Insert: {
           automation_id: string
           created_at?: string
           id?: string
           knowledge_item_id: string
+          law_firm_id: string
         }
         Update: {
           automation_id?: string
           created_at?: string
           id?: string
           knowledge_item_id?: string
+          law_firm_id?: string
         }
         Relationships: [
           {
@@ -189,6 +192,13 @@ export type Database = {
             columns: ["knowledge_item_id"]
             isOneToOne: false
             referencedRelation: "knowledge_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_agent_knowledge_law_firm"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
         ]
@@ -1109,6 +1119,13 @@ export type Database = {
             columns: ["whatsapp_instance_id"]
             isOneToOne: false
             referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_conversations_current_automation"
+            columns: ["current_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
             referencedColumns: ["id"]
           },
         ]

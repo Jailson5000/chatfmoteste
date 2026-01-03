@@ -102,10 +102,10 @@ export default function KnowledgeBase() {
   });
 
   const linkToAgent = useMutation({
-    mutationFn: async ({ automationId, knowledgeItemId }: { automationId: string; knowledgeItemId: string }) => {
+    mutationFn: async ({ automationId, knowledgeItemId, lawFirmId }: { automationId: string; knowledgeItemId: string; lawFirmId: string }) => {
       const { error } = await supabase
         .from('agent_knowledge')
-        .insert({ automation_id: automationId, knowledge_item_id: knowledgeItemId });
+        .insert({ automation_id: automationId, knowledge_item_id: knowledgeItemId, law_firm_id: lawFirmId });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -132,11 +132,11 @@ export default function KnowledgeBase() {
   });
 
   const handleToggleAgentLink = (automationId: string) => {
-    if (!selectedItem) return;
+    if (!selectedItem || !lawFirm?.id) return;
     if (itemAgentLinks.includes(automationId)) {
       unlinkFromAgent.mutate({ automationId, knowledgeItemId: selectedItem.id });
     } else {
-      linkToAgent.mutate({ automationId, knowledgeItemId: selectedItem.id });
+      linkToAgent.mutate({ automationId, knowledgeItemId: selectedItem.id, lawFirmId: lawFirm.id });
     }
   };
 
