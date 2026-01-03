@@ -281,7 +281,7 @@ export function ContactDetailsPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
@@ -289,8 +289,8 @@ export function ContactDetailsPanel({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="p-4 space-y-4">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-4 space-y-4 overflow-hidden">
           {/* Contact Card */}
           <div className="text-center space-y-3">
             <Avatar className="h-20 w-20 mx-auto">
@@ -339,24 +339,27 @@ export function ContactDetailsPanel({
                     variant="outline"
                     role="combobox"
                     aria-expanded={attendantPopoverOpen}
-                    className="w-full justify-start h-auto py-2"
+                    className="w-full justify-start h-auto py-2 overflow-hidden"
                   >
-                    <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <Users className="h-4 w-4 mr-2 text-muted-foreground flex-shrink-0" />
+                    <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
                       {conversation.current_handler === "ai" ? (
-                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0">
-                          <Bot className="h-3 w-3 mr-1" />
-                          {/* Use current_automation from join (source of truth) with fallback to lookup */}
-                          {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
+                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0 truncate max-w-full">
+                          <Bot className="h-3 w-3 mr-1 flex-shrink-0" />
+                          <span className="truncate">
+                            {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
+                          </span>
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">
-                          <User className="h-3 w-3 mr-1" />
-                          {`Atendente · ${conversation.assigned_profile?.full_name || "Humano"}`}
+                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate max-w-full">
+                          <User className="h-3 w-3 mr-1 flex-shrink-0" />
+                          <span className="truncate">
+                            {`Atendente · ${conversation.assigned_profile?.full_name || "Humano"}`}
+                          </span>
                         </Badge>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground ml-auto">Buscar responsável...</span>
+                    <span className="text-xs text-muted-foreground ml-auto flex-shrink-0 hidden sm:inline">Buscar responsável...</span>
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[300px] p-0" align="start">
@@ -459,27 +462,27 @@ export function ContactDetailsPanel({
               <CollapsibleTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50 overflow-hidden"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <CircleDot className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm">Status</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
                     {currentStatus ? (
                       <Badge
                         variant="outline"
-                        className="text-xs"
+                        className="text-xs truncate max-w-[100px]"
                         style={{
                           borderColor: currentStatus.color,
                           backgroundColor: `${currentStatus.color}30`,
                           color: currentStatus.color,
                         }}
                       >
-                        {currentStatus.name}
+                        <span className="truncate">{currentStatus.name}</span>
                       </Badge>
                     ) : null}
-                    {statusOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    {statusOpen ? <ChevronDown className="h-4 w-4 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 flex-shrink-0" />}
                   </div>
                 </Button>
               </CollapsibleTrigger>
@@ -593,27 +596,27 @@ export function ContactDetailsPanel({
               <CollapsibleTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50 overflow-hidden"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <Folder className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm">Departamento</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
                     {currentDepartment ? (
                       <Badge
                         variant="outline"
-                        className="text-xs"
+                        className="text-xs truncate max-w-[100px]"
                         style={{
                           borderColor: currentDepartment.color,
                           backgroundColor: `${currentDepartment.color}30`,
                           color: currentDepartment.color,
                         }}
                       >
-                        {currentDepartment.name}
+                        <span className="truncate">{currentDepartment.name}</span>
                       </Badge>
                     ) : null}
-                    {departmentOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    {departmentOpen ? <ChevronDown className="h-4 w-4 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 flex-shrink-0" />}
                   </div>
                 </Button>
               </CollapsibleTrigger>
