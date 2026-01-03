@@ -93,12 +93,21 @@ export function useClients() {
 
   const deleteClient = useMutation({
     mutationFn: async (id: string) => {
+      // CASCADE delete will automatically remove:
+      // - conversations
+      // - client_tags
+      // - client_actions
+      // - client_memories
+      // - cases
+      // - documents
+      // - consent_logs
       const { error } = await supabase.from("clients").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
-      toast({ title: "Contato excluído" });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast({ title: "Contato e todos os registros relacionados foram excluídos" });
     },
     onError: (error) => {
       toast({ title: "Erro ao excluir contato", description: error.message, variant: "destructive" });
@@ -139,6 +148,43 @@ export function useClients() {
     },
   });
 
+  const unifyDuplicates = useMutation({
+    mutationFn: async () => {
+      const { data: profile } = await supabase.auth.getUser();
+      if (!profile.user) throw new Error("Usuário não autenticado");
+
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("law_firm_id")
+        .eq("id", profile.user.id)
+        .single();
+
+      if (!userProfile?.law_firm_id) throw new Error("Escritório não encontrado");
+
+      const { data, error } = await supabase.rpc("unify_duplicate_clients", {
+        _law_firm_id: userProfile.law_firm_id,
+      });
+
+      if (error) throw error;
+      return data as { success: boolean; deleted_count: number; unified_phones: string[] };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (data.deleted_count > 0) {
+        toast({ 
+          title: `${data.deleted_count} contatos duplicados unificados`,
+          description: `Telefones unificados: ${data.unified_phones.length}`,
+        });
+      } else {
+        toast({ title: "Nenhum contato duplicado encontrado" });
+      }
+    },
+    onError: (error) => {
+      toast({ title: "Erro ao unificar duplicados", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     clients,
     isLoading,
@@ -147,5 +193,6 @@ export function useClients() {
     deleteClient,
     moveClientToDepartment,
     updateClientStatus,
+    unifyDuplicates,
   };
 }
