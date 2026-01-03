@@ -1763,8 +1763,8 @@ export default function Conversations() {
         {selectedConversation ? (
           <>
             {/* Chat Header */}
-            	<div className="p-4 border-b border-border flex-shrink-0 min-w-0 overflow-hidden">
-              <div className="flex items-center justify-between gap-3">
+            <div className="p-4 border-b border-border flex-shrink-0 min-w-0 overflow-x-hidden">
+              <div className="flex flex-wrap items-start justify-between gap-3 min-w-0">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Button
                     variant="ghost"
@@ -1838,37 +1838,39 @@ export default function Conversations() {
                     </div>
                   </div>
                 </div>
-              <div className="flex items-center gap-2">
-                {/* Audio Mode Indicator */}
-                {showAudioIndicator && selectedConversation && (
-                  <AudioModeIndicator
-                    isAudioEnabled={true}
-                    voiceId={globalVoiceConfig?.voiceId}
-                    onDisable={() => {
-                      // Disable audio mode for THIS CONVERSATION (SINGLE SOURCE OF TRUTH)
-                      updateConversationAudioMode.mutate({
-                        conversationId: selectedConversation.id,
-                        enabled: false,
-                        reason: 'manual_toggle',
-                      });
-                    }}
-                  />
-                )}
-                
-                {/* AI Provider Indicator */}
-                <AIProviderBadge size="sm" />
-                {/* Transfer Handler - Categorized */}
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <ArrowRightLeft className="h-4 w-4 mr-2" />
-                      Transferir
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-0" align="end">
-                    <div className="p-3 border-b">
-                      <h4 className="font-medium text-sm">Transferir para</h4>
-                    </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+                  {/* Audio Mode Indicator */}
+                  {showAudioIndicator && selectedConversation && (
+                    <AudioModeIndicator
+                      isAudioEnabled={true}
+                      voiceId={globalVoiceConfig?.voiceId}
+                      className="min-w-0 max-w-[260px]"
+                      onDisable={() => {
+                        // Disable audio mode for THIS CONVERSATION (SINGLE SOURCE OF TRUTH)
+                        updateConversationAudioMode.mutate({
+                          conversationId: selectedConversation.id,
+                          enabled: false,
+                          reason: 'manual_toggle',
+                        });
+                      }}
+                    />
+                  )}
+
+                  {/* AI Provider Indicator */}
+                  <AIProviderBadge size="sm" className="min-w-0 max-w-[200px]" />
+                  {/* Transfer Handler - Categorized */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="shrink-0">
+                        <ArrowRightLeft className="h-4 w-4 mr-2" />
+                        Transferir
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-0" align="end">
+                      <div className="p-3 border-b">
+                        <h4 className="font-medium text-sm">Transferir para</h4>
+                      </div>
                     <ScrollArea className="max-h-80">
                       <div className="p-2 space-y-1">
                         {/* IA Section */}
