@@ -14,6 +14,7 @@ interface KanbanCardProps {
     status: string;
     current_handler: 'ai' | 'human';
     current_automation_id?: string | null;
+    current_automation?: { id: string; name: string } | null;
     last_message_at: string | null;
     tags: string[] | null;
     department_id: string | null;
@@ -109,14 +110,22 @@ export function KanbanCard({
   const maskedPhone = maskPhone(conversation.contact_phone);
   const timeAgo = getTimeAgo(conversation.last_message_at);
   
-  // Get handler name: if AI, show "IA + specific automation name", if human, show person's name
-  const currentAutomation = conversation.current_automation_id 
-    ? automations.find(a => a.id === conversation.current_automation_id)
-    : null;
-  const handlerName = conversation.current_handler === 'ai' 
-    ? `IA ${currentAutomation?.name || ''}`.trim()
-    : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Sem responsável');
-  
+  // Get handler name (backend-first):
+  // - AI: IA · <automation name>
+  // - Human: Atendente · <full name>
+  const automationName =
+    conversation.current_automation?.name ||
+    (conversation.current_automation_id
+      ? automations.find((a) => a.id === conversation.current_automation_id)?.name
+      : undefined);
+
+  const handlerName =
+    conversation.current_handler === "ai"
+      ? `IA · ${automationName || "Assistente"}`
+      : conversation.assigned_profile?.full_name
+        ? `Atendente · ${conversation.assigned_profile.full_name}`
+        : "Atendente · Sem responsável";
+
   const isAI = conversation.current_handler === 'ai';
 
   // Instance identifier: only display_name or instance_name

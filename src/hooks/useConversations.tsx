@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
+import { useLawFirm } from "@/hooks/useLawFirm";
 import { useEffect } from "react";
 
 type Conversation = Tables<"conversations">;
@@ -17,6 +18,10 @@ interface ConversationWithLastMessage extends Conversation {
     instance_name: string;
     display_name?: string | null;
     phone_number?: string | null;
+  } | null;
+  current_automation?: {
+    id: string;
+    name: string;
   } | null;
   assigned_profile?: {
     full_name: string;
@@ -46,35 +51,40 @@ interface ConversationWithLastMessage extends Conversation {
 export function useConversations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: conversations = [], isLoading, error } = useQuery({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", lawFirm?.id],
     queryFn: async () => {
-      // Fetch conversations with related data including phone_number
+      if (!lawFirm?.id) return [];
+
+      // Fetch conversations with related data including phone_number + current automation name
       const { data: convs, error: convError } = await supabase
         .from("conversations")
         .select(`
           *,
           whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
+          current_automation:automations(id, name),
           client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
           department:departments(id, name, color)
         `)
+        .eq("law_firm_id", lawFirm.id)
         .order("last_message_at", { ascending: false, nullsFirst: false });
 
       if (convError) throw convError;
 
       // Fetch assigned profiles separately
       const assignedIds = (convs || [])
-        .map(c => c.assigned_to)
+        .map((c) => c.assigned_to)
         .filter((id): id is string => id !== null);
-      
+
       let profilesMap: Record<string, string> = {};
       if (assignedIds.length > 0) {
         const { data: profiles } = await supabase
           .from("profiles")
           .select("id, full_name")
           .in("id", assignedIds);
-        
+
         profilesMap = (profiles || []).reduce((acc, p) => {
           acc[p.id] = p.full_name;
           return acc;
@@ -83,7 +93,7 @@ export function useConversations() {
 
       // Fetch client IDs to get their tags
       const clientIds = (convs || [])
-        .map(c => (c.client as { id?: string } | null)?.id)
+        .map((c) => (c.client as { id?: string } | null)?.id)
         .filter((id): id is string => id !== null && id !== undefined);
 
       // Fetch client tags from client_tags table
@@ -93,7 +103,7 @@ export function useConversations() {
           .from("client_tags")
           .select("client_id, tag:tags(name, color)")
           .in("client_id", clientIds);
-        
+
         if (clientTagsData) {
           clientTagsMap = clientTagsData.reduce((acc, ct) => {
             const clientId = ct.client_id;
@@ -123,17 +133,29 @@ export function useConversations() {
               .select("id", { count: "exact", head: true })
               .eq("conversation_id", conv.id)
               .eq("is_from_me", false)
-              .is("read_at", null)
+              .is("read_at", null),
           ]);
 
-          const clientData = conv.client as { id?: string; custom_status_id?: string | null; avatar_url?: string | null; custom_status?: { id: string; name: string; color: string } | null } | null;
+          const clientData = conv.client as
+            | {
+                id?: string;
+                custom_status_id?: string | null;
+                avatar_url?: string | null;
+                custom_status?: { id: string; name: string; color: string } | null;
+              }
+            | null;
           const clientId = clientData?.id;
 
           return {
             ...conv,
             last_message: lastMsgResult.data,
-            whatsapp_instance: conv.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
-            assigned_profile: conv.assigned_to ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" } : null,
+            whatsapp_instance: conv.whatsapp_instance as
+              | { instance_name: string; display_name?: string | null; phone_number?: string | null }
+              | null,
+            current_automation: conv.current_automation as { id: string; name: string } | null,
+            assigned_profile: conv.assigned_to
+              ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" }
+              : null,
             unread_count: unreadResult.count || 0,
             client: clientData,
             client_tags: clientId ? clientTagsMap[clientId] || [] : [],
@@ -143,6 +165,7 @@ export function useConversations() {
 
       return conversationsWithMessages;
     },
+    enabled: !!lawFirm?.id,
   });
 
   // Real-time subscription for conversations, messages, clients, and custom_statuses
@@ -329,12 +352,22 @@ export function useConversations() {
         updateData.current_automation_id = null;
       }
       
-      const { error } = await supabase
+      if (!lawFirmId) {
+        throw new Error("Empresa da conversa não encontrada");
+      }
+
+      const { data: updatedConversation, error } = await supabase
         .from("conversations")
         .update(updateData)
-        .eq("id", conversationId);
-      
+        .eq("id", conversationId)
+        .eq("law_firm_id", lawFirmId)
+        .select("id, current_handler, assigned_to, current_automation_id, law_firm_id")
+        .maybeSingle();
+
       if (error) throw error;
+      if (!updatedConversation) {
+        throw new Error("Sem permissão para transferir esta conversa.");
+      }
 
       // ========================================================================
       // AUDIT: Log the AI transfer for full traceability
@@ -393,11 +426,14 @@ export function useConversations() {
         });
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Transferência realizada",
-        description: "A conversa foi transferida com sucesso. O novo agente responderá com seu próprio prompt.",
+        description:
+          variables.handlerType === "ai"
+            ? "A conversa foi transferida para a IA selecionada."
+            : "A conversa foi transferida para o atendente selecionado.",
       });
     },
     onError: (error) => {
