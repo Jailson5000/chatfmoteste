@@ -225,7 +225,9 @@ export default function Conversations() {
   // Archive dialog state
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [archiveReason, setArchiveReason] = useState<string>("resolved");
+  const [archiveCustomReason, setArchiveCustomReason] = useState<string>("");
   const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
+  const [archiveNextResponsibleType, setArchiveNextResponsibleType] = useState<"human" | "ai" | null>(null);
 
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
@@ -1279,23 +1281,47 @@ export default function Conversations() {
     if (!selectedConversation) return;
 
     try {
-      await updateConversation.mutateAsync({
+      // Determine the reason text
+      const reasonText = archiveReason === "other" && archiveCustomReason.trim()
+        ? archiveCustomReason.trim()
+        : ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason;
+
+      // Build the update payload
+      const updatePayload: any = {
         id: selectedConversation.id,
         status: "archived" as any,
-        // Optionally store archiveReason and archiveNextResponsible in internal_notes or a dedicated column
         internal_notes: selectedConversation.internal_notes
-          ? `${selectedConversation.internal_notes}\n\n[Arquivado: ${ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason}]`
-          : `[Arquivado: ${ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason}]`,
-        ...(archiveNextResponsible && archiveNextResponsible !== "none" ? { assigned_to: archiveNextResponsible } : {}),
-      });
+          ? `${selectedConversation.internal_notes}\n\n[Arquivado: ${reasonText}]`
+          : `[Arquivado: ${reasonText}]`,
+      };
+
+      // If next responsible is an AI agent, update current_automation_id
+      // If it's a human, update assigned_to
+      if (archiveNextResponsible && archiveNextResponsible !== "none") {
+        if (archiveNextResponsibleType === "ai") {
+          updatePayload.current_automation_id = archiveNextResponsible;
+          updatePayload.current_handler = "ai";
+        } else {
+          updatePayload.assigned_to = archiveNextResponsible;
+          updatePayload.current_handler = "human";
+        }
+      }
+
+      await updateConversation.mutateAsync(updatePayload);
 
       toast({ title: "Conversa arquivada" });
       setArchiveDialogOpen(false);
+      setArchiveReason("resolved");
+      setArchiveCustomReason("");
+      setArchiveNextResponsible(null);
+      setArchiveNextResponsibleType(null);
       setSelectedConversationId(null);
       setShowMobileChat(false);
     } catch (error) {
+      console.error("Error archiving conversation:", error);
       toast({
         title: "Erro ao arquivar",
+        description: "Não foi possível arquivar a conversa.",
         variant: "destructive",
       });
     }
@@ -2534,30 +2560,76 @@ export default function Conversations() {
                   </div>
                 ))}
               </div>
+              {/* Custom reason text field when "Outros" is selected */}
+              {archiveReason === "other" && (
+                <Input
+                  placeholder="Digite o motivo..."
+                  value={archiveCustomReason}
+                  onChange={(e) => setArchiveCustomReason(e.target.value)}
+                  className="mt-2"
+                  autoFocus
+                />
+              )}
             </div>
 
             {/* Next Responsible */}
             <div className="space-y-3">
               <Label className="text-sm font-medium">Próximo responsável</Label>
               <Select
-                value={archiveNextResponsible || "none"}
-                onValueChange={(v) => setArchiveNextResponsible(v === "none" ? null : v)}
+                value={archiveNextResponsible ? `${archiveNextResponsibleType}:${archiveNextResponsible}` : "none"}
+                onValueChange={(v) => {
+                  if (v === "none") {
+                    setArchiveNextResponsible(null);
+                    setArchiveNextResponsibleType(null);
+                  } else {
+                    const [type, id] = v.split(":");
+                    setArchiveNextResponsibleType(type as "human" | "ai");
+                    setArchiveNextResponsible(id);
+                  }
+                }}
               >
                 <SelectTrigger className="w-full">
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-muted-foreground" />
-                    <SelectValue placeholder="Selecionar atendente" />
+                    <SelectValue placeholder="Selecionar responsável" />
                   </div>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">
                     <span className="text-muted-foreground">Nenhum responsável</span>
                   </SelectItem>
-                  {teamMembers.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.full_name}
-                    </SelectItem>
-                  ))}
+                  {/* AI Agents */}
+                  {automations.filter(a => a.is_active).length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                        Agentes IA
+                      </div>
+                      {automations.filter(a => a.is_active).map((agent) => (
+                        <SelectItem key={`ai:${agent.id}`} value={`ai:${agent.id}`}>
+                          <div className="flex items-center gap-2">
+                            <Bot className="h-3 w-3 text-purple-500" />
+                            {agent.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                  {/* Human Team Members */}
+                  {teamMembers.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                        Atendentes
+                      </div>
+                      {teamMembers.map((member) => (
+                        <SelectItem key={`human:${member.id}`} value={`human:${member.id}`}>
+                          <div className="flex items-center gap-2">
+                            <User className="h-3 w-3 text-green-500" />
+                            {member.full_name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
