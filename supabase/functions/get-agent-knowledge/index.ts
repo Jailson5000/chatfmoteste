@@ -56,9 +56,10 @@ serve(async (req) => {
       .eq("automation_id", automationId);
 
     if (agentError) {
-      console.error("Error fetching agent knowledge:", agentError);
+      const errorRef = crypto.randomUUID().slice(0, 8);
+      console.error(`[${errorRef}] Error fetching agent knowledge:`, agentError);
       return new Response(
-        JSON.stringify({ error: "Failed to fetch knowledge items" }),
+        JSON.stringify({ error: "Failed to fetch knowledge items", ref: errorRef }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -106,9 +107,10 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error in get-agent-knowledge:", error);
+    const errorRef = crypto.randomUUID().slice(0, 8);
+    console.error(`[${errorRef}] Error in get-agent-knowledge:`, error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "An error occurred", ref: errorRef }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
