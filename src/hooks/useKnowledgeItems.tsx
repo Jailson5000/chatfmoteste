@@ -124,6 +124,8 @@ export function useKnowledgeItems() {
 }
 
 export function useAgentKnowledge(automationId: string | undefined) {
+  const { lawFirm } = useLawFirm();
+  const lawFirmId = lawFirm?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -146,10 +148,15 @@ export function useAgentKnowledge(automationId: string | undefined) {
   const linkKnowledge = useMutation({
     mutationFn: async (knowledgeItemId: string) => {
       if (!automationId) throw new Error('Automation ID required');
+      if (!lawFirmId) throw new Error('Law firm ID required');
 
       const { data, error } = await supabase
         .from('agent_knowledge')
-        .insert({ automation_id: automationId, knowledge_item_id: knowledgeItemId })
+        .insert({ 
+          automation_id: automationId, 
+          knowledge_item_id: knowledgeItemId,
+          law_firm_id: lawFirmId 
+        })
         .select()
         .single();
 

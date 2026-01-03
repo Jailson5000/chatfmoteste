@@ -59,12 +59,13 @@ export function useConversations() {
       if (!lawFirm?.id) return [];
 
       // Fetch conversations with related data including phone_number + current automation name
+      // Use explicit hint for automations relationship since FK was added
       const { data: convs, error: convError } = await supabase
         .from("conversations")
         .select(`
           *,
           whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
-          current_automation:automations(id, name),
+          current_automation:automations!fk_conversations_current_automation(id, name),
           client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
           department:departments(id, name, color)
         `)
