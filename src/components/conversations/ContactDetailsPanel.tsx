@@ -343,24 +343,24 @@ export function ContactDetailsPanel({
                     className="w-full justify-start h-auto py-2 px-3"
                   >
                     <Users className="h-4 w-4 mr-2 text-muted-foreground flex-shrink-0" />
-                    <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       {conversation.current_handler === "ai" ? (
-                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0 max-w-full overflow-hidden">
+                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0 truncate">
                           <Bot className="h-3 w-3 mr-1 flex-shrink-0" />
-                          <span className="truncate">
+                          <span className="truncate max-w-[120px]">
                             {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
                           </span>
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 max-w-full overflow-hidden">
+                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate">
                           <User className="h-3 w-3 mr-1 flex-shrink-0" />
-                          <span className="truncate">
+                          <span className="truncate max-w-[120px]">
                             {`Atendente · ${conversation.assigned_profile?.full_name || "Humano"}`}
                           </span>
                         </Badge>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground ml-2 flex-shrink-0 whitespace-nowrap">Buscar responsável...</span>
+                    <span className="text-xs text-muted-foreground ml-1 flex-shrink-0">Buscar</span>
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[300px] p-0" align="start">
