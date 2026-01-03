@@ -42,7 +42,11 @@ export default function Kanban() {
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
   const [draggedDepartment, setDraggedDepartment] = useState<string | null>(null);
-  const [selectedConversation, setSelectedConversation] = useState<typeof conversations[0] | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const selectedConversation = useMemo(
+    () => conversations.find((c) => c.id === selectedConversationId) || null,
+    [conversations, selectedConversationId]
+  );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<'department' | 'status'>('department');
@@ -213,7 +217,7 @@ export default function Kanban() {
   };
 
   const handleConversationClick = (conversation: typeof conversations[0]) => {
-    setSelectedConversation(conversation);
+    setSelectedConversationId(conversation.id);
     setSheetOpen(true);
   };
 
@@ -520,6 +524,7 @@ export default function Kanban() {
               contactName={selectedConversation.contact_name}
               contactPhone={selectedConversation.contact_phone}
               currentHandler={selectedConversation.current_handler}
+              currentAutomationId={selectedConversation.current_automation_id}
               assignedProfile={selectedConversation.assigned_profile}
               clientId={selectedConversation.client_id}
               clientStatus={selectedConversation.client?.custom_status_id}
@@ -530,7 +535,10 @@ export default function Kanban() {
               departments={departments}
               members={members}
               automations={automations}
-              onClose={() => setSheetOpen(false)}
+              onClose={() => {
+                setSheetOpen(false);
+                setSelectedConversationId(null);
+              }}
             />
           )}
         </SheetContent>
