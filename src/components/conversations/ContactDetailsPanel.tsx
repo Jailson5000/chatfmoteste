@@ -73,6 +73,7 @@ interface ContactDetailsPanelProps {
     contact_name: string | null;
     contact_phone: string | null;
     current_handler: 'ai' | 'human';
+    current_automation_id?: string | null;
     department_id: string | null;
     tags: string[] | null;
     created_at: string;
@@ -343,7 +344,7 @@ export function ContactDetailsPanel({
                       {conversation.current_handler === "ai" ? (
                         <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0">
                           <Bot className="h-3 w-3 mr-1" />
-                          IA
+                          {automations.find(a => a.id === conversation.current_automation_id)?.name || "IA"}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0">
@@ -390,7 +391,8 @@ export function ContactDetailsPanel({
                                   )}
                                 </div>
                               </div>
-                              {conversation.current_handler === "ai" && (
+                              {conversation.current_handler === "ai" && 
+                               conversation.current_automation_id === automation.id && (
                                 <Check className="h-4 w-4 text-primary" />
                               )}
                             </CommandItem>

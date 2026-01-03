@@ -13,6 +13,7 @@ interface KanbanCardProps {
     contact_phone: string | null;
     status: string;
     current_handler: 'ai' | 'human';
+    current_automation_id?: string | null;
     last_message_at: string | null;
     tags: string[] | null;
     department_id: string | null;
@@ -108,10 +109,12 @@ export function KanbanCard({
   const maskedPhone = maskPhone(conversation.contact_phone);
   const timeAgo = getTimeAgo(conversation.last_message_at);
   
-  // Get handler name: if AI, show "IA + automation name", if human, show person's name
-  const activeAutomation = automations.find(a => a.is_active);
+  // Get handler name: if AI, show "IA + specific automation name", if human, show person's name
+  const currentAutomation = conversation.current_automation_id 
+    ? automations.find(a => a.id === conversation.current_automation_id)
+    : null;
   const handlerName = conversation.current_handler === 'ai' 
-    ? `IA ${activeAutomation?.name || ''}`.trim()
+    ? `IA ${currentAutomation?.name || ''}`.trim()
     : (conversation.assigned_profile?.full_name?.split(' ')[0] || 'Sem responsável');
   
   const isAI = conversation.current_handler === 'ai';

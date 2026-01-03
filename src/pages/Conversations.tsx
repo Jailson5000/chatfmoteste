@@ -562,29 +562,38 @@ export default function Conversations() {
       }
     };
 
-    // Get the active AI agent name
-    const activeAutomation = automations.find((a) => a.is_active);
-    const aiAgentName = activeAutomation?.name || "IA";
+    // Build a map of automation IDs to names for fast lookup
+    const automationMap = automations.reduce((acc, a) => {
+      acc[a.id] = a.name;
+      return acc;
+    }, {} as Record<string, string>);
 
-    return conversations.map((conv) => ({
-      id: conv.id,
-      name: conv.contact_name || conv.contact_phone || "Sem nome",
-      phone: conv.contact_phone || "",
-      lastMessage: conv.last_message?.content || "Sem mensagens",
-      time: formatTimeAgoShort(conv.last_message_at),
-      unread: unreadCounts[conv.id] || 0,
-      handler: conv.current_handler as "ai" | "human",
-      status: conv.status,
-      // Use client_tags from client_tags table instead of conversation.tags
-      tags: (conv as any).client_tags || [],
-      assignedTo: conv.assigned_profile?.full_name || null,
-      whatsappInstance: conv.whatsapp_instance?.display_name || conv.whatsapp_instance?.instance_name || null,
-      whatsappPhone: conv.whatsapp_instance?.phone_number || null,
-      avatarUrl: conv.client?.avatar_url || null,
-      clientStatus: conv.client?.custom_status || null,
-      department: conv.department || null,
-      aiAgentName: aiAgentName,
-    }));
+    return conversations.map((conv) => {
+      // Get the specific AI agent name for THIS conversation
+      const aiAgentName = conv.current_automation_id 
+        ? automationMap[conv.current_automation_id] || "IA"
+        : "IA";
+
+      return {
+        id: conv.id,
+        name: conv.contact_name || conv.contact_phone || "Sem nome",
+        phone: conv.contact_phone || "",
+        lastMessage: conv.last_message?.content || "Sem mensagens",
+        time: formatTimeAgoShort(conv.last_message_at),
+        unread: unreadCounts[conv.id] || 0,
+        handler: conv.current_handler as "ai" | "human",
+        status: conv.status,
+        // Use client_tags from client_tags table instead of conversation.tags
+        tags: (conv as any).client_tags || [],
+        assignedTo: conv.assigned_profile?.full_name || null,
+        whatsappInstance: conv.whatsapp_instance?.display_name || conv.whatsapp_instance?.instance_name || null,
+        whatsappPhone: conv.whatsapp_instance?.phone_number || null,
+        avatarUrl: conv.client?.avatar_url || null,
+        clientStatus: conv.client?.custom_status || null,
+        department: conv.department || null,
+        aiAgentName: aiAgentName,
+      };
+    });
   }, [conversations, unreadCounts, tags, automations]);
 
   // Filter conversations by tab and filters
