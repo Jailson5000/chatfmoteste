@@ -1231,7 +1231,7 @@ export function MessageBubble({
       
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-2.5 transition-all break-words overflow-wrap-anywhere",
+          "max-w-[85%] rounded-2xl px-4 py-2.5 transition-all break-words [overflow-wrap:anywhere] [word-break:break-word]",
           isInternal
             ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
             : isFromMe
