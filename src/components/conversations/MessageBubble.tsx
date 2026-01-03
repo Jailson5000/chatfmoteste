@@ -1211,7 +1211,7 @@ export function MessageBubble({
   return (
     <div
       className={cn(
-        "flex group animate-fade-in",
+        "flex w-full min-w-0 group animate-fade-in",
         isFromMe ? "justify-end" : "justify-start"
       )}
       onMouseEnter={() => setShowActions(true)}

@@ -1651,7 +1651,7 @@ export default function Conversations() {
       </div>
 
       <div
-        className="hidden md:grid h-full w-full min-h-0 overflow-hidden grid-rows-1"
+        className="hidden md:grid h-full w-full min-h-0 grid-rows-1"
         style={{
           minWidth: 0,
           gridTemplateColumns:
@@ -1759,7 +1759,7 @@ export default function Conversations() {
         }}
         disabled={isSending || !selectedConversation}
       >
-        <div className="flex-1 flex flex-col bg-background min-h-0 min-w-0 w-full h-full overflow-hidden">
+        <div className="flex-1 flex flex-col bg-background min-h-0 min-w-0 w-full h-full">
         {selectedConversation ? (
           <>
             {/* Chat Header */}
