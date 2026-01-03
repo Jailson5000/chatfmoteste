@@ -1746,7 +1746,7 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area Panel - Flexible, shrinks to fit available space */}
-        <div className="flex flex-col min-h-0 min-w-0 overflow-hidden h-full w-full">
+        <div className="flex flex-col min-h-0 min-w-0 h-full w-full">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -2060,7 +2060,7 @@ export default function Conversations() {
 
 
             {/* Messages */}
-            <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
+            <div className="relative flex-1 min-h-0 min-w-0">
               <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full">
                 <div className="py-4 space-y-4 w-full px-3 lg:px-4">
                   {messagesLoading ? (
