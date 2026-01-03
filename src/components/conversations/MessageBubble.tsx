@@ -1283,7 +1283,7 @@ export function MessageBubble({
         
         {/* Render text content (strip audio placeholder line if it came mixed with text) */}
         {displayContent && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word]">
             {highlightText ? highlightText(displayContent) : displayContent}
           </p>
         )}
