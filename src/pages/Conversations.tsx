@@ -2232,6 +2232,8 @@ export default function Conversations() {
                   ...selectedConversation,
                   assigned_to: selectedConversation.assigned_to,
                   ai_summary: selectedConversation.ai_summary,
+                  // Pass current_automation from join for real-time name display
+                  current_automation: (selectedConversation as any).current_automation || null,
                   client: selectedConversation.client_id ? {
                     id: selectedConversation.client_id,
                     custom_status_id: (selectedConversation as any).client?.custom_status_id,

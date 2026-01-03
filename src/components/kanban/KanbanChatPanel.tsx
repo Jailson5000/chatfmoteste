@@ -403,6 +403,8 @@ interface KanbanChatPanelProps {
   currentHandler: 'ai' | 'human';
   /** The specific AI agent assigned to this conversation (source of truth for prompt selection) */
   currentAutomationId?: string | null;
+  /** The name of current automation from backend join - use this for display (source of truth) */
+  currentAutomationName?: string | null;
   assignedProfile?: { full_name: string } | null;
   clientId?: string | null;
   clientStatus?: string | null;
@@ -422,6 +424,7 @@ export function KanbanChatPanel({
   contactPhone,
   currentHandler,
   currentAutomationId,
+  currentAutomationName,
   assignedProfile,
   clientId,
   clientStatus,
@@ -439,9 +442,10 @@ export function KanbanChatPanel({
   const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
   const { updateClientStatus } = useClients();
 
-  const currentAutomation = currentAutomationId
-    ? (automations || []).find((a) => a.id === currentAutomationId) || null
-    : null;
+  // Use backend name (source of truth) with fallback to local lookup
+  const resolvedAutomationName = currentAutomationName 
+    || (currentAutomationId ? automations.find(a => a.id === currentAutomationId)?.name : null)
+    || null;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1150,7 +1154,7 @@ export function KanbanChatPanel({
                 <ArrowRightLeft className="h-3 w-3" />
                 <span className="text-xs">
                   {currentHandler === 'ai'
-                    ? `IA: ${currentAutomation?.name || '—'}`
+                    ? `IA: ${resolvedAutomationName || '—'}`
                     : `Humano: ${assignedProfile?.full_name || '—'}`}
                 </span>
               </Button>
@@ -1525,10 +1529,10 @@ export function KanbanChatPanel({
         {/* Handler info */}
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-1">
-            {currentHandler === "ai" ? (
+          {currentHandler === "ai" ? (
               <>
                 <Bot className="h-3 w-3 text-purple-500" />
-                <span>IA · {currentAutomation?.name || "Assistente"}</span>
+                <span>IA · {resolvedAutomationName || "Assistente"}</span>
               </>
             ) : (
               <>

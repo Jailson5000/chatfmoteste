@@ -426,8 +426,11 @@ export function useConversations() {
         });
       }
     },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    onSuccess: async (_data, variables) => {
+      // Force immediate refetch to update UI with new automation name
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await queryClient.refetchQueries({ queryKey: ["conversations"] });
+      
       toast({
         title: "Transferência realizada",
         description:

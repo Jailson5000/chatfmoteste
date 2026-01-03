@@ -525,6 +525,7 @@ export default function Kanban() {
               contactPhone={selectedConversation.contact_phone}
               currentHandler={selectedConversation.current_handler}
               currentAutomationId={selectedConversation.current_automation_id}
+              currentAutomationName={(selectedConversation as any).current_automation?.name || null}
               assignedProfile={selectedConversation.assigned_profile}
               clientId={selectedConversation.client_id}
               clientStatus={selectedConversation.client?.custom_status_id}
