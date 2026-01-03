@@ -1551,9 +1551,18 @@ export default function Conversations() {
         </ChatDropZone>
       </div>
 
-      <div className="hidden md:flex h-full w-full overflow-hidden" style={{ minWidth: 0 }}>
+      <div
+        className="hidden md:grid h-full w-full overflow-hidden grid-rows-1"
+        style={{
+          minWidth: 0,
+          gridTemplateColumns:
+            showDetailsPanel && selectedConversation
+              ? "320px minmax(0, 1fr) 320px"
+              : "320px minmax(0, 1fr)",
+        }}
+      >
         {/* Conversations List Panel - Fixed width */}
-        <div className="flex-shrink-0 bg-card flex flex-col min-h-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px', flexBasis: '320px' }}>
+        <div className="bg-card flex flex-col min-h-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px' }}>
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
           <h1 className="font-display text-lg font-bold">Atendimentos</h1>
@@ -1624,7 +1633,7 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area Panel - Flexible, shrinks to fit available space */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" style={{ flexBasis: 0 }}>
+        <div className="min-h-0 min-w-0 overflow-hidden">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1641,7 +1650,7 @@ export default function Conversations() {
         {selectedConversation ? (
           <>
             {/* Chat Header */}
-            <div className="p-4 border-b border-border flex-shrink-0">
+            	<div className="p-4 border-b border-border flex-shrink-0 min-w-0 overflow-hidden">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Button
@@ -2273,7 +2282,7 @@ export default function Conversations() {
 
         {/* Contact Details Panel - Fixed width with explicit flex-basis */}
         {showDetailsPanel && selectedConversation && (
-          <div className="h-full flex-shrink-0 bg-card border-l border-border overflow-y-auto overflow-x-hidden" style={{ width: '320px', minWidth: '320px', flexBasis: '320px' }}>
+          <div className="h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden" style={{ width: '320px', minWidth: '320px' }}>
               <ContactDetailsPanel
                 conversation={{
                   ...selectedConversation,

@@ -148,8 +148,8 @@ export function ContactStatusTags({
   // If no client is linked, show link button
   if (!clientId || !linkedClient) {
     return (
-      <div className="flex items-center gap-2 py-1">
-        <span className="text-xs text-muted-foreground">Contato não vinculado</span>
+      <div className="flex items-center gap-2 py-1 min-w-0 w-full">
+        <span className="text-xs text-muted-foreground truncate min-w-0">Contato não vinculado</span>
         <Button
           variant="outline"
           size="sm"
@@ -165,21 +165,23 @@ export function ContactStatusTags({
   }
 
   return (
-    <div className="flex items-center gap-2 flex-wrap py-1">
+    <div className="flex items-center gap-2 flex-wrap py-1 w-full min-w-0">
       {/* Status selector */}
       <Popover>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             size="sm"
-            className="h-6 text-xs gap-1"
+            className="h-6 text-xs gap-1 min-w-0 max-w-[220px]"
             style={currentStatus ? { borderColor: currentStatus.color } : undefined}
           >
             <CheckCircle
-              className="h-3 w-3"
+              className="h-3 w-3 flex-shrink-0"
               style={currentStatus ? { color: currentStatus.color } : undefined}
             />
-            {currentStatus?.name || "Status"}
+            <span className="truncate min-w-0">
+              {currentStatus?.name || "Status"}
+            </span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-48 p-2" align="start">
@@ -218,12 +220,12 @@ export function ContactStatusTags({
         <Badge
           key={tag.id}
           variant="secondary"
-          className="h-6 text-xs gap-1 cursor-pointer"
+          className="h-6 text-xs gap-1 cursor-pointer min-w-0 max-w-[220px]"
           style={{ backgroundColor: tag.color + "20", color: tag.color }}
           onClick={() => handleRemoveTag(tag.id)}
         >
-          {tag.name}
-          <X className="h-2 w-2" />
+          <span className="truncate min-w-0">{tag.name}</span>
+          <X className="h-2 w-2 flex-shrink-0" />
         </Badge>
       ))}
 
@@ -231,7 +233,7 @@ export function ContactStatusTags({
       {availableTags.length > 0 && (
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 flex-shrink-0">
               <TagIcon className="h-3 w-3" />
             </Button>
           </PopoverTrigger>
