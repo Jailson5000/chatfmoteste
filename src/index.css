@@ -259,4 +259,9 @@
   .animate-shimmer {
     animation: shimmer 2s ease-in-out infinite;
   }
+  
+  .overflow-wrap-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
 }

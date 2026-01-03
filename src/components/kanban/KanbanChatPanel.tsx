@@ -934,7 +934,7 @@ export function KanbanChatPanel({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border space-y-3">
         {/* Top row: Avatar, name, actions */}
@@ -1218,7 +1218,7 @@ export function KanbanChatPanel({
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+      <ScrollArea className="flex-1 min-h-0 p-4" ref={scrollRef}>
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1245,7 +1245,7 @@ export function KanbanChatPanel({
                 >
                   <div
                     className={cn(
-                      "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm break-words overflow-hidden",
+                      "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm break-words overflow-wrap-anywhere",
                       isInternal
                         ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
                         : isFromMe

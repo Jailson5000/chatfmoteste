@@ -517,7 +517,7 @@ export default function Kanban() {
 
       {/* Conversation Chat Panel */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col [&>button]:hidden">
+        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col h-full [&>button]:hidden">
           {selectedConversation && (
             <KanbanChatPanel
               conversationId={selectedConversation.id}
