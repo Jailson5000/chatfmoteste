@@ -1378,12 +1378,12 @@ export default function Conversations() {
           <Button
             variant={activeTab === "archived" ? "secondary" : "ghost"}
             size="sm"
-            className="w-full justify-start gap-1.5 h-7 text-[10px]"
+            className="w-full justify-start gap-1 h-6 text-[8px]"
             onClick={() => setActiveTab("archived")}
           >
-            <Archive className="h-2.5 w-2.5" />
+            <Archive className="h-2 w-2" />
             Arquivados
-            <Badge variant="secondary" className="h-3.5 px-1 text-[9px] ml-auto">
+            <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
               {getTabCount("archived")}
             </Badge>
           </Button>
@@ -1665,12 +1665,12 @@ export default function Conversations() {
           <Button
             variant={activeTab === "archived" ? "secondary" : "ghost"}
             size="sm"
-            className="w-full justify-start gap-1.5 h-7 text-[10px]"
+            className="w-full justify-start gap-1 h-6 text-[8px]"
             onClick={() => setActiveTab("archived")}
           >
-            <Archive className="h-2.5 w-2.5" />
+            <Archive className="h-2 w-2" />
             Arquivados
-            <Badge variant="secondary" className="h-3.5 px-1 text-[9px] ml-auto">
+            <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
               {getTabCount("archived")}
             </Badge>
           </Button>
