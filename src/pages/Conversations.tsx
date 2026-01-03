@@ -1654,7 +1654,6 @@ export default function Conversations() {
         className="hidden md:grid h-full w-full min-h-0 grid-rows-1"
         style={{
           minWidth: 0,
-          overflow: 'hidden',
           gridTemplateColumns:
             showDetailsPanel && selectedConversation
               ? "320px minmax(0, 1fr) 320px"
@@ -1747,7 +1746,7 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area Panel - Flexible, shrinks to fit available space */}
-        <div className="flex flex-col min-h-0 min-w-0 h-full w-full" style={{ maxWidth: '100%', overflow: 'hidden' }}>
+        <div className="flex flex-col min-h-0 min-w-0 h-full w-full">
           <ChatDropZone
             onFileDrop={(file, mediaType) => {
               const previewUrl = URL.createObjectURL(file);
@@ -1760,7 +1759,7 @@ export default function Conversations() {
         }}
         disabled={isSending || !selectedConversation}
       >
-        <div className="flex-1 flex flex-col bg-background min-h-0 min-w-0 w-full h-full" style={{ maxWidth: '100%' }}>
+        <div className="flex-1 flex flex-col bg-background min-h-0 min-w-0 w-full h-full">
         {selectedConversation ? (
           <>
             {/* Chat Header */}
@@ -2061,9 +2060,9 @@ export default function Conversations() {
 
 
             {/* Messages */}
-            <div className="relative flex-1 min-h-0 min-w-0" style={{ maxWidth: '100%' }}>
-              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full">
-                <div className="py-4 space-y-4 w-full min-w-0 px-3 lg:px-4" style={{ maxWidth: '100%' }}>
+            <div className="relative flex-1 min-h-0 min-w-0">
+              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full min-w-0">
+                <div className="py-4 space-y-4 w-full min-w-0 px-3 lg:px-4">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
