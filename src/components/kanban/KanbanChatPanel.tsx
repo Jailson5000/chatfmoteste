@@ -1528,7 +1528,7 @@ export function KanbanChatPanel({
             {currentHandler === "ai" ? (
               <>
                 <Bot className="h-3 w-3 text-purple-500" />
-                <span>Atendimento com IA</span>
+                <span>IA · {currentAutomation?.name || "Assistente"}</span>
               </>
             ) : (
               <>
