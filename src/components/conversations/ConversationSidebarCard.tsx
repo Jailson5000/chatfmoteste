@@ -76,9 +76,13 @@ interface ConversationSidebarCardProps {
 
 export function ConversationSidebarCard({ conversation, selected, onClick }: ConversationSidebarCardProps) {
   const isAI = conversation.handler === "ai";
+  // Show "IA · AgentName" or just "AgentName" if the name already contains agent info
+  const agentName = conversation.aiAgentName && conversation.aiAgentName !== "IA" 
+    ? conversation.aiAgentName 
+    : null;
   const handlerLabel = isAI
-    ? `IA ${conversation.aiAgentName || ""}`.trim()
-    : conversation.assignedTo?.split(" ")[0] || "Atendente";
+    ? agentName ? `IA · ${agentName}` : "IA"
+    : conversation.assignedTo || "Atendente";
 
   const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
 
