@@ -57,6 +57,22 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+
+// Archive reason options (same as Conversations)
+const ARCHIVE_REASONS = [
+  { value: "resolved", label: "Chat do cliente resolvido com sucesso." },
+  { value: "no_response", label: "Cliente não responde mais." },
+  { value: "opened_by_mistake", label: "Abri sem querer." },
+  { value: "other", label: "Outros." },
+] as const;
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -476,6 +492,13 @@ export function KanbanChatPanel({
   // Transfer popover state
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferSearch, setTransferSearch] = useState("");
+  
+  // Archive dialog state
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiveReason, setArchiveReason] = useState<string>("resolved");
+  const [archiveCustomReason, setArchiveCustomReason] = useState<string>("");
+  const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
+  const [archiveNextResponsibleType, setArchiveNextResponsibleType] = useState<"human" | "ai" | null>(null);
 
   // Get current status
   const currentStatusObj = customStatuses.find(s => s.id === clientStatus);
@@ -776,17 +799,52 @@ export function KanbanChatPanel({
     }
   };
 
+  const openArchiveDialog = () => {
+    setArchiveReason("resolved");
+    setArchiveCustomReason("");
+    setArchiveNextResponsible(null);
+    setArchiveNextResponsibleType(null);
+    setArchiveDialogOpen(true);
+  };
+
   const handleArchive = async () => {
     try {
-      await updateConversation.mutateAsync({
+      // Determine the reason text
+      const reasonText = archiveReason === "other" && archiveCustomReason.trim()
+        ? archiveCustomReason.trim()
+        : ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason;
+
+      // Build the update payload - use archived_at column
+      const updatePayload: any = {
         id: conversationId,
-        status: "archived" as any,
-      });
+        archived_at: new Date().toISOString(),
+        archived_reason: reasonText,
+      };
+
+      // If next responsible is set
+      if (archiveNextResponsible && archiveNextResponsible !== "none") {
+        updatePayload.archived_next_responsible_id = archiveNextResponsible;
+        updatePayload.archived_next_responsible_type = archiveNextResponsibleType;
+        
+        if (archiveNextResponsibleType === "ai") {
+          updatePayload.current_automation_id = archiveNextResponsible;
+          updatePayload.current_handler = "ai";
+        } else {
+          updatePayload.assigned_to = archiveNextResponsible;
+          updatePayload.current_handler = "human";
+        }
+      }
+
+      await updateConversation.mutateAsync(updatePayload);
+
       toast({ title: "Conversa arquivada" });
+      setArchiveDialogOpen(false);
       onClose();
     } catch (error) {
+      console.error("Error archiving conversation:", error);
       toast({
         title: "Erro ao arquivar",
+        description: "Não foi possível arquivar a conversa.",
         variant: "destructive",
       });
     }
@@ -970,7 +1028,7 @@ export function KanbanChatPanel({
             <Button 
               variant="ghost" 
               size="icon" 
-              onClick={handleArchive}
+              onClick={openArchiveDialog}
               title="Arquivar"
             >
               <Archive className="h-4 w-4" />
@@ -1582,6 +1640,144 @@ export function KanbanChatPanel({
                 Salvar
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Archive Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">Arquivamento do chat</DialogTitle>
+            <p className="text-sm text-muted-foreground text-center mt-1">
+              Selecione o motivo do arquivamento e o próximo responsável.
+            </p>
+          </DialogHeader>
+          <div className="space-y-6 mt-4">
+            {/* Archive Reason */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Motivo do arquivamento</Label>
+              <div className="space-y-2">
+                {ARCHIVE_REASONS.map((reason) => (
+                  <div
+                    key={reason.value}
+                    className={cn(
+                      "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                      archiveReason === reason.value
+                        ? "bg-muted"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={() => setArchiveReason(reason.value)}
+                  >
+                    <div
+                      className={cn(
+                        "w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                        archiveReason === reason.value
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground"
+                      )}
+                    >
+                      {archiveReason === reason.value && (
+                        <div className="w-2 h-2 bg-primary-foreground rounded-full" />
+                      )}
+                    </div>
+                    <span className="text-sm">{reason.label}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Custom reason text field when "Outros" is selected */}
+              {archiveReason === "other" && (
+                <Input
+                  placeholder="Digite o motivo..."
+                  value={archiveCustomReason}
+                  onChange={(e) => setArchiveCustomReason(e.target.value)}
+                  className="mt-2"
+                  autoFocus
+                />
+              )}
+            </div>
+
+            {/* Next Responsible */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Próximo responsável</Label>
+              <Select
+                value={archiveNextResponsible ? `${archiveNextResponsibleType}:${archiveNextResponsible}` : "none"}
+                onValueChange={(v) => {
+                  if (v === "none") {
+                    setArchiveNextResponsible(null);
+                    setArchiveNextResponsibleType(null);
+                  } else {
+                    const [type, id] = v.split(":");
+                    setArchiveNextResponsibleType(type as "human" | "ai");
+                    setArchiveNextResponsible(id);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    <SelectValue placeholder="Selecionar responsável" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Nenhum responsável</span>
+                  </SelectItem>
+                  {/* AI Agents */}
+                  {automations.filter(a => a.is_active).length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                        Agentes IA
+                      </div>
+                      {automations.filter(a => a.is_active).map((agent) => (
+                        <SelectItem key={`ai:${agent.id}`} value={`ai:${agent.id}`}>
+                          <div className="flex items-center gap-2">
+                            <Bot className="h-3 w-3 text-purple-500" />
+                            {agent.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                  {/* Human Team Members */}
+                  {members.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                        Atendentes
+                      </div>
+                      {members.map((member) => (
+                        <SelectItem key={`human:${member.id}`} value={`human:${member.id}`}>
+                          <div className="flex items-center gap-2">
+                            <User className="h-3 w-3 text-green-500" />
+                            {member.full_name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Este será o responsável quando o lead retornar. (Opcional)
+              </p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 mt-6">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setArchiveDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              onClick={handleArchive}
+            >
+              Arquivar chat
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

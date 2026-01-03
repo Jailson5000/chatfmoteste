@@ -644,6 +644,7 @@ export default function Conversations() {
         unread: unreadCounts[conv.id] || 0,
         handler: conv.current_handler as "ai" | "human",
         status: conv.status,
+        archivedAt: (conv as any).archived_at || null,
         // Use client_tags from client_tags table instead of conversation.tags
         tags: (conv as any).client_tags || [],
         assignedTo: conv.assigned_profile?.full_name || null,
@@ -687,20 +688,21 @@ export default function Conversations() {
         }
       }
 
-      // Tab filter
+      // Tab filter - use archivedAt to determine archived status
+      const isArchived = !!conv.archivedAt;
       switch (activeTab) {
         case "chat":
           // "Chat": Only show conversations assigned to current user (as human handler), exclude archived
-          return (conv.status as string) !== "archived" && conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
+          return !isArchived && conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
         case "ai":
           // Exclude archived from AI tab
-          return (conv.status as string) !== "archived" && conv.handler === "ai";
+          return !isArchived && conv.handler === "ai";
         case "queue":
           // Exclude archived from Fila tab
-          return (conv.status as string) !== "archived";
+          return !isArchived;
         case "archived":
           // Only show archived conversations
-          return (conv.status as string) === "archived";
+          return isArchived;
         default:
           return true;
       }
@@ -1286,10 +1288,11 @@ export default function Conversations() {
         ? archiveCustomReason.trim()
         : ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason;
 
-      // Build the update payload
+      // Build the update payload - use archived_at column instead of status enum
       const updatePayload: any = {
         id: selectedConversation.id,
-        status: "archived" as any,
+        archived_at: new Date().toISOString(),
+        archived_reason: reasonText,
         internal_notes: selectedConversation.internal_notes
           ? `${selectedConversation.internal_notes}\n\n[Arquivado: ${reasonText}]`
           : `[Arquivado: ${reasonText}]`,
@@ -1298,6 +1301,9 @@ export default function Conversations() {
       // If next responsible is an AI agent, update current_automation_id
       // If it's a human, update assigned_to
       if (archiveNextResponsible && archiveNextResponsible !== "none") {
+        updatePayload.archived_next_responsible_id = archiveNextResponsible;
+        updatePayload.archived_next_responsible_type = archiveNextResponsibleType;
+        
         if (archiveNextResponsibleType === "ai") {
           updatePayload.current_automation_id = archiveNextResponsible;
           updatePayload.current_handler = "ai";
@@ -1330,13 +1336,13 @@ export default function Conversations() {
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo && (c.status as string) !== "archived").length;
+        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo && !c.archivedAt).length;
       case "ai":
-        return mappedConversations.filter((c) => c.handler === "ai" && (c.status as string) !== "archived").length;
+        return mappedConversations.filter((c) => c.handler === "ai" && !c.archivedAt).length;
       case "queue":
-        return mappedConversations.filter((c) => (c.status as string) !== "archived").length;
+        return mappedConversations.filter((c) => !c.archivedAt).length;
       case "archived":
-        return mappedConversations.filter((c) => (c.status as string) === "archived").length;
+        return mappedConversations.filter((c) => !!c.archivedAt).length;
     }
   };
 
