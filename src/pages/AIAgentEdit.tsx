@@ -18,7 +18,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"; // keeping for potential future use
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { 
   ArrowLeft, 
   Save, 
@@ -39,6 +49,7 @@ import {
   Volume2,
   Play,
   Square,
+  AlertTriangle,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
 import { MentionEditor } from "@/components/ai-agents/MentionEditor";
@@ -93,6 +104,7 @@ export default function AIAgentEdit() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   useEffect(() => {
     if (automations && id) {
@@ -408,15 +420,53 @@ export default function AIAgentEdit() {
     }
   };
 
+  // Handle back navigation with unsaved changes check
+  const handleBack = () => {
+    if (hasChanges) {
+      setShowUnsavedDialog(true);
+    } else {
+      navigate('/ai-agents');
+    }
+  };
+
+  const confirmLeave = () => {
+    setShowUnsavedDialog(false);
+    navigate('/ai-agents');
+  };
+
   return (
     <div className="flex flex-col h-full bg-background">
+      {/* Unsaved changes dialog */}
+      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertDialogTitle>Tem certeza que deseja sair?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>
+              Você tem alterações não salvas no formulário. Se você sair, essas alterações serão perdidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmLeave}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Sair
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b bg-card">
         <div className="flex items-center gap-4">
           <Button 
             variant="ghost" 
             size="sm"
-            onClick={() => navigate('/ai-agents')}
+            onClick={handleBack}
             className="gap-2"
           >
             <ArrowLeft className="h-4 w-4" />
