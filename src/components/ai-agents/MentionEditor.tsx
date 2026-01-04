@@ -552,7 +552,8 @@ export function MentionEditor({
           setIsFocused(false);
           // ensure parent is in sync when leaving the field
           setTimeout(syncValueUp, 0);
-          closePicker();
+          // Do NOT close the picker here; clicking the picker would blur the editor.
+          // We close it via the outside click handler instead.
         }}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
@@ -574,7 +575,12 @@ export function MentionEditor({
       />
 
       {showMentionPicker && (
-        <div ref={mentionPickerRef} className="absolute z-50 top-12 left-4">
+        <div
+          ref={mentionPickerRef}
+          className="absolute z-50 top-12 left-4"
+          // Prevent focus leaving the editor when clicking an option
+          onMouseDown={(e) => e.preventDefault()}
+        >
           <MentionPicker
             departments={departments}
             statuses={statuses}
