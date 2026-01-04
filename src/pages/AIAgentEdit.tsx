@@ -486,7 +486,7 @@ export default function AIAgentEdit() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-background">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-background">
       {/* Unsaved changes dialog */}
       <AlertDialog
         open={showUnsavedDialog}
@@ -571,13 +571,10 @@ export default function AIAgentEdit() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Prompt Editor Area */}
-        <div className="flex-1 flex flex-col p-6 min-w-0 overflow-hidden">
-          <div 
-            className="min-w-0 overflow-hidden"
-            style={{ height: 'calc(100vh - 180px)' }}
-          >
+        <div className="flex-1 flex flex-col p-6 min-w-0 min-h-0 overflow-hidden">
+          <div className="flex-1 min-w-0 min-h-0">
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
