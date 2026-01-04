@@ -201,14 +201,43 @@ export default function Contacts() {
   };
 
   const handleStatusChange = (clientId: string, statusId: string) => {
-    updateClientStatus.mutate({
-      clientId,
-      statusId: statusId === "none" ? null : statusId,
-    }, {
-      onSuccess: () => {
-        toast({ title: "Status atualizado" });
-      },
-    });
+    const normalizedStatusId = statusId === "none" ? null : statusId;
+
+    console.log("[Contacts] handleStatusChange", { clientId, statusId: normalizedStatusId });
+
+    updateClientStatus.mutate(
+      { clientId, statusId: normalizedStatusId },
+      {
+        onSuccess: (data: any) => {
+          const created = typeof data?.follow_ups_created === "number" ? data.follow_ups_created : null;
+
+          if (created === 0) {
+            toast({
+              title: "Status atualizado",
+              description: "Nenhum follow-up configurado para este status.",
+            });
+            return;
+          }
+
+          if (typeof created === "number" && created > 0) {
+            toast({
+              title: "Status atualizado",
+              description: `${created} follow-up(s) agendado(s).`,
+            });
+            return;
+          }
+
+          toast({ title: "Status atualizado" });
+        },
+        onError: (error) => {
+          toast({
+            title: "Erro ao atualizar status",
+            description: error.message,
+            variant: "destructive",
+          });
+        },
+      }
+    );
   };
 
   const handleExport = () => {
@@ -499,11 +528,13 @@ export default function Contacts() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Select 
-                        value={client.custom_status_id || "none"} 
+                      <Select
+                        value={client.custom_status_id || "none"}
                         onValueChange={(val) => handleStatusChange(client.id, val)}
                       >
                         <SelectTrigger className="h-7 w-auto min-w-[100px] border-0 bg-transparent hover:bg-muted/50">
+                          <SelectValue placeholder="Status" />
+                          <span className="sr-only">Status</span>
                           {status ? (
                             <Badge 
                               variant="outline"

@@ -125,30 +125,52 @@ export function useClients() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
-      // Use the RPC function which handles follow-up scheduling reliably
+      console.log("[useClients.updateClientStatus]", { clientId, statusId });
+
+      // Non-null status: use the DB function that cancels + recreates follow-ups reliably
       if (statusId) {
-        const { data, error } = await supabase.rpc("test_schedule_follow_ups", {
+        const { data, error } = await supabase.rpc("update_client_status_with_follow_ups", {
           _client_id: clientId,
           _new_status_id: statusId,
         });
         if (error) throw error;
-        return data;
-      } else {
-        // If clearing status, just update directly
-        const { data, error } = await supabase
-          .from("clients")
-          .update({ custom_status_id: null })
-          .eq("id", clientId)
-          .select()
-          .single();
-        if (error) throw error;
-        return data;
+        return data as any;
       }
+
+      // Clearing status: update + cancel any pending follow-ups
+      const { error: updateError } = await supabase
+        .from("clients")
+        .update({ custom_status_id: null })
+        .eq("id", clientId);
+
+      if (updateError) throw updateError;
+
+      const { error: cancelError } = await supabase
+        .from("scheduled_follow_ups")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancel_reason: "Status cleared",
+        })
+        .eq("client_id", clientId)
+        .eq("status", "pending");
+
+      if (cancelError) throw cancelError;
+
+      return { success: true, cleared: true };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
       queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao atualizar status",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
