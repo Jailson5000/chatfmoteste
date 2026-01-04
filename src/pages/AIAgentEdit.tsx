@@ -486,7 +486,7 @@ export default function AIAgentEdit() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-background">
+    <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* Unsaved changes dialog */}
       <AlertDialog
         open={showUnsavedDialog}
@@ -571,10 +571,10 @@ export default function AIAgentEdit() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 flex overflow-hidden">
         {/* Prompt Editor Area */}
-        <div className="flex-1 flex flex-col p-6 min-h-0 min-w-0 overflow-hidden">
-          <div className="flex-1 h-full min-h-0 min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col p-6 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
@@ -589,7 +589,7 @@ REGRAS DE COMUNICAÇÃO
 
 Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
               maxLength={MAX_PROMPT_CHARS}
-              className={cn("h-full min-h-0", isOverLimit && "text-destructive")}
+              className={cn(isOverLimit && "text-destructive")}
               departments={departments || []}
               statuses={statuses || []}
               tags={tags || []}
