@@ -66,10 +66,13 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
   const [isExpanded, setIsExpanded] = useState(false);
   const queryClient = useQueryClient();
 
+  console.log("[ChatActivityLog] Rendering with:", { conversationId, clientId });
+
   // Fetch client actions
-  const { data: clientActions = [] } = useQuery({
+  const { data: clientActions = [], isLoading: isLoadingActions } = useQuery({
     queryKey: ["chat-activity-actions", clientId],
     queryFn: async () => {
+      console.log("[ChatActivityLog] Fetching client actions for client:", clientId);
       if (!clientId) return [];
       
       const { data, error } = await supabase
@@ -92,6 +95,7 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
         console.error("[ChatActivityLog] Error fetching client actions:", error);
         return [];
       }
+      console.log("[ChatActivityLog] Client actions fetched:", data?.length || 0, data);
       return data as ClientAction[];
     },
     enabled: !!clientId,
@@ -202,6 +206,8 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
       };
     }),
   ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+  console.log("[ChatActivityLog] Activities count:", activities.length, { clientActions: clientActions.length, transferLogs: transferLogs.length });
 
   if (activities.length === 0) {
     return null;
