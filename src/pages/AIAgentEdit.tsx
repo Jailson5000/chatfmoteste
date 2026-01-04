@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useDepartments } from "@/hooks/useDepartments";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useTags } from "@/hooks/useTags";
+import { useTemplates } from "@/hooks/useTemplates";
+import { useLawFirm } from "@/hooks/useLawFirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +39,11 @@ import {
   Volume2,
   Play,
   Square,
+  Building2,
+  Tag,
+  Users,
+  Clock,
+  MessageSquare,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
 import { useToast } from "@/hooks/use-toast";
@@ -54,24 +64,42 @@ const TRIGGER_TYPES = [
 
 const MAX_PROMPT_CHARS = 10000;
 
-// Available mention variables
-const MENTION_VARIABLES = [
-  { key: '@Nome da empresa', description: 'Nome da sua empresa' },
-  { key: '@Nome do cliente', description: 'Nome do cliente na conversa' },
-  { key: '@Atendimento', description: 'Departamento de atendimento' },
-  { key: '@Responsável', description: 'Nome do responsável pelo atendimento' },
-  { key: '@Data atual', description: 'Data atual formatada' },
-  { key: '@Hora atual', description: 'Hora atual formatada' },
-  { key: '@Ativar áudio', description: 'Comando para ativar resposta por áudio' },
-  { key: '@Desativar áudio', description: 'Comando para desativar resposta por áudio' },
-  { key: '@bemvindo', description: 'Template de boas-vindas' },
+// Static mention variables
+const STATIC_MENTION_VARIABLES = [
+  { key: '@Nome da empresa', description: 'Nome da sua empresa', category: 'info', icon: Building2 },
+  { key: '@Endereço', description: 'Endereço do escritório', category: 'info', icon: Building2 },
+  { key: '@Telefone', description: 'Telefone de contato', category: 'info', icon: Building2 },
+  { key: '@Email', description: 'Email de contato', category: 'info', icon: Building2 },
+  { key: '@OAB', description: 'Número da OAB', category: 'info', icon: Building2 },
+  { key: '@Instagram', description: 'Instagram do escritório', category: 'info', icon: Building2 },
+  { key: '@Facebook', description: 'Facebook do escritório', category: 'info', icon: Building2 },
+  { key: '@Website', description: 'Website do escritório', category: 'info', icon: Building2 },
+  { key: '@Horário comercial', description: 'Horário de funcionamento', category: 'hours', icon: Clock },
+  { key: '@Nome do cliente', description: 'Nome do cliente na conversa', category: 'client', icon: Users },
+  { key: '@Responsável', description: 'Nome do responsável pelo atendimento', category: 'client', icon: Users },
+  { key: '@Data atual', description: 'Data atual formatada', category: 'system', icon: Clock },
+  { key: '@Hora atual', description: 'Hora atual formatada', category: 'system', icon: Clock },
+  { key: '@Ativar áudio', description: 'Comando para ativar resposta por áudio', category: 'system', icon: Volume2 },
+  { key: '@Desativar áudio', description: 'Comando para desativar resposta por áudio', category: 'system', icon: Volume2 },
 ];
+
+type MentionVariable = {
+  key: string;
+  description: string;
+  category: string;
+  icon: React.ElementType;
+};
 
 export default function AIAgentEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { isAdmin, loading: roleLoading } = useUserRole();
   const { automations, isLoading, updateAutomation, refetch } = useAutomations();
+  const { departments } = useDepartments();
+  const { statuses } = useCustomStatuses();
+  const { tags } = useTags();
+  const { templates } = useTemplates();
+  const { lawFirm } = useLawFirm();
   const { toast } = useToast();
 
   const [automation, setAutomation] = useState<Automation | null>(null);
@@ -96,7 +124,75 @@ export default function AIAgentEdit() {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
   const [cursorPosition, setCursorPosition] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mentionPopupRef = useRef<HTMLDivElement | null>(null);
+
+  // Build dynamic mentions list from database data
+  const allMentions = useMemo((): MentionVariable[] => {
+    const mentions: MentionVariable[] = [...STATIC_MENTION_VARIABLES];
+    
+    // Add departments
+    if (departments && departments.length > 0) {
+      departments.forEach(dept => {
+        mentions.push({
+          key: `@departamento:${dept.name}`,
+          description: `Departamento: ${dept.name}`,
+          category: 'department',
+          icon: Building2,
+        });
+      });
+    }
+    
+    // Add statuses
+    if (statuses && statuses.length > 0) {
+      statuses.forEach(status => {
+        mentions.push({
+          key: `@status:${status.name}`,
+          description: `Status: ${status.name}`,
+          category: 'status',
+          icon: Tag,
+        });
+      });
+    }
+    
+    // Add tags
+    if (tags && tags.length > 0) {
+      tags.forEach(tag => {
+        mentions.push({
+          key: `@etiqueta:${tag.name}`,
+          description: `Etiqueta: ${tag.name}`,
+          category: 'tag',
+          icon: Tag,
+        });
+      });
+    }
+    
+    // Add templates
+    if (templates && templates.length > 0) {
+      templates.forEach(tpl => {
+        mentions.push({
+          key: `@template:${tpl.name}`,
+          description: `Template: ${tpl.name}`,
+          category: 'template',
+          icon: MessageSquare,
+        });
+      });
+    }
+    
+    return mentions;
+  }, [departments, statuses, tags, templates]);
+
+  // Filter mentions based on search
+  const filteredMentions = useMemo(() => {
+    if (!mentionFilter) return allMentions;
+    const filter = mentionFilter.toLowerCase();
+    return allMentions.filter(m => 
+      m.key.toLowerCase().includes(filter) || 
+      m.description.toLowerCase().includes(filter)
+    );
+  }, [allMentions, mentionFilter]);
 
   useEffect(() => {
     if (automations && id) {
@@ -133,11 +229,35 @@ export default function AIAgentEdit() {
   }, []);
 
   const insertMention = useCallback((mention: string) => {
-    const before = editedPrompt.slice(0, cursorPosition);
-    const after = editedPrompt.slice(cursorPosition);
-    const newPrompt = before + mention + ' ' + after;
-    setEditedPrompt(newPrompt);
+    // Find the @ position before cursor and replace from there
+    const textBeforeCursor = editedPrompt.slice(0, cursorPosition);
+    const atIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (atIndex !== -1) {
+      const before = editedPrompt.slice(0, atIndex);
+      const after = editedPrompt.slice(cursorPosition);
+      const newPrompt = before + mention + ' ' + after;
+      setEditedPrompt(newPrompt);
+      
+      // Move cursor after the inserted mention
+      const newCursorPos = atIndex + mention.length + 1;
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = newCursorPos;
+          textareaRef.current.selectionEnd = newCursorPos;
+          textareaRef.current.focus();
+        }
+      }, 0);
+    } else {
+      // Fallback: insert at cursor
+      const before = editedPrompt.slice(0, cursorPosition);
+      const after = editedPrompt.slice(cursorPosition);
+      const newPrompt = before + mention + ' ' + after;
+      setEditedPrompt(newPrompt);
+    }
+    
     setShowMentions(false);
+    setMentionFilter('');
   }, [editedPrompt, cursorPosition]);
 
   const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -146,11 +266,23 @@ export default function AIAgentEdit() {
     setEditedPrompt(value);
     setCursorPosition(pos);
     
-    // Check if @ was typed
-    if (value[pos - 1] === '@') {
-      setShowMentions(true);
+    // Check if we're typing after @
+    const textBeforeCursor = value.slice(0, pos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
+      // Only show mentions if there's no space after @ (still typing the mention)
+      if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+        setShowMentions(true);
+        setMentionFilter(textAfterAt);
+      } else {
+        setShowMentions(false);
+        setMentionFilter('');
+      }
     } else {
       setShowMentions(false);
+      setMentionFilter('');
     }
   }, []);
 
@@ -492,34 +624,55 @@ export default function AIAgentEdit() {
       <div className="flex flex-1 overflow-hidden">
         {/* Prompt Editor Area */}
         <div className="flex-1 p-6 overflow-auto relative">
-          <div className="max-w-4xl">
-            {/* Mentions Popup */}
-            {showMentions && (
-              <div className="absolute z-50 bg-popover border rounded-lg shadow-lg p-2 w-64">
-                <ScrollArea className="h-48">
-                  <div className="space-y-1">
-                    {MENTION_VARIABLES.map((mention) => (
+          <div className="max-w-4xl relative">
+            {/* Mentions Popup - positioned below cursor */}
+            {showMentions && filteredMentions.length > 0 && (
+              <div 
+                ref={mentionPopupRef}
+                className="absolute z-50 bg-popover border rounded-lg shadow-lg p-2 w-80 max-h-64 overflow-auto"
+                style={{ top: '40px', left: '0' }}
+              >
+                <div className="text-xs text-muted-foreground mb-2 px-2">
+                  {mentionFilter ? `Buscando "${mentionFilter}"...` : 'Selecione uma variável'}
+                </div>
+                <div className="space-y-0.5">
+                  {filteredMentions.slice(0, 15).map((mention) => {
+                    const Icon = mention.icon;
+                    return (
                       <button
                         key={mention.key}
                         onClick={() => insertMention(mention.key)}
-                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors"
+                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors flex items-start gap-2"
                       >
-                        <div className="font-medium text-sm">{mention.key}</div>
-                        <div className="text-xs text-muted-foreground">{mention.description}</div>
+                        <Icon className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">{mention.key}</div>
+                          <div className="text-xs text-muted-foreground truncate">{mention.description}</div>
+                        </div>
                       </button>
-                    ))}
-                  </div>
-                </ScrollArea>
+                    );
+                  })}
+                  {filteredMentions.length > 15 && (
+                    <div className="text-xs text-muted-foreground text-center py-2">
+                      +{filteredMentions.length - 15} mais...
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             
             <Textarea
+              ref={textareaRef}
               value={editedPrompt}
               onChange={handlePromptChange}
               onSelect={(e) => setCursorPosition((e.target as HTMLTextAreaElement).selectionStart || 0)}
+              onBlur={() => {
+                // Delay hiding to allow click on mention
+                setTimeout(() => setShowMentions(false), 200);
+              }}
               placeholder="Digite o prompt que define o comportamento da IA...
 
-Use @ para inserir variáveis dinâmicas como @Nome do cliente, @Atendimento, etc.
+Use @ para inserir variáveis dinâmicas como @Nome do cliente, @departamento:Vendas, etc.
 
 Exemplo:
 REGRAS DE COMUNICAÇÃO
@@ -593,19 +746,28 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                   Inserir menção
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-64 p-2" align="start">
-                <ScrollArea className="h-48">
-                  <div className="space-y-1">
-                    {MENTION_VARIABLES.map((mention) => (
-                      <button
-                        key={mention.key}
-                        onClick={() => insertMention(mention.key)}
-                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors"
-                      >
-                        <div className="font-medium text-sm">{mention.key}</div>
-                        <div className="text-xs text-muted-foreground">{mention.description}</div>
-                      </button>
-                    ))}
+              <PopoverContent className="w-80 p-2" align="start">
+                <div className="text-xs text-muted-foreground mb-2">
+                  Clique para inserir no prompt
+                </div>
+                <ScrollArea className="h-64">
+                  <div className="space-y-0.5">
+                    {allMentions.map((mention) => {
+                      const Icon = mention.icon;
+                      return (
+                        <button
+                          key={mention.key}
+                          onClick={() => insertMention(mention.key)}
+                          className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors flex items-start gap-2"
+                        >
+                          <Icon className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{mention.key}</div>
+                            <div className="text-xs text-muted-foreground truncate">{mention.description}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               </PopoverContent>
