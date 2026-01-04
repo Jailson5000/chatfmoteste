@@ -17,6 +17,9 @@ interface ScheduledFollowUp {
   follow_up_rule_id: string;
   template_id: string | null;
   scheduled_at: string;
+  status: string;
+  started_at: string | null;
+  created_at: string;
 }
 
 interface Template {
@@ -58,11 +61,16 @@ Deno.serve(async (req) => {
     console.log("[process-follow-ups] Starting follow-up processing...");
 
     // Get all pending follow-ups that are due
+    // Note: also retries any stuck "pending" rows that were claimed >10min ago
+    const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
     const { data: pendingFollowUps, error: fetchError } = await supabase
       .from("scheduled_follow_ups")
       .select("*")
       .eq("status", "pending")
       .lte("scheduled_at", new Date().toISOString())
+      .or(`started_at.is.null,started_at.lt.${staleThreshold}`)
+      .order("scheduled_at", { ascending: true })
       .limit(50); // Process in batches
 
     if (fetchError) {
@@ -85,6 +93,49 @@ Deno.serve(async (req) => {
 
     for (const followUp of pendingFollowUps as ScheduledFollowUp[]) {
       try {
+        const startedAtIso = new Date().toISOString();
+
+        // Claim the row to prevent duplicate sends across overlapping cron runs
+        const { data: claimed, error: claimError } = await supabase
+          .from("scheduled_follow_ups")
+          .update({ started_at: startedAtIso })
+          .eq("id", followUp.id)
+          .eq("status", "pending")
+          .or(`started_at.is.null,started_at.lt.${staleThreshold}`)
+          .select("id")
+          .maybeSingle();
+
+        if (claimError) throw claimError;
+        if (!claimed) continue;
+
+        // Extra safety: if client already replied after this follow-up was created, cancel and skip
+        const { data: lastClientMessage, error: lastClientError } = await supabase
+          .from("messages")
+          .select("created_at")
+          .eq("conversation_id", followUp.conversation_id)
+          .eq("is_from_me", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lastClientError) throw lastClientError;
+
+        if (
+          lastClientMessage?.created_at &&
+          new Date(lastClientMessage.created_at).getTime() > new Date(followUp.created_at).getTime()
+        ) {
+          await supabase
+            .from("scheduled_follow_ups")
+            .update({
+              status: "cancelled",
+              cancelled_at: startedAtIso,
+              cancel_reason: "Client responded",
+            })
+            .eq("id", followUp.id)
+            .eq("status", "pending");
+          continue;
+        }
+
         console.log(`[process-follow-ups] Processing follow-up ${followUp.id}`);
 
         // Get the template content
@@ -300,14 +351,16 @@ Deno.serve(async (req) => {
           .update({ last_message_at: new Date().toISOString() })
           .eq("id", followUp.conversation_id);
 
-        // Mark follow-up as sent
+        // Mark follow-up as sent (only if still pending + claimed)
         await supabase
           .from("scheduled_follow_ups")
-          .update({ 
-            status: "sent", 
-            sent_at: new Date().toISOString() 
+          .update({
+            status: "sent",
+            sent_at: new Date().toISOString(),
           })
-          .eq("id", followUp.id);
+          .eq("id", followUp.id)
+          .eq("status", "pending")
+          .eq("started_at", startedAtIso);
 
         successCount++;
 
@@ -324,13 +377,13 @@ Deno.serve(async (req) => {
           // Cancel any remaining pending follow-ups for this client
           await supabase
             .from("scheduled_follow_ups")
-            .update({ 
-              status: "cancelled", 
+            .update({
+              status: "cancelled",
               cancelled_at: new Date().toISOString(),
-              cancel_reason: "Give up on no response triggered" 
+              cancel_reason: "Give up on no response triggered",
             })
             .eq("client_id", followUp.client_id)
-            .eq("status", "pending")
+            .in("status", ["pending", "processing"]) // processing is safe even if unused
             .neq("id", followUp.id);
 
           // Update client status if give_up_status_id is set
@@ -358,11 +411,12 @@ Deno.serve(async (req) => {
         console.error(`[process-follow-ups] Error processing follow-up ${followUp.id}:`, error);
         await supabase
           .from("scheduled_follow_ups")
-          .update({ 
-            status: "failed", 
-            error_message: error.message || "Unknown error" 
+          .update({
+            status: "failed",
+            error_message: error.message || "Unknown error",
           })
-          .eq("id", followUp.id);
+          .eq("id", followUp.id)
+          .eq("status", "pending");
         failCount++;
       }
     }
