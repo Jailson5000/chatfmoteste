@@ -69,61 +69,53 @@ export function MentionPicker({
   const categories = useMemo((): MentionCategory[] => {
     const cats: MentionCategory[] = [];
 
-    // Departamento
-    if (departments.length > 0) {
-      cats.push({
-        id: "departamento",
-        label: "Departamento",
-        icon: Building2,
-        items: departments.map(d => ({
-          key: `@departamento:${d.name}`,
-          label: d.name,
-          description: `Departamento: ${d.name}`,
-        })),
-      });
-    }
+    // Departamento - always show
+    cats.push({
+      id: "departamento",
+      label: "Departamento",
+      icon: Building2,
+      items: departments.map(d => ({
+        key: `@departamento:${d.name}`,
+        label: d.name,
+        description: `Departamento: ${d.name}`,
+      })),
+    });
 
-    // Status
-    if (statuses.length > 0) {
-      cats.push({
-        id: "status",
-        label: "Status",
-        icon: CheckCircle2,
-        items: statuses.map(s => ({
-          key: `@status:${s.name}`,
-          label: s.name,
-          description: `Status: ${s.name}`,
-        })),
-      });
-    }
+    // Status - always show
+    cats.push({
+      id: "status",
+      label: "Status",
+      icon: CheckCircle2,
+      items: statuses.map(s => ({
+        key: `@status:${s.name}`,
+        label: s.name,
+        description: `Status: ${s.name}`,
+      })),
+    });
 
-    // Etiquetas
-    if (tags.length > 0) {
-      cats.push({
-        id: "etiquetas",
-        label: "Etiquetas",
-        icon: Tag,
-        items: tags.map(t => ({
-          key: `@etiqueta:${t.name}`,
-          label: t.name,
-          description: `Etiqueta: ${t.name}`,
-        })),
-      });
-    }
+    // Etiquetas - always show
+    cats.push({
+      id: "etiquetas",
+      label: "Etiquetas",
+      icon: Tag,
+      items: tags.map(t => ({
+        key: `@etiqueta:${t.name}`,
+        label: t.name,
+        description: `Etiqueta: ${t.name}`,
+      })),
+    });
 
-    // Responsáveis
-    if (teamMembers && teamMembers.length > 0) {
-      cats.push({
-        id: "responsaveis",
-        label: "Responsáveis",
-        icon: Users,
-        items: teamMembers.map(m => ({
-          key: `@responsavel:${m.full_name}`,
-          label: m.full_name,
-          description: `Responsável: ${m.full_name}`,
-        })),
-      });
-    }
+    // Responsáveis - always show
+    cats.push({
+      id: "responsaveis",
+      label: "Responsáveis",
+      icon: Users,
+      items: (teamMembers || []).map(m => ({
+        key: `@responsavel:${m.full_name}`,
+        label: m.full_name,
+        description: `Responsável: ${m.full_name}`,
+      })),
+    });
 
     // Dados gerais (Informações Gerais)
     const generalDataItems: MentionItem[] = [
@@ -175,19 +167,17 @@ export function MentionPicker({
       items: calendarItems,
     });
 
-    // Templates/Mensagens
-    if (templates.length > 0) {
-      cats.push({
-        id: "mensagens",
-        label: "Mensagens",
-        icon: MessageSquare,
-        items: templates.map(t => ({
-          key: `@template:${t.name}`,
-          label: t.name,
-          description: `Template: ${t.name}`,
-        })),
-      });
-    }
+    // Templates/Mensagens - always show
+    cats.push({
+      id: "mensagens",
+      label: "Mensagens",
+      icon: MessageSquare,
+      items: templates.map(t => ({
+        key: `@template:${t.name}`,
+        label: t.name,
+        description: `Template: ${t.name}`,
+      })),
+    });
 
     return cats;
   }, [departments, statuses, tags, templates, teamMembers, lawFirm]);
@@ -275,18 +265,24 @@ export function MentionPicker({
         
         <ScrollArea className="max-h-72">
           <div className="p-1">
-            {activeCategoryData.items.map((item, idx) => (
-              <button
-                key={item.key}
-                onClick={() => onSelect(item.key)}
-                className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors flex items-center gap-3"
-              >
-                <span className="text-sm flex-1">{item.label}</span>
-                {idx === 0 && (
-                  <span className="text-xs text-muted-foreground">↵</span>
-                )}
-              </button>
-            ))}
+            {activeCategoryData.items.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                Nenhum item cadastrado
+              </div>
+            ) : (
+              activeCategoryData.items.map((item, idx) => (
+                <button
+                  key={item.key}
+                  onClick={() => onSelect(item.key)}
+                  className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors flex items-center gap-3"
+                >
+                  <span className="text-sm flex-1">{item.label}</span>
+                  {idx === 0 && (
+                    <span className="text-xs text-muted-foreground">↵</span>
+                  )}
+                </button>
+              ))
+            )}
           </div>
         </ScrollArea>
         
