@@ -139,6 +139,8 @@ interface Message {
   whatsapp_message_id?: string | null;
   is_internal?: boolean;
   is_pontual?: boolean;
+  ai_agent_id?: string | null;
+  ai_agent_name?: string | null;
   reply_to?: {
     id: string;
     content: string | null;
@@ -599,7 +601,7 @@ export default function Conversations() {
       setMessagesLoading(true);
       const { data, error } = await supabase
         .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id")
+        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name")
         .eq("conversation_id", selectedConversationId)
         .order("created_at", { ascending: true });
       
@@ -1769,6 +1771,7 @@ export default function Conversations() {
                             replyTo={msg.reply_to}
                             isInternal={msg.is_internal}
                             isPontual={msg.is_pontual}
+                            aiAgentName={msg.ai_agent_name}
                             onReply={handleReply}
                             onScrollToMessage={scrollToMessage}
                             onRetry={handleRetryMessage}
@@ -2278,6 +2281,7 @@ export default function Conversations() {
                           replyTo={msg.reply_to}
                           isInternal={msg.is_internal}
                           isPontual={msg.is_pontual}
+                          aiAgentName={msg.ai_agent_name}
                           onReply={handleReply}
                           onScrollToMessage={scrollToMessage}
                           onRetry={handleRetryMessage}

@@ -714,6 +714,8 @@ interface AutomationContext {
   instanceId: string;
   instanceName: string;
   clientId?: string; // Added for client memory support
+  automationId?: string; // ID of the AI agent handling this conversation
+  automationName?: string; // Name of the AI agent for display purposes
 }
 
 // =============================================================================
@@ -1303,6 +1305,8 @@ async function sendTextFallbackWithWarning(
           is_from_me: true,
           sender_type: 'system',
           ai_generated: true,
+          ai_agent_id: context.automationId || null,
+          ai_agent_name: context.automationName || null,
         });
     }
   }
@@ -1551,6 +1555,8 @@ async function sendAIResponseToWhatsApp(
             sender_type: 'system',
             ai_generated: true,
             media_mime_type: 'audio/mpeg',
+            ai_agent_id: context.automationId || null,
+            ai_agent_name: context.automationName || null,
           });
 
         // Record TTS usage for billing
@@ -1655,6 +1661,8 @@ async function sendAIResponseToWhatsApp(
           is_from_me: true,
           sender_type: 'system',
           ai_generated: true,
+          ai_agent_id: context.automationId || null,
+          ai_agent_name: context.automationName || null,
         });
 
       if (saveError) {
@@ -1794,8 +1802,15 @@ async function processWithGemini(
         lawFirmId: context.lawFirmId,
       });
 
+      // Add AI agent info to context for message tracking
+      const contextWithAgent = {
+        ...context,
+        automationId: automation.id,
+        automationName: automation.name,
+      };
+
       // Send the response back to WhatsApp (with optional voice)
-      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig);
     }
 
     // Log the AI processing with tool calls
@@ -1944,8 +1959,15 @@ async function processWithGPT(
         lawFirmId: context.lawFirmId,
       });
 
+      // Add AI agent info to context for message tracking
+      const contextWithAgent = {
+        ...context,
+        automationId: automation.id,
+        automationName: automation.name,
+      };
+
       // Send the response back to WhatsApp (with optional voice)
-      await sendAIResponseToWhatsApp(supabaseClient, context, aiResponse, voiceConfig);
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig);
 
       // Log the AI processing with tool calls
       await supabaseClient
