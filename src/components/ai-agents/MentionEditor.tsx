@@ -235,6 +235,19 @@ export function MentionEditor({
     sel.addRange(r);
   }, []);
 
+  const setCaretInTextNode = useCallback((node: Text, offset: number) => {
+    const sel = window.getSelection();
+    if (!sel) return;
+
+    const r = document.createRange();
+    const len = node.textContent?.length ?? 0;
+    const safeOffset = Math.max(0, Math.min(offset, len));
+    r.setStart(node, safeOffset);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }, []);
+
   const ensureTrailingSpace = useCallback((badge: HTMLElement) => {
     const next = badge.nextSibling;
     if (isTextNode(next)) {
@@ -280,16 +293,19 @@ export function MentionEditor({
     }
   }, []);
 
-  const openPickerForBadge = useCallback((badge: HTMLElement) => {
-    editingBadgeRef.current = badge;
-    triggerRangeRef.current = null;
-    setMentionFilter("");
-    setShowMentionPicker(true);
+  const openPickerForBadge = useCallback(
+    (badge: HTMLElement) => {
+      editingBadgeRef.current = badge;
+      triggerRangeRef.current = null;
+      setMentionFilter("");
+      setShowMentionPicker(true);
 
-    // Keep caret after the badge so typing continues normally
-    const space = ensureTrailingSpace(badge);
-    setCaretAfterNode(space);
-  }, [ensureTrailingSpace, setCaretAfterNode]);
+      // Keep caret right after the badge (inside the trailing space node)
+      const space = ensureTrailingSpace(badge);
+      setCaretInTextNode(space, Math.min(1, space.textContent?.length ?? 0));
+    },
+    [ensureTrailingSpace, setCaretInTextNode]
+  );
 
   const closePicker = useCallback(() => {
     setShowMentionPicker(false);
@@ -313,24 +329,48 @@ export function MentionEditor({
       return;
     }
 
-    // We only support trigger when caret is inside a Text node.
-    const container = range.startContainer;
-    if (!isTextNode(container)) {
+    // Resolve caret to a Text node + offset (contenteditable can report Element nodes)
+    let containerNode: Node = range.startContainer;
+    let cursorOffset = range.startOffset;
+
+    let textNode: Text | null = null;
+    let textOffset = 0;
+
+    if (isTextNode(containerNode)) {
+      textNode = containerNode;
+      textOffset = cursorOffset;
+    } else if (isHTMLElement(containerNode)) {
+      const el = containerNode;
+      const i = cursorOffset;
+      const before = i > 0 ? el.childNodes[i - 1] : null;
+      const at = i < el.childNodes.length ? el.childNodes[i] : null;
+
+      if (isTextNode(at)) {
+        textNode = at;
+        textOffset = 0;
+      } else if (isTextNode(before)) {
+        textNode = before;
+        textOffset = before.textContent?.length ?? 0;
+      } else {
+        closePicker();
+        return;
+      }
+    } else {
       closePicker();
       return;
     }
 
-    const text = container.textContent || "";
-    const cursor = range.startOffset;
-    const before = text.slice(0, cursor);
-    const at = before.lastIndexOf("@");
+    const text = textNode.textContent || "";
+    const cursor = textOffset;
+    const beforeText = text.slice(0, cursor);
+    const at = beforeText.lastIndexOf("@");
 
     if (at === -1) {
       closePicker();
       return;
     }
 
-    const afterAt = before.slice(at + 1);
+    const afterAt = beforeText.slice(at + 1);
 
     // Must be same token: stop on whitespace/newline
     if (/[\s\n]/.test(afterAt)) {
@@ -340,8 +380,8 @@ export function MentionEditor({
 
     // Build a trigger range from '@' to caret
     const triggerRange = document.createRange();
-    triggerRange.setStart(container, at);
-    triggerRange.setEnd(container, cursor);
+    triggerRange.setStart(textNode, at);
+    triggerRange.setEnd(textNode, cursor);
 
     triggerRangeRef.current = triggerRange;
     editingBadgeRef.current = null;
@@ -349,6 +389,7 @@ export function MentionEditor({
     setShowMentionPicker(true);
     setMentionFilter(afterAt);
   }, [closePicker]);
+
 
   const handleInput = useCallback(() => {
     if (isComposingRef.current) return;
@@ -382,7 +423,7 @@ export function MentionEditor({
       if (editingBadgeRef.current) {
         updateMentionBadge(editingBadgeRef.current, full);
         const space = ensureTrailingSpace(editingBadgeRef.current);
-        setCaretAfterNode(space);
+        setCaretInTextNode(space, Math.min(1, space.textContent?.length ?? 0));
         closePicker();
         setTimeout(syncValueUp, 0);
         inputRef.current.focus();
@@ -406,7 +447,7 @@ export function MentionEditor({
       // First check if there's already a text node after
       let spaceNode: Text;
       const nextSibling = badge.nextSibling;
-      
+
       if (isTextNode(nextSibling)) {
         // If next text node doesn't start with space, prepend one
         if (!nextSibling.textContent?.startsWith(" ")) {
@@ -420,18 +461,21 @@ export function MentionEditor({
       }
 
       // Position caret INSIDE the space text node, after the space character
-      const newRange = document.createRange();
-      newRange.setStart(spaceNode, 1); // After the space
-      newRange.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(newRange);
+      setCaretInTextNode(spaceNode, 1);
 
       closePicker();
 
       setTimeout(syncValueUp, 0);
       inputRef.current.focus();
     },
-    [closePicker, createMentionBadge, ensureTrailingSpace, setCaretAfterNode, syncValueUp, updateMentionBadge]
+    [
+      closePicker,
+      createMentionBadge,
+      ensureTrailingSpace,
+      setCaretInTextNode,
+      syncValueUp,
+      updateMentionBadge,
+    ]
   );
 
   const handleEditorClick = useCallback(

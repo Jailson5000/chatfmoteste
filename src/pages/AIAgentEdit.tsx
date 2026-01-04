@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
+import { useParams, useNavigate, UNSAFE_NavigationContext } from "react-router-dom";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -29,15 +29,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { 
-  ArrowLeft, 
-  Save, 
-  Loader2, 
-  Bot, 
-  Settings, 
-  Copy, 
-  Check, 
-  Wifi, 
+import {
+  ArrowLeft,
+  Save,
+  Loader2,
+  Bot,
+  Settings,
+  Copy,
+  Check,
+  Wifi,
   WifiOff,
   FileText,
   Thermometer,
@@ -61,11 +61,11 @@ import { cn } from "@/lib/utils";
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 const TRIGGER_TYPES = [
-  { value: 'new_message', label: 'Nova Mensagem Recebida' },
-  { value: 'keyword', label: 'Palavra-chave Detectada' },
-  { value: 'schedule', label: 'Agendamento' },
-  { value: 'status_change', label: 'Mudança de Status' },
-  { value: 'new_client', label: 'Novo Cliente' },
+  { value: "new_message", label: "Nova Mensagem Recebida" },
+  { value: "keyword", label: "Palavra-chave Detectada" },
+  { value: "schedule", label: "Agendamento" },
+  { value: "status_change", label: "Mudança de Status" },
+  { value: "new_client", label: "Novo Cliente" },
 ];
 
 const MAX_PROMPT_CHARS = 10000;
@@ -83,43 +83,59 @@ export default function AIAgentEdit() {
   const { members: teamMembers } = useTeamMembers();
   const { toast } = useToast();
 
+  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const pendingNavigationRef = useRef<null | (() => void)>(null);
+
   const [automation, setAutomation] = useState<Automation | null>(null);
-  const [editedPrompt, setEditedPrompt] = useState('');
+  const [editedPrompt, setEditedPrompt] = useState("");
   const [editedTemperature, setEditedTemperature] = useState(0.7);
-  const [editedName, setEditedName] = useState('');
-  const [editedDescription, setEditedDescription] = useState('');
-  const [editedWebhookUrl, setEditedWebhookUrl] = useState('');
-  const [editedTriggerType, setEditedTriggerType] = useState('new_message');
+  const [editedName, setEditedName] = useState("");
+  const [editedDescription, setEditedDescription] = useState("");
+  const [editedWebhookUrl, setEditedWebhookUrl] = useState("");
+  const [editedTriggerType, setEditedTriggerType] = useState("new_message");
   const [isActive, setIsActive] = useState(true);
-  
+
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  
+
   const [isSaving, setIsSaving] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
+  const currentTriggerConfig = automation?.trigger_config as Record<string, unknown> | null;
+  const hasChanges =
+    !!automation &&
+    (editedPrompt !== (automation.ai_prompt || "") ||
+      editedTemperature !== (automation.ai_temperature || 0.7) ||
+      editedName !== automation.name ||
+      editedDescription !== (automation.description || "") ||
+      editedWebhookUrl !== automation.webhook_url ||
+      editedTriggerType !== automation.trigger_type ||
+      isActive !== automation.is_active ||
+      voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
+      voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID));
+
   useEffect(() => {
     if (automations && id) {
-      const found = automations.find(a => a.id === id);
+      const found = automations.find((a) => a.id === id);
       if (found) {
         setAutomation(found);
-        setEditedPrompt(found.ai_prompt || '');
+        setEditedPrompt(found.ai_prompt || "");
         setEditedTemperature(found.ai_temperature || 0.7);
         setEditedName(found.name);
-        setEditedDescription(found.description || '');
+        setEditedDescription(found.description || "");
         setEditedWebhookUrl(found.webhook_url);
         setEditedTriggerType(found.trigger_type);
         setIsActive(found.is_active);
         setLastSaved(new Date(found.updated_at));
-        
+
         // Load voice settings from trigger_config
         const triggerConfig = found.trigger_config as Record<string, unknown> | null;
         if (triggerConfig) {
@@ -143,30 +159,32 @@ export default function AIAgentEdit() {
   // Warn before browser/tab close if there are unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!automation) return;
-      
-      const currentTriggerConfig = automation.trigger_config as Record<string, unknown> | null;
-      const hasUnsavedChanges = 
-        editedPrompt !== (automation.ai_prompt || '') ||
-        editedTemperature !== (automation.ai_temperature || 0.7) ||
-        editedName !== automation.name ||
-        editedDescription !== (automation.description || '') ||
-        editedWebhookUrl !== automation.webhook_url ||
-        editedTriggerType !== automation.trigger_type ||
-        isActive !== automation.is_active ||
-        voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
-        voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID);
-
-      if (hasUnsavedChanges) {
-        e.preventDefault();
-        e.returnValue = '';
-        return '';
-      }
+      if (!hasChanges) return;
+      e.preventDefault();
+      e.returnValue = "";
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [automation, editedPrompt, editedTemperature, editedName, editedDescription, editedWebhookUrl, editedTriggerType, isActive, voiceEnabled, voiceId]);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasChanges]);
+
+  // Block SPA navigations when there are unsaved changes (BrowserRouter-compatible)
+  useEffect(() => {
+    if (!hasChanges) return;
+
+    const nav = navigator as any;
+    if (typeof nav?.block !== "function") return;
+
+    const unblock = nav.block((tx: any) => {
+      pendingNavigationRef.current = () => {
+        unblock();
+        tx.retry();
+      };
+      setShowUnsavedDialog(true);
+    });
+
+    return unblock;
+  }, [hasChanges, navigator]);
 
 
   const handleRestoreLastVersion = useCallback(() => {
@@ -225,17 +243,7 @@ export default function AIAgentEdit() {
   const promptPercentage = Math.round((promptLength / MAX_PROMPT_CHARS) * 100);
   const isOverLimit = promptLength > MAX_PROMPT_CHARS;
 
-  const currentTriggerConfig = automation.trigger_config as Record<string, unknown> | null;
-  const hasChanges = 
-    editedPrompt !== (automation.ai_prompt || '') ||
-    editedTemperature !== (automation.ai_temperature || 0.7) ||
-    editedName !== automation.name ||
-    editedDescription !== (automation.description || '') ||
-    editedWebhookUrl !== automation.webhook_url ||
-    editedTriggerType !== automation.trigger_type ||
-    isActive !== automation.is_active ||
-    voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
-    voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID);
+  // hasChanges/currentTriggerConfig são calculados acima (usados por navegação + UI)
 
   const handleSave = async () => {
     if (isOverLimit) {
@@ -448,24 +456,40 @@ export default function AIAgentEdit() {
     }
   };
 
-  // Handle back navigation with unsaved changes check
+  // Handle back navigation (blocked when there are unsaved changes)
   const handleBack = () => {
-    if (hasChanges) {
-      setShowUnsavedDialog(true);
-    } else {
-      navigate('/ai-agents');
-    }
+    navigate("/ai-agents");
+  };
+
+  const cancelLeave = () => {
+    pendingNavigationRef.current = null;
+    setShowUnsavedDialog(false);
   };
 
   const confirmLeave = () => {
     setShowUnsavedDialog(false);
-    navigate('/ai-agents');
+
+    const proceed = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+
+    if (proceed) {
+      proceed();
+    } else {
+      // Fallback (e.g., when opened via the header button)
+      navigate("/ai-agents");
+    }
   };
 
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Unsaved changes dialog */}
-      <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+      <AlertDialog
+        open={showUnsavedDialog}
+        onOpenChange={(open) => {
+          setShowUnsavedDialog(open);
+          if (!open) pendingNavigationRef.current = null;
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <div className="flex items-center gap-2 text-destructive">
@@ -477,8 +501,8 @@ export default function AIAgentEdit() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogCancel onClick={cancelLeave}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
               onClick={confirmLeave}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
