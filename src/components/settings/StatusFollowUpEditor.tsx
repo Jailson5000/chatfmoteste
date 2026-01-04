@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/collapsible";
 import { useStatusFollowUps, type StatusFollowUp } from "@/hooks/useStatusFollowUps";
 import { useTemplates } from "@/hooks/useTemplates";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 
 interface StatusFollowUpEditorProps {
   statusId: string;
@@ -26,8 +27,12 @@ interface StatusFollowUpEditorProps {
 export function StatusFollowUpEditor({ statusId }: StatusFollowUpEditorProps) {
   const { followUps, createFollowUp, updateFollowUp, deleteFollowUp } = useStatusFollowUps(statusId);
   const { templates } = useTemplates();
+  const { statuses } = useCustomStatuses();
   const [searchQuery, setSearchQuery] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // Filter out the current status from the dropdown options
+  const availableStatuses = statuses.filter(s => s.id !== statusId);
 
   const filteredFollowUps = followUps.filter(f => 
     f.template?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -109,6 +114,7 @@ export function StatusFollowUpEditor({ statusId }: StatusFollowUpEditorProps) {
             followUp={followUp}
             index={index + 1}
             templates={templates}
+            statuses={availableStatuses}
             onUpdate={handleUpdateFollowUp}
             onDelete={handleDeleteFollowUp}
             onDuplicate={handleDuplicateFollowUp}
@@ -158,18 +164,24 @@ interface FollowUpCardProps {
   followUp: StatusFollowUp;
   index: number;
   templates: Array<{ id: string; name: string; shortcut: string }>;
+  statuses: Array<{ id: string; name: string; color: string }>;
   onUpdate: (id: string, updates: Partial<StatusFollowUp>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onDuplicate: (followUp: StatusFollowUp) => Promise<void>;
 }
 
-function FollowUpCard({ followUp, index, templates, onUpdate, onDelete, onDuplicate }: FollowUpCardProps) {
+function FollowUpCard({ followUp, index, templates, statuses, onUpdate, onDelete, onDuplicate }: FollowUpCardProps) {
   const [isUpdating, setIsUpdating] = useState(false);
 
   const handleChange = async (field: keyof StatusFollowUp, value: any) => {
     setIsUpdating(true);
     try {
-      await onUpdate(followUp.id, { [field]: value });
+      // If turning off give_up, also clear the status
+      if (field === "give_up_on_no_response" && value === false) {
+        await onUpdate(followUp.id, { [field]: value, give_up_status_id: null });
+      } else {
+        await onUpdate(followUp.id, { [field]: value });
+      }
     } finally {
       setIsUpdating(false);
     }
@@ -249,16 +261,60 @@ function FollowUpCard({ followUp, index, templates, onUpdate, onDelete, onDuplic
             </div>
           </div>
 
-          {/* Give up toggle */}
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={followUp.give_up_on_no_response}
-              onCheckedChange={(checked) => handleChange("give_up_on_no_response", checked)}
-              disabled={isUpdating}
-            />
-            <Label className="text-muted-foreground cursor-pointer">
-              desistir do lead?
-            </Label>
+          {/* Give up toggle and status selection */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={followUp.give_up_on_no_response}
+                onCheckedChange={(checked) => handleChange("give_up_on_no_response", checked)}
+                disabled={isUpdating}
+              />
+              <Label className="text-muted-foreground cursor-pointer">
+                desistir do lead?
+              </Label>
+            </div>
+
+            {/* Status selection when give_up is enabled */}
+            {followUp.give_up_on_no_response && (
+              <div className="flex items-center gap-2 pl-12">
+                <Label className="text-muted-foreground">Alterar status para</Label>
+                <Select
+                  value={followUp.give_up_status_id || ""}
+                  onValueChange={(value) => handleChange("give_up_status_id", value || null)}
+                  disabled={isUpdating}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Status">
+                      {followUp.give_up_status ? (
+                        <span className="flex items-center gap-2">
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: followUp.give_up_status.color }}
+                          />
+                          {followUp.give_up_status.name}
+                        </span>
+                      ) : (
+                        "Status"
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statuses.map((status) => (
+                      <SelectItem key={status.id} value={status.id}>
+                        <span className="flex items-center gap-2">
+                          <span 
+                            className="w-2 h-2 rounded-full" 
+                            style={{ backgroundColor: status.color }}
+                          />
+                          {status.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Label className="text-muted-foreground">e arquivar conversa</Label>
+              </div>
+            )}
           </div>
         </div>
 
