@@ -47,6 +47,7 @@ import {
   GlobalAdminProvisioningDashboard,
   GlobalAdminAlertHistory,
   GlobalAdminTemplateBase,
+  GlobalAdminAgentTemplates,
 } from "./pages/global-admin";
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
@@ -274,6 +275,7 @@ const App = () => (
                 </GlobalAdminRoute>
               }
             />
+            <Route path="agent-templates" element={<GlobalAdminAgentTemplates />} />
           </Route>
           
             {/* Catch-all route */}
