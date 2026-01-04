@@ -598,7 +598,7 @@ export function MentionEditor({
   }, [closePicker]);
 
   return (
-    <div ref={editorRef} className="relative h-full">
+    <div ref={editorRef} className="relative h-full min-h-0">
       <div
         ref={inputRef}
         contentEditable

@@ -481,7 +481,7 @@ export default function AIAgentEdit() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full min-h-0 bg-background">
       {/* Unsaved changes dialog */}
       <AlertDialog
         open={showUnsavedDialog}
