@@ -125,18 +125,30 @@ export function useClients() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
-      const { data, error } = await supabase
-        .from("clients")
-        .update({ custom_status_id: statusId })
-        .eq("id", clientId)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      // Use the RPC function which handles follow-up scheduling reliably
+      if (statusId) {
+        const { data, error } = await supabase.rpc("test_schedule_follow_ups", {
+          _client_id: clientId,
+          _new_status_id: statusId,
+        });
+        if (error) throw error;
+        return data;
+      } else {
+        // If clearing status, just update directly
+        const { data, error } = await supabase
+          .from("clients")
+          .update({ custom_status_id: null })
+          .eq("id", clientId)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
+      queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
     },
   });
 

@@ -3622,7 +3622,15 @@ export type Database = {
         Returns: number
       }
       normalize_phone: { Args: { phone: string }; Returns: string }
+      test_schedule_follow_ups: {
+        Args: { _client_id: string; _new_status_id: string }
+        Returns: Json
+      }
       unify_duplicate_clients: { Args: { _law_firm_id: string }; Returns: Json }
+      update_client_status_with_follow_ups: {
+        Args: { _client_id: string; _new_status_id: string }
+        Returns: Json
+      }
       user_belongs_to_law_firm: {
         Args: { _law_firm_id: string; _user_id: string }
         Returns: boolean

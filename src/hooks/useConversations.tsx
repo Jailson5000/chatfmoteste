@@ -493,16 +493,35 @@ export function useConversations() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
-      const { error } = await supabase
-        .from("clients")
-        .update({ custom_status_id: statusId })
-        .eq("id", clientId);
-      
-      if (error) throw error;
+      // Use the RPC function which handles follow-up scheduling reliably
+      if (statusId) {
+        const { data, error } = await supabase.rpc("test_schedule_follow_ups", {
+          _client_id: clientId,
+          _new_status_id: statusId,
+        });
+        if (error) throw error;
+        return data;
+      } else {
+        // If clearing status, just update directly and cancel pending follow-ups
+        const { error } = await supabase
+          .from("clients")
+          .update({ custom_status_id: null })
+          .eq("id", clientId);
+        if (error) throw error;
+        
+        // Cancel pending follow-ups when clearing status
+        await supabase
+          .from("scheduled_follow_ups")
+          .update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancel_reason: "Status cleared" })
+          .eq("client_id", clientId)
+          .eq("status", "pending");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
+      queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
     },
     onError: (error) => {
       toast({

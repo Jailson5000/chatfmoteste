@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
+import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 
 import { cn } from "@/lib/utils";
 import { 
@@ -1025,6 +1026,14 @@ export function KanbanChatPanel({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Scheduled Follow-up Indicator */}
+            {conversationId && (
+              <ScheduledFollowUpIndicator
+                conversationId={conversationId}
+                variant="badge"
+                className="mr-1"
+              />
+            )}
             <Button 
               variant="ghost" 
               size="icon" 
