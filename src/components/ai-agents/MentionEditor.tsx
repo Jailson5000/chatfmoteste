@@ -255,7 +255,10 @@ export function MentionEditor({
               "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-semibold cursor-pointer transition-all mx-0.5 select-none",
               colorClass
             )}
-            onClick={() => handleMentionClick(part.start, part.end)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleMentionClick(part.start, part.end);
+            }}
           >
             @{mentionText}
             <button
@@ -268,9 +271,9 @@ export function MentionEditor({
         );
       }
       
-      // Regular text - render visible
+      // Invisible text to maintain layout but not duplicate visible content
       return (
-        <span key={`${index}-${part.start}`} className="text-foreground">
+        <span key={`${index}-${part.start}`} className="invisible">
           {part.content}
         </span>
       );
@@ -279,22 +282,7 @@ export function MentionEditor({
 
   return (
     <div ref={editorRef} className="relative h-full">
-      {/* Visual display layer - shows styled text and mentions (only when not editing) */}
-      {!isFocused && (
-        <div 
-          ref={displayRef}
-          className={cn(
-            "absolute inset-0 p-4 overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap break-words bg-background rounded-lg border border-border"
-          )}
-          onClick={() => textareaRef.current?.focus()}
-        >
-          {value ? renderDisplayContent() : (
-            <span className="text-muted-foreground">{placeholder}</span>
-          )}
-        </div>
-      )}
-
-      {/* Visible textarea for actual editing */}
+      {/* Base textarea - always visible with normal text */}
       <textarea
         ref={textareaRef}
         value={value}
@@ -311,10 +299,55 @@ export function MentionEditor({
         data-gramm="false"
         className={cn(
           "h-full w-full resize-none p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
-          !isFocused && "opacity-0 absolute inset-0",
           className
         )}
       />
+
+      {/* Overlay layer - shows styled mention badges positioned over the text */}
+      <div 
+        ref={displayRef}
+        className="absolute inset-0 p-4 overflow-hidden font-mono text-sm leading-relaxed whitespace-pre-wrap break-words pointer-events-none"
+        style={{
+          paddingTop: textareaRef.current ? getComputedStyle(textareaRef.current).paddingTop : '1rem',
+          paddingLeft: textareaRef.current ? getComputedStyle(textareaRef.current).paddingLeft : '1rem',
+        }}
+      >
+        {parts.map((part, index) => {
+          if (part.type === "mention") {
+            const mentionText = part.content.slice(1);
+            const colorClass = getMentionColor(mentionText);
+            
+            return (
+              <span
+                key={`${index}-${part.start}`}
+                className={cn(
+                  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-semibold cursor-pointer transition-all mx-0.5 select-none pointer-events-auto bg-opacity-100",
+                  colorClass
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMentionClick(part.start, part.end);
+                }}
+              >
+                @{mentionText}
+                <button
+                  onClick={(e) => handleRemoveMention(e, part.start, part.end)}
+                  className="hover:bg-foreground/10 rounded-full p-0.5 -mr-0.5 transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            );
+          }
+          
+          // Invisible placeholder to maintain spacing
+          return (
+            <span key={`${index}-${part.start}`} className="invisible">
+              {part.content}
+            </span>
+          );
+        })}
+      </div>
 
       {/* Mention picker popup */}
       {showMentionPicker && (
