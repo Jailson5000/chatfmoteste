@@ -203,6 +203,75 @@ export type Database = {
           },
         ]
       }
+      agent_templates: {
+        Row: {
+          ai_prompt: string
+          ai_temperature: number | null
+          category: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          display_order: number | null
+          icon: string | null
+          id: string
+          is_active: boolean
+          is_featured: boolean | null
+          name: string
+          response_delay_seconds: number | null
+          tags: string[] | null
+          trigger_config: Json | null
+          trigger_type: string
+          updated_at: string
+          usage_count: number | null
+          voice_enabled: boolean | null
+          voice_id: string | null
+        }
+        Insert: {
+          ai_prompt: string
+          ai_temperature?: number | null
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean | null
+          name: string
+          response_delay_seconds?: number | null
+          tags?: string[] | null
+          trigger_config?: Json | null
+          trigger_type?: string
+          updated_at?: string
+          usage_count?: number | null
+          voice_enabled?: boolean | null
+          voice_id?: string | null
+        }
+        Update: {
+          ai_prompt?: string
+          ai_temperature?: number | null
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          display_order?: number | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean | null
+          name?: string
+          response_delay_seconds?: number | null
+          tags?: string[] | null
+          trigger_config?: Json | null
+          trigger_type?: string
+          updated_at?: string
+          usage_count?: number | null
+          voice_enabled?: boolean | null
+          voice_id?: string | null
+        }
+        Relationships: []
+      }
       ai_template_base: {
         Row: {
           ai_capabilities: Json | null

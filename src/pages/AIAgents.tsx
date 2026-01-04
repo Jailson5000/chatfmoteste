@@ -24,7 +24,8 @@ import {
   Folder,
   FolderOpen,
   Pencil,
-  Volume2
+  Volume2,
+  Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -99,7 +100,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AgentTemplatesList } from "@/components/ai-agents/AgentTemplatesList";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -236,6 +238,7 @@ export default function AIAgents() {
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [activeTab, setActiveTab] = useState<"agents" | "templates">("agents");
   const [selectedAgent, setSelectedAgent] = useState<Automation | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -899,7 +902,7 @@ export default function AIAgents() {
         <div className="flex flex-col h-full bg-background">
           {/* Tabs Header */}
           <div className="border-b border-border px-6 pt-4">
-            <Tabs defaultValue="agents">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "agents" | "templates")}>
               <TabsList className="bg-transparent p-0 h-auto gap-6">
                 <TabsTrigger 
                   value="agents" 
@@ -911,38 +914,44 @@ export default function AIAgents() {
                   value="templates" 
                   className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-0 pb-3 text-muted-foreground data-[state=active]:text-primary font-medium"
                 >
+                  <Sparkles className="h-4 w-4 mr-2" />
                   Templates
                 </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
 
-          {/* Search and Actions */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Pesquisar agentes..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
-                onClick={() => setIsCreateFolderDialogOpen(true)} 
-                className="gap-2"
-              >
-                <FolderPlus className="h-4 w-4" />
-                Nova Pasta
-              </Button>
-              <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
-                <Plus className="h-4 w-4" />
-                Criar Agente
-              </Button>
-            </div>
-          </div>
+          {/* Templates Tab Content */}
+          {activeTab === "templates" ? (
+            <AgentTemplatesList onCloneSuccess={() => setActiveTab("agents")} />
+          ) : (
+            <>
+              {/* Search and Actions */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Pesquisar agentes..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setIsCreateFolderDialogOpen(true)} 
+                    className="gap-2"
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    Nova Pasta
+                  </Button>
+                  <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Criar Agente
+                  </Button>
+                </div>
+              </div>
 
           {/* Selection Actions Bar */}
           {selectedAgentIds.size > 0 && (
@@ -1468,6 +1477,8 @@ export default function AIAgents() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+            </>
+          )}
         </div>
       </DndContext>
     );

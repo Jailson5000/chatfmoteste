@@ -17,7 +17,8 @@ import {
   X,
   FileText,
   HeartPulse,
-  Bot
+  Bot,
+  Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,7 @@ const principalNavItems = [
   { icon: Workflow, label: "Configuração n8n", path: "/global-admin/n8n-settings", roles: ["super_admin", "admin_operacional"] },
   { icon: Bot, label: "IAs APIs", path: "/global-admin/ai-apis", roles: ["super_admin", "admin_operacional"] },
   { icon: Bot, label: "Template Base", path: "/global-admin/template-base", roles: ["super_admin"] },
+  { icon: Sparkles, label: "Templates de Agentes", path: "/global-admin/agent-templates", roles: ["super_admin", "admin_operacional"] },
   { icon: HeartPulse, label: "Provisionamento", path: "/global-admin/provisioning", roles: ["super_admin", "admin_operacional"] },
   { icon: Activity, label: "Monitoramento", path: "/global-admin/monitoring", roles: ["super_admin", "admin_operacional"] },
 ];
@@ -82,6 +84,7 @@ const breadcrumbMap: Record<string, string> = {
   "audit-logs": "Logs de Auditoria",
   "alert-history": "Histórico de Alertas",
   "template-base": "Template Base",
+  "agent-templates": "Templates de Agentes",
 };
 
 export function GlobalAdminLayout() {

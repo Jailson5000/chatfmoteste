@@ -12,3 +12,4 @@ export { default as GlobalAdminAuditLogs } from "./GlobalAdminAuditLogs";
 export { default as GlobalAdminProvisioningDashboard } from "./GlobalAdminProvisioningDashboard";
 export { default as GlobalAdminAlertHistory } from "./GlobalAdminAlertHistory";
 export { default as GlobalAdminTemplateBase } from "./GlobalAdminTemplateBase";
+export { default as GlobalAdminAgentTemplates } from "./GlobalAdminAgentTemplates";
