@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { StatusEditDialog } from "./StatusEditDialog";
 import type { CustomStatus } from "@/hooks/useCustomStatuses";
 import type { Tag as TagType } from "@/hooks/useTags";
 import type { Department } from "@/hooks/useDepartments";
@@ -302,7 +303,9 @@ export function ClassesSubTabs({
                         {status.name}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">-</TableCell>
+                    <TableCell className="text-muted-foreground max-w-xs truncate">
+                      {status.description || "-"}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">-</TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1 text-muted-foreground">
@@ -350,35 +353,16 @@ export function ClassesSubTabs({
           </Table>
         </div>
 
-        {/* Edit Status Dialog */}
-        <Dialog open={!!editingStatus} onOpenChange={(open) => !open && setEditingStatus(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Editar Status</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 mt-4">
-              <div className="space-y-2">
-                <Label>Nome do Status</Label>
-                <Input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Cor</Label>
-                <ColorPicker value={editColor} onChange={setEditColor} />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setEditingStatus(null)}>
-                  Cancelar
-                </Button>
-                <Button onClick={saveEditStatus} disabled={updateStatus.isPending}>
-                  {updateStatus.isPending ? "Salvando..." : "Salvar"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        {/* Edit Status Dialog with Follow-Up support */}
+        <StatusEditDialog
+          status={editingStatus}
+          open={!!editingStatus}
+          onOpenChange={(open) => !open && setEditingStatus(null)}
+          onSave={async (id, updates) => {
+            updateStatus.mutate({ id, ...updates });
+          }}
+          isPending={updateStatus.isPending}
+        />
       </TabsContent>
 
       {/* Etiquetas Tab */}
