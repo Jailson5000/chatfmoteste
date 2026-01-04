@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { 
   Save, 
   Clock, 
@@ -40,6 +40,11 @@ import { useAgentFolders, AgentFolder } from "@/hooks/useAgentFolders";
 import { useKnowledgeItems } from "@/hooks/useKnowledgeItems";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useDepartments } from "@/hooks/useDepartments";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useTags } from "@/hooks/useTags";
+import { useTemplates } from "@/hooks/useTemplates";
+import { useLawFirm } from "@/hooks/useLawFirm";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -102,6 +107,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AgentTemplatesList } from "@/components/ai-agents/AgentTemplatesList";
+import { MentionPicker } from "@/components/ai-agents/MentionPicker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -225,6 +231,11 @@ export default function AIAgents() {
   const { knowledgeItems, isLoading: knowledgeLoading } = useKnowledgeItems();
   const { instances, isLoading: instancesLoading } = useWhatsAppInstances();
   const { departments, isLoading: departmentsLoading } = useDepartments();
+  const { statuses } = useCustomStatuses();
+  const { tags } = useTags();
+  const { templates } = useTemplates();
+  const { lawFirm } = useLawFirm();
+  const { members: teamMembers } = useTeamMembers();
 
   // DnD state
   const [activeAgent, setActiveAgent] = useState<Automation | null>(null);
@@ -270,6 +281,12 @@ export default function AIAgents() {
 
   // Editor state
   const [prompt, setPrompt] = useState("");
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mentionPopupRef = useRef<HTMLDivElement | null>(null);
+
   const [responseDelay, setResponseDelay] = useState(10);
   const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
   const [keywords, setKeywords] = useState("");
@@ -307,6 +324,8 @@ export default function AIAgents() {
       setVoiceId((config?.voice_id as string) || DEFAULT_VOICE_ID);
       
       setHasChanges(false);
+      setShowMentions(false);
+      setMentionFilter("");
     }
   }, [selectedAgent]);
 
@@ -317,6 +336,59 @@ export default function AIAgents() {
       setHasChanges(prompt !== currentPrompt || isActive !== selectedAgent.is_active);
     }
   }, [prompt, isActive, selectedAgent]);
+
+  const insertMention = useCallback((mention: string) => {
+    const textBeforeCursor = prompt.slice(0, cursorPosition);
+    const atIndex = textBeforeCursor.lastIndexOf("@");
+
+    if (atIndex !== -1) {
+      const before = prompt.slice(0, atIndex);
+      const after = prompt.slice(cursorPosition);
+      const newPrompt = before + mention + " " + after;
+      setPrompt(newPrompt);
+
+      const newCursorPos = atIndex + mention.length + 1;
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = newCursorPos;
+          textareaRef.current.selectionEnd = newCursorPos;
+          textareaRef.current.focus();
+        }
+      }, 0);
+    } else {
+      const before = prompt.slice(0, cursorPosition);
+      const after = prompt.slice(cursorPosition);
+      setPrompt(before + mention + " " + after);
+    }
+
+    setShowMentions(false);
+    setMentionFilter("");
+  }, [prompt, cursorPosition]);
+
+  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    const pos = e.target.selectionStart || 0;
+
+    setPrompt(value);
+    setCursorPosition(pos);
+
+    const textBeforeCursor = value.slice(0, pos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
+      if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+        setShowMentions(true);
+        setMentionFilter(textAfterAt);
+      } else {
+        setShowMentions(false);
+        setMentionFilter("");
+      }
+    } else {
+      setShowMentions(false);
+      setMentionFilter("");
+    }
+  }, []);
 
   // DnD handlers
   const handleDragStart = (event: DragStartEvent) => {
@@ -1551,10 +1623,31 @@ export default function AIAgents() {
         <div className="flex-1 p-6 flex flex-col">
           <Card className="flex-1 flex flex-col">
             <CardContent className="p-0 flex-1">
-              <Textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Digite aqui o prompt principal da IA...
+              <div className="relative h-full">
+                {showMentions && (
+                  <div
+                    ref={mentionPopupRef}
+                    className="absolute z-50"
+                    style={{ top: "44px", left: "12px" }}
+                  >
+                    <MentionPicker
+                      departments={departments || []}
+                      statuses={statuses || []}
+                      tags={tags || []}
+                      templates={templates || []}
+                      teamMembers={teamMembers}
+                      lawFirm={lawFirm || undefined}
+                      onSelect={insertMention}
+                      filter={mentionFilter}
+                    />
+                  </div>
+                )}
+
+                <Textarea
+                  ref={textareaRef}
+                  value={prompt}
+                  onChange={handlePromptChange}
+                  placeholder="Digite aqui o prompt principal da IA...
 
 Exemplo:
 Você é um assistente virtual da empresa [Nome da Empresa]. Seu papel é:
@@ -1568,9 +1661,10 @@ Regras:
 - Seja sempre cordial e profissional
 - Encaminhe casos complexos para um atendente humano
 - Mantenha a confidencialidade das informações"
-                className="h-full resize-none border-0 focus-visible:ring-0 rounded-lg text-base font-mono min-h-[400px]"
-                maxLength={MAX_PROMPT_LENGTH}
-              />
+                  className="h-full resize-none border-0 focus-visible:ring-0 rounded-lg text-base font-mono min-h-[400px]"
+                  maxLength={MAX_PROMPT_LENGTH}
+                />
+              </div>
             </CardContent>
           </Card>
           
