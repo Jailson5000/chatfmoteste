@@ -323,7 +323,7 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
-            Escritório
+            Empresa
           </TabsTrigger>
           <TabsTrigger value="team">
             <Users className="h-4 w-4 mr-2" />
@@ -1124,7 +1124,7 @@ export default function Settings() {
                 <div className="space-y-0.5">
                   <Label>Autenticação em dois fatores</Label>
                   <p className="text-sm text-muted-foreground">
-                    Exigir 2FA para todos os advogados
+                    Exigir 2FA para todos os usuários
                   </p>
                 </div>
                 <Switch />
@@ -1186,7 +1186,7 @@ export default function Settings() {
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>Transferência para advogado</Label>
+                  <Label>Transferência para atendente</Label>
                   <p className="text-sm text-muted-foreground">
                     Notificar quando a IA transferir para humano
                   </p>
