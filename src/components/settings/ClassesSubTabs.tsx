@@ -29,6 +29,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { StatusEditDialog } from "./StatusEditDialog";
+import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 import type { CustomStatus } from "@/hooks/useCustomStatuses";
 import type { Tag as TagType } from "@/hooks/useTags";
 import type { Department } from "@/hooks/useDepartments";
@@ -177,18 +178,29 @@ export function ClassesSubTabs({
   };
 
   return (
-    <Tabs defaultValue="status" className="w-full">
-      <TabsList className="w-fit bg-muted/50 p-1 rounded-lg">
-        <TabsTrigger value="status" className="data-[state=active]:bg-background">
-          Status
-        </TabsTrigger>
-        <TabsTrigger value="etiquetas" className="data-[state=active]:bg-background">
-          Etiquetas
-        </TabsTrigger>
-        <TabsTrigger value="departamento" className="data-[state=active]:bg-background">
-          Departamento
-        </TabsTrigger>
-      </TabsList>
+    <div className="space-y-6">
+      <SettingsHelpCollapsible
+        title="Como funcionam as Classes?"
+        items={[
+          { text: "Classes organizam seus leads em Status, Etiquetas e Departamentos para facilitar o gerenciamento." },
+          { text: "Use @status, @etiqueta ou @departamento nos prompts dos agentes de IA para referenciá-los automaticamente." },
+          { text: "Configure Follow-ups automáticos em cada Status para manter contato com seus leads." },
+        ]}
+        tip="Mantenha suas classes bem organizadas para que os agentes de IA possam classificar leads automaticamente."
+      />
+
+      <Tabs defaultValue="status" className="w-full">
+        <TabsList className="w-fit bg-muted/50 p-1 rounded-lg">
+          <TabsTrigger value="status" className="data-[state=active]:bg-background">
+            Status
+          </TabsTrigger>
+          <TabsTrigger value="etiquetas" className="data-[state=active]:bg-background">
+            Etiquetas
+          </TabsTrigger>
+          <TabsTrigger value="departamento" className="data-[state=active]:bg-background">
+            Departamento
+          </TabsTrigger>
+        </TabsList>
 
       {/* Status Tab */}
       <TabsContent value="status" className="mt-6">
@@ -729,6 +741,7 @@ export function ClassesSubTabs({
           </DialogContent>
         </Dialog>
       </TabsContent>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 }

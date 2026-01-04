@@ -2,14 +2,30 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
+export interface BusinessHours {
+  monday: { enabled: boolean; start: string; end: string };
+  tuesday: { enabled: boolean; start: string; end: string };
+  wednesday: { enabled: boolean; start: string; end: string };
+  thursday: { enabled: boolean; start: string; end: string };
+  friday: { enabled: boolean; start: string; end: string };
+  saturday: { enabled: boolean; start: string; end: string };
+  sunday: { enabled: boolean; start: string; end: string };
+}
+
 export interface LawFirm {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
+  phone2?: string | null;
   document: string | null;
   address: string | null;
   logo_url: string | null;
+  oab_number: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  website: string | null;
+  business_hours: BusinessHours | null;
   created_at: string;
   updated_at: string;
 }
@@ -39,7 +55,7 @@ export function useLawFirm() {
         .single();
 
       if (error) throw error;
-      return data as LawFirm;
+      return data as unknown as LawFirm;
     },
   });
 
@@ -49,7 +65,7 @@ export function useLawFirm() {
 
       const { data, error } = await supabase
         .from("law_firms")
-        .update(updates)
+        .update(updates as any)
         .eq("id", lawFirm.id)
         .select()
         .single();
