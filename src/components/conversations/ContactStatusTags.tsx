@@ -19,6 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useClients } from "@/hooks/useClients";
 import { useCustomStatuses, CustomStatus } from "@/hooks/useCustomStatuses";
 import { useTags, Tag } from "@/hooks/useTags";
+import { useClientActions } from "@/hooks/useClientActions";
 
 interface ContactStatusTagsProps {
   clientId: string | null;
@@ -37,6 +38,7 @@ export function ContactStatusTags({
   const { clients, updateClientStatus, createClient } = useClients();
   const { statuses } = useCustomStatuses();
   const { tags } = useTags();
+  const { createAction } = useClientActions(clientId || undefined);
 
   const [isLinking, setIsLinking] = useState(false);
 
@@ -69,10 +71,29 @@ export function ContactStatusTags({
 
   const handleStatusChange = async (statusId: string) => {
     if (!clientId) return;
+    
+    // Get current and new status names for logging
+    const currentStatus = statuses.find(s => s.id === linkedClient?.custom_status_id);
+    const newStatus = statuses.find(s => s.id === statusId);
+    const fromStatusName = currentStatus?.name || "Sem status";
+    const toStatusName = statusId === "none" ? "Sem status" : (newStatus?.name || "Desconhecido");
+    
     await updateClientStatus.mutateAsync({
       clientId,
       statusId: statusId === "none" ? null : statusId,
     });
+    
+    // Log the status change action
+    if (fromStatusName !== toStatusName) {
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "status_change",
+        from_value: fromStatusName,
+        to_value: toStatusName,
+        description: `alterou o status de ${fromStatusName} para ${toStatusName}`,
+      });
+    }
+    
     // Force immediate refetch of conversations to sync sidebar
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
@@ -80,10 +101,22 @@ export function ContactStatusTags({
   const handleAddTag = async (tagId: string) => {
     if (!clientId || clientTagIds.includes(tagId)) return;
 
+    const tagToAdd = tags.find(t => t.id === tagId);
+    
     await supabase.from("client_tags").insert({
       client_id: clientId,
       tag_id: tagId,
     });
+
+    // Log the tag addition
+    if (tagToAdd) {
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_add",
+        to_value: tagToAdd.name,
+        description: `adicionou a tag ${tagToAdd.name}`,
+      });
+    }
 
     setClientTagIds((prev) => [...prev, tagId]);
     queryClient.invalidateQueries({ queryKey: ["clients"] });
@@ -92,11 +125,23 @@ export function ContactStatusTags({
   const handleRemoveTag = async (tagId: string) => {
     if (!clientId) return;
 
+    const tagToRemove = tags.find(t => t.id === tagId);
+    
     await supabase
       .from("client_tags")
       .delete()
       .eq("client_id", clientId)
       .eq("tag_id", tagId);
+
+    // Log the tag removal
+    if (tagToRemove) {
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_remove",
+        from_value: tagToRemove.name,
+        description: `removeu a tag ${tagToRemove.name}`,
+      });
+    }
 
     setClientTagIds((prev) => prev.filter((id) => id !== tagId));
     queryClient.invalidateQueries({ queryKey: ["clients"] });

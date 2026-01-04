@@ -1417,6 +1417,7 @@ export default function Conversations() {
       updateConversationDepartment.mutate({
         conversationId: selectedConversation.id,
         departmentId,
+        clientId: selectedConversation.client_id,
       });
     }
   };

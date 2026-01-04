@@ -919,7 +919,7 @@ export function KanbanChatPanel({
 
   const handleDepartmentChange = (deptId: string) => {
     const newDeptId = currentDepartment?.id === deptId ? null : deptId;
-    updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId }, {
+    updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId, clientId }, {
       onSuccess: () => {
         toast({ title: "Departamento atualizado" });
         setDepartmentOpen(false);
