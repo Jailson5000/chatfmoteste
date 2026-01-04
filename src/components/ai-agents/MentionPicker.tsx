@@ -39,6 +39,7 @@ interface MentionPickerProps {
   tags: { id: string; name: string; color: string }[];
   templates: { id: string; name: string }[];
   teamMembers?: { id: string; full_name: string }[];
+  aiAgents?: { id: string; name: string; is_active?: boolean }[];
   lawFirm?: {
     name: string;
     address?: string;
@@ -59,6 +60,7 @@ export function MentionPicker({
   tags,
   templates,
   teamMembers,
+  aiAgents,
   lawFirm,
   onSelect,
   filter,
@@ -105,16 +107,27 @@ export function MentionPicker({
       })),
     });
 
-    // Responsáveis - always show
-    cats.push({
-      id: "responsaveis",
-      label: "Responsáveis",
-      icon: Users,
-      items: (teamMembers || []).map(m => ({
+    // Responsáveis - humanos + IAs ativas
+    const responsibleItems: MentionItem[] = [
+      ...(teamMembers || []).map(m => ({
         key: `@responsavel:${m.full_name}`,
         label: m.full_name,
         description: `Responsável: ${m.full_name}`,
       })),
+      ...((aiAgents || [])
+        .filter(a => a.is_active !== false)
+        .map(a => ({
+          key: `@responsavel:IA:${a.name}`,
+          label: `IA: ${a.name}`,
+          description: `Responsável (IA): ${a.name}`,
+        }))),
+    ];
+
+    cats.push({
+      id: "responsaveis",
+      label: "Responsáveis",
+      icon: Users,
+      items: responsibleItems,
     });
 
     // Dados gerais (Informações Gerais)
@@ -180,7 +193,7 @@ export function MentionPicker({
     });
 
     return cats;
-  }, [departments, statuses, tags, templates, teamMembers, lawFirm]);
+  }, [departments, statuses, tags, templates, teamMembers, aiAgents, lawFirm]);
 
   // Filter categories and items based on search
   const filteredCategories = useMemo(() => {

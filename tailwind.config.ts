@@ -82,6 +82,15 @@ export default {
           pending: "hsl(var(--status-pending))",
           closed: "hsl(var(--status-closed))",
         },
+        mention: {
+          department: "hsl(var(--mention-department))",
+          status: "hsl(var(--mention-status))",
+          tag: "hsl(var(--mention-tag))",
+          responsible: "hsl(var(--mention-responsible))",
+          template: "hsl(var(--mention-template))",
+          calendar: "hsl(var(--mention-calendar))",
+          tool: "hsl(var(--mention-tool))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

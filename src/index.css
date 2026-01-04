@@ -70,6 +70,15 @@
     --status-human: 142 71% 45%;
     --status-pending: 45 93% 47%;
     --status-closed: 240 5% 45%;
+
+    /* Mention Colors (Editor de Prompt) */
+    --mention-department: 210 80% 52%;
+    --mention-status: 45 93% 47%;
+    --mention-tag: 280 70% 50%;
+    --mention-responsible: 142 71% 45%;
+    --mention-template: 330 80% 55%;
+    --mention-calendar: 190 90% 45%;
+    --mention-tool: 25 95% 52%;
   }
 
   .dark {
@@ -130,6 +139,15 @@
     --status-human: 142 60% 55%;
     --status-pending: 45 93% 55%;
     --status-closed: 240 5% 50%;
+
+    /* Mention Colors (Editor de Prompt) */
+    --mention-department: 210 90% 62%;
+    --mention-status: 45 93% 55%;
+    --mention-tag: 280 60% 65%;
+    --mention-responsible: 142 60% 55%;
+    --mention-template: 330 80% 68%;
+    --mention-calendar: 190 85% 58%;
+    --mention-tool: 25 95% 60%;
   }
 }
 
