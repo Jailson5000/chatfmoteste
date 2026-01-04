@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -84,6 +85,7 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { AIProviderBadge } from "@/components/ai/AIProviderBadge";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useAutomations } from "@/hooks/useAutomations";
+import { useLawFirm } from "@/hooks/useLawFirm";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -154,6 +156,8 @@ export default function Conversations() {
   const { toast } = useToast();
   const { playNotification } = useNotificationSound();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { lawFirm } = useLawFirm();
 
   // Filter connected instances for the selector
   const connectedInstances = useMemo(() => 
