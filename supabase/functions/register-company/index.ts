@@ -17,6 +17,37 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Simple in-memory rate limiter (per IP, per hour)
+// Note: This resets on function cold starts, but provides basic protection
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = 5; // Max registrations per IP per hour
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  const record = rateLimitStore.get(ip);
+  
+  // Clean up expired entries periodically
+  if (rateLimitStore.size > 1000) {
+    for (const [key, value] of rateLimitStore.entries()) {
+      if (value.resetAt < now) rateLimitStore.delete(key);
+    }
+  }
+  
+  if (!record || record.resetAt < now) {
+    // New window
+    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
+  }
+  
+  if (record.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0 };
+  }
+  
+  record.count++;
+  return { allowed: true, remaining: RATE_LIMIT_MAX - record.count };
+}
+
 interface RegisterRequest {
   company_name: string;
   admin_name: string;
@@ -24,6 +55,7 @@ interface RegisterRequest {
   phone?: string;
   document?: string;
   plan_id?: string;
+  website?: string; // Honeypot field - should be empty
 }
 
 function generateSubdomain(companyName: string): string {
@@ -43,6 +75,30 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Get client IP for rate limiting
+  const clientIP = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+                   req.headers.get('cf-connecting-ip') || 
+                   'unknown';
+  
+  // Check rate limit
+  const rateLimit = checkRateLimit(clientIP);
+  if (!rateLimit.allowed) {
+    console.warn(`[register-company] Rate limit exceeded for IP: ${clientIP}`);
+    return new Response(
+      JSON.stringify({ 
+        error: 'Muitas tentativas de cadastro. Por favor, aguarde 1 hora antes de tentar novamente.' 
+      }),
+      { 
+        status: 429, 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json',
+          'Retry-After': '3600'
+        } 
+      }
+    );
+  }
+
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const resendApiKey = Deno.env.get('RESEND_API_KEY');
@@ -53,7 +109,20 @@ serve(async (req) => {
   try {
     // Parse request body
     const body: RegisterRequest = await req.json();
-    const { company_name, admin_name, admin_email, phone, document, plan_id } = body;
+    const { company_name, admin_name, admin_email, phone, document, plan_id, website } = body;
+
+    // Honeypot check - if website field is filled, it's a bot
+    if (website) {
+      console.warn(`[register-company] Honeypot triggered from IP: ${clientIP}`);
+      // Return success to fool the bot, but don't actually register
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'Cadastro realizado com sucesso!',
+        }),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Validate required fields
     if (!company_name || !admin_name || !admin_email) {
@@ -61,6 +130,14 @@ serve(async (req) => {
         JSON.stringify({ 
           error: 'Campos obrigatórios: company_name, admin_name, admin_email' 
         }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Validate field lengths
+    if (company_name.length > 100 || admin_name.length > 100 || admin_email.length > 255) {
+      return new Response(
+        JSON.stringify({ error: 'Dados inválidos' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -74,7 +151,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[register-company] New registration request: ${company_name} - ${admin_email}`);
+    console.log(`[register-company] New registration request: ${company_name} - ${admin_email} (IP: ${clientIP}, remaining: ${rateLimit.remaining})`);
 
     // Generate subdomain
     let subdomain = generateSubdomain(company_name);
