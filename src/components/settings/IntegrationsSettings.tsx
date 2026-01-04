@@ -1,15 +1,9 @@
-import { useState } from "react";
-import { Info, Link2, FileText, PenTool, ChevronDown } from "lucide-react";
+import { Link2, PenTool } from "lucide-react";
 import { GoogleCalendarIntegration } from "./integrations/GoogleCalendarIntegration";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { TrayCommerceIntegration } from "./integrations/TrayCommerceIntegration";
 import { IntegrationCard } from "./IntegrationCard";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { Button } from "@/components/ui/button";
+import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 
 // Placeholder icons for coming soon integrations
 function AdvBoxIcon() {
@@ -45,40 +39,18 @@ function DocuSignIcon() {
 }
 
 export function IntegrationsSettings() {
-  const [infoOpen, setInfoOpen] = useState(false);
-
   return (
     <div className="space-y-6">
       {/* Info Section */}
-      <Collapsible open={infoOpen} onOpenChange={setInfoOpen}>
-        <CollapsibleTrigger asChild>
-          <Button variant="outline" className="w-full justify-between">
-            <span className="flex items-center gap-2">
-              <Info className="h-4 w-4" />
-              Como funcionam as Integrações?
-            </span>
-            <ChevronDown className={`h-4 w-4 transition-transform ${infoOpen ? "rotate-180" : ""}`} />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-4">
-          <div className="rounded-lg border bg-card p-4 space-y-3">
-            <h4 className="font-medium flex items-center gap-2">
-              <Info className="h-4 w-4 text-primary" />
-              Como funcionam as Integrações?
-            </h4>
-            <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-              <li>Integrações permitem conectar a plataforma a outras ferramentas para ampliar suas funcionalidades.</li>
-              <li>Configure integrações para automatizar processos, centralizar informações e facilitar o fluxo de trabalho.</li>
-              <li>Cada integração pode exigir credenciais ou permissões específicas. Siga as instruções de configuração para ativar.</li>
-            </ol>
-            <div className="mt-3 p-3 rounded-lg bg-primary/10 border border-primary/20">
-              <p className="text-sm text-primary">
-                💡 <strong>Dica:</strong> Explore as integrações disponíveis para potencializar o uso da plataforma e tornar sua operação mais eficiente.
-              </p>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      <SettingsHelpCollapsible
+        title="Como funcionam as Integrações?"
+        items={[
+          { text: "Integrações permitem conectar a plataforma a outras ferramentas para ampliar suas funcionalidades." },
+          { text: "Configure integrações para automatizar processos, centralizar informações e facilitar o fluxo de trabalho." },
+          { text: "Cada integração pode exigir credenciais ou permissões específicas. Siga as instruções de configuração para ativar." },
+        ]}
+        tip="Explore as integrações disponíveis para potencializar o uso da plataforma e tornar sua operação mais eficiente."
+      />
 
       {/* Integrations Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -104,17 +76,18 @@ export function IntegrationsSettings() {
         <IntegrationCard
           icon={<PdfReaderIcon />}
           title="Leitor de PDF"
-          description="Analise documentos PDF automaticamente pelos agentes. Extraia informações, contextos e dados relevantes para respostas melhores."
+          description="Extração automática de informações de documentos PDF como contratos e petições. Use nos seus agentes de IA."
           isComingSoon
         />
         
         <IntegrationCard
           icon={<DocuSignIcon />}
-          title="DocuSign"
-          description="A DocuSign é o padrão global para gestão de transações digitais com milhões de usuários em mais de 188 países."
+          title="Assinatura Digital"
+          description="Integração com plataformas de assinatura eletrônica para contratos e documentos jurídicos."
           isComingSoon
         />
         
+        {/* Tray Commerce Integration */}
         <TrayCommerceIntegration />
       </div>
     </div>

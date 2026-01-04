@@ -1913,42 +1913,57 @@ export type Database = {
       law_firms: {
         Row: {
           address: string | null
+          business_hours: Json | null
           created_at: string
           document: string | null
           email: string | null
+          facebook: string | null
           id: string
+          instagram: string | null
           logo_url: string | null
           name: string
+          oab_number: string | null
           phone: string | null
           phone2: string | null
           subdomain: string | null
           updated_at: string
+          website: string | null
         }
         Insert: {
           address?: string | null
+          business_hours?: Json | null
           created_at?: string
           document?: string | null
           email?: string | null
+          facebook?: string | null
           id?: string
+          instagram?: string | null
           logo_url?: string | null
           name: string
+          oab_number?: string | null
           phone?: string | null
           phone2?: string | null
           subdomain?: string | null
           updated_at?: string
+          website?: string | null
         }
         Update: {
           address?: string | null
+          business_hours?: Json | null
           created_at?: string
           document?: string | null
           email?: string | null
+          facebook?: string | null
           id?: string
+          instagram?: string | null
           logo_url?: string | null
           name?: string
+          oab_number?: string | null
           phone?: string | null
           phone2?: string | null
           subdomain?: string | null
           updated_at?: string
+          website?: string | null
         }
         Relationships: []
       }

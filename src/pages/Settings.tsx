@@ -1,11 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   Building2,
   Users,
   Shield,
-  Database,
   FileText,
-  Save,
   Tag,
   Layers,
   Folder,
@@ -20,6 +18,8 @@ import {
   Pencil,
   Loader2,
   Plug,
+  Clock,
+  Database,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -66,8 +66,12 @@ import { EditableTemplate } from "@/components/settings/EditableTemplate";
 import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
 import { ClassesSubTabs } from "@/components/settings/ClassesSubTabs";
+import { BusinessHoursSettings } from "@/components/settings/BusinessHoursSettings";
+import { GeneralInfoSettings } from "@/components/settings/GeneralInfoSettings";
+import { SettingsHelpCollapsible } from "@/components/settings/SettingsHelpCollapsible";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
+import type { BusinessHours } from "@/hooks/useLawFirm";
 
 const roleLabels: Record<string, { label: string; color: string }> = {
   admin: { label: "Administrador", color: "bg-primary text-primary-foreground" },
@@ -87,16 +91,9 @@ const templateTypes = [
 export default function Settings() {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
-  const logoInputRef = useRef<HTMLInputElement>(null);
   
   // Law firm data
   const { lawFirm, updateLawFirm, uploadLogo } = useLawFirm();
-  const [officeName, setOfficeName] = useState("");
-  const [officeCnpj, setOfficeCnpj] = useState("");
-  const [officePhone, setOfficePhone] = useState("");
-  const [officePhone2, setOfficePhone2] = useState("");
-  const [officeEmail, setOfficeEmail] = useState("");
-  const [officeAddress, setOfficeAddress] = useState("");
   
   // Status management
   const { statuses, createStatus, updateStatus, deleteStatus } = useCustomStatuses();
@@ -135,33 +132,6 @@ export default function Settings() {
   const [editMemberRole, setEditMemberRole] = useState<AppRole>("atendente");
   const [editMemberDepts, setEditMemberDepts] = useState<string[]>([]);
   const [savingMember, setSavingMember] = useState(false);
-  useEffect(() => {
-    if (lawFirm) {
-      setOfficeName(lawFirm.name || "");
-      setOfficeCnpj(lawFirm.document || "");
-      setOfficePhone(lawFirm.phone || "");
-      setOfficePhone2((lawFirm as any).phone2 || "");
-      setOfficeEmail(lawFirm.email || "");
-      setOfficeAddress(lawFirm.address || "");
-    }
-  }, [lawFirm]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await updateLawFirm.mutateAsync({
-        name: officeName,
-        document: officeCnpj,
-        phone: officePhone,
-        phone2: officePhone2,
-        email: officeEmail,
-        address: officeAddress,
-      } as any);
-    } catch (error) {
-      // Error handled by mutation
-    }
-    setSaving(false);
-  };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -300,7 +270,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="classes">
-        <TabsList className="grid w-full max-w-4xl grid-cols-7">
+        <TabsList className="grid w-full max-w-5xl grid-cols-8">
           <TabsTrigger value="classes">
             <Layers className="h-4 w-4 mr-2" />
             Classes
@@ -316,6 +286,10 @@ export default function Settings() {
           <TabsTrigger value="integrations">
             <Plug className="h-4 w-4 mr-2" />
             Integrações
+          </TabsTrigger>
+          <TabsTrigger value="hours">
+            <Clock className="h-4 w-4 mr-2" />
+            Horário Comercial
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
@@ -377,6 +351,16 @@ export default function Settings() {
 
         {/* Templates Settings */}
         <TabsContent value="templates" className="space-y-6 mt-6">
+          <SettingsHelpCollapsible
+            title="Como funcionam os Templates?"
+            items={[
+              { text: "Templates são mensagens pré-configuradas que podem ser reutilizadas rapidamente." },
+              { text: "Use atalhos (como /saudacao) para enviar templates instantaneamente no chat." },
+              { text: "Templates suportam texto, imagens, vídeos, áudios e arquivos." },
+            ]}
+            tip="Crie templates para respostas frequentes e aumente sua produtividade no atendimento."
+          />
+          
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -562,127 +546,54 @@ export default function Settings() {
           <IntegrationsSettings />
         </TabsContent>
 
+        {/* Business Hours Settings */}
+        <TabsContent value="hours" className="space-y-6 mt-6">
+          <BusinessHoursSettings
+            businessHours={lawFirm?.business_hours ?? null}
+            onSave={async (hours) => {
+              setSaving(true);
+              try {
+                await updateLawFirm.mutateAsync({ business_hours: hours } as any);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            saving={saving}
+          />
+        </TabsContent>
+
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Logo da Empresa</CardTitle>
-              <CardDescription>
-                Faça upload do logo que será exibido no sistema
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-6">
-                <div className="w-24 h-24 rounded-xl border-2 border-dashed flex items-center justify-center bg-muted/50 overflow-hidden">
-                  {lawFirm?.logo_url ? (
-                    <img 
-                      src={lawFirm.logo_url} 
-                      alt="Logo" 
-                      className="w-full h-full object-contain"
-                    />
-                  ) : (
-                    <Image className="h-8 w-8 text-muted-foreground" />
-                  )}
-                </div>
-                <div>
-                  <input
-                    type="file"
-                    ref={logoInputRef}
-                    onChange={handleLogoUpload}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                  <Button 
-                    variant="outline" 
-                    onClick={() => logoInputRef.current?.click()}
-                    disabled={uploadLogo.isPending}
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    {uploadLogo.isPending ? "Enviando..." : "Alterar Logo"}
-                  </Button>
-                  <p className="text-sm text-muted-foreground mt-2">PNG, JPG ou SVG. Max 2MB.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Dados da Empresa</CardTitle>
-              <CardDescription>
-                Informações básicas da sua empresa
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="office-name">Nome da Empresa</Label>
-                  <Input 
-                    id="office-name" 
-                    placeholder="Nome da empresa" 
-                    value={officeName}
-                    onChange={(e) => setOfficeName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="office-cnpj">CNPJ</Label>
-                  <Input 
-                    id="office-cnpj" 
-                    placeholder="00.000.000/0001-00" 
-                    value={officeCnpj}
-                    onChange={(e) => setOfficeCnpj(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="office-phone">Telefone 1</Label>
-                  <Input 
-                    id="office-phone" 
-                    placeholder="(11) 3000-0000" 
-                    value={officePhone}
-                    onChange={(e) => setOfficePhone(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="office-phone2">Telefone 2</Label>
-                  <Input 
-                    id="office-phone2" 
-                    placeholder="(11) 99999-9999" 
-                    value={officePhone2}
-                    onChange={(e) => setOfficePhone2(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="office-email">Email</Label>
-                  <Input 
-                    id="office-email" 
-                    type="email" 
-                    placeholder="contato@escritorio.com" 
-                    value={officeEmail}
-                    onChange={(e) => setOfficeEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="office-address">Endereço</Label>
-                <Textarea 
-                  id="office-address" 
-                  placeholder="Rua, número, bairro, cidade - UF" 
-                  value={officeAddress}
-                  onChange={(e) => setOfficeAddress(e.target.value)}
-                />
-              </div>
-              <div className="flex justify-end pt-4 border-t">
-                <Button onClick={handleSave} disabled={saving}>
-                  <Save className="h-4 w-4 mr-2" />
-                  {saving ? "Salvando..." : "Salvar Alterações"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <GeneralInfoSettings
+            lawFirm={lawFirm as any}
+            onSave={async (data) => {
+              setSaving(true);
+              try {
+                await updateLawFirm.mutateAsync(data as any);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            onLogoUpload={async (file) => {
+              await uploadLogo.mutateAsync(file);
+            }}
+            saving={saving}
+            uploadingLogo={uploadLogo.isPending}
+          />
         </TabsContent>
 
         {/* Team Settings */}
         <TabsContent value="team" className="space-y-6 mt-6">
+          <SettingsHelpCollapsible
+            title="Como funcionam os Membros?"
+            items={[
+              { text: "Membros são usuários que podem acessar a plataforma, gerenciar agentes e atender leads." },
+              { text: "Convide membros para colaborar, compartilhar conhecimento e impulsionar o atendimento da sua equipe!" },
+              { text: "Defina cargos e permissões para cada membro, garantindo segurança e organização no seu time." },
+            ]}
+            tip="Mantenha sua equipe alinhada e pronta para atender melhor seus clientes adicionando novos membros sempre que necessário."
+          />
+          
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
