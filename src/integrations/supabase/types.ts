@@ -1215,6 +1215,7 @@ export type Database = {
         Row: {
           color: string
           created_at: string
+          description: string | null
           id: string
           is_active: boolean
           law_firm_id: string
@@ -1225,6 +1226,7 @@ export type Database = {
         Insert: {
           color?: string
           created_at?: string
+          description?: string | null
           id?: string
           is_active?: boolean
           law_firm_id: string
@@ -1235,6 +1237,7 @@ export type Database = {
         Update: {
           color?: string
           created_at?: string
+          description?: string | null
           id?: string
           is_active?: boolean
           law_firm_id?: string
@@ -2208,6 +2211,154 @@ export type Database = {
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_follow_ups: {
+        Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          client_id: string
+          conversation_id: string
+          created_at: string
+          error_message: string | null
+          follow_up_rule_id: string
+          id: string
+          law_firm_id: string
+          scheduled_at: string
+          sent_at: string | null
+          status: string
+          template_id: string | null
+        }
+        Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          client_id: string
+          conversation_id: string
+          created_at?: string
+          error_message?: string | null
+          follow_up_rule_id: string
+          id?: string
+          law_firm_id: string
+          scheduled_at: string
+          sent_at?: string | null
+          status?: string
+          template_id?: string | null
+        }
+        Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          client_id?: string
+          conversation_id?: string
+          created_at?: string
+          error_message?: string | null
+          follow_up_rule_id?: string
+          id?: string
+          law_firm_id?: string
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_follow_ups_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_follow_ups_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_follow_ups_follow_up_rule_id_fkey"
+            columns: ["follow_up_rule_id"]
+            isOneToOne: false
+            referencedRelation: "status_follow_ups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_follow_ups_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_follow_ups_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      status_follow_ups: {
+        Row: {
+          created_at: string
+          delay_minutes: number
+          delay_unit: string
+          give_up_on_no_response: boolean
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          position: number
+          status_id: string
+          template_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delay_minutes?: number
+          delay_unit?: string
+          give_up_on_no_response?: boolean
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          position?: number
+          status_id: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delay_minutes?: number
+          delay_unit?: string
+          give_up_on_no_response?: boolean
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          position?: number
+          status_id?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "status_follow_ups_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "status_follow_ups_status_id_fkey"
+            columns: ["status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "status_follow_ups_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
             referencedColumns: ["id"]
           },
         ]

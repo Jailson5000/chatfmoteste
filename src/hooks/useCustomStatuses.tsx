@@ -8,6 +8,7 @@ export interface CustomStatus {
   law_firm_id: string;
   name: string;
   color: string;
+  description?: string;
   position: number;
   is_active: boolean;
   created_at: string;
