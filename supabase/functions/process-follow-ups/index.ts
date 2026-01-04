@@ -386,23 +386,38 @@ Deno.serve(async (req) => {
             .in("status", ["pending", "processing"]) // processing is safe even if unused
             .neq("id", followUp.id);
 
-          // Update client status if give_up_status_id is set
+          // Update client status using RPC to trigger new follow-ups if configured
           if (followUpRule.give_up_status_id) {
-            console.log(`[process-follow-ups] Updating client ${followUp.client_id} status to ${followUpRule.give_up_status_id}`);
-            await supabase
-              .from("clients")
-              .update({ custom_status_id: followUpRule.give_up_status_id })
-              .eq("id", followUp.client_id);
+            console.log(`[process-follow-ups] Updating client ${followUp.client_id} status to ${followUpRule.give_up_status_id} via RPC`);
+            
+            // Use the RPC function that properly handles follow-up creation for the new status
+            const { data: rpcResult, error: rpcError } = await supabase.rpc("update_client_status_with_follow_ups", {
+              _client_id: followUp.client_id,
+              _new_status_id: followUpRule.give_up_status_id,
+            });
+            
+            if (rpcError) {
+              console.error(`[process-follow-ups] Error calling RPC for status update:`, rpcError);
+              // Fallback to direct update if RPC fails
+              await supabase
+                .from("clients")
+                .update({ custom_status_id: followUpRule.give_up_status_id })
+                .eq("id", followUp.client_id);
+            } else {
+              console.log(`[process-follow-ups] RPC result:`, rpcResult);
+            }
           }
 
-          // Archive the conversation
+          // Archive the conversation with proper reason
           console.log(`[process-follow-ups] Archiving conversation ${followUp.conversation_id}`);
           await supabase
             .from("conversations")
             .update({ 
               archived_at: new Date().toISOString(),
               archived_reason: "Follow-up: desistir do lead",
-              status: "archived"
+              status: "archived",
+              archived_next_responsible_type: null,
+              archived_next_responsible_id: null,
             })
             .eq("id", followUp.conversation_id);
         }
