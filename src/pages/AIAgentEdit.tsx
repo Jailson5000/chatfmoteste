@@ -566,10 +566,10 @@ export default function AIAgentEdit() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0">
         {/* Prompt Editor Area */}
-        <div className="flex-1 p-6 overflow-auto relative">
-          <div className="max-w-4xl h-full min-h-[calc(100vh-280px)]">
+        <div className="flex-1 flex flex-col p-6 min-h-0">
+          <div className="flex-1 max-w-4xl min-h-0">
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
@@ -585,7 +585,7 @@ REGRAS DE COMUNICAÇÃO
 Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
               maxLength={MAX_PROMPT_CHARS}
               className={cn(
-                "min-h-[calc(100vh-280px)]",
+                "h-full",
                 isOverLimit && "text-destructive"
               )}
               departments={departments || []}
