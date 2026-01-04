@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAutomations, Automation } from "@/hooks/useAutomations";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -7,6 +7,7 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTags } from "@/hooks/useTags";
 import { useTemplates } from "@/hooks/useTemplates";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   ArrowLeft, 
   Save, 
@@ -39,19 +39,14 @@ import {
   Volume2,
   Play,
   Square,
-  Building2,
-  Tag,
-  Users,
-  Clock,
-  MessageSquare,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
+import { MentionPicker } from "@/components/ai-agents/MentionPicker";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 // Available voices
-// Vozes importadas do arquivo centralizado
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 const TRIGGER_TYPES = [
@@ -64,31 +59,6 @@ const TRIGGER_TYPES = [
 
 const MAX_PROMPT_CHARS = 10000;
 
-// Static mention variables
-const STATIC_MENTION_VARIABLES = [
-  { key: '@Nome da empresa', description: 'Nome da sua empresa', category: 'info', icon: Building2 },
-  { key: '@Endereço', description: 'Endereço da empresa', category: 'info', icon: Building2 },
-  { key: '@Telefone', description: 'Telefone de contato', category: 'info', icon: Building2 },
-  { key: '@Email', description: 'Email de contato', category: 'info', icon: Building2 },
-  { key: '@Instagram', description: 'Instagram da empresa', category: 'info', icon: Building2 },
-  { key: '@Facebook', description: 'Facebook da empresa', category: 'info', icon: Building2 },
-  { key: '@Website', description: 'Website da empresa', category: 'info', icon: Building2 },
-  { key: '@Horário comercial', description: 'Horário de funcionamento', category: 'hours', icon: Clock },
-  { key: '@Nome do cliente', description: 'Nome do cliente na conversa', category: 'client', icon: Users },
-  { key: '@Responsável', description: 'Nome do responsável pelo atendimento', category: 'client', icon: Users },
-  { key: '@Data atual', description: 'Data atual formatada', category: 'system', icon: Clock },
-  { key: '@Hora atual', description: 'Hora atual formatada', category: 'system', icon: Clock },
-  { key: '@Ativar áudio', description: 'Comando para ativar resposta por áudio', category: 'system', icon: Volume2 },
-  { key: '@Desativar áudio', description: 'Comando para desativar resposta por áudio', category: 'system', icon: Volume2 },
-];
-
-type MentionVariable = {
-  key: string;
-  description: string;
-  category: string;
-  icon: React.ElementType;
-};
-
 export default function AIAgentEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -99,6 +69,7 @@ export default function AIAgentEdit() {
   const { tags } = useTags();
   const { templates } = useTemplates();
   const { lawFirm } = useLawFirm();
+  const { members: teamMembers } = useTeamMembers();
   const { toast } = useToast();
 
   const [automation, setAutomation] = useState<Automation | null>(null);
@@ -127,71 +98,6 @@ export default function AIAgentEdit() {
   const [cursorPosition, setCursorPosition] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mentionPopupRef = useRef<HTMLDivElement | null>(null);
-
-  // Build dynamic mentions list from database data
-  const allMentions = useMemo((): MentionVariable[] => {
-    const mentions: MentionVariable[] = [...STATIC_MENTION_VARIABLES];
-    
-    // Add departments
-    if (departments && departments.length > 0) {
-      departments.forEach(dept => {
-        mentions.push({
-          key: `@departamento:${dept.name}`,
-          description: `Departamento: ${dept.name}`,
-          category: 'department',
-          icon: Building2,
-        });
-      });
-    }
-    
-    // Add statuses
-    if (statuses && statuses.length > 0) {
-      statuses.forEach(status => {
-        mentions.push({
-          key: `@status:${status.name}`,
-          description: `Status: ${status.name}`,
-          category: 'status',
-          icon: Tag,
-        });
-      });
-    }
-    
-    // Add tags
-    if (tags && tags.length > 0) {
-      tags.forEach(tag => {
-        mentions.push({
-          key: `@etiqueta:${tag.name}`,
-          description: `Etiqueta: ${tag.name}`,
-          category: 'tag',
-          icon: Tag,
-        });
-      });
-    }
-    
-    // Add templates
-    if (templates && templates.length > 0) {
-      templates.forEach(tpl => {
-        mentions.push({
-          key: `@template:${tpl.name}`,
-          description: `Template: ${tpl.name}`,
-          category: 'template',
-          icon: MessageSquare,
-        });
-      });
-    }
-    
-    return mentions;
-  }, [departments, statuses, tags, templates]);
-
-  // Filter mentions based on search
-  const filteredMentions = useMemo(() => {
-    if (!mentionFilter) return allMentions;
-    const filter = mentionFilter.toLowerCase();
-    return allMentions.filter(m => 
-      m.key.toLowerCase().includes(filter) || 
-      m.description.toLowerCase().includes(filter)
-    );
-  }, [allMentions, mentionFilter]);
 
   useEffect(() => {
     if (automations && id) {
@@ -624,39 +530,26 @@ export default function AIAgentEdit() {
         {/* Prompt Editor Area */}
         <div className="flex-1 p-6 overflow-auto relative">
           <div className="max-w-4xl relative">
-            {/* Mentions Popup - positioned below cursor */}
-            {showMentions && filteredMentions.length > 0 && (
+            {/* Mentions Popup - hierarchical picker */}
+            {showMentions && (
               <div 
                 ref={mentionPopupRef}
-                className="absolute z-50 bg-popover border rounded-lg shadow-lg p-2 w-80 max-h-64 overflow-auto"
+                className="absolute z-50"
                 style={{ top: '40px', left: '0' }}
               >
-                <div className="text-xs text-muted-foreground mb-2 px-2">
-                  {mentionFilter ? `Buscando "${mentionFilter}"...` : 'Selecione uma variável'}
-                </div>
-                <div className="space-y-0.5">
-                  {filteredMentions.slice(0, 15).map((mention) => {
-                    const Icon = mention.icon;
-                    return (
-                      <button
-                        key={mention.key}
-                        onClick={() => insertMention(mention.key)}
-                        className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors flex items-start gap-2"
-                      >
-                        <Icon className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">{mention.key}</div>
-                          <div className="text-xs text-muted-foreground truncate">{mention.description}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {filteredMentions.length > 15 && (
-                    <div className="text-xs text-muted-foreground text-center py-2">
-                      +{filteredMentions.length - 15} mais...
-                    </div>
-                  )}
-                </div>
+                <MentionPicker
+                  departments={departments || []}
+                  statuses={statuses || []}
+                  tags={tags || []}
+                  templates={templates || []}
+                  teamMembers={teamMembers}
+                  lawFirm={lawFirm || undefined}
+                  onSelect={(mention) => {
+                    insertMention(mention);
+                    setShowMentions(false);
+                  }}
+                  filter={mentionFilter}
+                />
               </div>
             )}
             
@@ -737,7 +630,7 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
               </div>
             )}
 
-            {/* Insert Mention */}
+            {/* Insert Mention - uses MentionPicker in a Popover */}
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="w-full gap-2 mb-4">
@@ -745,30 +638,17 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                   Inserir menção
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-80 p-2" align="start">
-                <div className="text-xs text-muted-foreground mb-2">
-                  Clique para inserir no prompt
-                </div>
-                <ScrollArea className="h-64">
-                  <div className="space-y-0.5">
-                    {allMentions.map((mention) => {
-                      const Icon = mention.icon;
-                      return (
-                        <button
-                          key={mention.key}
-                          onClick={() => insertMention(mention.key)}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-muted transition-colors flex items-start gap-2"
-                        >
-                          <Icon className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{mention.key}</div>
-                            <div className="text-xs text-muted-foreground truncate">{mention.description}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
+              <PopoverContent className="w-auto p-0" align="start">
+                <MentionPicker
+                  departments={departments || []}
+                  statuses={statuses || []}
+                  tags={tags || []}
+                  templates={templates || []}
+                  teamMembers={teamMembers}
+                  lawFirm={lawFirm || undefined}
+                  onSelect={insertMention}
+                  filter=""
+                />
               </PopoverContent>
             </Popover>
 
