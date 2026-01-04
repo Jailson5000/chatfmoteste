@@ -279,21 +279,22 @@ export function MentionEditor({
 
   return (
     <div ref={editorRef} className="relative h-full">
-      {/* Visual display layer - shows styled text and mentions */}
-      <div 
-        ref={displayRef}
-        className={cn(
-          "absolute inset-0 p-4 overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap break-words",
-          isFocused ? "pointer-events-none" : "pointer-events-auto"
-        )}
-        onClick={() => textareaRef.current?.focus()}
-      >
-        {value ? renderDisplayContent() : (
-          <span className="text-muted-foreground">{placeholder}</span>
-        )}
-      </div>
+      {/* Visual display layer - shows styled text and mentions (only when not editing) */}
+      {!isFocused && (
+        <div 
+          ref={displayRef}
+          className={cn(
+            "absolute inset-0 p-4 overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap break-words bg-background rounded-lg border border-border"
+          )}
+          onClick={() => textareaRef.current?.focus()}
+        >
+          {value ? renderDisplayContent() : (
+            <span className="text-muted-foreground">{placeholder}</span>
+          )}
+        </div>
+      )}
 
-      {/* Invisible textarea for actual editing */}
+      {/* Visible textarea for actual editing */}
       <textarea
         ref={textareaRef}
         value={value}
@@ -302,20 +303,17 @@ export function MentionEditor({
         onScroll={handleScroll}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
+        placeholder={placeholder}
         maxLength={maxLength}
         spellCheck={false}
         autoCorrect="off"
         autoCapitalize="off"
         data-gramm="false"
         className={cn(
-          "absolute inset-0 h-full w-full resize-none p-4 bg-transparent font-mono text-sm leading-relaxed focus:outline-none",
-          isFocused ? "opacity-100" : "opacity-0",
+          "h-full w-full resize-none p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
+          !isFocused && "opacity-0 absolute inset-0",
           className
         )}
-        style={{
-          color: isFocused ? "hsl(var(--foreground))" : "transparent",
-          caretColor: "hsl(var(--foreground))",
-        }}
       />
 
       {/* Mention picker popup */}
