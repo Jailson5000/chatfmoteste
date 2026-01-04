@@ -166,6 +166,112 @@ const CALENDAR_TOOLS = [
   }
 ];
 
+// CRM/Internal actions tools definition for function calling
+const CRM_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "transfer_to_department",
+      description: "Transfere a conversa/cliente para outro departamento da empresa. Use quando o cliente precisa de atendimento especializado de outro setor.",
+      parameters: {
+        type: "object",
+        properties: {
+          department_name: {
+            type: "string",
+            description: "Nome do departamento para transferir (ex: 'Suporte', 'Comercial', 'Financeiro')"
+          },
+          reason: {
+            type: "string",
+            description: "Motivo da transferência (opcional, para registro interno)"
+          }
+        },
+        required: ["department_name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "change_status",
+      description: "Altera o status do cliente no funil/CRM. Use para marcar evolução do atendimento.",
+      parameters: {
+        type: "object",
+        properties: {
+          status_name: {
+            type: "string",
+            description: "Nome do novo status (ex: 'Qualificado', 'Proposta Enviada', 'Sucesso')"
+          },
+          reason: {
+            type: "string",
+            description: "Motivo da mudança de status (opcional)"
+          }
+        },
+        required: ["status_name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_tag",
+      description: "Adiciona uma etiqueta/tag ao cliente para categorização. Use para marcar interesses, perfil ou situações específicas.",
+      parameters: {
+        type: "object",
+        properties: {
+          tag_name: {
+            type: "string",
+            description: "Nome da tag a adicionar (ex: 'VIP', 'Urgente', 'Interessado em X')"
+          }
+        },
+        required: ["tag_name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_tag",
+      description: "Remove uma etiqueta/tag do cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          tag_name: {
+            type: "string",
+            description: "Nome da tag a remover"
+          }
+        },
+        required: ["tag_name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "transfer_to_responsible",
+      description: "Transfere a conversa para outro responsável (humano ou agente de IA). Use quando o atendimento precisa ser passado para outra pessoa ou IA especializada.",
+      parameters: {
+        type: "object",
+        properties: {
+          responsible_type: {
+            type: "string",
+            enum: ["human", "ai"],
+            description: "Tipo do responsável: 'human' para atendente humano, 'ai' para outro agente de IA"
+          },
+          responsible_name: {
+            type: "string",
+            description: "Nome do responsável ou agente de IA para transferir"
+          },
+          reason: {
+            type: "string",
+            description: "Motivo da transferência (opcional, para registro)"
+          }
+        },
+        required: ["responsible_type", "responsible_name"]
+      }
+    }
+  }
+];
+
 // Check if Google Calendar integration is active for law firm
 async function checkCalendarIntegration(supabase: any, lawFirmId: string): Promise<{
   active: boolean;
@@ -198,8 +304,8 @@ async function checkCalendarIntegration(supabase: any, lawFirmId: string): Promi
   };
 }
 
-// Filter tools based on permissions
-function getAvailableTools(permissions: { read: boolean; create: boolean; edit: boolean; delete: boolean }) {
+// Filter calendar tools based on permissions
+function getCalendarTools(permissions: { read: boolean; create: boolean; edit: boolean; delete: boolean }) {
   const tools: typeof CALENDAR_TOOLS = [];
   
   if (permissions.read) {
@@ -217,6 +323,26 @@ function getAvailableTools(permissions: { read: boolean; create: boolean; edit: 
   }
   
   return tools.filter(Boolean);
+}
+
+// Get all available tools (calendar + CRM)
+function getAllAvailableTools(
+  calendarPermissions: { read: boolean; create: boolean; edit: boolean; delete: boolean } | null,
+  includeCrmTools: boolean = true
+) {
+  const tools: any[] = [];
+  
+  // Add calendar tools if integration is active
+  if (calendarPermissions) {
+    tools.push(...getCalendarTools(calendarPermissions));
+  }
+  
+  // Always include CRM tools (they're tenant-scoped by design)
+  if (includeCrmTools) {
+    tools.push(...CRM_TOOLS);
+  }
+  
+  return tools;
 }
 
 // Execute calendar tool call
@@ -320,7 +446,387 @@ async function executeCalendarTool(
   }
 }
 
-// Get current billing period in YYYY-MM format
+// Execute CRM/internal action tool call
+async function executeCrmTool(
+  supabase: any,
+  lawFirmId: string,
+  conversationId: string,
+  clientId: string | undefined,
+  automationId: string,
+  automationName: string,
+  toolCall: { name: string; arguments: string }
+): Promise<string> {
+  try {
+    const args = JSON.parse(toolCall.arguments);
+    
+    console.log(`[AI Chat] Executing CRM tool: ${toolCall.name}`, args);
+    
+    switch (toolCall.name) {
+      case "transfer_to_department": {
+        // Find department by name (case-insensitive)
+        const { data: departments } = await supabase
+          .from("departments")
+          .select("id, name")
+          .eq("law_firm_id", lawFirmId)
+          .eq("is_active", true);
+        
+        const targetDept = departments?.find((d: any) => 
+          d.name.toLowerCase().includes(args.department_name.toLowerCase()) ||
+          args.department_name.toLowerCase().includes(d.name.toLowerCase())
+        );
+        
+        if (!targetDept) {
+          const availableDepts = departments?.map((d: any) => d.name).join(", ") || "nenhum";
+          return JSON.stringify({ 
+            success: false, 
+            error: `Departamento "${args.department_name}" não encontrado. Disponíveis: ${availableDepts}` 
+          });
+        }
+        
+        // Update conversation and client department
+        await supabase
+          .from("conversations")
+          .update({ department_id: targetDept.id })
+          .eq("id", conversationId);
+        
+        if (clientId) {
+          await supabase
+            .from("clients")
+            .update({ department_id: targetDept.id })
+            .eq("id", clientId);
+          
+          // Log the action
+          await supabase
+            .from("client_actions")
+            .insert({
+              client_id: clientId,
+              law_firm_id: lawFirmId,
+              action_type: "department_change",
+              description: `IA ${automationName} transferiu para ${targetDept.name}`,
+              to_value: targetDept.name,
+              performed_by: null // AI action
+            });
+        }
+        
+        // Log AI transfer
+        await supabase
+          .from("ai_transfer_logs")
+          .insert({
+            law_firm_id: lawFirmId,
+            conversation_id: conversationId,
+            from_agent_id: automationId,
+            from_agent_name: automationName,
+            to_agent_id: targetDept.id,
+            to_agent_name: targetDept.name,
+            transfer_type: "department",
+            reason: args.reason || `Transferência automática para ${targetDept.name}`
+          });
+        
+        return JSON.stringify({ 
+          success: true, 
+          message: `Conversa transferida para o departamento ${targetDept.name}` 
+        });
+      }
+      
+      case "change_status": {
+        if (!clientId) {
+          return JSON.stringify({ success: false, error: "Cliente não identificado para alterar status" });
+        }
+        
+        // Find status by name
+        const { data: statuses } = await supabase
+          .from("custom_statuses")
+          .select("id, name")
+          .eq("law_firm_id", lawFirmId)
+          .eq("is_active", true);
+        
+        const targetStatus = statuses?.find((s: any) => 
+          s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+          args.status_name.toLowerCase().includes(s.name.toLowerCase())
+        );
+        
+        if (!targetStatus) {
+          const availableStatuses = statuses?.map((s: any) => s.name).join(", ") || "nenhum";
+          return JSON.stringify({ 
+            success: false, 
+            error: `Status "${args.status_name}" não encontrado. Disponíveis: ${availableStatuses}` 
+          });
+        }
+        
+        // Get current status for logging
+        const { data: client } = await supabase
+          .from("clients")
+          .select("custom_status_id, custom_statuses(name)")
+          .eq("id", clientId)
+          .single();
+        
+        const fromStatus = (client?.custom_statuses as any)?.name || "Sem status";
+        
+        // Update client status
+        await supabase
+          .from("clients")
+          .update({ custom_status_id: targetStatus.id })
+          .eq("id", clientId);
+        
+        // Log the action
+        await supabase
+          .from("client_actions")
+          .insert({
+            client_id: clientId,
+            law_firm_id: lawFirmId,
+            action_type: "status_change",
+            description: `IA ${automationName} alterou status para ${targetStatus.name}`,
+            from_value: fromStatus,
+            to_value: targetStatus.name,
+            performed_by: null
+          });
+        
+        return JSON.stringify({ 
+          success: true, 
+          message: `Status do cliente alterado para ${targetStatus.name}` 
+        });
+      }
+      
+      case "add_tag": {
+        if (!clientId) {
+          return JSON.stringify({ success: false, error: "Cliente não identificado para adicionar tag" });
+        }
+        
+        // Find or create tag by name
+        let { data: tag } = await supabase
+          .from("tags")
+          .select("id, name")
+          .eq("law_firm_id", lawFirmId)
+          .ilike("name", args.tag_name)
+          .maybeSingle();
+        
+        if (!tag) {
+          // Create new tag
+          const { data: newTag, error } = await supabase
+            .from("tags")
+            .insert({
+              law_firm_id: lawFirmId,
+              name: args.tag_name,
+              color: "#6366f1" // Default purple
+            })
+            .select()
+            .single();
+          
+          if (error) {
+            return JSON.stringify({ success: false, error: "Erro ao criar tag" });
+          }
+          tag = newTag;
+        }
+        
+        // Check if client already has this tag
+        const { data: existingTag } = await supabase
+          .from("client_tags")
+          .select("id")
+          .eq("client_id", clientId)
+          .eq("tag_id", tag.id)
+          .maybeSingle();
+        
+        if (existingTag) {
+          return JSON.stringify({ 
+            success: true, 
+            message: `Cliente já possui a tag ${tag.name}` 
+          });
+        }
+        
+        // Add tag to client
+        await supabase
+          .from("client_tags")
+          .insert({
+            client_id: clientId,
+            tag_id: tag.id
+          });
+        
+        // Log the action
+        await supabase
+          .from("client_actions")
+          .insert({
+            client_id: clientId,
+            law_firm_id: lawFirmId,
+            action_type: "tag_added",
+            description: `IA ${automationName} adicionou tag ${tag.name}`,
+            to_value: tag.name,
+            performed_by: null
+          });
+        
+        return JSON.stringify({ 
+          success: true, 
+          message: `Tag ${tag.name} adicionada ao cliente` 
+        });
+      }
+      
+      case "remove_tag": {
+        if (!clientId) {
+          return JSON.stringify({ success: false, error: "Cliente não identificado para remover tag" });
+        }
+        
+        // Find tag by name
+        const { data: tag } = await supabase
+          .from("tags")
+          .select("id, name")
+          .eq("law_firm_id", lawFirmId)
+          .ilike("name", args.tag_name)
+          .maybeSingle();
+        
+        if (!tag) {
+          return JSON.stringify({ 
+            success: false, 
+            error: `Tag "${args.tag_name}" não encontrada` 
+          });
+        }
+        
+        // Remove tag from client
+        const { error } = await supabase
+          .from("client_tags")
+          .delete()
+          .eq("client_id", clientId)
+          .eq("tag_id", tag.id);
+        
+        if (error) {
+          return JSON.stringify({ success: false, error: "Erro ao remover tag" });
+        }
+        
+        // Log the action
+        await supabase
+          .from("client_actions")
+          .insert({
+            client_id: clientId,
+            law_firm_id: lawFirmId,
+            action_type: "tag_removed",
+            description: `IA ${automationName} removeu tag ${tag.name}`,
+            from_value: tag.name,
+            performed_by: null
+          });
+        
+        return JSON.stringify({ 
+          success: true, 
+          message: `Tag ${tag.name} removida do cliente` 
+        });
+      }
+      
+      case "transfer_to_responsible": {
+        if (args.responsible_type === "human") {
+          // Find team member by name
+          const { data: members } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .eq("law_firm_id", lawFirmId)
+            .eq("is_active", true);
+          
+          const targetMember = members?.find((m: any) => 
+            m.full_name.toLowerCase().includes(args.responsible_name.toLowerCase()) ||
+            args.responsible_name.toLowerCase().includes(m.full_name.toLowerCase())
+          );
+          
+          if (!targetMember) {
+            const availableMembers = members?.map((m: any) => m.full_name).join(", ") || "nenhum";
+            return JSON.stringify({ 
+              success: false, 
+              error: `Responsável "${args.responsible_name}" não encontrado. Disponíveis: ${availableMembers}` 
+            });
+          }
+          
+          // Update conversation handler to human and assign
+          await supabase
+            .from("conversations")
+            .update({ 
+              current_handler: "human",
+              assigned_to: targetMember.id,
+              current_automation_id: null
+            })
+            .eq("id", conversationId);
+          
+          // Log transfer
+          await supabase
+            .from("ai_transfer_logs")
+            .insert({
+              law_firm_id: lawFirmId,
+              conversation_id: conversationId,
+              from_agent_id: automationId,
+              from_agent_name: automationName,
+              to_agent_id: targetMember.id,
+              to_agent_name: targetMember.full_name,
+              transfer_type: "human",
+              reason: args.reason || `Transferência para atendente ${targetMember.full_name}`
+            });
+          
+          return JSON.stringify({ 
+            success: true, 
+            message: `Conversa transferida para ${targetMember.full_name}. O atendimento agora será feito por um humano.` 
+          });
+          
+        } else if (args.responsible_type === "ai") {
+          // Find AI agent by name
+          const { data: agents } = await supabase
+            .from("automations")
+            .select("id, name")
+            .eq("law_firm_id", lawFirmId)
+            .eq("is_active", true)
+            .neq("id", automationId); // Exclude current agent
+          
+          const targetAgent = agents?.find((a: any) => 
+            a.name.toLowerCase().includes(args.responsible_name.toLowerCase()) ||
+            args.responsible_name.toLowerCase().includes(a.name.toLowerCase())
+          );
+          
+          if (!targetAgent) {
+            const availableAgents = agents?.map((a: any) => a.name).join(", ") || "nenhum";
+            return JSON.stringify({ 
+              success: false, 
+              error: `Agente de IA "${args.responsible_name}" não encontrado. Disponíveis: ${availableAgents}` 
+            });
+          }
+          
+          // Update conversation to use new AI agent
+          await supabase
+            .from("conversations")
+            .update({ 
+              current_handler: "ai",
+              current_automation_id: targetAgent.id,
+              assigned_to: null
+            })
+            .eq("id", conversationId);
+          
+          // Log transfer
+          await supabase
+            .from("ai_transfer_logs")
+            .insert({
+              law_firm_id: lawFirmId,
+              conversation_id: conversationId,
+              from_agent_id: automationId,
+              from_agent_name: automationName,
+              to_agent_id: targetAgent.id,
+              to_agent_name: targetAgent.name,
+              transfer_type: "ai",
+              reason: args.reason || `Transferência para IA ${targetAgent.name}`
+            });
+          
+          return JSON.stringify({ 
+            success: true, 
+            message: `Conversa transferida para o agente de IA ${targetAgent.name}. O novo agente continuará o atendimento.` 
+          });
+        }
+        
+        return JSON.stringify({ 
+          success: false, 
+          error: "Tipo de responsável inválido. Use 'human' ou 'ai'" 
+        });
+      }
+      
+      default:
+        return JSON.stringify({ error: `Ação desconhecida: ${toolCall.name}` });
+    }
+  } catch (error) {
+    console.error(`[AI Chat] CRM tool error:`, error);
+    return JSON.stringify({ error: "Erro ao executar ação interna" });
+  }
+}
+
+// Get all available tools (calendar + CRM)
 function getCurrentBillingPeriod(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -953,7 +1459,54 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
       }
     }
 
-    // Add client memories if clientId is provided
+    // Add CRM/Internal actions instructions (always available)
+    if (effectiveLawFirmIdForCalendar) {
+      // Fetch available departments, statuses, and agents for context
+      const [deptResult, statusResult, agentResult, memberResult] = await Promise.all([
+        supabase.from("departments").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true),
+        supabase.from("custom_statuses").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true),
+        supabase.from("automations").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true).neq("id", automationId),
+        supabase.from("profiles").select("full_name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true)
+      ]);
+      
+      const departments = deptResult.data?.map((d: any) => d.name) || [];
+      const statuses = statusResult.data?.map((s: any) => s.name) || [];
+      const otherAgents = agentResult.data?.map((a: any) => a.name) || [];
+      const teamMembers = memberResult.data?.map((m: any) => m.full_name) || [];
+      
+      const crmInstructions = `\n\n🔧 AÇÕES INTERNAS DISPONÍVEIS - VOCÊ PODE:
+
+📁 TRANSFERIR PARA DEPARTAMENTO (use transfer_to_department):
+- Use quando o cliente precisa de atendimento especializado
+- Departamentos disponíveis: ${departments.length > 0 ? departments.join(", ") : "nenhum configurado"}
+- Exemplo: transferir para "Suporte" quando há problema técnico
+
+📊 ALTERAR STATUS DO CLIENTE (use change_status):
+- Use para marcar evolução no funil de vendas/atendimento
+- Status disponíveis: ${statuses.length > 0 ? statuses.join(", ") : "nenhum configurado"}
+- Exemplo: marcar como "Qualificado" quando cliente demonstra interesse
+
+🏷️ ADICIONAR/REMOVER ETIQUETAS (use add_tag e remove_tag):
+- Use para categorizar o cliente baseado em suas características
+- Você pode criar novas tags se necessário
+- Exemplo: adicionar "VIP" para clientes prioritários
+
+👥 TRANSFERIR PARA OUTRO RESPONSÁVEL (use transfer_to_responsible):
+- Use quando precisa passar o atendimento para outra pessoa ou IA
+- Para humanos disponíveis: ${teamMembers.length > 0 ? teamMembers.join(", ") : "nenhum"}
+- Para outros agentes de IA: ${otherAgents.length > 0 ? otherAgents.join(", ") : "nenhum"}
+- Tipos: "human" para atendente, "ai" para outro agente de IA
+
+REGRAS PARA USO DAS AÇÕES:
+1. Use quando identificar claramente a necessidade
+2. Confirme a ação com o cliente quando apropriado
+3. Informe o cliente sobre o que foi feito após executar
+4. Use nomes exatos ou similares dos itens disponíveis`;
+      
+      messages.push({ role: "system", content: crmInstructions });
+      console.log(`[AI Chat] Added CRM instructions with ${departments.length} depts, ${statuses.length} statuses, ${otherAgents.length} agents, ${teamMembers.length} members`);
+    }
+
     let clientMemoriesText = "";
     if (context?.clientId) {
       clientMemoriesText = await getClientMemories(supabase, context.clientId);
@@ -997,19 +1550,21 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
 
     // Check Google Calendar integration and get available tools
     const effectiveLawFirmId = agentLawFirmId || context?.lawFirmId;
-    let calendarTools: any[] = [];
+    let allTools: any[] = [];
     let calendarIntegration = { active: false, permissions: { read: false, create: false, edit: false, delete: false } };
     
     if (effectiveLawFirmId) {
       calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmId);
-      if (calendarIntegration.active) {
-        calendarTools = getAvailableTools(calendarIntegration.permissions);
-        console.log(`[AI Chat] Google Calendar active with ${calendarTools.length} tools`, calendarIntegration.permissions);
-      }
+      // Get all tools (calendar if active + CRM always)
+      allTools = getAllAvailableTools(
+        calendarIntegration.active ? calendarIntegration.permissions : null,
+        true // Always include CRM tools
+      );
+      console.log(`[AI Chat] Tools available: ${allTools.length} (Calendar: ${calendarIntegration.active ? 'yes' : 'no'}, CRM: yes)`);
     }
 
     console.log(`[AI Chat] Processing message for conversation ${conversationId}, useOpenAI: ${useOpenAI}`);
-    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}, CalendarTools: ${calendarTools.length}`);
+    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}, Tools: ${allTools.length}`);
 
     // Build request body with optional tools
     const aiRequestBody: any = {
@@ -1018,9 +1573,9 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
       max_tokens: context?.audioRequested ? 900 : 400,
     };
 
-    // Add tools if calendar integration is active
-    if (calendarTools.length > 0) {
-      aiRequestBody.tools = calendarTools;
+    // Add tools if available
+    if (allTools.length > 0) {
+      aiRequestBody.tools = allTools;
       aiRequestBody.tool_choice = "auto";
     }
 
@@ -1030,7 +1585,7 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
     if (useOpenAI && OPENAI_API_KEY) {
       // Use OpenAI API
       aiProvider = "OpenAI";
-      console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini) with tools:", calendarTools.length);
+      console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini) with tools:", allTools.length);
       aiRequestBody.model = "gpt-4o-mini";
       response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -1043,7 +1598,7 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
     } else {
       // Use Lovable AI (IA do Site / Internal)
       aiProvider = "Lovable AI";
-      console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash) with tools:", calendarTools.length);
+      console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash) with tools:", allTools.length);
       aiRequestBody.model = "google/gemini-2.5-flash";
       response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -1097,16 +1652,36 @@ REGRAS CRÍTICAS PARA AGENDAMENTO:
         
         console.log(`[AI Chat] Executing tool: ${toolName}`, toolArgs);
         
-        const result = await executeCalendarTool(
-          supabase,
-          supabaseUrl,
-          supabaseKey,
-          effectiveLawFirmId!,
-          conversationId,
-          context?.clientId,
-          automationId!,
-          { name: toolName, arguments: toolArgs }
-        );
+        // Determine which executor to use based on tool name
+        const calendarToolNames = ["check_availability", "list_events", "create_event", "update_event", "delete_event"];
+        const crmToolNames = ["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"];
+        
+        let result: string;
+        
+        if (calendarToolNames.includes(toolName)) {
+          result = await executeCalendarTool(
+            supabase,
+            supabaseUrl,
+            supabaseKey,
+            effectiveLawFirmId!,
+            conversationId,
+            context?.clientId,
+            automationId!,
+            { name: toolName, arguments: toolArgs }
+          );
+        } else if (crmToolNames.includes(toolName)) {
+          result = await executeCrmTool(
+            supabase,
+            effectiveLawFirmId!,
+            conversationId,
+            context?.clientId,
+            automationId!,
+            automationName,
+            { name: toolName, arguments: toolArgs }
+          );
+        } else {
+          result = JSON.stringify({ error: `Unknown tool: ${toolName}` });
+        }
         
         toolResults.push({
           role: "tool",
