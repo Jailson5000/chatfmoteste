@@ -2258,16 +2258,40 @@ serve(async (req) => {
         logDebug('MESSAGE', `Processing message`, { requestId, phoneNumber, isFromMe });
 
         // Get or create conversation
-        logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid}`, { requestId });
+        // Use flexible phone matching to handle variations (with/without country code, 9th digit)
+        const phoneEnding = phoneNumber.slice(-8); // Last 8 digits for matching
+        logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid} (ending: ${phoneEnding})`, { requestId });
         
+        // First try exact match by remote_jid
         let { data: conversation, error: convError } = await supabaseClient
           .from('conversations')
           .select('*')
           .eq('remote_jid', remoteJid)
           .eq('law_firm_id', lawFirmId)
-          .single();
+          .maybeSingle();
+        
+        // If not found, try flexible matching by phone ending
+        if (!conversation && !convError) {
+          const { data: flexConv } = await supabaseClient
+            .from('conversations')
+            .select('*')
+            .eq('law_firm_id', lawFirmId)
+            .or(`contact_phone.ilike.%${phoneEnding},remote_jid.ilike.%${phoneEnding}@%`)
+            .limit(1)
+            .maybeSingle();
+          
+          if (flexConv) {
+            logDebug('DB', `Found conversation via flexible phone match`, { requestId, foundId: flexConv.id });
+            // Update the remote_jid to the correct format for future exact matches
+            await supabaseClient
+              .from('conversations')
+              .update({ remote_jid: remoteJid, contact_phone: phoneNumber })
+              .eq('id', flexConv.id);
+            conversation = { ...flexConv, remote_jid: remoteJid, contact_phone: phoneNumber };
+          }
+        }
 
-        if (convError && convError.code === 'PGRST116') {
+        if (!conversation) {
           // Conversation doesn't exist, create it
           // IMPORTANT: Only trust pushName for inbound messages. For outbound (fromMe), pushName is usually our own name.
           const contactName = (!isFromMe && data.pushName) ? data.pushName : phoneNumber;
@@ -2307,11 +2331,13 @@ serve(async (req) => {
           });
           
           // Also create/update the client with default department and status
+          // Use flexible phone matching to find existing client
           const { data: existingClient } = await supabaseClient
             .from('clients')
             .select('id')
-            .eq('phone', phoneNumber)
             .eq('law_firm_id', lawFirmId)
+            .or(`phone.eq.${phoneNumber},phone.ilike.%${phoneEnding}`)
+            .limit(1)
             .maybeSingle();
           
           if (!existingClient) {
