@@ -395,14 +395,36 @@ export function MentionEditor({
       const targetRange = triggerRangeRef.current || (sel.rangeCount ? sel.getRangeAt(0) : null);
       if (!targetRange) return;
 
-      // Replace typed '@...' if we have a triggerRange
+      // Delete the "@..." trigger text
       targetRange.deleteContents();
 
+      // Create and insert badge
       const badge = createMentionBadge(full);
       targetRange.insertNode(badge);
 
-      const space = ensureTrailingSpace(badge);
-      setCaretAfterNode(space);
+      // Ensure there's a space AFTER the badge for the caret
+      // First check if there's already a text node after
+      let spaceNode: Text;
+      const nextSibling = badge.nextSibling;
+      
+      if (isTextNode(nextSibling)) {
+        // If next text node doesn't start with space, prepend one
+        if (!nextSibling.textContent?.startsWith(" ")) {
+          nextSibling.textContent = " " + (nextSibling.textContent || "");
+        }
+        spaceNode = nextSibling;
+      } else {
+        // Create a new text node with a space
+        spaceNode = document.createTextNode(" ");
+        badge.after(spaceNode);
+      }
+
+      // Position caret INSIDE the space text node, after the space character
+      const newRange = document.createRange();
+      newRange.setStart(spaceNode, 1); // After the space
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
 
       closePicker();
 

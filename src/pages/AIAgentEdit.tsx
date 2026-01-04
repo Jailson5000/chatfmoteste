@@ -140,6 +140,34 @@ export default function AIAgentEdit() {
     };
   }, []);
 
+  // Warn before browser/tab close if there are unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!automation) return;
+      
+      const currentTriggerConfig = automation.trigger_config as Record<string, unknown> | null;
+      const hasUnsavedChanges = 
+        editedPrompt !== (automation.ai_prompt || '') ||
+        editedTemperature !== (automation.ai_temperature || 0.7) ||
+        editedName !== automation.name ||
+        editedDescription !== (automation.description || '') ||
+        editedWebhookUrl !== automation.webhook_url ||
+        editedTriggerType !== automation.trigger_type ||
+        isActive !== automation.is_active ||
+        voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
+        voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID);
+
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [automation, editedPrompt, editedTemperature, editedName, editedDescription, editedWebhookUrl, editedTriggerType, isActive, voiceEnabled, voiceId]);
+
 
   const handleRestoreLastVersion = useCallback(() => {
     if (automation?.last_prompt) {
