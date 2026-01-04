@@ -13,6 +13,7 @@ import { ScheduledFollowUpIndicator } from "@/components/conversations/Scheduled
 import { ChatActivityLog } from "@/components/conversations/ChatActivityLog";
 
 import { cn } from "@/lib/utils";
+import { renderWithLinks } from "@/lib/linkify";
 import { 
   Send, 
   X, 
@@ -1364,7 +1365,9 @@ export function KanbanChatPanel({
 
                     {/* Content (hide for audio if no text) */}
                     {(msg.message_type !== 'audio' || msg.content) && (
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <p className="whitespace-pre-wrap">
+                        {msg.content ? renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all") : null}
+                      </p>
                     )}
 
                     {/* Time and status */}

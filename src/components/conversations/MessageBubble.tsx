@@ -1,5 +1,6 @@
 import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { renderWithLinks } from "@/lib/linkify";
 import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
 import {
   Dialog,
@@ -1281,10 +1282,10 @@ export function MessageBubble({
           </div>
         )}
         
-        {/* Render text content (strip audio placeholder line if it came mixed with text) */}
+        {/* Render text content with linkified URLs */}
         {displayContent && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word]">
-            {highlightText ? highlightText(displayContent) : displayContent}
+            {highlightText ? highlightText(displayContent) : renderWithLinks(displayContent)}
           </p>
         )}
         {/* Show audio player for AI-sent audio without URL - fetch via WhatsApp message ID */}

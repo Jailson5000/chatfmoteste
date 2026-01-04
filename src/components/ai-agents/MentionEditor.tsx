@@ -26,9 +26,11 @@ interface MentionEditorProps {
   };
 }
 
-// Regex to match mentions: supports @foo, @foo bar, @foo:bar, @foo:<bar|baz>
+// Regex to match mentions: @type:value pattern only (strict matching)
+// This ensures only properly formatted mentions like @departamento:Vendas are captured
+// and not regular text that happens to follow a mention
 const MENTION_REGEX =
-  /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/|<>.-]+)?)/g;
+  /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s(?!@)|$|[.,;:!?\n](?!\S*@))/gi;
 
 // Explicit Tailwind classes for mention badges (dynamic classes don't work with JIT)
 const MENTION_COLORS = {
@@ -68,14 +70,17 @@ function parseValueToParts(value: string): ParsedPart[] {
   const result: ParsedPart[] = [];
   let lastIndex = 0;
 
-  const regex = new RegExp(MENTION_REGEX.source, "g");
+  // Use a simpler, more reliable regex for parsing that matches @type:value
+  const parseRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+[^@]|\s*$|[.,;:!?\n])/gi;
   let match: RegExpExecArray | null;
 
-  while ((match = regex.exec(value)) !== null) {
+  while ((match = parseRegex.exec(value)) !== null) {
     if (match.index > lastIndex) {
       result.push({ type: "text", content: value.slice(lastIndex, match.index) });
     }
-    result.push({ type: "mention", content: match[0] });
+    // Reconstruct the full mention
+    const fullMention = `@${match[1]}:${match[2].trim()}`;
+    result.push({ type: "mention", content: fullMention });
     lastIndex = match.index + match[0].length;
   }
 
