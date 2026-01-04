@@ -42,7 +42,8 @@ import { ReplyPreview } from "@/components/conversations/ReplyPreview";
 import { TemplatePopup } from "@/components/conversations/TemplatePopup";
 import { ContactStatusTags } from "@/components/conversations/ContactStatusTags";
 import { UnreadBadge } from "@/components/conversations/UnreadBadge";
-import { ChatActivityLog } from "@/components/conversations/ChatActivityLog";
+import { InlineActivityBadge } from "@/components/conversations/InlineActivityBadge";
+import { useInlineActivities } from "@/hooks/useInlineActivities";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
 import { useTemplates, Template } from "@/hooks/useTemplates";
 import { Input } from "@/components/ui/input";
@@ -206,6 +207,12 @@ export default function Conversations() {
     searchName: string;
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
+  
+  // Get inline activities for the selected conversation (after selectedConversationId is declared)
+  const { activities: inlineActivities } = useInlineActivities(
+    selectedConversationId,
+    conversations.find(c => c.id === selectedConversationId)?.client_id || null
+  );
 
   // Message search state
   const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -293,6 +300,36 @@ export default function Conversations() {
 
   // Show audio indicator if: voice is globally enabled AND conversation has audio mode active
   const showAudioIndicator = globalVoiceConfig?.enabled && conversationAudioEnabled;
+
+  // Merge messages with inline activities, sorted by timestamp
+  type TimelineItem = 
+    | { type: 'message'; data: Message }
+    | { type: 'activity'; data: (typeof inlineActivities)[0] };
+  
+  const timelineItems = useMemo<TimelineItem[]>(() => {
+    const items: TimelineItem[] = [];
+    
+    // Add messages
+    messages.forEach(msg => {
+      items.push({ type: 'message', data: msg });
+    });
+    
+    // Add activities
+    inlineActivities.forEach(activity => {
+      items.push({ type: 'activity', data: activity });
+    });
+    
+    // Sort by timestamp (ascending for chronological order)
+    return items.sort((a, b) => {
+      const aTime = a.type === 'message' 
+        ? new Date(a.data.created_at).getTime() 
+        : a.data.timestamp.getTime();
+      const bTime = b.type === 'message' 
+        ? new Date(b.data.created_at).getTime() 
+        : b.data.timestamp.getTime();
+      return aTime - bTime;
+    });
+  }, [messages, inlineActivities]);
 
   // Fetch user profile for signature
   useEffect(() => {
@@ -1748,35 +1785,34 @@ export default function Conversations() {
                       </div>
                     ) : (
                       <>
-                        {/* Activity Log - Internal movements visible only to team */}
-                        <ChatActivityLog 
-                          conversationId={selectedConversation.id} 
-                          clientId={selectedConversation.client_id || undefined} 
-                        />
-                        {messages.map((msg) => (
-                          <MessageBubble
-                            key={msg.id}
-                            id={msg.id}
-                            content={msg.content}
-                            createdAt={msg.created_at}
-                            isFromMe={msg.is_from_me}
-                            senderType={msg.sender_type}
-                            aiGenerated={msg.ai_generated}
-                            mediaUrl={msg.media_url}
-                            mediaMimeType={msg.media_mime_type}
-                            messageType={msg.message_type}
-                            status={msg.status || "sent"}
-                            readAt={msg.read_at}
-                            whatsappMessageId={msg.whatsapp_message_id}
-                            conversationId={selectedConversationId || undefined}
-                            replyTo={msg.reply_to}
-                            isInternal={msg.is_internal}
-                            isPontual={msg.is_pontual}
-                            aiAgentName={msg.ai_agent_name}
-                            onReply={handleReply}
-                            onScrollToMessage={scrollToMessage}
-                            onRetry={handleRetryMessage}
-                          />
+                        {timelineItems.map((item) => (
+                          item.type === 'activity' ? (
+                            <InlineActivityBadge key={item.data.id} activity={item.data} />
+                          ) : (
+                            <MessageBubble
+                              key={item.data.id}
+                              id={item.data.id}
+                              content={item.data.content}
+                              createdAt={item.data.created_at}
+                              isFromMe={item.data.is_from_me}
+                              senderType={item.data.sender_type}
+                              aiGenerated={item.data.ai_generated}
+                              mediaUrl={item.data.media_url}
+                              mediaMimeType={item.data.media_mime_type}
+                              messageType={item.data.message_type}
+                              status={item.data.status || "sent"}
+                              readAt={item.data.read_at}
+                              whatsappMessageId={item.data.whatsapp_message_id}
+                              conversationId={selectedConversationId || undefined}
+                              replyTo={item.data.reply_to}
+                              isInternal={item.data.is_internal}
+                              isPontual={item.data.is_pontual}
+                              aiAgentName={item.data.ai_agent_name}
+                              onReply={handleReply}
+                              onScrollToMessage={scrollToMessage}
+                              onRetry={handleRetryMessage}
+                            />
+                          )
                         ))}
                       </>
                     )}
@@ -2258,40 +2294,38 @@ export default function Conversations() {
                     </div>
                   ) : (
                     <>
-                      {/* Activity Log - Internal movements visible only to team */}
-                      <ChatActivityLog 
-                        conversationId={selectedConversation.id} 
-                        clientId={selectedConversation.client_id || undefined} 
-                      />
-                      {messages.map((msg) => (
-                      <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
-                        <MessageBubble
-                          id={msg.id}
-                          content={msg.content}
-                          createdAt={msg.created_at}
-                          isFromMe={msg.is_from_me}
-                          senderType={msg.sender_type}
-                          aiGenerated={msg.ai_generated}
-                          mediaUrl={msg.media_url}
-                          mediaMimeType={msg.media_mime_type}
-                          messageType={msg.message_type}
-                          status={msg.status || "sent"}
-                          readAt={msg.read_at}
-                          whatsappMessageId={msg.whatsapp_message_id}
-                          conversationId={selectedConversationId || undefined}
-                          replyTo={msg.reply_to}
-                          isInternal={msg.is_internal}
-                          isPontual={msg.is_pontual}
-                          aiAgentName={msg.ai_agent_name}
-                          onReply={handleReply}
-                          onScrollToMessage={scrollToMessage}
-                          onRetry={handleRetryMessage}
-                          highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
-                          isHighlighted={highlightedMessageId === msg.id}
-                        />
-                      </div>
-                      ))
-                    }
+                      {timelineItems.map((item) => (
+                        item.type === 'activity' ? (
+                          <InlineActivityBadge key={item.data.id} activity={item.data} />
+                        ) : (
+                          <div key={item.data.id} ref={(el) => { if (el) messageRefs.current.set(item.data.id, el); }}>
+                            <MessageBubble
+                              id={item.data.id}
+                              content={item.data.content}
+                              createdAt={item.data.created_at}
+                              isFromMe={item.data.is_from_me}
+                              senderType={item.data.sender_type}
+                              aiGenerated={item.data.ai_generated}
+                              mediaUrl={item.data.media_url}
+                              mediaMimeType={item.data.media_mime_type}
+                              messageType={item.data.message_type}
+                              status={item.data.status || "sent"}
+                              readAt={item.data.read_at}
+                              whatsappMessageId={item.data.whatsapp_message_id}
+                              conversationId={selectedConversationId || undefined}
+                              replyTo={item.data.reply_to}
+                              isInternal={item.data.is_internal}
+                              isPontual={item.data.is_pontual}
+                              aiAgentName={item.data.ai_agent_name}
+                              onReply={handleReply}
+                              onScrollToMessage={scrollToMessage}
+                              onRetry={handleRetryMessage}
+                              highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
+                              isHighlighted={highlightedMessageId === item.data.id}
+                            />
+                          </div>
+                        )
+                      ))}
                     </>
                   )}
                   <div ref={messagesEndRef} />
