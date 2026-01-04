@@ -62,7 +62,7 @@ export function useScheduledFollowUps(conversationId?: string) {
         .from("scheduled_follow_ups")
         .select("conversation_id, scheduled_at")
         .eq("law_firm_id", lawFirm.id)
-        .eq("status", "pending");
+        .in("status", ["pending", "processing"]);
 
       if (error) throw error;
       return data as Array<{ conversation_id: string; scheduled_at: string }>;
