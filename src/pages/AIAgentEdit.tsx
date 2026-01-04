@@ -569,7 +569,7 @@ export default function AIAgentEdit() {
       <div className="flex flex-1 min-h-0">
         {/* Prompt Editor Area */}
         <div className="flex-1 flex flex-col p-6 min-h-0">
-          <div className="flex-1 max-w-4xl min-h-0">
+          <div className="flex-1 h-full max-w-4xl min-h-0">
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
@@ -584,10 +584,7 @@ REGRAS DE COMUNICAÇÃO
 
 Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
               maxLength={MAX_PROMPT_CHARS}
-              className={cn(
-                "h-full",
-                isOverLimit && "text-destructive"
-              )}
+              className={cn("h-full min-h-0", isOverLimit && "text-destructive")}
               departments={departments || []}
               statuses={statuses || []}
               tags={tags || []}
