@@ -574,7 +574,10 @@ export default function AIAgentEdit() {
       <div className="flex-1 flex overflow-hidden">
         {/* Prompt Editor Area */}
         <div className="flex-1 flex flex-col p-6 min-w-0 overflow-hidden">
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div 
+            className="min-w-0 overflow-hidden"
+            style={{ height: 'calc(100vh - 180px)' }}
+          >
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
