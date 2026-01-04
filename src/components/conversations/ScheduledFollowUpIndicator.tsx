@@ -101,12 +101,12 @@ export function ScheduledFollowUpIndicator({
             variant="outline" 
             size="sm" 
             className={cn(
-              "gap-2 bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20",
+              "h-6 px-2 text-[11px] gap-1 bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20",
               className
             )}
           >
-            <Clock className="h-4 w-4" />
-            <span>{pendingFollowUps.length} mensagem{pendingFollowUps.length > 1 ? "ns" : ""} agendada{pendingFollowUps.length > 1 ? "s" : ""}</span>
+            <Clock className="h-3 w-3" />
+            <span>{pendingFollowUps.length} agendada{pendingFollowUps.length > 1 ? "s" : ""}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-96 p-0" align="start">
