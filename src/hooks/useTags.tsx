@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "./useLawFirm";
 
 export interface Tag {
   id: string;
@@ -13,18 +14,23 @@ export interface Tag {
 export function useTags() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: tags = [], isLoading } = useQuery({
-    queryKey: ["tags"],
+    queryKey: ["tags", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       const { data, error } = await supabase
         .from("tags")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("name", { ascending: true });
 
       if (error) throw error;
       return data as Tag[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createTag = useMutation({

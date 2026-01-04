@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "./useLawFirm";
 
 export interface Template {
   id: string;
@@ -17,18 +18,23 @@ export interface Template {
 export function useTemplates() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: templates = [], isLoading } = useQuery({
-    queryKey: ["templates"],
+    queryKey: ["templates", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       const { data, error } = await supabase
         .from("templates")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("name", { ascending: true });
 
       if (error) throw error;
       return data as Template[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createTemplate = useMutation({

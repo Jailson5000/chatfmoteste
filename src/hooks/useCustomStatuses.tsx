@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "./useLawFirm";
 
 export interface CustomStatus {
   id: string;
@@ -16,18 +17,23 @@ export interface CustomStatus {
 export function useCustomStatuses() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: statuses = [], isLoading } = useQuery({
-    queryKey: ["custom_statuses"],
+    queryKey: ["custom_statuses", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       const { data, error } = await supabase
         .from("custom_statuses")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("position", { ascending: true });
 
       if (error) throw error;
       return data as CustomStatus[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createStatus = useMutation({
