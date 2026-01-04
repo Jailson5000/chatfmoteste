@@ -78,10 +78,14 @@ export function useDepartments() {
 
   const updateDepartment = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Department> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate department belongs to user's law firm
       const { data, error } = await supabase
         .from("departments")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -99,7 +103,14 @@ export function useDepartments() {
 
   const deleteDepartment = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("departments").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate department belongs to user's law firm
+      const { error } = await supabase
+        .from("departments")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       if (error) throw error;
     },
     onSuccess: () => {
@@ -113,8 +124,15 @@ export function useDepartments() {
 
   const reorderDepartments = useMutation({
     mutationFn: async (orderedIds: string[]) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Each update includes law_firm_id validation
       const updates = orderedIds.map((id, index) => 
-        supabase.from("departments").update({ position: index }).eq("id", id)
+        supabase
+          .from("departments")
+          .update({ position: index })
+          .eq("id", id)
+          .eq("law_firm_id", lawFirm.id) // Tenant isolation
       );
       await Promise.all(updates);
     },
