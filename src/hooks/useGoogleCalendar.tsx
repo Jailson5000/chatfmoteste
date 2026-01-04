@@ -260,11 +260,21 @@ export function useGoogleCalendar() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Invalidate both integration AND events queries so UI updates immediately
       queryClient.invalidateQueries({ queryKey: ["google-calendar-integration"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+      
+      const syncedMsg = data?.synced_events !== undefined 
+        ? `Sincronizados ${data.synced_events} eventos.`
+        : "Os eventos foram sincronizados.";
+      const deletedMsg = data?.deleted_events > 0 
+        ? ` Removidos ${data.deleted_events} cancelados.`
+        : "";
+      
       toast({
-        title: "Sincronização iniciada",
-        description: "Os eventos estão sendo sincronizados.",
+        title: "Sincronização concluída",
+        description: syncedMsg + deletedMsg,
       });
     },
     onError: (error: any) => {

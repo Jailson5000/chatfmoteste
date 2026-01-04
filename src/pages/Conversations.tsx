@@ -417,6 +417,112 @@ export default function Conversations() {
     }
   }, [showDetailsPanel, selectedConversationId, scrollMessagesToBottom]);
 
+  // Handle deep-link via query params (?id=conversationId or ?phone=number&name=name)
+  useEffect(() => {
+    if (isLoading || !conversations.length) return;
+    
+    const idParam = searchParams.get("id");
+    const phoneParam = searchParams.get("phone");
+    const nameParam = searchParams.get("name");
+    
+    // Clear params after processing to avoid re-triggering
+    const clearParams = () => {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("id");
+      newParams.delete("phone");
+      newParams.delete("name");
+      setSearchParams(newParams, { replace: true });
+    };
+    
+    // If ?id= is present, select that conversation directly
+    if (idParam) {
+      const conv = conversations.find(c => c.id === idParam);
+      if (conv) {
+        setSelectedConversationId(idParam);
+        setShowMobileChat(true);
+        setActiveTab("queue"); // Show all to ensure it's visible
+      }
+      clearParams();
+      return;
+    }
+    
+    // If ?phone= is present, find existing conversation or prepare to create new
+    if (phoneParam) {
+      const normalizedPhone = phoneParam.replace(/\D/g, "");
+      
+      // Try to find existing conversation by phone
+      const existingConv = conversations.find(c => {
+        const convPhone = (c.contact_phone || "").replace(/\D/g, "");
+        return convPhone === normalizedPhone || convPhone.endsWith(normalizedPhone) || normalizedPhone.endsWith(convPhone);
+      });
+      
+      if (existingConv) {
+        setSelectedConversationId(existingConv.id);
+        setShowMobileChat(true);
+        setActiveTab("queue");
+        clearParams();
+      } else if (lawFirm?.id && connectedInstances.length > 0) {
+        // No existing conversation - create one
+        const createConversation = async () => {
+          const instance = connectedInstances[0]; // Use first connected instance
+          const remoteJid = normalizedPhone.includes("@") 
+            ? normalizedPhone 
+            : `${normalizedPhone}@s.whatsapp.net`;
+          
+          const { data: newConv, error } = await supabase
+            .from("conversations")
+            .insert({
+              law_firm_id: lawFirm.id,
+              remote_jid: remoteJid,
+              contact_phone: normalizedPhone,
+              contact_name: nameParam || normalizedPhone,
+              current_handler: "human",
+              status: "novo_contato",
+              whatsapp_instance_id: instance.id,
+              assigned_to: user?.id || null,
+            })
+            .select()
+            .single();
+          
+          if (!error && newConv) {
+            // Invalidate and refetch conversations
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            
+            // Select the new conversation after a brief delay for refetch
+            setTimeout(() => {
+              setSelectedConversationId(newConv.id);
+              setShowMobileChat(true);
+              setActiveTab("queue");
+            }, 300);
+            
+            toast({
+              title: "Conversa iniciada",
+              description: `Nova conversa com ${nameParam || normalizedPhone}`,
+            });
+          } else if (error) {
+            console.error("[Conversations] Error creating conversation:", error);
+            toast({
+              title: "Erro ao iniciar conversa",
+              description: error.message,
+              variant: "destructive",
+            });
+          }
+        };
+        
+        createConversation();
+        clearParams();
+      } else {
+        // No connected instances
+        toast({
+          title: "Nenhuma conexão ativa",
+          description: "Conecte uma instância WhatsApp antes de iniciar conversas.",
+          variant: "destructive",
+        });
+        clearParams();
+      }
+    }
+  }, [isLoading, conversations, searchParams, setSearchParams, lawFirm?.id, connectedInstances, user?.id, queryClient, toast]);
+
   // Handle reply
   const handleReply = useCallback((messageId: string) => {
     const message = messages.find(m => m.id === messageId);
