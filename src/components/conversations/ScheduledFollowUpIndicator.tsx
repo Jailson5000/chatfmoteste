@@ -24,6 +24,36 @@ import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
+function formatMessagePreview(content: string): string {
+  if (!content) return "";
+  
+  // Check for media template format: [IMAGE]url or [VIDEO]url
+  const mediaMatch = content.match(/^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](.*?)(?:\n(.*))?$/s);
+  if (mediaMatch) {
+    const mediaType = mediaMatch[1];
+    const caption = mediaMatch[3]?.trim();
+    
+    const typeLabels: Record<string, string> = {
+      IMAGE: "📷 Imagem",
+      VIDEO: "🎬 Vídeo",
+      AUDIO: "🎵 Áudio",
+      DOCUMENT: "📄 Documento",
+    };
+    
+    const label = typeLabels[mediaType] || "📎 Mídia";
+    return caption ? `${label}: ${caption}` : label;
+  }
+  
+  // For regular text, truncate if too long
+  const maxLength = 100;
+  if (content.length > maxLength) {
+    return content.substring(0, maxLength) + "...";
+  }
+  
+  return content;
+}
+
+
 interface ScheduledFollowUpIndicatorProps {
   conversationId: string;
   variant?: "badge" | "full";
@@ -167,9 +197,11 @@ export function ScheduledFollowUpIndicator({
                   </div>
 
                   {followUp.template?.content && (
-                    <div className="p-2 rounded bg-background border text-xs text-muted-foreground line-clamp-2">
+                    <div className="p-2 rounded bg-background border text-xs text-muted-foreground">
                       <MessageSquare className="h-3 w-3 inline-block mr-1" />
-                      {followUp.template.content}
+                      <span className="line-clamp-2 break-all">
+                        {formatMessagePreview(followUp.template.content)}
+                      </span>
                     </div>
                   )}
                 </div>
