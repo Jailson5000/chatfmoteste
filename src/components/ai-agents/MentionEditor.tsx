@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MentionPicker } from "./MentionPicker";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
 
 interface MentionEditorProps {
   value: string;
@@ -15,10 +14,10 @@ interface MentionEditorProps {
   templates?: Array<{ id: string; name: string }>;
   teamMembers?: Array<{ id: string; full_name: string }>;
   aiAgents?: Array<{ id: string; name: string; is_active?: boolean }>;
-  lawFirm?: { 
-    name: string; 
-    phone?: string; 
-    email?: string; 
+  lawFirm?: {
+    name: string;
+    phone?: string;
+    email?: string;
     address?: string;
     instagram?: string;
     facebook?: string;
@@ -27,28 +26,70 @@ interface MentionEditorProps {
   };
 }
 
-// Regex to match mentions
-const MENTION_REGEX = /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/|<>.-]+)?)/g;
+// Regex to match mentions: supports @foo, @foo bar, @foo:bar, @foo:<bar|baz>
+const MENTION_REGEX =
+  /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/|<>.-]+)?)/g;
 
-// Get category color based on mention type
-function getMentionColor(mention: string): string {
-  const lowerMention = mention.toLowerCase();
+function getMentionColor(mentionText: string): string {
+  const lower = mentionText.toLowerCase();
 
-  if (lowerMention.startsWith("departamento:")) return "bg-blue-500/20 text-blue-400 border-blue-500/40";
-  if (lowerMention.startsWith("status:")) return "bg-purple-500/20 text-purple-400 border-purple-500/40";
-  if (lowerMention.startsWith("etiqueta:")) return "bg-green-500/20 text-green-400 border-green-500/40";
-  if (lowerMention.startsWith("responsavel:")) return "bg-orange-500/20 text-orange-400 border-orange-500/40";
-  if (lowerMention.startsWith("template:")) return "bg-cyan-500/20 text-cyan-400 border-cyan-500/40";
-  if (lowerMention.includes("evento")) return "bg-rose-500/20 text-rose-400 border-rose-500/40";
+  const cls = (token: string) =>
+    `bg-mention-${token}/15 text-mention-${token} border-mention-${token}/30 hover:bg-mention-${token}/25`;
 
-  return "bg-slate-500/20 text-slate-400 border-slate-500/40";
+  if (lower.startsWith("departamento:")) return cls("department");
+  if (lower.startsWith("status:")) return cls("status");
+  if (lower.startsWith("etiqueta:")) return cls("tag");
+  if (lower.startsWith("responsavel:")) return cls("responsible");
+  if (lower.startsWith("template:")) return cls("template");
+  if (lower.includes("evento")) return cls("calendar");
+  return cls("tool");
 }
 
 interface ParsedPart {
   type: "text" | "mention";
   content: string;
-  start: number;
-  end: number;
+}
+
+function parseValueToParts(value: string): ParsedPart[] {
+  if (!value) return [];
+
+  const result: ParsedPart[] = [];
+  let lastIndex = 0;
+
+  const regex = new RegExp(MENTION_REGEX.source, "g");
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      result.push({ type: "text", content: value.slice(lastIndex, match.index) });
+    }
+    result.push({ type: "mention", content: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < value.length) {
+    result.push({ type: "text", content: value.slice(lastIndex) });
+  }
+
+  return result;
+}
+
+function isTextNode(node: Node | null): node is Text {
+  return Boolean(node && node.nodeType === Node.TEXT_NODE);
+}
+
+function isHTMLElement(node: Node | null): node is HTMLElement {
+  return Boolean(node && node.nodeType === Node.ELEMENT_NODE);
+}
+
+function getClosestMentionBadge(node: Node | null): HTMLElement | null {
+  if (!node) return null;
+  if (isHTMLElement(node) && node.dataset.mention) return node;
+  if (isHTMLElement(node) && node.closest) {
+    const el = node.closest("[data-mention]");
+    return (el as HTMLElement) || null;
+  }
+  return null;
 }
 
 export function MentionEditor({
@@ -67,341 +108,451 @@ export function MentionEditor({
 }: MentionEditorProps) {
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
-  const [cursorPosition, setCursorPosition] = useState(0);
+  const [isFocused, setIsFocused] = useState(false);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLDivElement>(null);
   const mentionPickerRef = useRef<HTMLDivElement>(null);
+
   const isComposingRef = useRef(false);
+  const triggerRangeRef = useRef<Range | null>(null);
+  const editingBadgeRef = useRef<HTMLElement | null>(null);
+  const lastSyncedValueRef = useRef<string>("");
 
-  // Parse text and find mentions
-  const parts = useMemo((): ParsedPart[] => {
-    const result: ParsedPart[] = [];
-    let lastIndex = 0;
-    let match;
+  const parts = useMemo(() => parseValueToParts(value), [value]);
 
-    const regex = new RegExp(MENTION_REGEX.source, "g");
-    while ((match = regex.exec(value)) !== null) {
-      if (match.index > lastIndex) {
-        result.push({
-          type: "text",
-          content: value.slice(lastIndex, match.index),
-          start: lastIndex,
-          end: match.index,
-        });
+  const createMentionBadge = useCallback((fullMention: string): HTMLElement => {
+    // fullMention must include '@'
+    const mentionText = fullMention.startsWith("@") ? fullMention.slice(1) : fullMention;
+
+    const badge = document.createElement("span");
+    badge.setAttribute("contenteditable", "false");
+    badge.dataset.mention = fullMention.startsWith("@") ? fullMention : `@${fullMention}`;
+
+    badge.className = cn(
+      "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-semibold mx-0.5 align-baseline",
+      "select-none cursor-pointer",
+      getMentionColor(mentionText)
+    );
+
+    const label = document.createElement("span");
+    label.textContent = badge.dataset.mention;
+    label.className = "leading-none";
+
+    const remove = document.createElement("span");
+    remove.textContent = "×";
+    remove.dataset.removeMention = "true";
+    remove.className = cn(
+      "ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded",
+      "text-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+    );
+
+    badge.appendChild(label);
+    badge.appendChild(remove);
+
+    return badge;
+  }, []);
+
+  const renderFromValue = useCallback(
+    (nextValue: string) => {
+      if (!inputRef.current) return;
+
+      // Replace DOM entirely (only for external changes / initial mount)
+      inputRef.current.innerHTML = "";
+
+      if (!nextValue) {
+        // Keep truly empty to allow placeholder styles
+        return;
       }
-      result.push({
-        type: "mention",
-        content: match[0],
-        start: match.index,
-        end: match.index + match[0].length,
+
+      const parsed = parseValueToParts(nextValue);
+      parsed.forEach((p) => {
+        if (p.type === "mention") {
+          inputRef.current!.appendChild(createMentionBadge(p.content));
+        } else {
+          inputRef.current!.appendChild(document.createTextNode(p.content));
+        }
       });
-      lastIndex = match.index + match[0].length;
-    }
+    },
+    [createMentionBadge]
+  );
 
-    if (lastIndex < value.length) {
-      result.push({
-        type: "text",
-        content: value.slice(lastIndex),
-        start: lastIndex,
-        end: value.length,
-      });
-    }
-
-    return result;
-  }, [value]);
-
-  // Get plain text from contenteditable
   const getPlainText = useCallback(() => {
     if (!inputRef.current) return "";
-    
-    let text = "";
+
+    let out = "";
+
     const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent || "";
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement;
-        // Check if it's a mention badge
-        if (el.dataset.mention) {
-          text += el.dataset.mention;
-        } else {
-          // Walk children
-          el.childNodes.forEach(walk);
-        }
-        // Add newline for block elements
-        if (el.tagName === "DIV" || el.tagName === "P" || el.tagName === "BR") {
-          if (el.tagName !== "BR" || el.nextSibling) {
-            text += "\n";
-          }
-        }
+      if (isTextNode(node)) {
+        out += node.textContent || "";
+        return;
+      }
+
+      if (!isHTMLElement(node)) return;
+
+      // Mention badge
+      if (node.dataset.mention) {
+        out += node.dataset.mention;
+        return;
+      }
+
+      if (node.tagName === "BR") {
+        out += "\n";
+        return;
+      }
+
+      node.childNodes.forEach(walk);
+
+      // Convert block elements to newline separators
+      if (node.tagName === "DIV" || node.tagName === "P") {
+        out += "\n";
       }
     };
-    
+
     inputRef.current.childNodes.forEach(walk);
-    return text.replace(/\n+$/, ""); // Remove trailing newlines
+
+    // Normalize: remove trailing spaces before newlines, collapse excessive newlines
+    return out
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\n+$/, "");
   }, []);
 
-  // Handle input changes
-  const handleInput = useCallback(() => {
-    if (isComposingRef.current) return;
-    
-    const text = getPlainText();
-    
-    // Check for @ trigger
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const textNode = range.startContainer;
-      
-      if (textNode.nodeType === Node.TEXT_NODE) {
-        const textContent = textNode.textContent || "";
-        const cursorPos = range.startOffset;
-        const textBeforeCursor = textContent.slice(0, cursorPos);
-        const lastAtIndex = textBeforeCursor.lastIndexOf("@");
-        
-        if (lastAtIndex !== -1) {
-          const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
-          if (!textAfterAt.includes(" ") && !textAfterAt.includes("\n")) {
-            setShowMentionPicker(true);
-            setMentionFilter(textAfterAt);
-            setCursorPosition(lastAtIndex);
-            onChange(text);
-            return;
-          }
-        }
-      }
-    }
-    
-    setShowMentionPicker(false);
-    setMentionFilter("");
-    onChange(text);
+  const syncValueUp = useCallback(() => {
+    const next = getPlainText();
+    lastSyncedValueRef.current = next;
+    onChange(next);
   }, [getPlainText, onChange]);
 
-  // Handle selecting a mention from picker
-  const handleSelectMention = useCallback((mention: string) => {
-    if (!inputRef.current) return;
-    
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-    
-    // Find and remove the @ trigger text
-    const range = selection.getRangeAt(0);
-    const textNode = range.startContainer;
-    
-    if (textNode.nodeType === Node.TEXT_NODE) {
-      const textContent = textNode.textContent || "";
-      const cursorPos = range.startOffset;
-      const textBeforeCursor = textContent.slice(0, cursorPos);
-      const lastAtIndex = textBeforeCursor.lastIndexOf("@");
-      
-      if (lastAtIndex !== -1) {
-        // Remove from @ to cursor
-        const beforeAt = textContent.slice(0, lastAtIndex);
-        const afterCursor = textContent.slice(cursorPos);
-        textNode.textContent = beforeAt + afterCursor;
-        
-        // Create mention badge
-        const badge = createMentionBadge(mention);
-        
-        // Insert badge at position
-        const newRange = document.createRange();
-        newRange.setStart(textNode, lastAtIndex);
-        newRange.collapse(true);
-        newRange.insertNode(badge);
-        
-        // Add space after badge
-        const spaceNode = document.createTextNode(" ");
-        badge.after(spaceNode);
-        
-        // Move cursor after space
-        const cursorRange = document.createRange();
-        cursorRange.setStartAfter(spaceNode);
-        cursorRange.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(cursorRange);
+  const setCaretAfterNode = useCallback((node: Node) => {
+    const sel = window.getSelection();
+    if (!sel) return;
+
+    const r = document.createRange();
+    r.setStartAfter(node);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }, []);
+
+  const ensureTrailingSpace = useCallback((badge: HTMLElement) => {
+    const next = badge.nextSibling;
+    if (isTextNode(next)) {
+      if (!next.textContent?.startsWith(" ")) {
+        next.textContent = ` ${next.textContent || ""}`;
       }
+      return next;
     }
-    
+
+    const space = document.createTextNode(" ");
+    badge.after(space);
+    return space;
+  }, []);
+
+  const updateMentionBadge = useCallback((badge: HTMLElement, mention: string) => {
+    const full = mention.startsWith("@") ? mention : `@${mention}`;
+    badge.dataset.mention = full;
+
+    const mentionText = full.slice(1);
+
+    // Update label (first child)
+    const label = badge.firstChild;
+    if (label && isTextNode(label)) {
+      label.textContent = full;
+    } else if (label && isHTMLElement(label)) {
+      label.textContent = full;
+    }
+
+    // Re-apply classes (keep remove styles)
+    badge.className = cn(
+      "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-semibold mx-0.5 align-baseline",
+      "select-none cursor-pointer",
+      getMentionColor(mentionText)
+    );
+
+    // Keep remove icon styles
+    const remove = badge.querySelector("[data-remove-mention='true']") as HTMLElement | null;
+    if (remove) {
+      remove.className = cn(
+        "ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded",
+        "text-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+      );
+    }
+  }, []);
+
+  const openPickerForBadge = useCallback((badge: HTMLElement) => {
+    editingBadgeRef.current = badge;
+    triggerRangeRef.current = null;
+    setMentionFilter("");
+    setShowMentionPicker(true);
+
+    // Keep caret after the badge so typing continues normally
+    const space = ensureTrailingSpace(badge);
+    setCaretAfterNode(space);
+  }, [ensureTrailingSpace, setCaretAfterNode]);
+
+  const closePicker = useCallback(() => {
     setShowMentionPicker(false);
     setMentionFilter("");
-    
-    // Update value
-    setTimeout(() => {
-      const text = getPlainText();
-      onChange(text);
-    }, 0);
-    
-    inputRef.current.focus();
-  }, [getPlainText, onChange]);
+    triggerRangeRef.current = null;
+    editingBadgeRef.current = null;
+  }, []);
 
-  // Create a mention badge element
-  const createMentionBadge = (mention: string): HTMLSpanElement => {
-    const mentionText = mention.startsWith("@") ? mention.slice(1) : mention;
-    const fullMention = mention.startsWith("@") ? mention : `@${mention}`;
-    const colorClass = getMentionColor(mentionText);
-    
-    const badge = document.createElement("span");
-    badge.className = `inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-semibold mx-0.5 select-all cursor-pointer ${colorClass}`;
-    badge.contentEditable = "false";
-    badge.dataset.mention = fullMention;
-    badge.innerHTML = `<span>${fullMention}</span>`;
-    
-    // Add click handler to select/edit
-    badge.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      // Select the badge
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNode(badge);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    });
-    
-    return badge;
-  };
-
-  // Remove a mention badge
-  const handleRemoveMention = (badge: HTMLElement) => {
-    badge.remove();
-    const text = getPlainText();
-    onChange(text);
-    inputRef.current?.focus();
-  };
-
-  // Render content from value
-  const renderContent = useCallback(() => {
-    if (!inputRef.current) return;
-    
-    // Save current selection
-    const selection = window.getSelection();
-    let savedOffset = 0;
-    let savedNode: Node | null = null;
-    
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      savedNode = range.startContainer;
-      savedOffset = range.startOffset;
-    }
-    
-    // Clear and rebuild content
-    inputRef.current.innerHTML = "";
-    
-    if (!value) {
+  const updatePickerFromCaret = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      closePicker();
       return;
     }
-    
-    parts.forEach((part) => {
-      if (part.type === "mention") {
-        const badge = createMentionBadge(part.content);
-        inputRef.current!.appendChild(badge);
-      } else {
-        const textNode = document.createTextNode(part.content);
-        inputRef.current!.appendChild(textNode);
+
+    const range = sel.getRangeAt(0);
+
+    // If caret is inside/near a mention badge, do not open picker by typing.
+    if (getClosestMentionBadge(range.startContainer)) {
+      closePicker();
+      return;
+    }
+
+    // We only support trigger when caret is inside a Text node.
+    const container = range.startContainer;
+    if (!isTextNode(container)) {
+      closePicker();
+      return;
+    }
+
+    const text = container.textContent || "";
+    const cursor = range.startOffset;
+    const before = text.slice(0, cursor);
+    const at = before.lastIndexOf("@");
+
+    if (at === -1) {
+      closePicker();
+      return;
+    }
+
+    const afterAt = before.slice(at + 1);
+
+    // Must be same token: stop on whitespace/newline
+    if (/[\s\n]/.test(afterAt)) {
+      closePicker();
+      return;
+    }
+
+    // Build a trigger range from '@' to caret
+    const triggerRange = document.createRange();
+    triggerRange.setStart(container, at);
+    triggerRange.setEnd(container, cursor);
+
+    triggerRangeRef.current = triggerRange;
+    editingBadgeRef.current = null;
+
+    setShowMentionPicker(true);
+    setMentionFilter(afterAt);
+  }, [closePicker]);
+
+  const handleInput = useCallback(() => {
+    if (isComposingRef.current) return;
+
+    // Keep parent value in sync
+    syncValueUp();
+
+    // Update picker state from caret
+    updatePickerFromCaret();
+
+    // Enforce maxLength (soft) by trimming, only if needed
+    if (maxLength && inputRef.current) {
+      const plain = getPlainText();
+      if (plain.length > maxLength) {
+        // Trim the last inserted chars by re-rendering from trimmed value (rare path)
+        const trimmed = plain.slice(0, maxLength);
+        renderFromValue(trimmed);
+        lastSyncedValueRef.current = trimmed;
+        onChange(trimmed);
       }
-    });
-    
-    // Restore cursor at end
-    if (inputRef.current.lastChild) {
-      const range = document.createRange();
-      range.selectNodeContents(inputRef.current);
-      range.collapse(false);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
     }
-  }, [value, parts]);
+  }, [getPlainText, maxLength, onChange, renderFromValue, syncValueUp, updatePickerFromCaret]);
 
-  // Initial render
-  const hasRenderedRef = useRef(false);
-  
-  useEffect(() => {
-    if (!inputRef.current) return;
-    
-    // Only render initially or when value changes from outside
-    if (!hasRenderedRef.current || inputRef.current.childNodes.length === 0) {
-      renderContent();
-      hasRenderedRef.current = true;
-    }
-  }, [value, renderContent]);
+  const handleSelectMention = useCallback(
+    (mention: string) => {
+      if (!inputRef.current) return;
 
-  // Handle paste - strip formatting
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
-    document.execCommand("insertText", false, text);
-  }, []);
+      const full = mention.startsWith("@") ? mention : `@${mention}`;
 
-  // Handle keydown
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Handle backspace on badges
-    if (e.key === "Backspace") {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        if (range.collapsed) {
-          const prevSibling = range.startContainer.previousSibling;
-          if (prevSibling && (prevSibling as HTMLElement).dataset?.mention) {
+      // Editing an existing badge
+      if (editingBadgeRef.current) {
+        updateMentionBadge(editingBadgeRef.current, full);
+        const space = ensureTrailingSpace(editingBadgeRef.current);
+        setCaretAfterNode(space);
+        closePicker();
+        setTimeout(syncValueUp, 0);
+        inputRef.current.focus();
+        return;
+      }
+
+      const sel = window.getSelection();
+      if (!sel) return;
+
+      const targetRange = triggerRangeRef.current || (sel.rangeCount ? sel.getRangeAt(0) : null);
+      if (!targetRange) return;
+
+      // Replace typed '@...' if we have a triggerRange
+      targetRange.deleteContents();
+
+      const badge = createMentionBadge(full);
+      targetRange.insertNode(badge);
+
+      const space = ensureTrailingSpace(badge);
+      setCaretAfterNode(space);
+
+      closePicker();
+
+      setTimeout(syncValueUp, 0);
+      inputRef.current.focus();
+    },
+    [closePicker, createMentionBadge, ensureTrailingSpace, setCaretAfterNode, syncValueUp, updateMentionBadge]
+  );
+
+  const handleEditorClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement;
+
+      // Remove mention
+      if (target?.dataset?.removeMention === "true") {
+        e.preventDefault();
+        e.stopPropagation();
+        const badge = target.closest("[data-mention]") as HTMLElement | null;
+        badge?.remove();
+        closePicker();
+        setTimeout(syncValueUp, 0);
+        inputRef.current?.focus();
+        return;
+      }
+
+      const badge = target.closest?.("[data-mention]") as HTMLElement | null;
+      if (badge) {
+        e.preventDefault();
+        e.stopPropagation();
+        openPickerForBadge(badge);
+      }
+    },
+    [closePicker, openPickerForBadge, syncValueUp]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Escape") {
+        closePicker();
+        return;
+      }
+
+      // Backspace removes badge when caret is immediately after it
+      if (e.key === "Backspace") {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+
+        const r = sel.getRangeAt(0);
+        if (!r.collapsed) return;
+
+        const container = r.startContainer;
+        const offset = r.startOffset;
+
+        // Case 1: caret is at start of a text node, check previous sibling
+        if (isTextNode(container) && offset === 0) {
+          const prev = container.previousSibling;
+          const prevBadge = getClosestMentionBadge(prev);
+          if (prevBadge) {
             e.preventDefault();
-            handleRemoveMention(prevSibling as HTMLElement);
+            prevBadge.remove();
+            closePicker();
+            setTimeout(syncValueUp, 0);
             return;
           }
         }
+
+        // Case 2: caret is in the root element after a badge
+        if (isHTMLElement(container) && container === inputRef.current && offset > 0) {
+          const prev = container.childNodes[offset - 1];
+          const prevBadge = getClosestMentionBadge(prev);
+          if (prevBadge) {
+            e.preventDefault();
+            prevBadge.remove();
+            closePicker();
+            setTimeout(syncValueUp, 0);
+          }
+        }
       }
+    },
+    [closePicker, syncValueUp]
+  );
+
+  // Sync external value only when not focused (prevents caret jump while typing)
+  useEffect(() => {
+    if (!inputRef.current) return;
+
+    // First mount
+    if (lastSyncedValueRef.current === "") {
+      renderFromValue(value);
+      lastSyncedValueRef.current = value || "";
+      return;
     }
-    
-    // Close picker on escape
-    if (e.key === "Escape") {
-      setShowMentionPicker(false);
+
+    if (!isFocused && value !== lastSyncedValueRef.current) {
+      renderFromValue(value);
+      lastSyncedValueRef.current = value || "";
     }
-  }, []);
+  }, [getPlainText, isFocused, renderFromValue, value]);
 
   // Close picker when clicking outside
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (evt: MouseEvent) => {
       if (
         mentionPickerRef.current &&
-        !mentionPickerRef.current.contains(e.target as Node) &&
+        !mentionPickerRef.current.contains(evt.target as Node) &&
         editorRef.current &&
-        !editorRef.current.contains(e.target as Node)
+        !editorRef.current.contains(evt.target as Node)
       ) {
-        setShowMentionPicker(false);
+        closePicker();
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [closePicker]);
 
   return (
     <div ref={editorRef} className="relative h-full">
-      {/* Contenteditable editor */}
       <div
         ref={inputRef}
         contentEditable
         suppressContentEditableWarning
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => {
+          setIsFocused(false);
+          // ensure parent is in sync when leaving the field
+          setTimeout(syncValueUp, 0);
+          closePicker();
+        }}
         onInput={handleInput}
-        onPaste={handlePaste}
         onKeyDown={handleKeyDown}
-        onCompositionStart={() => { isComposingRef.current = true; }}
-        onCompositionEnd={() => { 
-          isComposingRef.current = false; 
+        onClick={handleEditorClick}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          isComposingRef.current = false;
           handleInput();
         }}
         data-placeholder={placeholder}
         className={cn(
           "h-full w-full overflow-auto p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
-          "empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground empty:before:pointer-events-none",
+          "[&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-muted-foreground [&:empty]:before:pointer-events-none",
           className
         )}
-        style={{ minHeight: "200px", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+        style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
       />
 
-      {/* Mention picker popup */}
       {showMentionPicker && (
-        <div
-          ref={mentionPickerRef}
-          className="absolute z-50 top-12 left-4"
-        >
+        <div ref={mentionPickerRef} className="absolute z-50 top-12 left-4">
           <MentionPicker
             departments={departments}
             statuses={statuses}
