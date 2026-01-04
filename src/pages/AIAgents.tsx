@@ -1592,9 +1592,8 @@ Regras:
                 tags={tags || []}
                 templates={templates || []}
                 teamMembers={teamMembers}
-                aiAgents={automations.filter(a => a.is_active)}
+              aiAgents={automations.filter(a => a.is_active)}
                 lawFirm={lawFirm || undefined}
-              />
               />
             </CardContent>
           </Card>
