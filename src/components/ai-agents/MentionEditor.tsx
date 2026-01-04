@@ -311,16 +311,18 @@ export function MentionEditor({
     }
   }, [value, parts]);
 
-  // Initial render and value sync
+  // Initial render
+  const hasRenderedRef = useRef(false);
+  
   useEffect(() => {
     if (!inputRef.current) return;
     
-    // Only re-render if the actual text content differs
-    const currentText = getPlainText();
-    if (currentText !== value) {
+    // Only render initially or when value changes from outside
+    if (!hasRenderedRef.current || inputRef.current.childNodes.length === 0) {
       renderContent();
+      hasRenderedRef.current = true;
     }
-  }, [value, renderContent, getPlainText]);
+  }, [value, renderContent]);
 
   // Handle paste - strip formatting
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
