@@ -473,16 +473,60 @@ export function useConversations() {
   });
 
   const updateConversationDepartment = useMutation({
-    mutationFn: async ({ conversationId, departmentId }: { conversationId: string; departmentId: string | null }) => {
+    mutationFn: async ({ conversationId, departmentId, clientId }: { conversationId: string; departmentId: string | null; clientId?: string | null }) => {
+      // Get current department name for logging
+      const { data: conversation } = await supabase
+        .from("conversations")
+        .select("department_id, client_id, departments(name)")
+        .eq("id", conversationId)
+        .single();
+      
+      const fromDeptName = (conversation?.departments as any)?.name || null;
+      const effectiveClientId = clientId || conversation?.client_id;
+      
+      // Get new department name
+      let toDeptName: string | null = null;
+      if (departmentId) {
+        const { data: newDept } = await supabase
+          .from("departments")
+          .select("name")
+          .eq("id", departmentId)
+          .single();
+        toDeptName = newDept?.name || null;
+      }
+      
       const { error } = await supabase
         .from("conversations")
         .update({ department_id: departmentId })
         .eq("id", conversationId);
       
       if (error) throw error;
+      
+      // Log department change if client exists and there's an actual change
+      if (effectiveClientId && fromDeptName !== toDeptName) {
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: userProfile } = await supabase
+          .from("profiles")
+          .select("law_firm_id")
+          .eq("id", user?.id || '')
+          .single();
+        
+        if (userProfile?.law_firm_id) {
+          await supabase.from("client_actions").insert({
+            client_id: effectiveClientId,
+            law_firm_id: userProfile.law_firm_id,
+            action_type: "department_change",
+            from_value: fromDeptName || "Sem departamento",
+            to_value: toDeptName || "Sem departamento",
+            description: `transferiu para departamento ${toDeptName || "Sem departamento"}`,
+            performed_by: user?.id || null,
+          });
+        }
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
     },
     onError: (error) => {
       toast({

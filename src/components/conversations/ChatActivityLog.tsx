@@ -57,6 +57,8 @@ const actionTypeConfig: Record<string, { icon: typeof ArrowRightLeft; label: str
   department_change: { icon: Folder, label: "transferiu para departamento" },
   tag_add: { icon: Tag, label: "adicionou a tag" },
   tag_remove: { icon: Tag, label: "removeu a tag" },
+  tag_added: { icon: Tag, label: "adicionou a tag" },
+  tag_removed: { icon: Tag, label: "removeu a tag" },
   transfer_handler: { icon: ArrowRightLeft, label: "transferiu o atendimento" },
 };
 
