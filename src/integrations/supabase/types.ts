@@ -2243,6 +2243,7 @@ export type Database = {
           law_firm_id: string
           scheduled_at: string
           sent_at: string | null
+          started_at: string | null
           status: string
           template_id: string | null
         }
@@ -2258,6 +2259,7 @@ export type Database = {
           law_firm_id: string
           scheduled_at: string
           sent_at?: string | null
+          started_at?: string | null
           status?: string
           template_id?: string | null
         }
@@ -2273,6 +2275,7 @@ export type Database = {
           law_firm_id?: string
           scheduled_at?: string
           sent_at?: string | null
+          started_at?: string | null
           status?: string
           template_id?: string | null
         }
