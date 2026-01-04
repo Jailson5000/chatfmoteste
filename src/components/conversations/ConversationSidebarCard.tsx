@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Clock, Folder, Phone, Smartphone, Tag, User } from "lucide-react";
+import { Bot, Folder, Phone, Smartphone, Tag, User } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -149,30 +149,9 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
         </p>
       </div>
 
-      {/* Status + Department + Tags + Scheduled Follow-ups */}
-      {(conversation.clientStatus || conversation.department || conversation.tags.length > 0 || (conversation.scheduledFollowUps && conversation.scheduledFollowUps > 0)) && (
+      {/* Status + Department + Tags */}
+      {(conversation.clientStatus || conversation.department || conversation.tags.length > 0) && (
         <div className="mt-2 flex flex-wrap gap-1 min-w-0 overflow-hidden">
-          {/* Scheduled follow-ups badge */}
-          {conversation.scheduledFollowUps && conversation.scheduledFollowUps > 0 && (
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge 
-                    variant="outline" 
-                    className="text-[10px] h-[18px] px-1.5 gap-1 bg-amber-500/10 text-amber-600 border-amber-500/30"
-                  >
-                    <Clock className="h-2.5 w-2.5" />
-                    <span>{conversation.scheduledFollowUps}</span>
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <span className="text-xs">
-                    {conversation.scheduledFollowUps} follow-up{conversation.scheduledFollowUps > 1 ? "s" : ""} agendado{conversation.scheduledFollowUps > 1 ? "s" : ""}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
           {conversation.clientStatus && (
             <Badge
               className="text-[10px] h-[18px] px-1.5 border-0 min-w-0 max-w-[100px]"
