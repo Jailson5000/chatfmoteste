@@ -5,6 +5,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function normalizeUrl(url: string): string {
+  return (url || "").replace(/\/+$/, "").replace(/\/manager$/i, "");
+}
+
 interface ScheduledFollowUp {
   id: string;
   law_firm_id: string;
