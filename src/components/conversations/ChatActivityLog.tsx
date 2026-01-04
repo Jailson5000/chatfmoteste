@@ -1,8 +1,7 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -16,7 +15,6 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { cn } from "@/lib/utils";
 
 interface ChatActivityLogProps {
   conversationId: string;
@@ -64,6 +62,7 @@ const actionTypeConfig: Record<string, { icon: typeof ArrowRightLeft; label: str
 
 export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const queryClient = useQueryClient();
 
   // Fetch client actions
   const { data: clientActions = [] } = useQuery({
@@ -115,6 +114,45 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
     },
     enabled: !!conversationId,
   });
+
+  // Real-time subscription for transfer logs and client actions
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const channel = supabase
+      .channel(`activity-log-${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ai_transfer_logs',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["chat-activity-transfers", conversationId] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'client_actions',
+          filter: clientId ? `client_id=eq.${clientId}` : undefined,
+        },
+        () => {
+          if (clientId) {
+            queryClient.invalidateQueries({ queryKey: ["chat-activity-actions", clientId] });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, clientId, queryClient]);
 
   // Combine and sort activities
   const activities: ActivityItem[] = [

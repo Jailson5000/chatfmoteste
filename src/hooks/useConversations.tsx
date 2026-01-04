@@ -379,44 +379,68 @@ export function useConversations() {
       }
 
       // ========================================================================
-      // AUDIT: Log the AI transfer for full traceability
+      // AUDIT: Log ALL transfers (AI↔Human and AI↔AI) for full traceability
       // ========================================================================
-      if (toAutomationId && lawFirmId && toAutomationId !== fromAutomationId) {
-        // Get agent names for the log
+      // Determine if this is a meaningful transfer that should be logged
+      const isTransferToAI = handlerType === 'ai' && toAutomationId;
+      const isTransferToHuman = handlerType === 'human' && assignedTo;
+      const hasHandlerChange = isTransferToAI || isTransferToHuman;
+      
+      if (hasHandlerChange && lawFirmId) {
+        // Get agent names for the log (if any AI involved)
         const agentIds = [toAutomationId, fromAutomationId].filter(Boolean) as string[];
-        const { data: agents } = await supabase
-          .from("automations")
-          .select("id, name")
-          .in("id", agentIds);
-
-        const agentsMap = (agents || []).reduce((acc, a) => {
-          acc[a.id] = a.name;
-          return acc;
-        }, {} as Record<string, string>);
+        let agentsMap: Record<string, string> = {};
+        
+        if (agentIds.length > 0) {
+          const { data: agents } = await supabase
+            .from("automations")
+            .select("id, name")
+            .in("id", agentIds);
+          agentsMap = (agents || []).reduce((acc, a) => {
+            acc[a.id] = a.name;
+            return acc;
+          }, {} as Record<string, string>);
+        }
 
         // Get current user for audit
         const { data: { user } } = await supabase.auth.getUser();
         let userName: string | null = null;
-        if (user?.id) {
-          const { data: profile } = await supabase
+        let targetHumanName: string | null = null;
+        
+        if (user?.id || assignedTo) {
+          const profileIds = [user?.id, assignedTo].filter(Boolean) as string[];
+          const { data: profiles } = await supabase
             .from("profiles")
-            .select("full_name")
-            .eq("id", user.id)
-            .single();
-          userName = profile?.full_name || null;
+            .select("id, full_name")
+            .in("id", profileIds);
+          
+          const profilesMap = (profiles || []).reduce((acc, p) => {
+            acc[p.id] = p.full_name;
+            return acc;
+          }, {} as Record<string, string>);
+          
+          if (user?.id) userName = profilesMap[user.id] || null;
+          if (assignedTo) targetHumanName = profilesMap[assignedTo] || null;
         }
+
+        // Determine transfer type and target name
+        const transferType = isTransferToHuman ? 'human' : 'ai';
+        const toAgentId = isTransferToHuman ? assignedTo! : toAutomationId!;
+        const toAgentName = isTransferToHuman 
+          ? (targetHumanName || "Atendente")
+          : (agentsMap[toAutomationId!] || "IA");
 
         // Insert transfer log
         await supabase.from("ai_transfer_logs").insert({
           law_firm_id: lawFirmId,
           conversation_id: conversationId,
           from_agent_id: fromAutomationId,
-          to_agent_id: toAutomationId,
+          to_agent_id: toAgentId,
           from_agent_name: fromAutomationId ? agentsMap[fromAutomationId] || null : null,
-          to_agent_name: agentsMap[toAutomationId] || "Unknown",
+          to_agent_name: toAgentName,
           transferred_by: user?.id || null,
           transferred_by_name: userName,
-          transfer_type: 'manual',
+          transfer_type: transferType,
           reason: reason || null,
           metadata: {
             handler_type: handlerType,
