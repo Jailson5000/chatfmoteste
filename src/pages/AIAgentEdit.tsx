@@ -422,10 +422,6 @@ export default function AIAgentEdit() {
 
   // Handle back navigation with unsaved changes check
   const handleBack = () => {
-    console.log("[AIAgentEdit] handleBack called, hasChanges:", hasChanges);
-    console.log("[AIAgentEdit] editedPrompt:", editedPrompt?.slice(0, 50));
-    console.log("[AIAgentEdit] automation.ai_prompt:", automation?.ai_prompt?.slice(0, 50));
-    
     if (hasChanges) {
       setShowUnsavedDialog(true);
     } else {
