@@ -60,7 +60,7 @@ import { ptBR } from "date-fns/locale";
 import { exportToExcel, getFormattedDate } from "@/lib/exportUtils";
 
 export default function Contacts() {
-  const { clients, isLoading, createClient, deleteClient, unifyDuplicates } = useClients();
+  const { clients, isLoading, createClient, deleteClient, unifyDuplicates, updateClientStatus } = useClients();
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
@@ -198,6 +198,17 @@ export default function Contacts() {
     setSelectedContacts((prev) =>
       prev.includes(id) ? prev.filter((cid) => cid !== id) : [...prev, id]
     );
+  };
+
+  const handleStatusChange = (clientId: string, statusId: string) => {
+    updateClientStatus.mutate({
+      clientId,
+      statusId: statusId === "none" ? null : statusId,
+    }, {
+      onSuccess: () => {
+        toast({ title: "Status atualizado" });
+      },
+    });
   };
 
   const handleExport = () => {
@@ -488,22 +499,45 @@ export default function Contacts() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {status ? (
-                        <Badge 
-                          variant="outline"
-                          style={{ 
-                            backgroundColor: `${status.color}20`,
-                            borderColor: status.color,
-                            color: status.color
-                          }}
-                        >
-                          {status.name}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="border-emerald-500 text-emerald-500 bg-emerald-500/10">
-                          Aberto
-                        </Badge>
-                      )}
+                      <Select 
+                        value={client.custom_status_id || "none"} 
+                        onValueChange={(val) => handleStatusChange(client.id, val)}
+                      >
+                        <SelectTrigger className="h-7 w-auto min-w-[100px] border-0 bg-transparent hover:bg-muted/50">
+                          {status ? (
+                            <Badge 
+                              variant="outline"
+                              style={{ 
+                                backgroundColor: `${status.color}20`,
+                                borderColor: status.color,
+                                color: status.color
+                              }}
+                            >
+                              {status.name}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-emerald-500 text-emerald-500 bg-emerald-500/10">
+                              Aberto
+                            </Badge>
+                          )}
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            <span className="text-emerald-600">Aberto</span>
+                          </SelectItem>
+                          {statuses.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              <div className="flex items-center gap-2">
+                                <div 
+                                  className="w-2 h-2 rounded-full" 
+                                  style={{ backgroundColor: s.color }} 
+                                />
+                                {s.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell>
                       {department ? (
