@@ -12,7 +12,13 @@ export function AppLayout() {
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden">
       <AppSidebar />
-      <main className={isConversations ? "flex-1 min-h-0 min-w-0 overflow-hidden transition-all duration-300" : "flex-1 min-h-0 min-w-0 overflow-auto transition-all duration-300"}>
+      <main
+        className={
+          isConversations
+            ? "flex-1 h-full min-h-0 min-w-0 overflow-hidden transition-all duration-300"
+            : "flex-1 h-full min-h-0 min-w-0 overflow-auto transition-all duration-300"
+        }
+      >
         <Outlet />
       </main>
     </div>
