@@ -180,6 +180,7 @@ export default function Conversations() {
   }, [automations]);
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [newlyCreatedConversation, setNewlyCreatedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messageInput, setMessageInput] = useState("");
@@ -267,10 +268,15 @@ export default function Conversations() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
-  const selectedConversation = useMemo(() => 
-    conversations.find((c) => c.id === selectedConversationId),
-    [conversations, selectedConversationId]
-  );
+  const selectedConversation = useMemo(() => {
+    const fromList = conversations.find((c) => c.id === selectedConversationId);
+    if (fromList) return fromList;
+    // Use newly created conversation as fallback while waiting for refetch
+    if (newlyCreatedConversation && newlyCreatedConversation.id === selectedConversationId) {
+      return newlyCreatedConversation;
+    }
+    return undefined;
+  }, [conversations, selectedConversationId, newlyCreatedConversation]);
 
   // Check if audio mode is enabled for the SELECTED CONVERSATION (SINGLE SOURCE OF TRUTH)
   // This takes precedence over global voice config
@@ -485,15 +491,46 @@ export default function Conversations() {
             .single();
           
           if (!error && newConv) {
-            // Invalidate and refetch conversations
-            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            // Create a temporary conversation object for immediate use
+            const tempConversation = {
+              ...newConv,
+              whatsapp_instance: instance,
+              current_automation: null,
+              client: null,
+              department: null,
+              assigned_profile: null,
+              client_tags: [],
+            };
             
-            // Select the new conversation after a brief delay for refetch
-            setTimeout(() => {
-              setSelectedConversationId(newConv.id);
-              setShowMobileChat(true);
-              setActiveTab("queue");
-            }, 300);
+            // Store temporarily so selectedConversation works before refetch
+            setNewlyCreatedConversation(tempConversation);
+            
+            // Immediately set the conversation id so chat panel appears
+            setSelectedConversationId(newConv.id);
+            setShowMobileChat(true);
+            setActiveTab("queue");
+            
+            // Also try to link to existing client by phone
+            const { data: existingClient } = await supabase
+              .from("clients")
+              .select("id, name")
+              .eq("law_firm_id", lawFirm.id)
+              .or(`phone.eq.${normalizedPhone},phone.ilike.%${normalizedPhone.slice(-9)}%`)
+              .limit(1)
+              .single();
+            
+            if (existingClient) {
+              await supabase
+                .from("conversations")
+                .update({ client_id: existingClient.id })
+                .eq("id", newConv.id);
+            }
+            
+            // Invalidate and refetch conversations
+            await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            
+            // Clear temporary conversation after refetch
+            setNewlyCreatedConversation(null);
             
             toast({
               title: "Conversa iniciada",

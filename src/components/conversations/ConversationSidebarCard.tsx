@@ -114,22 +114,23 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           </AvatarFallback>
         </Avatar>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-1.5 min-w-0">
             <h3
               className={cn(
-                "min-w-0 font-semibold text-[13px] leading-4 truncate",
+                "min-w-0 flex-1 font-semibold text-[12px] leading-4 truncate max-w-[140px]",
                 conversation.unread > 0 && "font-bold"
               )}
+              title={conversation.name}
             >
               {conversation.name}
             </h3>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
-              <div className="w-1.5 h-1.5 rounded-full bg-success" />
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0">
+              <div className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0" />
               <span className="tabular-nums">{conversation.time}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="text-[11px] text-muted-foreground truncate">
             {formatBrazilianPhone(conversation.phone)}
           </p>
         </div>
@@ -149,10 +150,10 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
 
       {/* Status + Department + Tags */}
       {(conversation.clientStatus || conversation.department || conversation.tags.length > 0) && (
-        <div className="mt-2 flex flex-wrap gap-1 min-w-0">
+        <div className="mt-2 flex flex-wrap gap-1 min-w-0 overflow-hidden">
           {conversation.clientStatus && (
             <Badge
-              className="text-xs h-5 px-2 border-0 min-w-0 max-w-[180px]"
+              className="text-[10px] h-[18px] px-1.5 border-0 min-w-0 max-w-[100px]"
               style={{
                 backgroundColor: `${conversation.clientStatus.color}20`,
                 color: conversation.clientStatus.color,
@@ -164,13 +165,13 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
 
           {conversation.department && (
             <Badge
-              className="text-xs h-5 px-2 border-0 gap-1 min-w-0 max-w-[180px]"
+              className="text-[10px] h-[18px] px-1.5 border-0 gap-0.5 min-w-0 max-w-[100px]"
               style={{
                 backgroundColor: `${conversation.department.color}20`,
                 color: conversation.department.color,
               }}
             >
-              <Folder className="h-3 w-3 flex-shrink-0" />
+              <Folder className="h-2.5 w-2.5 flex-shrink-0" />
               <span className="truncate">{conversation.department.name}</span>
             </Badge>
           )}
@@ -178,14 +179,14 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           {conversation.tags.slice(0, 1).map((tag, idx) => (
             <Badge
               key={`${tag.name}-${idx}`}
-              className="text-xs h-5 px-2 border-0 min-w-0 max-w-[140px]"
+              className="text-[10px] h-[18px] px-1.5 border-0 min-w-0 max-w-[80px]"
               style={{ backgroundColor: `${tag.color}20`, color: tag.color }}
             >
               <span className="truncate">{tag.name}</span>
             </Badge>
           ))}
           {conversation.tags.length > 1 && (
-            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+            <Badge variant="secondary" className="text-[10px] h-[18px] px-1">
               +{conversation.tags.length - 1}
             </Badge>
           )}
@@ -245,15 +246,15 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           </TooltipProvider>
         </div>
 
-        <div className="flex items-center gap-1 min-w-0">
+        <div className="flex items-center gap-1 min-w-0 overflow-hidden">
           {isAI ? (
-            <Bot className="h-3 w-3 text-purple-500 flex-shrink-0" />
+            <Bot className="h-2.5 w-2.5 text-purple-500 flex-shrink-0" />
           ) : (
-            <User className="h-3 w-3 text-success flex-shrink-0" />
+            <User className="h-2.5 w-2.5 text-success flex-shrink-0" />
           )}
           <span
             className={cn(
-              "text-[10px] truncate max-w-[100px]",
+              "text-[9px] truncate max-w-[80px]",
               isAI ? "text-purple-500" : "text-success"
             )}
             title={handlerLabel}
