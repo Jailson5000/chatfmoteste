@@ -60,16 +60,22 @@ Deno.serve(async (req) => {
 
     console.log("[process-follow-ups] Starting follow-up processing...");
 
-    // Get all pending follow-ups that are due
-    // Note: also retries any stuck "pending" rows that were claimed >10min ago
-    const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
 
+    // Recovery: retry follow-ups that failed due to the legacy started_at claim error
+    await supabase
+      .from("scheduled_follow_ups")
+      .update({ status: "pending", error_message: null })
+      .eq("status", "failed")
+      .eq("error_message", "column scheduled_follow_ups.started_at does not exist")
+      .lte("scheduled_at", nowIso);
+
+    // Get all pending follow-ups that are due
     const { data: pendingFollowUps, error: fetchError } = await supabase
       .from("scheduled_follow_ups")
       .select("*")
       .eq("status", "pending")
-      .lte("scheduled_at", new Date().toISOString())
-      .or(`started_at.is.null,started_at.lt.${staleThreshold}`)
+      .lte("scheduled_at", nowIso)
       .order("scheduled_at", { ascending: true })
       .limit(50); // Process in batches
 
@@ -93,15 +99,14 @@ Deno.serve(async (req) => {
 
     for (const followUp of pendingFollowUps as ScheduledFollowUp[]) {
       try {
-        const startedAtIso = new Date().toISOString();
+        const processingAtIso = new Date().toISOString();
 
         // Claim the row to prevent duplicate sends across overlapping cron runs
         const { data: claimed, error: claimError } = await supabase
           .from("scheduled_follow_ups")
-          .update({ started_at: startedAtIso })
+          .update({ status: "processing" })
           .eq("id", followUp.id)
           .eq("status", "pending")
-          .or(`started_at.is.null,started_at.lt.${staleThreshold}`)
           .select("id")
           .maybeSingle();
 
@@ -128,11 +133,11 @@ Deno.serve(async (req) => {
             .from("scheduled_follow_ups")
             .update({
               status: "cancelled",
-              cancelled_at: startedAtIso,
+              cancelled_at: processingAtIso,
               cancel_reason: "Client responded",
             })
             .eq("id", followUp.id)
-            .eq("status", "pending");
+            .eq("status", "processing");
           continue;
         }
 
@@ -359,8 +364,7 @@ Deno.serve(async (req) => {
             sent_at: new Date().toISOString(),
           })
           .eq("id", followUp.id)
-          .eq("status", "pending")
-          .eq("started_at", startedAtIso);
+          .eq("status", "processing");
 
         successCount++;
 
@@ -412,10 +416,9 @@ Deno.serve(async (req) => {
           console.log(`[process-follow-ups] Archiving conversation ${followUp.conversation_id}`);
           await supabase
             .from("conversations")
-            .update({ 
+            .update({
               archived_at: new Date().toISOString(),
               archived_reason: "Follow-up: desistir do lead",
-              status: "archived",
               archived_next_responsible_type: null,
               archived_next_responsible_id: null,
             })
@@ -431,7 +434,7 @@ Deno.serve(async (req) => {
             error_message: error.message || "Unknown error",
           })
           .eq("id", followUp.id)
-          .eq("status", "pending");
+          .in("status", ["pending", "processing"]);
         failCount++;
       }
     }

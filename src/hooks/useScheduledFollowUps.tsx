@@ -43,7 +43,7 @@ export function useScheduledFollowUps(conversationId?: string) {
           template:templates(id, name, shortcut, content)
         `)
         .eq("conversation_id", conversationId)
-        .eq("status", "pending")
+        .in("status", ["pending", "processing"])
         .order("scheduled_at", { ascending: true });
 
       if (error) throw error;
@@ -87,8 +87,9 @@ export function useScheduledFollowUps(conversationId?: string) {
         },
         (payload) => {
           const newStatus = payload.new?.status;
-          // When a follow-up is sent, update queries
-          if (newStatus === 'sent' || newStatus === 'cancelled') {
+
+          // Any status change affects indicators and chat header badge
+          if (newStatus) {
             queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
             queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
             queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -148,7 +149,7 @@ export function useScheduledFollowUps(conversationId?: string) {
           cancel_reason: "All cancelled by user" 
         })
         .eq("conversation_id", convId)
-        .eq("status", "pending");
+        .in("status", ["pending", "processing"]);
 
       if (error) throw error;
     },
