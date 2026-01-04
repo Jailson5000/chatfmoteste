@@ -12,6 +12,26 @@ const MAX_CONTEXT_STRING_LENGTH = 255;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api'];
 
+// Prompt injection detection patterns
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)/i,
+  /disregard\s+(all\s+)?(previous|prior|your)\s+(instructions?|prompts?|programming)/i,
+  /you\s+are\s+now\s+(a|an|the)/i,
+  /forget\s+(all\s+)?(previous|your|everything)/i,
+  /new\s+(persona|identity|role|character)/i,
+  /pretend\s+(you\s+are|to\s+be)/i,
+  /act\s+as\s+(if\s+)?(you\s+are|a|an)/i,
+  /system\s*(message|prompt|override|instruction)/i,
+  /\[(system|admin|override|root|sudo)\]/i,
+  /repeat\s+(your|the)\s+(instructions?|system\s+prompt|rules?)/i,
+  /what\s+(are|is)\s+(your|the)\s+(instructions?|system\s+prompt|rules?)/i,
+  /reveal\s+(your|the)\s+(instructions?|prompt|programming)/i,
+  /output\s+(your|the)\s+(initial|original|system)\s+(prompt|instructions?)/i,
+  /jailbreak/i,
+  /DAN\s*mode/i,
+  /developer\s*mode/i,
+];
+
 // Helper to generate error reference ID for tracking
 function generateErrorRef(): string {
   return crypto.randomUUID().slice(0, 8);
@@ -23,11 +43,26 @@ function isValidUUID(str: string | undefined | null): boolean {
   return UUID_REGEX.test(str);
 }
 
+// Detect potential prompt injection attempts
+function detectPromptInjection(text: string): { detected: boolean; pattern?: string } {
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(text)) {
+      return { detected: true, pattern: pattern.source };
+    }
+  }
+  return { detected: false };
+}
+
 // Sanitize string input (prevent XSS and limit length)
 function sanitizeString(str: string | undefined | null, maxLength: number = MAX_CONTEXT_STRING_LENGTH): string {
   if (!str || typeof str !== 'string') return '';
   // Trim and limit length
   return str.trim().slice(0, maxLength);
+}
+
+// Wrap user input with delimiters to reduce injection risk
+function wrapUserInput(message: string): string {
+  return `<user_message>${message}</user_message>`;
 }
 
 interface ChatRequest {
@@ -1545,8 +1580,37 @@ REGRAS PARA USO DAS AÇÕES:
       messages.push(...recentMessages);
     }
 
-    // Add the current message
-    messages.push({ role: "user", content: message });
+    // ========================================================================
+    // PROMPT INJECTION DETECTION
+    // Check for potential prompt injection attempts before processing
+    // ========================================================================
+    const injectionCheck = detectPromptInjection(message);
+    if (injectionCheck.detected) {
+      console.warn(`[${errorRef}] PROMPT INJECTION DETECTED - Pattern: ${injectionCheck.pattern}`, {
+        conversation_id: conversationId,
+        message_preview: message.slice(0, 200),
+        tenant_id: agentLawFirmId,
+      });
+      
+      // Log to audit_logs for monitoring
+      await supabase.from('audit_logs').insert({
+        action: 'AI_INJECTION_ATTEMPT',
+        entity_type: 'conversation',
+        entity_id: conversationId,
+        new_values: {
+          pattern_detected: injectionCheck.pattern,
+          message_preview: message.slice(0, 200),
+          tenant_id: agentLawFirmId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+      
+      // Don't block - but add warning to context for the AI to handle naturally
+      // The AI will respond normally but we've logged the attempt
+    }
+
+    // Add the current message with XML delimiters to reduce injection risk
+    messages.push({ role: "user", content: wrapUserInput(message) });
 
     // Check Google Calendar integration and get available tools
     const effectiveLawFirmId = agentLawFirmId || context?.lawFirmId;
