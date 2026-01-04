@@ -36,6 +36,7 @@ interface MessageBubbleProps {
   conversationId?: string;
   isInternal?: boolean;
   isPontual?: boolean;
+  aiAgentName?: string | null; // Name of the AI agent that sent this message
   replyTo?: {
     id: string;
     content: string | null;
@@ -1063,6 +1064,7 @@ export function MessageBubble({
   replyTo,
   isInternal = false,
   isPontual = false,
+  aiAgentName,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -1271,7 +1273,7 @@ export function MessageBubble({
         {aiGenerated && isFromMe && !isInternal && (
           <div className="flex items-center gap-1 text-xs text-purple-600 mb-1 dark:text-purple-400">
             <Bot className="h-3 w-3" />
-            Assistente IA
+            {aiAgentName || "Assistente IA"}
           </div>
         )}
         

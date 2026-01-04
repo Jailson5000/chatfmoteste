@@ -2008,6 +2008,8 @@ export type Database = {
       }
       messages: {
         Row: {
+          ai_agent_id: string | null
+          ai_agent_name: string | null
           ai_generated: boolean
           content: string | null
           conversation_id: string
@@ -2027,6 +2029,8 @@ export type Database = {
           whatsapp_message_id: string | null
         }
         Insert: {
+          ai_agent_id?: string | null
+          ai_agent_name?: string | null
           ai_generated?: boolean
           content?: string | null
           conversation_id: string
@@ -2046,6 +2050,8 @@ export type Database = {
           whatsapp_message_id?: string | null
         }
         Update: {
+          ai_agent_id?: string | null
+          ai_agent_name?: string | null
           ai_generated?: boolean
           content?: string | null
           conversation_id?: string
@@ -2065,6 +2071,13 @@ export type Database = {
           whatsapp_message_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "messages_ai_agent_id_fkey"
+            columns: ["ai_agent_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "messages_conversation_id_fkey"
             columns: ["conversation_id"]

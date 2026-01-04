@@ -97,6 +97,8 @@ interface Message {
   media_url?: string | null;
   media_mime_type?: string | null;
   whatsapp_message_id?: string | null;
+  ai_agent_id?: string | null;
+  ai_agent_name?: string | null;
 }
 
 // Memory cache for decrypted audio
@@ -1337,7 +1339,7 @@ export function KanbanChatPanel({
                     {isAI && isFromMe && !isInternal && (
                       <div className="flex items-center gap-1 text-xs text-white/80 mb-1">
                         <Bot className="h-3 w-3" />
-                        Assistente IA
+                        {msg.ai_agent_name || "Assistente IA"}
                       </div>
                     )}
 
