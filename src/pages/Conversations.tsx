@@ -42,6 +42,7 @@ import { ReplyPreview } from "@/components/conversations/ReplyPreview";
 import { TemplatePopup } from "@/components/conversations/TemplatePopup";
 import { ContactStatusTags } from "@/components/conversations/ContactStatusTags";
 import { UnreadBadge } from "@/components/conversations/UnreadBadge";
+import { ChatActivityLog } from "@/components/conversations/ChatActivityLog";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
 import { useTemplates, Template } from "@/hooks/useTemplates";
 import { Input } from "@/components/ui/input";
@@ -1743,7 +1744,13 @@ export default function Conversations() {
                         <p className="text-sm">Nenhuma mensagem ainda</p>
                       </div>
                     ) : (
-                      messages.map((msg) => (
+                      <>
+                        {/* Activity Log - Internal movements visible only to team */}
+                        <ChatActivityLog 
+                          conversationId={selectedConversation.id} 
+                          clientId={selectedConversation.client_id || undefined} 
+                        />
+                        {messages.map((msg) => (
                           <MessageBubble
                             key={msg.id}
                             id={msg.id}
@@ -1766,7 +1773,8 @@ export default function Conversations() {
                             onScrollToMessage={scrollToMessage}
                             onRetry={handleRetryMessage}
                           />
-                        ))
+                        ))}
+                      </>
                     )}
                   </div>
                 </ScrollArea>
@@ -2245,7 +2253,13 @@ export default function Conversations() {
                       <p className="text-sm">Nenhuma mensagem ainda</p>
                     </div>
                   ) : (
-                    messages.map((msg) => (
+                    <>
+                      {/* Activity Log - Internal movements visible only to team */}
+                      <ChatActivityLog 
+                        conversationId={selectedConversation.id} 
+                        clientId={selectedConversation.client_id || undefined} 
+                      />
+                      {messages.map((msg) => (
                       <div key={msg.id} ref={(el) => { if (el) messageRefs.current.set(msg.id, el); }}>
                         <MessageBubble
                           id={msg.id}
@@ -2271,7 +2285,9 @@ export default function Conversations() {
                           isHighlighted={highlightedMessageId === msg.id}
                         />
                       </div>
-                    ))
+                      ))
+                    }
+                    </>
                   )}
                   <div ref={messagesEndRef} />
                 </div>

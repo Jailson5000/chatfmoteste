@@ -29,6 +29,7 @@ export interface Automation {
   updated_at: string;
   last_prompt: string | null;
   version: number;
+  notify_on_transfer: boolean;
 }
 
 export interface CreateAutomationParams {
@@ -40,6 +41,7 @@ export interface CreateAutomationParams {
   ai_prompt?: string;
   ai_temperature?: number;
   is_active?: boolean;
+  notify_on_transfer?: boolean;
 }
 
 export interface UpdateAutomationParams extends Partial<CreateAutomationParams> {
@@ -155,6 +157,7 @@ export function useAutomations() {
       if (updateData.ai_prompt !== undefined) updatePayload.ai_prompt = updateData.ai_prompt;
       if (updateData.ai_temperature !== undefined) updatePayload.ai_temperature = updateData.ai_temperature;
       if (updateData.is_active !== undefined) updatePayload.is_active = updateData.is_active;
+      if ((updateData as any).notify_on_transfer !== undefined) updatePayload.notify_on_transfer = (updateData as any).notify_on_transfer;
 
       // SECURITY: Validate automation belongs to user's law firm
       const { data, error } = await supabase

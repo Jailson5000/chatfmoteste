@@ -505,6 +505,7 @@ export type Database = {
           last_prompt: string | null
           law_firm_id: string
           name: string
+          notify_on_transfer: boolean
           position: number
           trigger_config: Json | null
           trigger_type: string
@@ -523,6 +524,7 @@ export type Database = {
           last_prompt?: string | null
           law_firm_id: string
           name: string
+          notify_on_transfer?: boolean
           position?: number
           trigger_config?: Json | null
           trigger_type: string
@@ -541,6 +543,7 @@ export type Database = {
           last_prompt?: string | null
           law_firm_id?: string
           name?: string
+          notify_on_transfer?: boolean
           position?: number
           trigger_config?: Json | null
           trigger_type?: string

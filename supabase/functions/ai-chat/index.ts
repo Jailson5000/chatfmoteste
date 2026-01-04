@@ -489,12 +489,13 @@ async function executeCrmTool(
   clientId: string | undefined,
   automationId: string,
   automationName: string,
-  toolCall: { name: string; arguments: string }
+  toolCall: { name: string; arguments: string },
+  notifyOnTransfer: boolean = false
 ): Promise<string> {
   try {
     const args = JSON.parse(toolCall.arguments);
     
-    console.log(`[AI Chat] Executing CRM tool: ${toolCall.name}`, args);
+    console.log(`[AI Chat] Executing CRM tool: ${toolCall.name}`, args, { notifyOnTransfer });
     
     switch (toolCall.name) {
       case "transfer_to_department": {
@@ -557,10 +558,20 @@ async function executeCrmTool(
             reason: args.reason || `Transferência automática para ${targetDept.name}`
           });
         
-        return JSON.stringify({ 
-          success: true, 
-          message: `Conversa transferida para o departamento ${targetDept.name}` 
-        });
+        // Return success with notification preference
+        if (notifyOnTransfer) {
+          return JSON.stringify({ 
+            success: true, 
+            message: `Conversa transferida para o departamento ${targetDept.name}. Por favor, informe ao cliente que ele será atendido por ${targetDept.name}.`,
+            notify_client: true
+          });
+        } else {
+          return JSON.stringify({ 
+            success: true, 
+            message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para o departamento ${targetDept.name}. Continue o atendimento normalmente sem mencionar a transferência.`,
+            notify_client: false
+          });
+        }
       }
       
       case "change_status": {
@@ -789,10 +800,20 @@ async function executeCrmTool(
               reason: args.reason || `Transferência para atendente ${targetMember.full_name}`
             });
           
-          return JSON.stringify({ 
-            success: true, 
-            message: `Conversa transferida para ${targetMember.full_name}. O atendimento agora será feito por um humano.` 
-          });
+          // Return success with notification preference
+          if (notifyOnTransfer) {
+            return JSON.stringify({ 
+              success: true, 
+              message: `Conversa transferida para ${targetMember.full_name}. Por favor, informe ao cliente que ele será atendido por um de nossos especialistas.`,
+              notify_client: true
+            });
+          } else {
+            return JSON.stringify({ 
+              success: true, 
+              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para ${targetMember.full_name}. Continue o atendimento normalmente sem mencionar a transferência.`,
+              notify_client: false
+            });
+          }
           
         } else if (args.responsible_type === "ai") {
           // Find AI agent by name
@@ -840,10 +861,20 @@ async function executeCrmTool(
               reason: args.reason || `Transferência para IA ${targetAgent.name}`
             });
           
-          return JSON.stringify({ 
-            success: true, 
-            message: `Conversa transferida para o agente de IA ${targetAgent.name}. O novo agente continuará o atendimento.` 
-          });
+          // Return success with notification preference
+          if (notifyOnTransfer) {
+            return JSON.stringify({ 
+              success: true, 
+              message: `Conversa transferida para o agente de IA ${targetAgent.name}. O novo agente continuará o atendimento.`,
+              notify_client: true
+            });
+          } else {
+            return JSON.stringify({ 
+              success: true, 
+              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para o agente ${targetAgent.name}. Continue normalmente sem mencionar a transferência.`,
+              notify_client: false
+            });
+          }
         }
         
         return JSON.stringify({ 
@@ -1336,7 +1367,7 @@ serve(async (req) => {
     // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
-      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config")
+      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer")
       .eq("id", automationId)
       .eq("is_active", true)
       .single();
@@ -1371,6 +1402,9 @@ serve(async (req) => {
     
     // Get law_firm_id from automation (for usage tracking)
     agentLawFirmId = (automation as any).law_firm_id;
+
+    // Get notify_on_transfer setting (default false)
+    const notifyOnTransfer = (automation as any).notify_on_transfer ?? false;
 
     // Extract AI role from trigger_config for audit purposes
     const triggerConfig = (automation as any).trigger_config as Record<string, unknown> | null;
@@ -1741,7 +1775,8 @@ REGRAS PARA USO DAS AÇÕES:
             context?.clientId,
             automationId!,
             automationName,
-            { name: toolName, arguments: toolArgs }
+            { name: toolName, arguments: toolArgs },
+            notifyOnTransfer
           );
         } else {
           result = JSON.stringify({ error: `Unknown tool: ${toolName}` });
