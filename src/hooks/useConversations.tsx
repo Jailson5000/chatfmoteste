@@ -261,10 +261,14 @@ export function useConversations() {
 
   const updateConversation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Conversation> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate conversation belongs to user's law firm
       const { error } = await supabase
         .from("conversations")
         .update(updates)
-        .eq("id", id);
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
     },
@@ -282,10 +286,14 @@ export function useConversations() {
 
   const updateConversationStatus = useMutation({
     mutationFn: async ({ conversationId, status }: { conversationId: string; status: string }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate conversation belongs to user's law firm
       const { error } = await supabase
         .from("conversations")
         .update({ status: status as any })
-        .eq("id", conversationId);
+        .eq("id", conversationId)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
     },
@@ -463,10 +471,14 @@ export function useConversations() {
 
   const updateConversationTags = useMutation({
     mutationFn: async ({ conversationId, tags }: { conversationId: string; tags: string[] }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate conversation belongs to user's law firm
       const { error } = await supabase
         .from("conversations")
         .update({ tags })
-        .eq("id", conversationId);
+        .eq("id", conversationId)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
     },
@@ -484,6 +496,8 @@ export function useConversations() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
       if (statusId) {
         const { data, error } = await supabase.rpc("update_client_status_with_follow_ups", {
           _client_id: clientId,
@@ -494,10 +508,12 @@ export function useConversations() {
       }
 
       // Clearing status: update + cancel pending follow-ups
+      // SECURITY: Validate client belongs to user's law firm
       const { error: updateError } = await supabase
         .from("clients")
         .update({ custom_status_id: null })
-        .eq("id", clientId);
+        .eq("id", clientId)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
 
       if (updateError) throw updateError;
 
@@ -509,7 +525,8 @@ export function useConversations() {
           cancel_reason: "Status cleared",
         })
         .eq("client_id", clientId)
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
 
       if (cancelError) throw cancelError;
 
@@ -541,6 +558,8 @@ export function useConversations() {
       enabled: boolean;
       reason?: 'user_request' | 'text_message_received' | 'manual_toggle' | 'accessibility_need';
     }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
       const now = new Date().toISOString();
       const updateData: Record<string, any> = {
         ai_audio_enabled: enabled,
@@ -553,10 +572,12 @@ export function useConversations() {
         updateData.ai_audio_last_disabled_at = now;
       }
 
+      // SECURITY: Validate conversation belongs to user's law firm
       const { error } = await supabase
         .from("conversations")
         .update(updateData)
-        .eq("id", conversationId);
+        .eq("id", conversationId)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
     },

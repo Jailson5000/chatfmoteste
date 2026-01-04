@@ -69,10 +69,14 @@ export function useTags() {
 
   const updateTag = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Tag> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate tag belongs to user's law firm
       const { data, error } = await supabase
         .from("tags")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -90,7 +94,14 @@ export function useTags() {
 
   const deleteTag = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("tags").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate tag belongs to user's law firm
+      const { error } = await supabase
+        .from("tags")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       if (error) throw error;
     },
     onSuccess: () => {

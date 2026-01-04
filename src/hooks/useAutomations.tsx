@@ -126,13 +126,16 @@ export function useAutomations() {
 
   const updateAutomation = useMutation({
     mutationFn: async (params: UpdateAutomationParams) => {
+      if (!lawFirm?.id) throw new Error("Law firm not found");
+      
       const { id, ...updateData } = params;
 
-      // First, get current version
+      // First, get current version - SECURITY: validate belongs to law firm
       const { data: currentData, error: fetchError } = await supabase
         .from("automations")
         .select("version")
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .single();
 
       if (fetchError) throw fetchError;
@@ -153,10 +156,12 @@ export function useAutomations() {
       if (updateData.ai_temperature !== undefined) updatePayload.ai_temperature = updateData.ai_temperature;
       if (updateData.is_active !== undefined) updatePayload.is_active = updateData.is_active;
 
+      // SECURITY: Validate automation belongs to user's law firm
       const { data, error } = await supabase
         .from("automations")
         .update(updatePayload)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -181,10 +186,14 @@ export function useAutomations() {
 
   const deleteAutomation = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirm?.id) throw new Error("Law firm not found");
+      
+      // SECURITY: Validate automation belongs to user's law firm
       const { error } = await supabase
         .from("automations")
         .delete()
-        .eq("id", id);
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
 
       if (error) throw error;
     },
@@ -206,10 +215,14 @@ export function useAutomations() {
 
   const toggleAutomation = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
+      if (!lawFirm?.id) throw new Error("Law firm not found");
+      
+      // SECURITY: Validate automation belongs to user's law firm
       const { data, error } = await supabase
         .from("automations")
         .update({ is_active, updated_at: new Date().toISOString() })
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 

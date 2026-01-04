@@ -74,10 +74,14 @@ export function useKnowledgeItems() {
 
   const updateItem = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<KnowledgeItem> & { id: string }) => {
+      if (!lawFirmId) throw new Error('Law firm not found');
+      
+      // SECURITY: Validate item belongs to user's law firm
       const { data, error } = await supabase
         .from('knowledge_items')
         .update(updates)
         .eq('id', id)
+        .eq('law_firm_id', lawFirmId) // Tenant isolation
         .select()
         .single();
 
@@ -96,10 +100,14 @@ export function useKnowledgeItems() {
 
   const deleteItem = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirmId) throw new Error('Law firm not found');
+      
+      // SECURITY: Validate item belongs to user's law firm
       const { error } = await supabase
         .from('knowledge_items')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('law_firm_id', lawFirmId); // Tenant isolation
 
       if (error) throw error;
     },

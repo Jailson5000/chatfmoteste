@@ -71,10 +71,14 @@ export function useClients() {
 
   const updateClient = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Client> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+      
+      // SECURITY: Validate client belongs to user's law firm
       const { data, error } = await supabase
         .from("clients")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -92,8 +96,15 @@ export function useClients() {
 
   const deleteClient = useMutation({
     mutationFn: async (id: string) => {
-      // CASCADE delete will automatically remove related records (conversations, tags, actions, memories, cases, documents, consent logs, etc.)
-      const { error } = await supabase.from("clients").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+      
+      // CASCADE delete will automatically remove related records
+      // SECURITY: Validate client belongs to user's law firm
+      const { error } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       if (error) throw error;
     },
     onSuccess: () => {
@@ -108,10 +119,14 @@ export function useClients() {
 
   const moveClientToDepartment = useMutation({
     mutationFn: async ({ clientId, departmentId }: { clientId: string; departmentId: string | null }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+      
+      // SECURITY: Validate client belongs to user's law firm
       const { data, error } = await supabase
         .from("clients")
         .update({ department_id: departmentId })
         .eq("id", clientId)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -125,6 +140,7 @@ export function useClients() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
       // Non-null status: use the DB function that cancels + recreates follow-ups reliably
       if (statusId) {
@@ -137,10 +153,12 @@ export function useClients() {
       }
 
       // Clearing status: update + cancel any pending follow-ups
+      // SECURITY: Validate client belongs to user's law firm
       const { error: updateError } = await supabase
         .from("clients")
         .update({ custom_status_id: null })
-        .eq("id", clientId);
+        .eq("id", clientId)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
 
       if (updateError) throw updateError;
 
@@ -152,7 +170,8 @@ export function useClients() {
           cancel_reason: "Status cleared",
         })
         .eq("client_id", clientId)
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
 
       if (cancelError) throw cancelError;
 

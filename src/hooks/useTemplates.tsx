@@ -73,10 +73,14 @@ export function useTemplates() {
 
   const updateTemplate = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Template> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate template belongs to user's law firm
       const { data, error } = await supabase
         .from("templates")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant isolation
         .select()
         .single();
 
@@ -94,7 +98,14 @@ export function useTemplates() {
 
   const deleteTemplate = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("templates").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+      
+      // SECURITY: Validate template belongs to user's law firm
+      const { error } = await supabase
+        .from("templates")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant isolation
       if (error) throw error;
     },
     onSuccess: () => {
