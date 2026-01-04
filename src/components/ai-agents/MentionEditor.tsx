@@ -14,6 +14,7 @@ interface MentionEditorProps {
   tags?: Array<{ id: string; name: string; color: string }>;
   templates?: Array<{ id: string; name: string }>;
   teamMembers?: Array<{ id: string; full_name: string }>;
+  aiAgents?: Array<{ id: string; name: string; is_active?: boolean }>;
   lawFirm?: { 
     name: string; 
     phone?: string; 
@@ -26,33 +27,26 @@ interface MentionEditorProps {
   };
 }
 
-// Regex to match mentions: @word or @category:value
-const MENTION_REGEX = /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/]+)?)/g;
+// Regex to match mentions: supports @foo, @foo bar, @foo:bar, @foo:<bar|baz>
+const MENTION_REGEX = /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/|<>.-]+)?)/g;
 
-// Get category color based on mention type
+// Get category color based on mention type (semantic design tokens)
 function getMentionColor(mention: string): string {
   const lowerMention = mention.toLowerCase();
-  
-  if (lowerMention.startsWith("departamento:")) return "bg-blue-500/20 text-blue-400 border-blue-500/30 hover:bg-blue-500/30";
-  if (lowerMention.startsWith("status:")) return "bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30";
-  if (lowerMention.startsWith("tag:")) return "bg-purple-500/20 text-purple-400 border-purple-500/30 hover:bg-purple-500/30";
-  if (lowerMention.startsWith("membro:")) return "bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30";
-  if (lowerMention.startsWith("template:")) return "bg-pink-500/20 text-pink-400 border-pink-500/30 hover:bg-pink-500/30";
-  if (lowerMention.startsWith("calendario:")) return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/30";
-  if (lowerMention.startsWith("ferramenta:")) return "bg-orange-500/20 text-orange-400 border-orange-500/30 hover:bg-orange-500/30";
-  
-  // Default colors for general mentions
-  if (["nome do cliente", "telefone do cliente", "email do cliente"].includes(lowerMention)) {
-    return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30";
-  }
-  if (["nome da empresa", "telefone da empresa", "email da empresa", "endereço da empresa"].includes(lowerMention)) {
-    return "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30";
-  }
-  if (["data atual", "hora atual", "dia da semana"].includes(lowerMention)) {
-    return "bg-slate-500/20 text-slate-400 border-slate-500/30 hover:bg-slate-500/30";
-  }
-  
-  return "bg-primary/20 text-primary border-primary/30 hover:bg-primary/30";
+
+  const cls = (token: string) =>
+    `bg-mention-${token}/15 text-mention-${token} border-mention-${token}/30 hover:bg-mention-${token}/25`;
+
+  if (lowerMention.startsWith("departamento:")) return cls("department");
+  if (lowerMention.startsWith("status:")) return cls("status");
+  if (lowerMention.startsWith("etiqueta:")) return cls("tag");
+  if (lowerMention.startsWith("responsavel:")) return cls("responsible");
+  if (lowerMention.startsWith("template:")) return cls("template");
+
+  // Generic mentions and tools
+  if (lowerMention.includes("evento")) return cls("calendar");
+
+  return cls("tool");
 }
 
 interface ParsedPart {
@@ -73,6 +67,7 @@ export function MentionEditor({
   tags = [],
   templates = [],
   teamMembers = [],
+  aiAgents = [],
   lawFirm,
 }: MentionEditorProps) {
   const [showMentionPicker, setShowMentionPicker] = useState(false);
@@ -265,7 +260,7 @@ export function MentionEditor({
             @{mentionText}
             <button
               onClick={(e) => handleRemoveMention(e, part.start, part.end)}
-              className="hover:bg-black/20 rounded-full p-0.5 -mr-0.5 transition-colors"
+              className="hover:bg-foreground/10 rounded-full p-0.5 -mr-0.5 transition-colors"
             >
               <X className="h-3 w-3" />
             </button>
@@ -308,6 +303,10 @@ export function MentionEditor({
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
         maxLength={maxLength}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        data-gramm="false"
         className={cn(
           "absolute inset-0 h-full w-full resize-none p-4 bg-transparent font-mono text-sm leading-relaxed focus:outline-none",
           isFocused ? "opacity-100" : "opacity-0",
@@ -331,6 +330,7 @@ export function MentionEditor({
             tags={tags}
             templates={templates}
             teamMembers={teamMembers}
+            aiAgents={aiAgents}
             lawFirm={lawFirm}
             onSelect={handleSelectMention}
             filter={mentionFilter}
