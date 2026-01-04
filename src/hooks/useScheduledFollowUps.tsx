@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -69,6 +70,38 @@ export function useScheduledFollowUps(conversationId?: string) {
     enabled: !!lawFirm?.id,
     refetchInterval: 60000, // Refresh every minute
   });
+
+  // Real-time subscription for follow-up status changes
+  useEffect(() => {
+    if (!lawFirm?.id) return;
+
+    const channel = supabase
+      .channel('follow-ups-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'scheduled_follow_ups',
+          filter: `law_firm_id=eq.${lawFirm.id}`,
+        },
+        (payload) => {
+          const newStatus = payload.new?.status;
+          // When a follow-up is sent, update queries
+          if (newStatus === 'sent' || newStatus === 'cancelled') {
+            queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
+            queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
+            queryClient.invalidateQueries({ queryKey: ["messages"] });
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [lawFirm?.id, queryClient]);
 
   // Get count of pending follow-ups per conversation
   const followUpsByConversation = allPendingFollowUps.reduce((acc, fu) => {
