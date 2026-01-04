@@ -30,19 +30,31 @@ interface MentionEditorProps {
 const MENTION_REGEX =
   /@([A-Za-zÀ-ÿ0-9_]+(?:\s[A-Za-zÀ-ÿ0-9_]+)*(?::[A-Za-zÀ-ÿ0-9_\s/|<>.-]+)?)/g;
 
+// Explicit Tailwind classes for mention badges (dynamic classes don't work with JIT)
+const MENTION_COLORS = {
+  department: "bg-blue-500/15 text-blue-600 border-blue-500/30 hover:bg-blue-500/25 dark:text-blue-400",
+  status: "bg-amber-500/15 text-amber-600 border-amber-500/30 hover:bg-amber-500/25 dark:text-amber-400",
+  tag: "bg-purple-500/15 text-purple-600 border-purple-500/30 hover:bg-purple-500/25 dark:text-purple-400",
+  responsible: "bg-green-500/15 text-green-600 border-green-500/30 hover:bg-green-500/25 dark:text-green-400",
+  template: "bg-pink-500/15 text-pink-600 border-pink-500/30 hover:bg-pink-500/25 dark:text-pink-400",
+  calendar: "bg-cyan-500/15 text-cyan-600 border-cyan-500/30 hover:bg-cyan-500/25 dark:text-cyan-400",
+  tool: "bg-orange-500/15 text-orange-600 border-orange-500/30 hover:bg-orange-500/25 dark:text-orange-400",
+  data: "bg-slate-500/15 text-slate-600 border-slate-500/30 hover:bg-slate-500/25 dark:text-slate-400",
+} as const;
+
 function getMentionColor(mentionText: string): string {
   const lower = mentionText.toLowerCase();
 
-  const cls = (token: string) =>
-    `bg-mention-${token}/15 text-mention-${token} border-mention-${token}/30 hover:bg-mention-${token}/25`;
-
-  if (lower.startsWith("departamento:")) return cls("department");
-  if (lower.startsWith("status:")) return cls("status");
-  if (lower.startsWith("etiqueta:")) return cls("tag");
-  if (lower.startsWith("responsavel:")) return cls("responsible");
-  if (lower.startsWith("template:")) return cls("template");
-  if (lower.includes("evento")) return cls("calendar");
-  return cls("tool");
+  if (lower.startsWith("departamento:")) return MENTION_COLORS.department;
+  if (lower.startsWith("status:")) return MENTION_COLORS.status;
+  if (lower.startsWith("etiqueta:")) return MENTION_COLORS.tag;
+  if (lower.startsWith("responsavel:")) return MENTION_COLORS.responsible;
+  if (lower.startsWith("template:")) return MENTION_COLORS.template;
+  if (lower.includes("evento")) return MENTION_COLORS.calendar;
+  // Data fields (empresa, cliente, etc.)
+  if (lower.startsWith("empresa:") || lower.startsWith("cliente:")) return MENTION_COLORS.data;
+  // Default: tools (actions)
+  return MENTION_COLORS.tool;
 }
 
 interface ParsedPart {
@@ -143,8 +155,8 @@ export function MentionEditor({
     remove.textContent = "×";
     remove.dataset.removeMention = "true";
     remove.className = cn(
-      "ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded",
-      "text-foreground/70 hover:bg-foreground/10 hover:text-foreground"
+      "ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-sm font-bold",
+      "opacity-60 hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10 transition-opacity"
     );
 
     badge.appendChild(label);
