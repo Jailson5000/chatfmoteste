@@ -101,6 +101,8 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
   const { data: transferLogs = [] } = useQuery({
     queryKey: ["chat-activity-transfers", conversationId],
     queryFn: async () => {
+      console.log("[ChatActivityLog] Fetching transfer logs for conversation:", conversationId);
+      
       const { data, error } = await supabase
         .from("ai_transfer_logs")
         .select("id, from_agent_name, to_agent_name, transfer_type, reason, transferred_by_name, transferred_at")
@@ -112,6 +114,8 @@ export function ChatActivityLog({ conversationId, clientId }: ChatActivityLogPro
         console.error("[ChatActivityLog] Error fetching transfer logs:", error);
         return [];
       }
+      
+      console.log("[ChatActivityLog] Transfer logs fetched:", data?.length || 0, data);
       return data as AITransferLog[];
     },
     enabled: !!conversationId,
