@@ -73,6 +73,8 @@ export function ContactStatusTags({
       clientId,
       statusId: statusId === "none" ? null : statusId,
     });
+    // Force immediate refetch of conversations to sync sidebar
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleAddTag = async (tagId: string) => {
