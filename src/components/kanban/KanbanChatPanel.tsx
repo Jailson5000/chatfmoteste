@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
+import { ChatActivityLog } from "@/components/conversations/ChatActivityLog";
 
 import { cn } from "@/lib/utils";
 import { 
@@ -1296,6 +1297,8 @@ export function KanbanChatPanel({
           </div>
         ) : (
           <div className="space-y-3">
+            {/* Activity Log - Internal movements visible only to team */}
+            <ChatActivityLog conversationId={conversationId} clientId={clientId} />
             {messages.map((msg) => {
               const isFromMe = msg.is_from_me;
               const isInternal = msg.is_internal;

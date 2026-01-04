@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   Save,
   Loader2,
   Bot,
@@ -94,7 +95,7 @@ export default function AIAgentEdit() {
   const [editedWebhookUrl, setEditedWebhookUrl] = useState("");
   const [editedTriggerType, setEditedTriggerType] = useState("new_message");
   const [isActive, setIsActive] = useState(true);
-
+  const [notifyOnTransfer, setNotifyOnTransfer] = useState(false);
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
@@ -119,6 +120,7 @@ export default function AIAgentEdit() {
       editedWebhookUrl !== automation.webhook_url ||
       editedTriggerType !== automation.trigger_type ||
       isActive !== automation.is_active ||
+      notifyOnTransfer !== (automation.notify_on_transfer || false) ||
       voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
       voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID));
 
@@ -134,6 +136,7 @@ export default function AIAgentEdit() {
         setEditedWebhookUrl(found.webhook_url);
         setEditedTriggerType(found.trigger_type);
         setIsActive(found.is_active);
+        setNotifyOnTransfer(found.notify_on_transfer || false);
         setLastSaved(new Date(found.updated_at));
 
         // Load voice settings from trigger_config
@@ -276,7 +279,8 @@ export default function AIAgentEdit() {
         ai_temperature: editedTemperature,
         is_active: isActive,
         trigger_config: updatedTriggerConfig,
-      });
+        notify_on_transfer: notifyOnTransfer,
+      } as any);
 
       // Sync prompt with N8N
       const { error } = await supabase.functions.invoke('sync-n8n-prompt', {
@@ -315,6 +319,7 @@ export default function AIAgentEdit() {
         ai_prompt: editedPrompt,
         ai_temperature: editedTemperature,
         is_active: isActive,
+        notify_on_transfer: notifyOnTransfer,
         updated_at: new Date().toISOString(),
         last_prompt: automation.ai_prompt, // Previous prompt is now last_prompt
         version: (automation.version || 1) + 1, // Increment version
@@ -696,6 +701,23 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                 checked={isActive}
                 onCheckedChange={setIsActive}
               />
+            </div>
+
+            {/* Notify on Transfer Toggle */}
+            <div className="space-y-2 mb-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm flex items-center gap-2">
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Avisar ao transferir
+                </Label>
+                <Switch
+                  checked={notifyOnTransfer}
+                  onCheckedChange={setNotifyOnTransfer}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Se ativado, a IA envia uma mensagem ao cliente quando transferir para outro departamento ou humano.
+              </p>
             </div>
 
             {/* Trigger Type */}
