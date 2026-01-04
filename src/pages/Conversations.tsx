@@ -86,6 +86,8 @@ import { AIProviderBadge } from "@/components/ai/AIProviderBadge";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useScheduledFollowUps } from "@/hooks/useScheduledFollowUps";
+import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -158,6 +160,7 @@ export default function Conversations() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { lawFirm } = useLawFirm();
+  const { followUpsByConversation } = useScheduledFollowUps();
 
   // Filter connected instances for the selector
   const connectedInstances = useMemo(() => 
@@ -814,9 +817,10 @@ export default function Conversations() {
         clientStatus: conv.client?.custom_status || null,
         department: conv.department || null,
         aiAgentName: aiAgentName,
+        scheduledFollowUps: followUpsByConversation[conv.id] || 0,
       };
     });
-  }, [conversations, unreadCounts, tags, automations]);
+  }, [conversations, unreadCounts, tags, automations, followUpsByConversation]);
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
@@ -2187,6 +2191,12 @@ export default function Conversations() {
                 </Tooltip>
               </div>
               </div>
+              {/* Scheduled Follow-up Indicator */}
+              <ScheduledFollowUpIndicator 
+                conversationId={selectedConversation.id} 
+                variant="full"
+                className="mx-4 mb-2"
+              />
               {/* Contact Status and Tags */}
               <ContactStatusTags
                 clientId={selectedConversation.client_id}
