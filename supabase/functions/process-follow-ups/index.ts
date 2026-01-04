@@ -48,8 +48,10 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const evolutionBaseUrl = Deno.env.get("EVOLUTION_BASE_URL");
-    const evolutionGlobalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+
+    // Prefer instance-specific configuration; env vars act as a fallback.
+    const evolutionBaseUrl = normalizeUrl(Deno.env.get("EVOLUTION_BASE_URL") ?? "");
+    const evolutionGlobalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY") ?? "";
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -138,33 +140,40 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Get WhatsApp instance
+        // Get WhatsApp instance (prefer instance-specific api_url/api_key)
         let instanceName: string | null = null;
-        
+        let instanceApiUrl: string | null = null;
+        let instanceApiKey: string | null = null;
+
         if (conversation.whatsapp_instance_id) {
           const { data: instance } = await supabase
             .from("whatsapp_instances")
-            .select("instance_name")
+            .select("instance_name, api_url, api_key")
             .eq("id", conversation.whatsapp_instance_id)
             .single();
-          
+
           if (instance) {
             instanceName = instance.instance_name;
+            instanceApiUrl = instance.api_url;
+            instanceApiKey = instance.api_key;
           }
         }
 
-        // If no specific instance, get default for the law firm
+        // If no specific instance, get a connected instance for the law firm
         if (!instanceName) {
           const { data: defaultInstance } = await supabase
             .from("whatsapp_instances")
-            .select("instance_name")
+            .select("instance_name, api_url, api_key")
             .eq("law_firm_id", followUp.law_firm_id)
             .eq("status", "connected")
+            .order("updated_at", { ascending: false })
             .limit(1)
             .single();
-          
+
           if (defaultInstance) {
             instanceName = defaultInstance.instance_name;
+            instanceApiUrl = defaultInstance.api_url;
+            instanceApiKey = defaultInstance.api_key;
           }
         }
 
@@ -195,28 +204,50 @@ Deno.serve(async (req) => {
           messageContent = mediaMatch[3] || "";
         }
 
-        // Send message via Evolution API
-        if (!evolutionBaseUrl || !evolutionGlobalApiKey) {
-          console.error("[process-follow-ups] Evolution API not configured");
+        // Send message via Evolution API (use instance configuration when available)
+        const apiUrl = normalizeUrl(instanceApiUrl || evolutionBaseUrl);
+        const apiKey = instanceApiKey || evolutionGlobalApiKey;
+
+        if (!apiUrl || !apiKey) {
+          console.error("[process-follow-ups] Evolution API not configured", {
+            hasApiUrl: !!apiUrl,
+            hasApiKey: !!apiKey,
+            instanceName,
+            hasInstanceApiUrl: !!instanceApiUrl,
+            hasInstanceApiKey: !!instanceApiKey,
+          });
           await supabase
             .from("scheduled_follow_ups")
-            .update({ 
-              status: "failed", 
-              error_message: "Evolution API not configured" 
+            .update({
+              status: "failed",
+              error_message: "Evolution API not configured",
             })
             .eq("id", followUp.id);
           failCount++;
           continue;
         }
 
-        let sendEndpoint = `${evolutionBaseUrl}/message/sendText/${instanceName}`;
+        if (!conversation.remote_jid) {
+          console.error(`[process-follow-ups] Conversation missing remote_jid for follow-up ${followUp.id}`);
+          await supabase
+            .from("scheduled_follow_ups")
+            .update({
+              status: "failed",
+              error_message: "Conversation missing remote_jid",
+            })
+            .eq("id", followUp.id);
+          failCount++;
+          continue;
+        }
+
+        let sendEndpoint = `${apiUrl}/message/sendText/${instanceName}`;
         let sendBody: any = {
           number: conversation.remote_jid.replace("@s.whatsapp.net", ""),
           text: messageContent,
         };
 
         if (messageType !== "text" && mediaUrl) {
-          sendEndpoint = `${evolutionBaseUrl}/message/sendMedia/${instanceName}`;
+          sendEndpoint = `${apiUrl}/message/sendMedia/${instanceName}`;
           sendBody = {
             number: conversation.remote_jid.replace("@s.whatsapp.net", ""),
             mediatype: messageType,
@@ -229,7 +260,7 @@ Deno.serve(async (req) => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "apikey": evolutionGlobalApiKey,
+            apikey: apiKey,
           },
           body: JSON.stringify(sendBody),
         });
