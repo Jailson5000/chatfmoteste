@@ -34,10 +34,13 @@ export function StatusFollowUpEditor({ statusId }: StatusFollowUpEditorProps) {
   // Filter out the current status from the dropdown options
   const availableStatuses = statuses.filter(s => s.id !== statusId);
 
-  const filteredFollowUps = followUps.filter(f => 
-    f.template?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    f.template?.shortcut?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredFollowUps = followUps.filter(f => {
+    // If no search query, show all follow-ups
+    if (!searchQuery.trim()) return true;
+    // Otherwise filter by template name/shortcut
+    return f.template?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      f.template?.shortcut?.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
   const handleAddFollowUp = async () => {
     await createFollowUp.mutateAsync({
