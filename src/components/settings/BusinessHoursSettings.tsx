@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Save, Clock } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 
 interface DaySchedule {
@@ -13,7 +13,7 @@ interface DaySchedule {
   end: string;
 }
 
-interface BusinessHours {
+export interface BusinessHours {
   monday: DaySchedule;
   tuesday: DaySchedule;
   wednesday: DaySchedule;
@@ -49,12 +49,25 @@ const defaultHours: BusinessHours = {
   sunday: { enabled: false, start: "08:00", end: "12:00" },
 };
 
-const timeOptions = [
-  "00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
-  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00",
-  "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
-  "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
-];
+// Validate time format HH:MM
+const isValidTime = (time: string): boolean => {
+  const regex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
+  return regex.test(time);
+};
+
+// Format time input to ensure HH:MM format
+const formatTimeInput = (value: string): string => {
+  // Remove non-numeric characters except :
+  let cleaned = value.replace(/[^\d:]/g, '');
+  
+  // Auto-add colon after 2 digits if not present
+  if (cleaned.length === 2 && !cleaned.includes(':')) {
+    cleaned = cleaned + ':';
+  }
+  
+  // Limit to 5 characters (HH:MM)
+  return cleaned.slice(0, 5);
+};
 
 export function BusinessHoursSettings({
   businessHours,
@@ -81,13 +94,22 @@ export function BusinessHoursSettings({
     field: "start" | "end",
     value: string
   ) => {
+    const formattedValue = formatTimeInput(value);
     setHours((prev) => ({
       ...prev,
-      [day]: { ...prev[day], [field]: value },
+      [day]: { ...prev[day], [field]: formattedValue },
     }));
   };
 
   const handleSave = async () => {
+    // Validate all times before saving
+    for (const day of Object.keys(hours) as Array<keyof BusinessHours>) {
+      if (hours[day].enabled) {
+        if (!isValidTime(hours[day].start) || !isValidTime(hours[day].end)) {
+          return;
+        }
+      }
+    }
     await onSave(hours);
   };
 
@@ -111,7 +133,7 @@ export function BusinessHoursSettings({
             <CardTitle>Horário de Funcionamento</CardTitle>
           </div>
           <CardDescription>
-            Defina os dias e horários de atendimento do seu escritório
+            Defina os dias e horários de atendimento. Digite o horário manualmente (ex: 08:30, 18:45).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -133,41 +155,35 @@ export function BusinessHoursSettings({
               </div>
               
               <div className="flex items-center gap-2 flex-1">
-                <Select
+                <Input
+                  type="text"
                   value={hours[day].start}
-                  onValueChange={(value) => handleTimeChange(day, "start", value)}
+                  onChange={(e) => handleTimeChange(day, "start", e.target.value)}
                   disabled={!hours[day].enabled}
-                >
-                  <SelectTrigger className="w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeOptions.map((time) => (
-                      <SelectItem key={time} value={time}>
-                        {time}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="08:00"
+                  className={`w-20 text-center font-mono ${
+                    hours[day].enabled && !isValidTime(hours[day].start) 
+                      ? "border-destructive" 
+                      : ""
+                  }`}
+                  maxLength={5}
+                />
                 
                 <span className="text-muted-foreground">até</span>
                 
-                <Select
+                <Input
+                  type="text"
                   value={hours[day].end}
-                  onValueChange={(value) => handleTimeChange(day, "end", value)}
+                  onChange={(e) => handleTimeChange(day, "end", e.target.value)}
                   disabled={!hours[day].enabled}
-                >
-                  <SelectTrigger className="w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeOptions.map((time) => (
-                      <SelectItem key={time} value={time}>
-                        {time}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="18:00"
+                  className={`w-20 text-center font-mono ${
+                    hours[day].enabled && !isValidTime(hours[day].end) 
+                      ? "border-destructive" 
+                      : ""
+                  }`}
+                  maxLength={5}
+                />
               </div>
             </div>
           ))}
