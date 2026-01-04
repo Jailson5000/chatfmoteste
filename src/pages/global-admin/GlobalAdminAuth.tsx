@@ -36,29 +36,23 @@ export default function GlobalAdminAuth() {
     try {
       const validation = loginSchema.safeParse({ email, password });
       if (!validation.success) {
-        console.log("[GlobalAdminAuth] Validação falhou:", validation.error.errors[0].message);
         toast.error(validation.error.errors[0].message);
         setIsSubmitting(false);
         return;
       }
 
-      console.log("[GlobalAdminAuth] Chamando signIn...");
       const { error } = await signIn(email, password);
 
       if (error) {
-        console.error("[GlobalAdminAuth] Erro signIn:", error.message);
         toast.error("Credenciais inválidas");
         setIsSubmitting(false);
         return;
       }
 
-      console.log("[GlobalAdminAuth] Login bem-sucedido, redirecionando...");
-      // Wait a moment for the auth state to update
       setTimeout(() => {
         navigate("/global-admin");
       }, 500);
     } catch (error: any) {
-      console.error("[GlobalAdminAuth] Exceção:", error?.message || error);
       toast.error("Erro ao fazer login");
       setIsSubmitting(false);
     }

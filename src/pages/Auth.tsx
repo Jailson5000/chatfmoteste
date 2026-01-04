@@ -10,7 +10,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { z } from "zod";
 import miauchatLogo from "@/assets/miauchat-logo.png";
-import { logAuthAttempt, logAuthError, checkSupabaseConfig } from "@/lib/authDebug";
 
 const loginSchema = z.object({
   email: z.string().email("Email inválido").max(255),
@@ -60,26 +59,8 @@ export default function Auth() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const configCheck = checkSupabaseConfig();
-    logAuthAttempt("handleLogin START", { 
-      email: loginData.email,
-      configValid: configCheck.valid,
-      configIssues: configCheck.issues,
-    });
-    
-    if (!configCheck.valid) {
-      console.error("[Auth] Config issues:", configCheck.issues);
-      toast({
-        title: "Erro de configuração",
-        description: `Problema de configuração: ${configCheck.issues.join(', ')}`,
-        variant: "destructive",
-      });
-      return;
-    }
-    
     const result = loginSchema.safeParse(loginData);
     if (!result.success) {
-      logAuthAttempt("handleLogin VALIDATION_FAILED", { error: result.error.errors[0].message });
       toast({
         title: "Erro de validação",
         description: result.error.errors[0].message,
@@ -90,13 +71,6 @@ export default function Auth() {
 
     setIsLoading(true);
     
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    logAuthAttempt("handleLogin CALLING_SUPABASE", { 
-      supabaseUrl,
-      endpoint: `${supabaseUrl}/auth/v1/token?grant_type=password`,
-      method: 'POST',
-    });
-    
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email: loginData.email,
@@ -104,27 +78,21 @@ export default function Auth() {
       });
 
       if (error) {
-        logAuthError("handleLogin", error);
         toast({
           title: "Falha na autenticação",
           description: error.message || "Email ou senha incorretos.",
           variant: "destructive",
         });
       } else {
-        logAuthAttempt("handleLogin SUCCESS", { 
-          hasSession: !!data.session,
-          userId: data.user?.id,
-        });
         toast({
           title: "Bem-vindo!",
           description: "Login realizado com sucesso.",
         });
       }
     } catch (err: any) {
-      logAuthError("handleLogin EXCEPTION", err);
       toast({
         title: "Erro de conexão",
-        description: `Falha na conexão: ${err?.message || 'Erro desconhecido'}. Verifique o console para detalhes.`,
+        description: `Falha na conexão: ${err?.message || 'Erro desconhecido'}.`,
         variant: "destructive",
       });
     }
