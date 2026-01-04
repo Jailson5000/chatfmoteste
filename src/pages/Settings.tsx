@@ -18,7 +18,6 @@ import {
   Pencil,
   Loader2,
   Plug,
-  Clock,
   Database,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,12 +65,10 @@ import { EditableTemplate } from "@/components/settings/EditableTemplate";
 import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
 import { ClassesSubTabs } from "@/components/settings/ClassesSubTabs";
-import { BusinessHoursSettings } from "@/components/settings/BusinessHoursSettings";
 import { GeneralInfoSettings } from "@/components/settings/GeneralInfoSettings";
 import { SettingsHelpCollapsible } from "@/components/settings/SettingsHelpCollapsible";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
-import type { BusinessHours } from "@/hooks/useLawFirm";
 
 const roleLabels: Record<string, { label: string; color: string }> = {
   admin: { label: "Administrador", color: "bg-primary text-primary-foreground" },
@@ -270,7 +267,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="classes">
-        <TabsList className="grid w-full max-w-5xl grid-cols-8">
+        <TabsList className="grid w-full max-w-4xl grid-cols-7">
           <TabsTrigger value="classes">
             <Layers className="h-4 w-4 mr-2" />
             Classes
@@ -286,10 +283,6 @@ export default function Settings() {
           <TabsTrigger value="integrations">
             <Plug className="h-4 w-4 mr-2" />
             Integrações
-          </TabsTrigger>
-          <TabsTrigger value="hours">
-            <Clock className="h-4 w-4 mr-2" />
-            Horário Comercial
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
@@ -546,21 +539,6 @@ export default function Settings() {
           <IntegrationsSettings />
         </TabsContent>
 
-        {/* Business Hours Settings */}
-        <TabsContent value="hours" className="space-y-6 mt-6">
-          <BusinessHoursSettings
-            businessHours={lawFirm?.business_hours ?? null}
-            onSave={async (hours) => {
-              setSaving(true);
-              try {
-                await updateLawFirm.mutateAsync({ business_hours: hours } as any);
-              } finally {
-                setSaving(false);
-              }
-            }}
-            saving={saving}
-          />
-        </TabsContent>
 
         {/* Office Settings */}
         <TabsContent value="office" className="space-y-6 mt-6">

@@ -67,13 +67,12 @@ const MAX_PROMPT_CHARS = 10000;
 // Static mention variables
 const STATIC_MENTION_VARIABLES = [
   { key: '@Nome da empresa', description: 'Nome da sua empresa', category: 'info', icon: Building2 },
-  { key: '@Endereço', description: 'Endereço do escritório', category: 'info', icon: Building2 },
+  { key: '@Endereço', description: 'Endereço da empresa', category: 'info', icon: Building2 },
   { key: '@Telefone', description: 'Telefone de contato', category: 'info', icon: Building2 },
   { key: '@Email', description: 'Email de contato', category: 'info', icon: Building2 },
-  { key: '@OAB', description: 'Número da OAB', category: 'info', icon: Building2 },
-  { key: '@Instagram', description: 'Instagram do escritório', category: 'info', icon: Building2 },
-  { key: '@Facebook', description: 'Facebook do escritório', category: 'info', icon: Building2 },
-  { key: '@Website', description: 'Website do escritório', category: 'info', icon: Building2 },
+  { key: '@Instagram', description: 'Instagram da empresa', category: 'info', icon: Building2 },
+  { key: '@Facebook', description: 'Facebook da empresa', category: 'info', icon: Building2 },
+  { key: '@Website', description: 'Website da empresa', category: 'info', icon: Building2 },
   { key: '@Horário comercial', description: 'Horário de funcionamento', category: 'hours', icon: Clock },
   { key: '@Nome do cliente', description: 'Nome do cliente na conversa', category: 'client', icon: Users },
   { key: '@Responsável', description: 'Nome do responsável pelo atendimento', category: 'client', icon: Users },
