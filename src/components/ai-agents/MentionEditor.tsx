@@ -598,7 +598,7 @@ export function MentionEditor({
   }, [closePicker]);
 
   return (
-    <div ref={editorRef} className="relative h-full min-h-0">
+    <div ref={editorRef} className="relative flex h-full min-h-0 flex-col">
       <div
         ref={inputRef}
         contentEditable
@@ -623,7 +623,7 @@ export function MentionEditor({
         }}
         data-placeholder={placeholder}
         className={cn(
-          "h-full w-full overflow-auto p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
+          "flex-1 min-h-0 w-full overflow-auto overscroll-contain p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
           "[&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-muted-foreground [&:empty]:before:pointer-events-none",
           className
         )}
