@@ -125,7 +125,6 @@ export function useClients() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
-      console.log("[useClients.updateClientStatus]", { clientId, statusId });
 
       // Non-null status: use the DB function that cancels + recreates follow-ups reliably
       if (statusId) {

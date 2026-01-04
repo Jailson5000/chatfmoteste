@@ -203,8 +203,6 @@ export default function Contacts() {
   const handleStatusChange = (clientId: string, statusId: string) => {
     const normalizedStatusId = statusId === "none" ? null : statusId;
 
-    console.log("[Contacts] handleStatusChange", { clientId, statusId: normalizedStatusId });
-
     updateClientStatus.mutate(
       { clientId, statusId: normalizedStatusId },
       {

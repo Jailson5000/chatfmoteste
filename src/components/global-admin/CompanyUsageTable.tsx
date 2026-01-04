@@ -200,7 +200,6 @@ export function CompanyUsageTable() {
         .select("*");
 
       if (usageError) {
-        console.error("[CompanyUsageTable] Error fetching usage summary:", usageError);
         throw usageError;
       }
 
@@ -210,7 +209,6 @@ export function CompanyUsageTable() {
         .select("id, status, created_at, law_firm_id");
 
       if (companyError) {
-        console.error("[CompanyUsageTable] Error fetching companies:", companyError);
         throw companyError;
       }
 
@@ -286,7 +284,6 @@ export function CompanyUsageTable() {
         };
       });
 
-      console.log("[CompanyUsageTable] Fetched companies:", merged.length, merged);
       return merged;
     },
     refetchInterval: 30000, // Refresh every 30s

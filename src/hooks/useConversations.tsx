@@ -416,15 +416,6 @@ export function useConversations() {
             timestamp: new Date().toISOString(),
           },
         });
-
-        console.log(`[AI_TRANSFER] Conversation transferred`, {
-          conversation_id: conversationId,
-          from_agent: fromAutomationId,
-          from_agent_name: fromAutomationId ? agentsMap[fromAutomationId] : null,
-          to_agent: toAutomationId,
-          to_agent_name: agentsMap[toAutomationId],
-          transferred_by: user?.id,
-        });
       }
     },
     onSuccess: async (_data, variables) => {
@@ -493,8 +484,6 @@ export function useConversations() {
 
   const updateClientStatus = useMutation({
     mutationFn: async ({ clientId, statusId }: { clientId: string; statusId: string | null }) => {
-      console.log("[useConversations.updateClientStatus]", { clientId, statusId });
-
       if (statusId) {
         const { data, error } = await supabase.rpc("update_client_status_with_follow_ups", {
           _client_id: clientId,

@@ -82,21 +82,16 @@ export default function AuthCallback() {
         }
         
         if (session) {
-          console.log("[AuthCallback] Sessão encontrada, redirecionando para:", next);
           if (!cancelled) navigate(next, { replace: true });
           return;
         }
 
-        // Wait a bit for session to be detected
-        console.log("[AuthCallback] Aguardando sessão por 3s...");
         const gotSession = await waitForSession(3000);
         if (cancelled) return;
 
         if (gotSession) {
-          console.log("[AuthCallback] Sessão detectada via listener, redirecionando para:", next);
           navigate(next, { replace: true });
         } else {
-          console.warn("[AuthCallback] Timeout: nenhuma sessão detectada");
           toast({
             title: "Link inválido",
             description: "Não foi possível concluir a autenticação. Tente novamente.",
@@ -106,7 +101,6 @@ export default function AuthCallback() {
         }
       } catch (err: any) {
         if (cancelled) return;
-        console.error("[AuthCallback] Exceção:", err?.message || err);
         toast({
           title: "Erro de autenticação",
           description: err?.message ?? "Não foi possível concluir a autenticação.",

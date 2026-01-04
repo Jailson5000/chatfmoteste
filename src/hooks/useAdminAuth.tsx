@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { logAuthAttempt, logAuthError, checkSupabaseConfig } from "@/lib/authDebug";
 
 export type AdminRole = "super_admin" | "admin_operacional" | "admin_financeiro";
 
@@ -130,23 +129,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    // Debug: Check config before attempting login
-    const configCheck = checkSupabaseConfig();
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    
-    logAuthAttempt("useAdminAuth.signIn START", { 
-      email,
-      supabaseUrl,
-      endpoint: `${supabaseUrl}/auth/v1/token?grant_type=password`,
-      configValid: configCheck.valid,
-      configIssues: configCheck.issues,
-    });
-    
-    if (!configCheck.valid) {
-      console.error("[useAdminAuth] Config issues:", configCheck.issues);
-      return { error: new Error(`Config invalid: ${configCheck.issues.join(', ')}`) };
-    }
-    
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -154,17 +136,11 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (error) {
-        logAuthError("useAdminAuth.signIn", error);
         return { error };
       }
 
-      logAuthAttempt("useAdminAuth.signIn SUCCESS", { 
-        hasSession: !!data.session,
-        userId: data.user?.id,
-      });
       return { error: null };
     } catch (error: any) {
-      logAuthError("useAdminAuth.signIn EXCEPTION", error);
       return { error: error as Error };
     }
   };
