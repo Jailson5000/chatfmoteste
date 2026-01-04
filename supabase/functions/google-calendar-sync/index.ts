@@ -85,14 +85,18 @@ serve(async (req) => {
     // Fetch events from Google Calendar
     const calendarId = integration.default_calendar_id || "primary";
     const now = new Date();
+    // Go back 30 days to catch edits on past events and forward 90 days
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const threeMonthsLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
     const calendarUrl = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
-    calendarUrl.searchParams.set("timeMin", now.toISOString());
+    calendarUrl.searchParams.set("timeMin", thirtyDaysAgo.toISOString());
     calendarUrl.searchParams.set("timeMax", threeMonthsLater.toISOString());
     calendarUrl.searchParams.set("singleEvents", "true");
     calendarUrl.searchParams.set("orderBy", "startTime");
-    calendarUrl.searchParams.set("maxResults", "250");
+    calendarUrl.searchParams.set("maxResults", "500");
+    // showDeleted=true allows us to see cancelled events and remove them locally
+    calendarUrl.searchParams.set("showDeleted", "true");
 
     const eventsResponse = await fetch(calendarUrl.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -108,13 +112,29 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[google-calendar-sync] Found ${eventsData.items?.length || 0} events`);
+    console.log(`[google-calendar-sync] Found ${eventsData.items?.length || 0} events from Google`);
 
     // Upsert events to database
     const events = eventsData.items || [];
     let syncedCount = 0;
+    let deletedCount = 0;
 
     for (const event of events) {
+      // Handle cancelled/deleted events by removing them locally
+      if (event.status === "cancelled") {
+        const { error: deleteError, count } = await supabase
+          .from("google_calendar_events")
+          .delete()
+          .eq("law_firm_id", law_firm_id)
+          .eq("google_event_id", event.id);
+        
+        if (!deleteError && count && count > 0) {
+          deletedCount++;
+          console.log(`[google-calendar-sync] Deleted cancelled event: ${event.id}`);
+        }
+        continue;
+      }
+
       const startTime = event.start?.dateTime || event.start?.date;
       const endTime = event.end?.dateTime || event.end?.date;
       const isAllDay = !event.start?.dateTime;
@@ -139,6 +159,7 @@ serve(async (req) => {
         recurrence_rule: event.recurrence?.[0] || null,
         recurring_event_id: event.recurringEventId || null,
         last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
 
       const { error: upsertError } = await supabase
@@ -169,15 +190,16 @@ serve(async (req) => {
       integration_id: integration.id,
       action_type: "sync",
       performed_by: "system",
-      response_summary: `Sincronizados ${syncedCount} eventos`,
+      response_summary: `Sincronizados ${syncedCount} eventos, removidos ${deletedCount} cancelados`,
     });
 
-    console.log(`[google-calendar-sync] Sync complete. Synced ${syncedCount} events.`);
+    console.log(`[google-calendar-sync] Sync complete. Synced ${syncedCount}, deleted ${deletedCount} events.`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         synced_events: syncedCount,
+        deleted_events: deletedCount,
         total_events: events.length
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
