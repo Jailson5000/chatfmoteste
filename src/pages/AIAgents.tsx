@@ -1498,7 +1498,7 @@ export default function AIAgents() {
 
   // Render Editor View
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4 shrink-0">
         <div className="flex items-center justify-between">
@@ -1558,11 +1558,11 @@ export default function AIAgents() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Editor Area */}
-        <div className="flex-1 p-6 flex flex-col">
-          <Card className="flex-1 flex flex-col">
-            <CardContent className="p-0 flex-1">
+        <div className="flex-1 p-6 flex flex-col min-h-0 min-w-0">
+          <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <CardContent className="p-0 flex-1 min-h-0">
               <MentionEditor
                 value={prompt}
                 onChange={(value) => {
@@ -1586,20 +1586,20 @@ Regras:
 - Encaminhe casos complexos para um atendente humano
 - Mantenha a confidencialidade das informações"
                 maxLength={MAX_PROMPT_LENGTH}
-                className="h-full min-h-[400px]"
+                className="h-full min-h-0"
                 departments={departments || []}
                 statuses={statuses || []}
                 tags={tags || []}
                 templates={templates || []}
                 teamMembers={teamMembers}
-              aiAgents={automations.filter(a => a.is_active)}
+                aiAgents={automations.filter(a => a.is_active)}
                 lawFirm={lawFirm || undefined}
               />
             </CardContent>
           </Card>
           
           {/* Character Counter */}
-          <div className="flex items-center justify-between mt-3">
+          <div className="flex items-center justify-between mt-3 shrink-0">
             <span className={cn(
               "text-sm font-medium",
               prompt.length > MAX_PROMPT_LENGTH * 0.9 ? "text-destructive" : "text-primary"
@@ -1648,14 +1648,13 @@ Regras:
                   <PopoverContent className="w-72" align="start">
                     <div className="space-y-2">
                       {knowledgeItems.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-2">
-                          Nenhuma base de conhecimento cadastrada
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          Nenhuma base cadastrada
                         </p>
                       ) : (
                         knowledgeItems.map((item) => (
-                          <div key={item.id} className="flex items-center gap-2">
+                          <div key={item.id} className="flex items-center space-x-2">
                             <Checkbox
-                              id={item.id}
                               checked={selectedKnowledge.includes(item.id)}
                               onCheckedChange={(checked) => {
                                 if (checked) {
@@ -1666,7 +1665,7 @@ Regras:
                                 setHasChanges(true);
                               }}
                             />
-                            <label htmlFor={item.id} className="text-sm cursor-pointer flex-1">
+                            <label className="text-sm flex-1 cursor-pointer">
                               {item.title}
                             </label>
                           </div>
