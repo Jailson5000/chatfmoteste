@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
-import { ChatActivityLog } from "@/components/conversations/ChatActivityLog";
+import { InlineActivityBadge } from "@/components/conversations/InlineActivityBadge";
+import { useInlineActivities } from "@/hooks/useInlineActivities";
 
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
@@ -462,6 +463,9 @@ export function KanbanChatPanel({
   const navigate = useNavigate();
   const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
   const { updateClientStatus } = useClients();
+  
+  // Get inline activities for this conversation
+  const { activities: inlineActivities } = useInlineActivities(conversationId, clientId || null);
 
   // Use backend name (source of truth) with fallback to local lookup
   const resolvedAutomationName = currentAutomationName 
@@ -515,6 +519,36 @@ export function KanbanChatPanel({
   const currentTags = (conversationTags || [])
     .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
     .filter(Boolean) as TagItem[];
+    
+  // Merge messages with inline activities, sorted by timestamp
+  type TimelineItem = 
+    | { type: 'message'; data: Message }
+    | { type: 'activity'; data: (typeof inlineActivities)[0] };
+  
+  const timelineItems = useMemo<TimelineItem[]>(() => {
+    const items: TimelineItem[] = [];
+    
+    // Add messages
+    messages.forEach(msg => {
+      items.push({ type: 'message', data: msg });
+    });
+    
+    // Add activities
+    inlineActivities.forEach(activity => {
+      items.push({ type: 'activity', data: activity });
+    });
+    
+    // Sort by timestamp (ascending for chronological order)
+    return items.sort((a, b) => {
+      const aTime = a.type === 'message' 
+        ? new Date(a.data.created_at).getTime() 
+        : a.data.timestamp.getTime();
+      const bTime = b.type === 'message' 
+        ? new Date(b.data.created_at).getTime() 
+        : b.data.timestamp.getTime();
+      return aTime - bTime;
+    });
+  }, [messages, inlineActivities]);
 
   // Fetch messages
   useEffect(() => {
@@ -1300,9 +1334,12 @@ export function KanbanChatPanel({
           </div>
         ) : (
           <div className="space-y-3">
-            {/* Activity Log - Internal movements visible only to team */}
-            <ChatActivityLog conversationId={conversationId} clientId={clientId} />
-            {messages.map((msg) => {
+            {timelineItems.map((item) => {
+              if (item.type === 'activity') {
+                return <InlineActivityBadge key={item.data.id} activity={item.data} />;
+              }
+              
+              const msg = item.data;
               const isFromMe = msg.is_from_me;
               const isInternal = msg.is_internal;
               const isAI = msg.ai_generated;
