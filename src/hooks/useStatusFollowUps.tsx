@@ -11,6 +11,7 @@ export interface StatusFollowUp {
   delay_unit: string;
   position: number;
   give_up_on_no_response: boolean;
+  give_up_status_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -18,6 +19,11 @@ export interface StatusFollowUp {
     id: string;
     name: string;
     shortcut: string;
+  };
+  give_up_status?: {
+    id: string;
+    name: string;
+    color: string;
   };
 }
 
@@ -34,7 +40,8 @@ export function useStatusFollowUps(statusId?: string) {
         .from("status_follow_ups")
         .select(`
           *,
-          template:templates(id, name, shortcut)
+          template:templates(id, name, shortcut),
+          give_up_status:custom_statuses!status_follow_ups_give_up_status_id_fkey(id, name, color)
         `)
         .eq("status_id", statusId)
         .order("position", { ascending: true });
@@ -73,7 +80,8 @@ export function useStatusFollowUps(statusId?: string) {
         })
         .select(`
           *,
-          template:templates(id, name, shortcut)
+          template:templates(id, name, shortcut),
+          give_up_status:custom_statuses!status_follow_ups_give_up_status_id_fkey(id, name, color)
         `)
         .single();
 
@@ -101,7 +109,8 @@ export function useStatusFollowUps(statusId?: string) {
         .eq("id", id)
         .select(`
           *,
-          template:templates(id, name, shortcut)
+          template:templates(id, name, shortcut),
+          give_up_status:custom_statuses!status_follow_ups_give_up_status_id_fkey(id, name, color)
         `)
         .single();
 

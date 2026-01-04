@@ -2305,6 +2305,7 @@ export type Database = {
           delay_minutes: number
           delay_unit: string
           give_up_on_no_response: boolean
+          give_up_status_id: string | null
           id: string
           is_active: boolean
           law_firm_id: string
@@ -2318,6 +2319,7 @@ export type Database = {
           delay_minutes?: number
           delay_unit?: string
           give_up_on_no_response?: boolean
+          give_up_status_id?: string | null
           id?: string
           is_active?: boolean
           law_firm_id: string
@@ -2331,6 +2333,7 @@ export type Database = {
           delay_minutes?: number
           delay_unit?: string
           give_up_on_no_response?: boolean
+          give_up_status_id?: string | null
           id?: string
           is_active?: boolean
           law_firm_id?: string
@@ -2340,6 +2343,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "status_follow_ups_give_up_status_id_fkey"
+            columns: ["give_up_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "status_follow_ups_law_firm_id_fkey"
             columns: ["law_firm_id"]

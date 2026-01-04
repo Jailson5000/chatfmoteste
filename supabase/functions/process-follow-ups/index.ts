@@ -279,11 +279,13 @@ Deno.serve(async (req) => {
         // Check if this follow-up has give_up_on_no_response enabled
         const { data: followUpRule } = await supabase
           .from("status_follow_ups")
-          .select("give_up_on_no_response")
+          .select("give_up_on_no_response, give_up_status_id")
           .eq("id", followUp.follow_up_rule_id)
           .single();
 
         if (followUpRule?.give_up_on_no_response) {
+          console.log(`[process-follow-ups] Give up triggered for client ${followUp.client_id}`);
+          
           // Cancel any remaining pending follow-ups for this client
           await supabase
             .from("scheduled_follow_ups")
@@ -295,6 +297,26 @@ Deno.serve(async (req) => {
             .eq("client_id", followUp.client_id)
             .eq("status", "pending")
             .neq("id", followUp.id);
+
+          // Update client status if give_up_status_id is set
+          if (followUpRule.give_up_status_id) {
+            console.log(`[process-follow-ups] Updating client ${followUp.client_id} status to ${followUpRule.give_up_status_id}`);
+            await supabase
+              .from("clients")
+              .update({ custom_status_id: followUpRule.give_up_status_id })
+              .eq("id", followUp.client_id);
+          }
+
+          // Archive the conversation
+          console.log(`[process-follow-ups] Archiving conversation ${followUp.conversation_id}`);
+          await supabase
+            .from("conversations")
+            .update({ 
+              archived_at: new Date().toISOString(),
+              archived_reason: "Follow-up: desistir do lead",
+              status: "archived"
+            })
+            .eq("id", followUp.conversation_id);
         }
 
       } catch (error: any) {
