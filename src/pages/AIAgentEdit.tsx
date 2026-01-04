@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"; // keeping for potential future use
 import { 
   ArrowLeft, 
   Save, 
@@ -41,7 +41,7 @@ import {
   Square,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
-import { MentionPicker } from "@/components/ai-agents/MentionPicker";
+import { MentionEditor } from "@/components/ai-agents/MentionEditor";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -93,11 +93,6 @@ export default function AIAgentEdit() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionFilter, setMentionFilter] = useState('');
-  const [cursorPosition, setCursorPosition] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const mentionPopupRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (automations && id) {
@@ -133,63 +128,6 @@ export default function AIAgentEdit() {
     };
   }, []);
 
-  const insertMention = useCallback((mention: string) => {
-    // Find the @ position before cursor and replace from there
-    const textBeforeCursor = editedPrompt.slice(0, cursorPosition);
-    const atIndex = textBeforeCursor.lastIndexOf('@');
-    
-    if (atIndex !== -1) {
-      const before = editedPrompt.slice(0, atIndex);
-      const after = editedPrompt.slice(cursorPosition);
-      const newPrompt = before + mention + ' ' + after;
-      setEditedPrompt(newPrompt);
-      
-      // Move cursor after the inserted mention
-      const newCursorPos = atIndex + mention.length + 1;
-      setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.selectionStart = newCursorPos;
-          textareaRef.current.selectionEnd = newCursorPos;
-          textareaRef.current.focus();
-        }
-      }, 0);
-    } else {
-      // Fallback: insert at cursor
-      const before = editedPrompt.slice(0, cursorPosition);
-      const after = editedPrompt.slice(cursorPosition);
-      const newPrompt = before + mention + ' ' + after;
-      setEditedPrompt(newPrompt);
-    }
-    
-    setShowMentions(false);
-    setMentionFilter('');
-  }, [editedPrompt, cursorPosition]);
-
-  const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    const pos = e.target.selectionStart || 0;
-    setEditedPrompt(value);
-    setCursorPosition(pos);
-    
-    // Check if we're typing after @
-    const textBeforeCursor = value.slice(0, pos);
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-    
-    if (lastAtIndex !== -1) {
-      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
-      // Only show mentions if there's no space after @ (still typing the mention)
-      if (!textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-        setShowMentions(true);
-        setMentionFilter(textAfterAt);
-      } else {
-        setShowMentions(false);
-        setMentionFilter('');
-      }
-    } else {
-      setShowMentions(false);
-      setMentionFilter('');
-    }
-  }, []);
 
   const handleRestoreLastVersion = useCallback(() => {
     if (automation?.last_prompt) {
@@ -529,39 +467,10 @@ export default function AIAgentEdit() {
       <div className="flex flex-1 overflow-hidden">
         {/* Prompt Editor Area */}
         <div className="flex-1 p-6 overflow-auto relative">
-          <div className="max-w-4xl relative">
-            {/* Mentions Popup - hierarchical picker */}
-            {showMentions && (
-              <div 
-                ref={mentionPopupRef}
-                className="absolute z-50"
-                style={{ top: '40px', left: '0' }}
-              >
-                <MentionPicker
-                  departments={departments || []}
-                  statuses={statuses || []}
-                  tags={tags || []}
-                  templates={templates || []}
-                  teamMembers={teamMembers}
-                  lawFirm={lawFirm || undefined}
-                  onSelect={(mention) => {
-                    insertMention(mention);
-                    setShowMentions(false);
-                  }}
-                  filter={mentionFilter}
-                />
-              </div>
-            )}
-            
-            <Textarea
-              ref={textareaRef}
+          <div className="max-w-4xl h-full min-h-[calc(100vh-280px)]">
+            <MentionEditor
               value={editedPrompt}
-              onChange={handlePromptChange}
-              onSelect={(e) => setCursorPosition((e.target as HTMLTextAreaElement).selectionStart || 0)}
-              onBlur={() => {
-                // Delay hiding to allow click on mention
-                setTimeout(() => setShowMentions(false), 200);
-              }}
+              onChange={setEditedPrompt}
               placeholder="Digite o prompt que define o comportamento da IA...
 
 Use @ para inserir variáveis dinâmicas como @Nome do cliente, @departamento:Vendas, etc.
@@ -572,10 +481,17 @@ REGRAS DE COMUNICAÇÃO
 • Forneça orientações gerais e faça a triagem inicial
 
 Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
+              maxLength={MAX_PROMPT_CHARS}
               className={cn(
-                "min-h-[calc(100vh-280px)] font-mono text-sm leading-relaxed resize-none border-0 focus-visible:ring-0 p-0 bg-transparent",
+                "min-h-[calc(100vh-280px)]",
                 isOverLimit && "text-destructive"
               )}
+              departments={departments || []}
+              statuses={statuses || []}
+              tags={tags || []}
+              templates={templates || []}
+              teamMembers={teamMembers}
+              lawFirm={lawFirm || undefined}
             />
           </div>
         </div>
@@ -630,27 +546,13 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
               </div>
             )}
 
-            {/* Insert Mention - uses MentionPicker in a Popover */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full gap-2 mb-4">
-                  <AtSign className="h-4 w-4" />
-                  Inserir menção
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <MentionPicker
-                  departments={departments || []}
-                  statuses={statuses || []}
-                  tags={tags || []}
-                  templates={templates || []}
-                  teamMembers={teamMembers}
-                  lawFirm={lawFirm || undefined}
-                  onSelect={insertMention}
-                  filter=""
-                />
-              </PopoverContent>
-            </Popover>
+            {/* Tip for mentions */}
+            <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <AtSign className="h-4 w-4" />
+                Digite @ no editor para inserir variáveis dinâmicas. Clique em uma menção para editá-la.
+              </p>
+            </div>
 
             <Separator className="my-4" />
 
