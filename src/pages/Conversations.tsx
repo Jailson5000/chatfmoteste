@@ -454,12 +454,25 @@ export default function Conversations() {
     
     // If ?phone= is present, find existing conversation or prepare to create new
     if (phoneParam) {
-      const normalizedPhone = phoneParam.replace(/\D/g, "");
+      let normalizedPhone = phoneParam.replace(/\D/g, "");
       
-      // Try to find existing conversation by phone
+      // Ensure phone has country code (55 for Brazil) for proper WhatsApp matching
+      // Brazilian phones without country code: starts with DDD (2 digits, 11-99)
+      if (normalizedPhone.length >= 10 && normalizedPhone.length <= 11 && !normalizedPhone.startsWith("55")) {
+        normalizedPhone = `55${normalizedPhone}`;
+      }
+      
+      // Extract last 8-9 digits for flexible matching (handles 9th digit variations)
+      const phoneEnding = normalizedPhone.slice(-9);
+      
+      // Try to find existing conversation by phone (flexible matching)
       const existingConv = conversations.find(c => {
         const convPhone = (c.contact_phone || "").replace(/\D/g, "");
-        return convPhone === normalizedPhone || convPhone.endsWith(normalizedPhone) || normalizedPhone.endsWith(convPhone);
+        const convEnding = convPhone.slice(-9);
+        return convPhone === normalizedPhone || 
+               convEnding === phoneEnding ||
+               convPhone.endsWith(normalizedPhone.slice(-8)) || 
+               normalizedPhone.endsWith(convPhone.slice(-8));
       });
       
       if (existingConv) {

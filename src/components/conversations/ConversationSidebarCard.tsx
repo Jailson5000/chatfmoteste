@@ -118,7 +118,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           <div className="flex items-center justify-between gap-1.5 min-w-0">
             <h3
               className={cn(
-                "min-w-0 flex-1 font-semibold text-[12px] leading-4 truncate max-w-[140px]",
+                "min-w-0 flex-1 font-semibold text-[11px] leading-4 truncate max-w-[120px]",
                 conversation.unread > 0 && "font-bold"
               )}
               title={conversation.name}
