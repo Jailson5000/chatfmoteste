@@ -3,7 +3,6 @@ import {
   Building2,
   Users,
   Shield,
-  Bell,
   Database,
   FileText,
   Save,
@@ -66,6 +65,7 @@ import { EditableItem } from "@/components/settings/EditableItem";
 import { EditableTemplate } from "@/components/settings/EditableTemplate";
 import { InviteMemberDialog } from "@/components/admin/InviteMemberDialog";
 import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
+import { ClassesSubTabs } from "@/components/settings/ClassesSubTabs";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
 
@@ -299,23 +299,19 @@ export default function Settings() {
         </p>
       </div>
 
-      <Tabs defaultValue="status">
-        <TabsList className="grid w-full max-w-5xl grid-cols-10">
-          <TabsTrigger value="status">
+      <Tabs defaultValue="classes">
+        <TabsList className="grid w-full max-w-4xl grid-cols-7">
+          <TabsTrigger value="classes">
             <Layers className="h-4 w-4 mr-2" />
-            Status
-          </TabsTrigger>
-          <TabsTrigger value="tags">
-            <Tag className="h-4 w-4 mr-2" />
-            Etiquetas
-          </TabsTrigger>
-          <TabsTrigger value="departments">
-            <Folder className="h-4 w-4 mr-2" />
-            Departamentos
+            Classes
           </TabsTrigger>
           <TabsTrigger value="templates">
             <MessageSquareText className="h-4 w-4 mr-2" />
             Templates
+          </TabsTrigger>
+          <TabsTrigger value="team">
+            <Users className="h-4 w-4 mr-2" />
+            Membros
           </TabsTrigger>
           <TabsTrigger value="integrations">
             <Plug className="h-4 w-4 mr-2" />
@@ -323,19 +319,11 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="office">
             <Building2 className="h-4 w-4 mr-2" />
-            Empresa
-          </TabsTrigger>
-          <TabsTrigger value="team">
-            <Users className="h-4 w-4 mr-2" />
-            Equipe
+            Informações Gerais
           </TabsTrigger>
           <TabsTrigger value="security">
             <Shield className="h-4 w-4 mr-2" />
             Segurança
-          </TabsTrigger>
-          <TabsTrigger value="notifications">
-            <Bell className="h-4 w-4 mr-2" />
-            Notificações
           </TabsTrigger>
           <TabsTrigger value="lgpd">
             <FileText className="h-4 w-4 mr-2" />
@@ -343,262 +331,49 @@ export default function Settings() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Status Settings */}
-        <TabsContent value="status" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Status Personalizados</CardTitle>
-                  <CardDescription>
-                    Crie status para classificar seus clientes (ex: Análise, Qualificado, Proposta Aceita)
-                  </CardDescription>
-                </div>
-                <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Novo Status
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Criar Status</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 mt-4">
-                      <div className="space-y-2">
-                        <Label>Nome do Status</Label>
-                        <Input
-                          value={newStatusName}
-                          onChange={(e) => setNewStatusName(e.target.value)}
-                          placeholder="Ex: Qualificado"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Cor</Label>
-                        <ColorPicker value={newStatusColor} onChange={setNewStatusColor} />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button onClick={handleCreateStatus} disabled={createStatus.isPending}>
-                          {createStatus.isPending ? "Criando..." : "Criar"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statuses.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhum status criado</p>
-                  <p className="text-sm">Clique em "Novo Status" para adicionar</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {statuses.map((status) => (
-                    <EditableItem
-                      key={status.id}
-                      id={status.id}
-                      name={status.name}
-                      color={status.color}
-                      type="status"
-                      onUpdate={({ id, name, color }) => updateStatus.mutate({ id, name, color })}
-                      onDelete={(id) => deleteStatus.mutate(id)}
-                      isPending={updateStatus.isPending}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* Classes Settings - Contains Status, Tags, Departments */}
+        <TabsContent value="classes" className="space-y-6 mt-6">
+          <ClassesSubTabs 
+            statuses={statuses}
+            createStatus={createStatus}
+            updateStatus={updateStatus}
+            deleteStatus={deleteStatus}
+            statusDialogOpen={statusDialogOpen}
+            setStatusDialogOpen={setStatusDialogOpen}
+            newStatusName={newStatusName}
+            setNewStatusName={setNewStatusName}
+            newStatusColor={newStatusColor}
+            setNewStatusColor={setNewStatusColor}
+            handleCreateStatus={handleCreateStatus}
+            tags={tags}
+            createTag={createTag}
+            updateTag={updateTag}
+            deleteTag={deleteTag}
+            tagDialogOpen={tagDialogOpen}
+            setTagDialogOpen={setTagDialogOpen}
+            newTagName={newTagName}
+            setNewTagName={setNewTagName}
+            newTagColor={newTagColor}
+            setNewTagColor={setNewTagColor}
+            handleCreateTag={handleCreateTag}
+            departments={departments}
+            createDepartment={createDepartment}
+            updateDepartment={updateDepartment}
+            deleteDepartment={deleteDepartment}
+            deptDialogOpen={deptDialogOpen}
+            setDeptDialogOpen={setDeptDialogOpen}
+            newDeptName={newDeptName}
+            setNewDeptName={setNewDeptName}
+            newDeptColor={newDeptColor}
+            setNewDeptColor={setNewDeptColor}
+            handleCreateDepartment={handleCreateDepartment}
+            draggedDept={draggedDept}
+            handleDeptDragStart={handleDeptDragStart}
+            handleDeptDragOver={handleDeptDragOver}
+            handleDeptDrop={handleDeptDrop}
+          />
         </TabsContent>
 
-        {/* Tags Settings */}
-        <TabsContent value="tags" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Etiquetas</CardTitle>
-                  <CardDescription>
-                    Crie etiquetas para organizar e filtrar seus clientes
-                  </CardDescription>
-                </div>
-                <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Nova Etiqueta
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Criar Etiqueta</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 mt-4">
-                      <div className="space-y-2">
-                        <Label>Nome da Etiqueta</Label>
-                        <Input
-                          value={newTagName}
-                          onChange={(e) => setNewTagName(e.target.value)}
-                          placeholder="Ex: VIP"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Cor</Label>
-                        <ColorPicker value={newTagColor} onChange={setNewTagColor} />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" onClick={() => setTagDialogOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button onClick={handleCreateTag} disabled={createTag.isPending}>
-                          {createTag.isPending ? "Criando..." : "Criar"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {tags.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Tag className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma etiqueta criada</p>
-                  <p className="text-sm">Clique em "Nova Etiqueta" para adicionar</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {tags.map((tag) => (
-                    <EditableItem
-                      key={tag.id}
-                      id={tag.id}
-                      name={tag.name}
-                      color={tag.color}
-                      type="tag"
-                      onUpdate={({ id, name, color }) => updateTag.mutate({ id, name, color })}
-                      onDelete={(id) => deleteTag.mutate(id)}
-                      isPending={updateTag.isPending}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Departments Settings */}
-        <TabsContent value="departments" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Departamentos</CardTitle>
-                  <CardDescription>
-                    Departamentos aparecem como colunas no Kanban. Arraste para reordenar.
-                  </CardDescription>
-                </div>
-                <Dialog open={deptDialogOpen} onOpenChange={setDeptDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Novo Departamento
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Criar Departamento</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 mt-4">
-                      <div className="space-y-2">
-                        <Label>Nome do Departamento</Label>
-                        <Input
-                          value={newDeptName}
-                          onChange={(e) => setNewDeptName(e.target.value)}
-                          placeholder="Ex: Comercial"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Cor</Label>
-                        <ColorPicker value={newDeptColor} onChange={setNewDeptColor} />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" onClick={() => setDeptDialogOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button onClick={handleCreateDepartment} disabled={createDepartment.isPending}>
-                          {createDepartment.isPending ? "Criando..." : "Criar"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {departments.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Folder className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhum departamento criado</p>
-                  <p className="text-sm">Clique em "Novo Departamento" para adicionar</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {departments.map((dept) => (
-                    <div
-                      key={dept.id}
-                      draggable
-                      onDragStart={() => handleDeptDragStart(dept.id)}
-                      onDragOver={handleDeptDragOver}
-                      onDrop={() => handleDeptDrop(dept.id)}
-                      className={`flex items-center justify-between p-3 rounded-lg border cursor-grab active:cursor-grabbing transition-opacity ${
-                        draggedDept === dept.id ? "opacity-50" : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <GripVertical className="h-4 w-4 text-muted-foreground" />
-                        <div
-                          className="w-4 h-4 rounded"
-                          style={{ backgroundColor: dept.color }}
-                        />
-                        <span className="font-medium">{dept.name}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => {
-                            const newName = prompt("Novo nome:", dept.name);
-                            if (newName && newName !== dept.name) {
-                              updateDepartment.mutate({ id: dept.id, name: newName });
-                            }
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => deleteDepartment.mutate(dept.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* Templates Settings */}
         <TabsContent value="templates" className="space-y-6 mt-6">
@@ -1160,56 +935,6 @@ export default function Settings() {
                     <SelectItem value="480">8 horas</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Notifications */}
-        <TabsContent value="notifications" className="space-y-6 mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Preferências de Notificação</CardTitle>
-              <CardDescription>
-                Configure quando e como você quer ser notificado
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Nova conversa</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Notificar quando um novo cliente entrar em contato
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Transferência para atendente</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Notificar quando a IA transferir para humano
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Documentos recebidos</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Notificar quando um cliente enviar documentos
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Resumo diário</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Receber um resumo das atividades do dia
-                  </p>
-                </div>
-                <Switch />
               </div>
             </CardContent>
           </Card>
