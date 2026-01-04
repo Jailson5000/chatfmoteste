@@ -1,6 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 export interface Client {
   id: string;
@@ -22,38 +23,36 @@ export interface Client {
 export function useClients() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: clients = [], isLoading } = useQuery({
-    queryKey: ["clients"],
+    queryKey: ["clients", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+
       const { data, error } = await supabase
         .from("clients")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
       return data as Client[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createClient = useMutation({
     mutationFn: async (client: Omit<Client, "id" | "law_firm_id" | "created_at" | "updated_at">) => {
       const { data: profile } = await supabase.auth.getUser();
       if (!profile.user) throw new Error("Usuário não autenticado");
-
-      const { data: userProfile } = await supabase
-        .from("profiles")
-        .select("law_firm_id")
-        .eq("id", profile.user.id)
-        .single();
-
-      if (!userProfile?.law_firm_id) throw new Error("Escritório não encontrado");
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
       const { data, error } = await supabase
         .from("clients")
         .insert({
           ...client,
-          law_firm_id: userProfile.law_firm_id,
+          law_firm_id: lawFirm.id,
         })
         .select()
         .single();
@@ -93,14 +92,7 @@ export function useClients() {
 
   const deleteClient = useMutation({
     mutationFn: async (id: string) => {
-      // CASCADE delete will automatically remove:
-      // - conversations
-      // - client_tags
-      // - client_actions
-      // - client_memories
-      // - cases
-      // - documents
-      // - consent_logs
+      // CASCADE delete will automatically remove related records (conversations, tags, actions, memories, cases, documents, consent logs, etc.)
       const { error } = await supabase.from("clients").delete().eq("id", id);
       if (error) throw error;
     },
@@ -152,17 +144,10 @@ export function useClients() {
     mutationFn: async () => {
       const { data: profile } = await supabase.auth.getUser();
       if (!profile.user) throw new Error("Usuário não autenticado");
-
-      const { data: userProfile } = await supabase
-        .from("profiles")
-        .select("law_firm_id")
-        .eq("id", profile.user.id)
-        .single();
-
-      if (!userProfile?.law_firm_id) throw new Error("Escritório não encontrado");
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
       const { data, error } = await supabase.rpc("unify_duplicate_clients", {
-        _law_firm_id: userProfile.law_firm_id,
+        _law_firm_id: lawFirm.id,
       });
 
       if (error) throw error;
@@ -172,7 +157,7 @@ export function useClients() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       if (data.deleted_count > 0) {
-        toast({ 
+        toast({
           title: `${data.deleted_count} contatos duplicados unificados`,
           description: `Telefones unificados: ${data.unified_phones.length}`,
         });

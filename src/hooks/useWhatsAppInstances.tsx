@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
 import { useCompanyLimits } from "./useCompanyLimits";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 export type WhatsAppInstance = Tables<"whatsapp_instances">;
 
@@ -42,14 +43,18 @@ export function useWhatsAppInstances() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { checkLimit, refetch: refetchLimits } = useCompanyLimits();
+  const { lawFirm } = useLawFirm();
 
   const { data: instances = [], isLoading, error, refetch } = useQuery({
-    queryKey: ["whatsapp-instances"],
+    queryKey: ["whatsapp-instances", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+
       console.log("[useWhatsAppInstances] Fetching instances...");
       const { data, error } = await supabase
         .from("whatsapp_instances")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -59,6 +64,7 @@ export function useWhatsAppInstances() {
       console.log("[useWhatsAppInstances] Fetched instances:", data?.length);
       return data as WhatsAppInstance[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const testConnection = useMutation({

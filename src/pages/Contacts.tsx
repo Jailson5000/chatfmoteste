@@ -659,12 +659,25 @@ export default function Contacts() {
               onClick={async () => {
                 setIsDeleting(true);
                 try {
-                  for (const id of selectedContacts) {
-                    await deleteClient.mutateAsync(id);
-                  }
+                  const results = await Promise.allSettled(
+                    selectedContacts.map((id) => deleteClient.mutateAsync(id))
+                  );
+
+                  const successCount = results.filter((r) => r.status === "fulfilled").length;
+                  const failCount = results.length - successCount;
+
                   setSelectedContacts([]);
                   setBulkDeleteDialogOpen(false);
-                  toast({ title: `${selectedContacts.length} contatos excluídos` });
+
+                  if (failCount > 0) {
+                    toast({
+                      title: `${successCount} contatos excluídos`,
+                      description: `${failCount} não puderam ser excluídos (permissão ou dados).`,
+                      variant: "destructive",
+                    });
+                  } else {
+                    toast({ title: `${successCount} contatos excluídos` });
+                  }
                 } finally {
                   setIsDeleting(false);
                 }
