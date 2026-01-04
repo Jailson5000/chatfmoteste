@@ -91,7 +91,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative w-full text-left rounded-lg bg-card border border-border/50 p-3",
+        "group relative w-full text-left rounded-lg bg-card border border-border/50 p-2.5",
         "transition-all duration-200 hover:border-border hover:shadow-md",
         selected && "bg-muted ring-1 ring-primary/20"
       )}
@@ -104,8 +104,8 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
       )}
 
       {/* Header */}
-      <div className="flex items-start gap-3">
-        <Avatar className="h-10 w-10 border-2 border-success/30">
+      <div className="flex items-start gap-2">
+        <Avatar className="h-9 w-9 border-2 border-success/30 flex-shrink-0">
           {conversation.avatarUrl ? (
             <AvatarImage src={conversation.avatarUrl} alt={`Avatar de ${conversation.name}`} />
           ) : null}
@@ -193,7 +193,7 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
       )}
 
       {/* Footer */}
-      <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between gap-2">
+      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center justify-between gap-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {/* Tags icon with tooltip */}
           <TooltipProvider delayDuration={200}>
@@ -245,15 +245,15 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
           </TooltipProvider>
         </div>
 
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1 min-w-0">
           {isAI ? (
-            <Bot className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
+            <Bot className="h-3 w-3 text-purple-500 flex-shrink-0" />
           ) : (
-            <User className="h-3.5 w-3.5 text-success flex-shrink-0" />
+            <User className="h-3 w-3 text-success flex-shrink-0" />
           )}
           <span
             className={cn(
-              "text-xs truncate max-w-[140px]",
+              "text-[10px] truncate max-w-[100px]",
               isAI ? "text-purple-500" : "text-success"
             )}
             title={handlerLabel}

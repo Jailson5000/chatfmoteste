@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { Plus, Search, Upload, Download, User, SlidersHorizontal, MoreVertical, Trash2, Merge } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Plus, Search, Upload, Download, User, SlidersHorizontal, MoreVertical, Trash2, Merge, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ export default function Contacts() {
   const { members: teamMembers } = useTeamMembers();
   const { tags } = useTags();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -543,6 +545,15 @@ export default function Contacts() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              navigate(`/conversations?phone=${encodeURIComponent(client.phone)}&name=${encodeURIComponent(client.name)}`);
+                            }}
+                          >
+                            <MessageCircle className="h-4 w-4 mr-2" />
+                            Iniciar conversa
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
                             onClick={() => {
