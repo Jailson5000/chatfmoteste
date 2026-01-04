@@ -571,10 +571,10 @@ export default function AIAgentEdit() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Prompt Editor Area */}
-        <div className="flex-1 flex flex-col p-6 min-h-0">
-          <div className="flex-1 h-full max-w-4xl min-h-0">
+        <div className="flex-1 flex flex-col p-6 min-h-0 min-w-0 overflow-hidden">
+          <div className="flex-1 h-full min-h-0 min-w-0 overflow-hidden">
             <MentionEditor
               value={editedPrompt}
               onChange={setEditedPrompt}
@@ -602,7 +602,7 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
         </div>
 
         {/* Settings Sidebar */}
-        <div className="w-80 border-l bg-card overflow-auto">
+        <div className="w-80 flex-shrink-0 border-l bg-card overflow-auto">
           <div className="p-4">
             <div className="flex items-center gap-2 mb-4">
               <Settings className="h-5 w-5" />
