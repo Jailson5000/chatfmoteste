@@ -83,7 +83,7 @@ export default function AIAgentEdit() {
   const { members: teamMembers } = useTeamMembers();
   const { toast } = useToast();
 
-  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const { navigator: routerNavigator } = useContext(UNSAFE_NavigationContext);
   const pendingNavigationRef = useRef<null | (() => void)>(null);
 
   const [automation, setAutomation] = useState<Automation | null>(null);
@@ -172,7 +172,7 @@ export default function AIAgentEdit() {
   useEffect(() => {
     if (!hasChanges) return;
 
-    const nav = navigator as any;
+    const nav = routerNavigator as any;
     if (typeof nav?.block !== "function") return;
 
     const unblock = nav.block((tx: any) => {
@@ -184,7 +184,7 @@ export default function AIAgentEdit() {
     });
 
     return unblock;
-  }, [hasChanges, navigator]);
+  }, [hasChanges, routerNavigator]);
 
 
   const handleRestoreLastVersion = useCallback(() => {
@@ -332,7 +332,7 @@ export default function AIAgentEdit() {
   };
 
   const handleCopyWebhook = () => {
-    navigator.clipboard.writeText(editedWebhookUrl);
+    window.navigator.clipboard.writeText(editedWebhookUrl);
     setCopiedUrl(true);
     toast({
       title: "URL copiada",

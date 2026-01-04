@@ -240,7 +240,11 @@ export function MentionPicker({
                 return (
                   <button
                     key={item.key}
-                    onClick={() => onSelect(item.key)}
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      onSelect(item.key);
+                    }}
                     className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors flex items-center gap-3"
                   >
                     <Icon className="h-4 w-4 text-primary shrink-0" />
@@ -249,6 +253,7 @@ export function MentionPicker({
                       <div className="text-xs text-muted-foreground truncate">{item.categoryLabel}</div>
                     </div>
                   </button>
+
                 );
               })
             )}
@@ -286,7 +291,11 @@ export function MentionPicker({
               activeCategoryData.items.map((item, idx) => (
                 <button
                   key={item.key}
-                  onClick={() => onSelect(item.key)}
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    onSelect(item.key);
+                  }}
                   className="w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors flex items-center gap-3"
                 >
                   <span className="text-sm flex-1">{item.label}</span>
@@ -294,6 +303,7 @@ export function MentionPicker({
                     <span className="text-xs text-muted-foreground">↵</span>
                   )}
                 </button>
+
               ))
             )}
           </div>
