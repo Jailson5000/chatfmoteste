@@ -317,25 +317,8 @@ export default function Kanban() {
       {/* Top Filter Bar */}
       <div className="p-3 md:p-4 border-b border-border flex-shrink-0 bg-background/95 backdrop-blur-sm">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          {/* Left: Group by selector */}
-          <div className="flex items-center gap-2">
-            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
-              <SelectTrigger className="w-[220px] h-9">
-                <LayoutGrid className="h-4 w-4 mr-2 text-muted-foreground" />
-                <span className="text-muted-foreground mr-1">Agrupar:</span>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="responsible">Responsável</SelectItem>
-                <SelectItem value="status">Status</SelectItem>
-                <SelectItem value="department">Departamento</SelectItem>
-                <SelectItem value="connection">Conexão</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Center: Search and filters */}
-          <div className="flex items-center gap-2 flex-1 justify-center">
+          {/* Left: Search and filters */}
+          <div className="flex items-center gap-2 flex-1">
             {/* Search Input */}
             <div className="relative min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -392,8 +375,22 @@ export default function Kanban() {
             />
           </div>
 
-          {/* Right: New contact button */}
+          {/* Right: Group by selector and new contact button */}
           <div className="flex items-center gap-2">
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="w-[220px] h-9">
+                <LayoutGrid className="h-4 w-4 mr-2 text-muted-foreground" />
+                <span className="text-muted-foreground mr-1">Agrupar:</span>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="responsible">Responsável</SelectItem>
+                <SelectItem value="status">Status</SelectItem>
+                <SelectItem value="department">Departamento</SelectItem>
+                <SelectItem value="connection">Conexão</SelectItem>
+              </SelectContent>
+            </Select>
+            
             <Button size="icon" variant="default" className="h-9 w-9 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
               <UserPlus className="h-4 w-4" />
             </Button>
