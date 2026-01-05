@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect, type RefObject, type UIEvent } from "react";
 
 export interface UseInfiniteScrollOptions {
   initialBatchSize?: number;
@@ -21,10 +21,10 @@ export interface UseInfiniteScrollReturn<T> {
   reset: () => void;
   
   // Scroll handler to attach to container
-  handleScroll: (e: React.UIEvent<HTMLElement>) => void;
+  handleScroll: (e: UIEvent<HTMLElement>) => void;
   
   // Ref-based scroll detection (alternative)
-  scrollContainerRef: React.RefObject<HTMLElement>;
+  scrollContainerRef: RefObject<HTMLElement>;
 }
 
 /**
@@ -77,18 +77,19 @@ export function useInfiniteScroll<T>(
   }, [data.length, displayedCount, initialBatchSize, batchIncrement]);
 
   const loadMore = useCallback(() => {
-    if (loadingRef.current || !hasMore) return;
+    if (loadingRef.current) return;
+    if (displayedCount >= data.length) return;
 
     loadingRef.current = true;
     setIsLoadingMore(true);
 
     // Small delay to show loading state and prevent rapid-fire loads
     requestAnimationFrame(() => {
-      setDisplayedCount((prev) => Math.min(prev + batchIncrement, totalCount));
+      setDisplayedCount((prev) => Math.min(prev + batchIncrement, data.length));
       setIsLoadingMore(false);
       loadingRef.current = false;
     });
-  }, [hasMore, batchIncrement, totalCount]);
+  }, [batchIncrement, data.length, displayedCount]);
 
   // Restore scrollTop after list grows (keeps same item visible)
   useLayoutEffect(() => {
@@ -107,7 +108,7 @@ export function useInfiniteScroll<T>(
   }, [initialBatchSize]);
 
   const handleScroll = useCallback(
-    (e: React.UIEvent<HTMLElement>) => {
+    (e: UIEvent<HTMLElement>) => {
       const target = e.currentTarget;
       const scrollTop = target.scrollTop;
       const scrollHeight = target.scrollHeight;
@@ -168,6 +169,6 @@ export function useInfiniteScroll<T>(
     loadMore,
     reset,
     handleScroll,
-    scrollContainerRef: scrollContainerRef as React.RefObject<HTMLElement>,
+    scrollContainerRef: scrollContainerRef as RefObject<HTMLElement>,
   };
 }
