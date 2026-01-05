@@ -44,14 +44,10 @@ export function useInfiniteScroll<T>(
   const [displayedCount, setDisplayedCount] = useState(initialBatchSize);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const scrollContainerRef = useRef<HTMLElement>(null);
+  
+  // Guards to prevent loops
   const loadingRef = useRef(false);
-
-  // Prevent load-more loops: only trigger again after user scrolls away and back
-  const nearEndArmedRef = useRef(true);
-
-  // Preserve user's current viewport position when incrementally revealing more items
-  const pendingScrollContainerRef = useRef<HTMLElement | null>(null);
-  const pendingScrollTopRef = useRef<number | null>(null);
+  const lastLoadTimeRef = useRef(0);
 
   const totalCount = data.length;
   const hasMore = displayedCount < totalCount;
@@ -62,7 +58,6 @@ export function useInfiniteScroll<T>(
   }, [data, displayedCount]);
 
   // Keep displayedCount consistent when data shrinks temporarily (e.g. realtime/drag moves)
-  // so we don't end up "stuck" showing only 1 item.
   useEffect(() => {
     const minCount = Math.min(initialBatchSize, data.length);
 
@@ -77,88 +72,87 @@ export function useInfiniteScroll<T>(
   }, [data.length, displayedCount, initialBatchSize, batchIncrement]);
 
   const loadMore = useCallback(() => {
+    // Triple guard: loading flag, hasMore check, AND debounce
     if (loadingRef.current) return;
     if (displayedCount >= data.length) return;
+    
+    // Debounce: minimum 100ms between loads
+    const now = Date.now();
+    if (now - lastLoadTimeRef.current < 100) return;
+    lastLoadTimeRef.current = now;
 
     loadingRef.current = true;
     setIsLoadingMore(true);
 
-    // Small delay to show loading state and prevent rapid-fire loads
-    requestAnimationFrame(() => {
-      setDisplayedCount((prev) => Math.min(prev + batchIncrement, data.length));
+    // Use setTimeout to ensure state batching and prevent sync loops
+    setTimeout(() => {
+      setDisplayedCount((prev) => {
+        const newCount = Math.min(prev + batchIncrement, data.length);
+        return newCount;
+      });
       setIsLoadingMore(false);
       loadingRef.current = false;
-    });
+    }, 16); // One frame delay
   }, [batchIncrement, data.length, displayedCount]);
-
-  // Restore scrollTop after list grows (keeps same item visible)
-  useLayoutEffect(() => {
-    const container = pendingScrollContainerRef.current;
-    const top = pendingScrollTopRef.current;
-    if (!container || top === null) return;
-
-    container.scrollTop = top;
-
-    pendingScrollContainerRef.current = null;
-    pendingScrollTopRef.current = null;
-  }, [displayedCount]);
 
   const reset = useCallback(() => {
     setDisplayedCount(initialBatchSize);
+    loadingRef.current = false;
+    lastLoadTimeRef.current = 0;
   }, [initialBatchSize]);
 
   const handleScroll = useCallback(
     (e: UIEvent<HTMLElement>) => {
+      // Skip if already loading
+      if (loadingRef.current || isLoadingMore) return;
+      if (displayedCount >= data.length) return;
+      
       const target = e.currentTarget;
       const scrollTop = target.scrollTop;
       const scrollHeight = target.scrollHeight;
       const clientHeight = target.clientHeight;
       const remaining = scrollHeight - scrollTop - clientHeight;
 
-      // Rearm once the user moves away from the threshold
-      if (remaining > threshold) {
-        nearEndArmedRef.current = true;
-      }
-
-      // Trigger only once per "crossing" into the threshold zone
-      if (remaining < threshold && nearEndArmedRef.current) {
-        nearEndArmedRef.current = false;
-
-        // Save current position to avoid jumps after incremental render
-        pendingScrollContainerRef.current = target;
-        pendingScrollTopRef.current = scrollTop;
+      // Only load when near bottom
+      if (remaining < threshold) {
         loadMore();
       }
     },
-    [loadMore, threshold]
+    [loadMore, threshold, isLoadingMore, displayedCount, data.length]
   );
 
-  // Alternative: Intersection Observer for ref-based detection
+  // Alternative: Ref-based scroll detection
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    let ticking = false;
+
     const handleContainerScroll = () => {
-      const scrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-      const remaining = scrollHeight - scrollTop - clientHeight;
+      if (ticking) return;
+      ticking = true;
 
-      if (remaining > threshold) {
-        nearEndArmedRef.current = true;
-      }
+      requestAnimationFrame(() => {
+        ticking = false;
+        
+        // Skip if loading
+        if (loadingRef.current || isLoadingMore) return;
+        if (displayedCount >= data.length) return;
 
-      if (remaining < threshold && nearEndArmedRef.current) {
-        nearEndArmedRef.current = false;
-        pendingScrollContainerRef.current = container;
-        pendingScrollTopRef.current = scrollTop;
-        loadMore();
-      }
+        const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+        const remaining = scrollHeight - scrollTop - clientHeight;
+
+        if (remaining < threshold) {
+          loadMore();
+        }
+      });
     };
 
-    container.addEventListener("scroll", handleContainerScroll);
+    container.addEventListener("scroll", handleContainerScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleContainerScroll);
-  }, [loadMore, threshold]);
+  }, [loadMore, threshold, isLoadingMore, displayedCount, data.length]);
 
   return {
     visibleData,
