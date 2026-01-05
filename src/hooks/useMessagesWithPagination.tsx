@@ -223,7 +223,9 @@ export function useMessagesWithPagination({
         requestAnimationFrame(() => {
           const newScrollHeight = viewport.scrollHeight;
           const delta = newScrollHeight - prevScrollHeight;
-          viewport.scrollTop = prevScrollTop + delta;
+          const anchoredTop = prevScrollTop + delta;
+          // Avoid triggering a chain of automatic loadMore calls when content is short
+          viewport.scrollTop = Math.max(anchoredTop, 120);
         });
       });
     }
