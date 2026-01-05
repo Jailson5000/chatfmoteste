@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+
 import { cn } from "@/lib/utils";
 
 export default function Kanban() {
@@ -517,35 +517,33 @@ export default function Kanban() {
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
 
-      {/* Conversation Chat Panel */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col h-full [&>button]:hidden">
-          {selectedConversation && (
-            <KanbanChatPanel
-              conversationId={selectedConversation.id}
-              contactName={selectedConversation.contact_name}
-              contactPhone={selectedConversation.contact_phone}
-              currentHandler={selectedConversation.current_handler}
-              currentAutomationId={selectedConversation.current_automation_id}
-              currentAutomationName={(selectedConversation as any).current_automation?.name || null}
-              assignedProfile={selectedConversation.assigned_profile}
-              clientId={selectedConversation.client_id}
-              clientStatus={selectedConversation.client?.custom_status_id}
-              conversationTags={selectedConversation.tags}
-              departmentId={selectedConversation.department_id}
-              customStatuses={customStatuses}
-              tags={tags}
-              departments={departments}
-              members={members}
-              automations={automations}
-              onClose={() => {
-                setSheetOpen(false);
-                setSelectedConversationId(null);
-              }}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* Conversation Chat Panel - Floating side panel */}
+      {sheetOpen && selectedConversation && (
+        <div className="fixed top-0 right-0 h-full w-full sm:w-[420px] lg:w-[480px] bg-background border-l border-border shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+          <KanbanChatPanel
+            conversationId={selectedConversation.id}
+            contactName={selectedConversation.contact_name}
+            contactPhone={selectedConversation.contact_phone}
+            currentHandler={selectedConversation.current_handler}
+            currentAutomationId={selectedConversation.current_automation_id}
+            currentAutomationName={(selectedConversation as any).current_automation?.name || null}
+            assignedProfile={selectedConversation.assigned_profile}
+            clientId={selectedConversation.client_id}
+            clientStatus={selectedConversation.client?.custom_status_id}
+            conversationTags={selectedConversation.tags}
+            departmentId={selectedConversation.department_id}
+            customStatuses={customStatuses}
+            tags={tags}
+            departments={departments}
+            members={members}
+            automations={automations}
+            onClose={() => {
+              setSheetOpen(false);
+              setSelectedConversationId(null);
+            }}
+          />
+        </div>
+      )}
 
       {/* New Contact Dialog */}
       <NewContactDialog
