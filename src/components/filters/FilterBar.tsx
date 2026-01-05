@@ -762,8 +762,8 @@ export function FilterBar({
                       </div>
                     </CollapsibleTrigger>
                     <CollapsibleContent className="pt-2">
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 overflow-visible">
-                        <div className="flex gap-4 flex-wrap">
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 overflow-visible pointer-events-auto">
+                        <div className="flex gap-4 flex-wrap pointer-events-auto">
                           {/* Quick periods */}
                           <div className="space-y-1 min-w-[130px]">
                             <p className="text-xs font-medium text-muted-foreground mb-2">PERÍODOS RÁPIDOS</p>
@@ -782,7 +782,7 @@ export function FilterBar({
                           </div>
                           
                           {/* Calendar */}
-                          <div className="flex-1 min-w-[264px]">
+                          <div className="flex-1 min-w-[264px] pointer-events-auto">
                             <Calendar
                               mode="range"
                               selected={dateRange}
