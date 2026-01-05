@@ -184,12 +184,15 @@ export function useAgentKnowledge(automationId: string | undefined) {
   const unlinkKnowledge = useMutation({
     mutationFn: async (knowledgeItemId: string) => {
       if (!automationId) throw new Error('Automation ID required');
+      if (!lawFirmId) throw new Error('Law firm ID required');
 
+      // SECURITY: Include law_firm_id for defense in depth
       const { error } = await supabase
         .from('agent_knowledge')
         .delete()
         .eq('automation_id', automationId)
-        .eq('knowledge_item_id', knowledgeItemId);
+        .eq('knowledge_item_id', knowledgeItemId)
+        .eq('law_firm_id', lawFirmId);
 
       if (error) throw error;
     },
