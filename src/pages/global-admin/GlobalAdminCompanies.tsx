@@ -80,9 +80,8 @@ export default function GlobalAdminCompanies() {
       return;
     }
     
-    const newPassword = "Teste@123";
     const confirmReset = confirm(
-      `Resetar a senha do admin da empresa "${company.name}"?\n\nNova senha: ${newPassword}\n\nEmail: Verifique no perfil do usuário`
+      `Resetar a senha do admin da empresa "${company.name}"?\n\nUma senha temporária segura será gerada automaticamente.\nO usuário será obrigado a alterá-la no primeiro login.\n\nEmail: ${company.email || 'Verifique no perfil'}`
     );
     
     if (!confirmReset) return;
@@ -97,18 +96,28 @@ export default function GlobalAdminCompanies() {
         return;
       }
       
-      const response = await supabase.functions.invoke('reset-user-password', {
+      // Call the secure admin-reset-password function
+      // Password is generated server-side for security
+      const response = await supabase.functions.invoke('admin-reset-password', {
         body: {
-          user_id: company.admin_user_id,
-          new_password: newPassword
+          email: company.email
         }
       });
       
       if (response.error) {
         throw new Error(response.error.message);
       }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Erro desconhecido');
+      }
       
-      toast.success(`Senha resetada com sucesso!\n\nNova senha: ${newPassword}`);
+      // Show the temporary password to the admin
+      const tempPassword = response.data.temporary_password;
+      toast.success(
+        `Senha resetada com sucesso!\n\nSenha temporária: ${tempPassword}\n\nO usuário deverá alterá-la no primeiro login.`,
+        { duration: 15000 }
+      );
     } catch (error: any) {
       console.error("Error resetting password:", error);
       toast.error(`Erro ao resetar senha: ${error.message}`);

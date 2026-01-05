@@ -117,11 +117,15 @@ export default function KnowledgeBase() {
 
   const unlinkFromAgent = useMutation({
     mutationFn: async ({ automationId, knowledgeItemId }: { automationId: string; knowledgeItemId: string }) => {
+      if (!lawFirm?.id) throw new Error("Law firm not found");
+      
+      // SECURITY: Include law_firm_id for defense in depth
       const { error } = await supabase
         .from('agent_knowledge')
         .delete()
         .eq('automation_id', automationId)
-        .eq('knowledge_item_id', knowledgeItemId);
+        .eq('knowledge_item_id', knowledgeItemId)
+        .eq('law_firm_id', lawFirm.id);
       if (error) throw error;
     },
     onSuccess: () => {

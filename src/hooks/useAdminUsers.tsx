@@ -49,51 +49,54 @@ export function useAdminUsers() {
 
   const updateAdminRole = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: AdminRole }) => {
-      // Check if role exists
-      const { data: existingRole } = await supabase
-        .from("admin_user_roles")
-        .select("id")
-        .eq("user_id", userId)
-        .maybeSingle();
+      // Use secure RPC that validates caller is super_admin
+      const { data, error } = await supabase.rpc("update_admin_role", {
+        _target_user_id: userId,
+        _new_role: role,
+      });
 
-      if (existingRole) {
-        const { error } = await supabase
-          .from("admin_user_roles")
-          .update({ role })
-          .eq("user_id", userId);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("admin_user_roles")
-          .insert({ user_id: userId, role });
-
-        if (error) throw error;
+      if (error) throw error;
+      
+      // Check if the RPC returned an error in its response
+      const result = data as { success: boolean; error?: string } | null;
+      if (result && !result.success) {
+        throw new Error(result.error || "Falha ao atualizar role");
       }
+
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       toast.success("Role atualizada com sucesso");
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       toast.error("Erro ao atualizar role: " + error.message);
     },
   });
 
   const toggleAdminActive = useMutation({
     mutationFn: async ({ userId, isActive }: { userId: string; isActive: boolean }) => {
-      const { error } = await supabase
-        .from("admin_profiles")
-        .update({ is_active: isActive })
-        .eq("user_id", userId);
+      // Use secure RPC that validates caller is super_admin
+      const { data, error } = await supabase.rpc("toggle_admin_active", {
+        _target_user_id: userId,
+        _is_active: isActive,
+      });
 
       if (error) throw error;
+      
+      // Check if the RPC returned an error in its response
+      const result = data as { success: boolean; error?: string } | null;
+      if (result && !result.success) {
+        throw new Error(result.error || "Falha ao atualizar status");
+      }
+
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       toast.success("Status atualizado com sucesso");
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       toast.error("Erro ao atualizar status: " + error.message);
     },
   });

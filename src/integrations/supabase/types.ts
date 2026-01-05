@@ -3641,7 +3641,18 @@ export type Database = {
         Returns: number
       }
       normalize_phone: { Args: { phone: string }; Returns: string }
+      toggle_admin_active: {
+        Args: { _is_active: boolean; _target_user_id: string }
+        Returns: Json
+      }
       unify_duplicate_clients: { Args: { _law_firm_id: string }; Returns: Json }
+      update_admin_role: {
+        Args: {
+          _new_role: Database["public"]["Enums"]["admin_role"]
+          _target_user_id: string
+        }
+        Returns: Json
+      }
       update_client_status_with_follow_ups: {
         Args: { _client_id: string; _new_status_id: string }
         Returns: Json
