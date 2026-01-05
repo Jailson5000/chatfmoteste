@@ -280,6 +280,8 @@ export default function Conversations() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Message list (chat) scroll area
   const messagesScrollAreaRef = useRef<HTMLDivElement>(null);
   const setMessagesScrollAreaNode = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
@@ -287,6 +289,14 @@ export default function Conversations() {
     if (node.offsetParent === null && node.getClientRects().length === 0) return;
     messagesScrollAreaRef.current = node;
   }, []);
+
+  // Conversation list scroll area (left sidebar)
+  const conversationListScrollAreaRef = useRef<HTMLDivElement>(null);
+  const setConversationListScrollAreaNode = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    conversationListScrollAreaRef.current = node;
+  }, []);
+
   const isAtBottomRef = useRef(true);
   const lastTailMessageIdRef = useRef<string | null>(null);
   const pendingOutgoingRef = useRef<Array<{ tempId: string; content: string; sentAt: number }>>([]);
@@ -851,6 +861,42 @@ export default function Conversations() {
     batchIncrement: 20,
     threshold: 150,
   });
+
+  const {
+    loadMore: loadMoreConversations,
+    hasMore: hasMoreConversations,
+    isLoadingMore: isLoadingMoreConversations,
+  } = conversationScroll;
+
+  // Radix ScrollArea: bind scroll listener to the internal viewport
+  useEffect(() => {
+    const root = conversationListScrollAreaRef.current;
+    const viewport = root?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    ) as HTMLDivElement | null;
+    if (!viewport) return;
+
+    const threshold = 150;
+
+    const onScroll = () => {
+      if (!hasMoreConversations || isLoadingMoreConversations) return;
+      const remaining = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      if (remaining < threshold) {
+        loadMoreConversations();
+      }
+    };
+
+    viewport.addEventListener("scroll", onScroll, { passive: true } as any);
+    onScroll();
+
+    return () => viewport.removeEventListener("scroll", onScroll as any);
+  }, [
+    loadMoreConversations,
+    hasMoreConversations,
+    isLoadingMoreConversations,
+    filteredConversations.length,
+    conversationScroll.displayedCount,
+  ]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
@@ -1884,9 +1930,9 @@ export default function Conversations() {
 
         {/* Conversation List */}
         <ScrollArea 
+          ref={setConversationListScrollAreaNode}
           className="flex-1 min-w-0" 
           viewportClassName="min-w-0"
-          onScrollCapture={conversationScroll.handleScroll}
         >
           <div className="p-2 space-y-1 min-w-0">
             {filteredConversations.length === 0 ? (
