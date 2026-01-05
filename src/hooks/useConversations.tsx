@@ -524,16 +524,40 @@ export function useConversations() {
         }
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
+    // Optimistic update: update local cache immediately to avoid visual flicker
+    onMutate: async ({ conversationId, departmentId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+
+      // Snapshot current conversations
+      const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
+
+      // Optimistically update to the new department_id
+      queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
+        if (!old) return old;
+        return old.map((conv) =>
+          conv.id === conversationId
+            ? { ...conv, department_id: departmentId }
+            : conv
+        );
+      });
+
+      return { previousConversations };
     },
-    onError: (error) => {
+    onError: (error, _vars, context) => {
+      // Rollback on error
+      if (context?.previousConversations) {
+        queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+      }
       toast({
         title: "Erro ao mover conversa",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
     },
   });
 
@@ -600,18 +624,43 @@ export function useConversations() {
 
       return { success: true, cleared: true };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
-      queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
+    // Optimistic update: update local cache immediately to avoid visual flicker
+    onMutate: async ({ clientId, statusId }) => {
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+
+      const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
+
+      queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
+        if (!old) return old;
+        return old.map((conv) => {
+          const client = conv.client as { id?: string; custom_status_id?: string | null } | null;
+          if (client?.id === clientId) {
+            return {
+              ...conv,
+              client: { ...client, custom_status_id: statusId },
+            };
+          }
+          return conv;
+        });
+      });
+
+      return { previousConversations };
     },
-    onError: (error) => {
+    onError: (error, _vars, context) => {
+      if (context?.previousConversations) {
+        queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+      }
       toast({
         title: "Erro ao atualizar status",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
+      queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
     },
   });
 
