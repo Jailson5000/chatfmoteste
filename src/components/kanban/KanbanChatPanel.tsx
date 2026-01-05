@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useReducer } from "react";
+import { useState, useEffect, useRef, useMemo, useReducer, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { useClients } from "@/hooks/useClients";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 import { InlineActivityBadge } from "@/components/conversations/InlineActivityBadge";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
+import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
 
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
@@ -472,8 +473,20 @@ export function KanbanChatPanel({
     || (currentAutomationId ? automations.find(a => a.id === currentAutomationId)?.name : null)
     || null;
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Use paginated messages hook
+  const {
+    messages,
+    setMessages,
+    isLoading,
+    isLoadingMore,
+    hasMoreMessages,
+    handleScrollToTop,
+  } = useMessagesWithPagination({
+    conversationId,
+    initialBatchSize: 50,
+    loadMoreBatchSize: 30,
+  });
+
   const [messageInput, setMessageInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isPontualMode, setIsPontualMode] = useState(false);
@@ -550,7 +563,7 @@ export function KanbanChatPanel({
     
   // Merge messages with inline activities, sorted by timestamp
   type TimelineItem = 
-    | { type: 'message'; data: Message }
+    | { type: 'message'; data: PaginatedMessage }
     | { type: 'activity'; data: (typeof inlineActivities)[0] };
   
   const timelineItems = useMemo<TimelineItem[]>(() => {
@@ -577,79 +590,18 @@ export function KanbanChatPanel({
       return aTime - bTime;
     });
   }, [messages, inlineActivities]);
-  // Fetch messages
-  useEffect(() => {
-    const fetchMessages = async () => {
-      setIsLoading(true);
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Error fetching messages:", error);
-        toast({
-          title: "Erro ao carregar mensagens",
-          description: error.message,
-          variant: "destructive",
-        });
-      } else {
-        setMessages(data || []);
-      }
-      setIsLoading(false);
-    };
-
-    fetchMessages();
-
-    // Real-time subscription
-    const channel = supabase
-      .channel(`messages-${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            setMessages((prev) => [...prev, payload.new as Message]);
-          } else if (payload.eventType === "UPDATE") {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === payload.new.id ? (payload.new as Message) : m))
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [conversationId, toast]);
-
-  // Auto-scroll to bottom when messages change or loading finishes
+  // Auto-scroll to bottom when messages load initially
   useEffect(() => {
     if (!isLoading && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, isLoading]);
+  }, [messages.length, isLoading]);
 
-  // Mark messages as read
+  // Update editing name when contactName changes
   useEffect(() => {
-    const markAsRead = async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData.user?.id) {
-        await supabase.rpc("mark_messages_as_read", {
-          _conversation_id: conversationId,
-          _user_id: userData.user.id,
-        });
-      }
-    };
-    markAsRead();
-  }, [conversationId]);
+    setEditingName(contactName || "");
+  }, [contactName]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || isSending) return;
@@ -1351,7 +1303,11 @@ export function KanbanChatPanel({
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 min-h-0 p-4" ref={scrollRef}>
+      <ScrollArea 
+        className="flex-1 min-h-0 p-4" 
+        ref={scrollRef}
+        onScrollCapture={handleScrollToTop}
+      >
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1362,6 +1318,18 @@ export function KanbanChatPanel({
           </div>
         ) : (
           <div className="space-y-3">
+            {/* Loading more indicator */}
+            {isLoadingMore && (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
+                <span className="text-xs text-muted-foreground">Carregando mais mensagens...</span>
+              </div>
+            )}
+            {hasMoreMessages && !isLoadingMore && (
+              <div className="text-center py-2">
+                <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
+              </div>
+            )}
             {timelineItems.map((item) => {
               if (item.type === 'activity') {
                 return <InlineActivityBadge key={item.data.id} activity={item.data} />;
