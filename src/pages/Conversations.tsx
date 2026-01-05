@@ -134,6 +134,7 @@ interface Message {
   media_mime_type?: string | null;
   message_type?: string;
   status?: MessageStatus;
+  delivered_at?: string | null;
   read_at?: string | null;
   reply_to_message_id?: string | null;
   whatsapp_message_id?: string | null;
@@ -765,10 +766,15 @@ export default function Conversations() {
         },
         (payload) => {
           const updatedMsg = payload.new as Message;
-          // Update the message in state to reflect new status (read_at, etc.)
+          // Update the message in state to reflect status ticks (delivered/read)
           setMessages(prev => prev.map(m => 
             m.id === updatedMsg.id 
-              ? { ...m, read_at: updatedMsg.read_at }
+              ? { 
+                  ...m,
+                  status: updatedMsg.status,
+                  delivered_at: updatedMsg.delivered_at,
+                  read_at: updatedMsg.read_at,
+                }
               : m
           ));
         }
