@@ -2703,36 +2703,57 @@ serve(async (req) => {
 
         // Normalize to array (Evolution API can send single or array)
         const ackMessages = Array.isArray(data) ? data : [data];
+        const nowIso = new Date().toISOString();
 
         for (const ackData of ackMessages) {
           // Get message ID and ack status
           const messageId = ackData.id || ackData.key?.id;
-          const ack = ackData.ack ?? (ackData.status === 'READ' ? 4 : ackData.status === 'DELIVERY_ACK' ? 3 : null);
+          const ack =
+            ackData.ack ??
+            (ackData.status === 'READ'
+              ? 4
+              : ackData.status === 'DELIVERY_ACK'
+                ? 3
+                : null);
 
           if (!messageId) {
             logDebug('ACK', `No message ID in ACK data, skipping`, { requestId });
             continue;
           }
 
-          logDebug('ACK', `Processing ACK for message`, { requestId, messageId, ack, status: ackData.status });
+          logDebug('ACK', `Processing ACK for message`, {
+            requestId,
+            messageId,
+            ack,
+            status: ackData.status,
+          });
 
           // ACK values: 0=error, 1=pending, 2=sent, 3=delivered, 4=read, 5=played
           if (ack === 3 || ackData.status === 'DELIVERY_ACK') {
             // Message delivered (2 grey ticks)
-            // We don't have a delivery_at column, so we'll use a workaround:
-            // If read_at is null and it's delivered, that means it's delivered but not read
-            // The frontend checks status prop for 'delivered'
-            logDebug('ACK', `Message delivered: ${messageId}`, { requestId });
-            
-            // We could add a delivered_at column, but for now we'll just log it
-            // The frontend will get UPDATE events via realtime
+            logDebug('ACK', `Marking message as delivered: ${messageId}`, { requestId });
+
+            const { error: updateError } = await supabaseClient
+              .from('messages')
+              .update({ status: 'delivered', delivered_at: nowIso })
+              .eq('whatsapp_message_id', messageId)
+              .is('read_at', null); // avoid downgrading if already read
+
+            if (updateError) {
+              logDebug('ERROR', `Failed to update message delivered status`, {
+                requestId,
+                error: updateError,
+              });
+            } else {
+              logDebug('ACK', `Message marked as delivered successfully`, { requestId, messageId });
+            }
           } else if (ack === 4 || ack === 5 || ackData.status === 'READ') {
             // Message read (2 blue ticks)
             logDebug('ACK', `Marking message as read: ${messageId}`, { requestId });
 
             const { error: updateError } = await supabaseClient
               .from('messages')
-              .update({ read_at: new Date().toISOString() })
+              .update({ status: 'read', read_at: nowIso, delivered_at: nowIso })
               .eq('whatsapp_message_id', messageId);
 
             if (updateError) {
@@ -2752,6 +2773,7 @@ serve(async (req) => {
         logDebug('ACK', `Message ACK event received`, { requestId, data });
 
         const ackMessages = Array.isArray(data) ? data : [data];
+        const nowIso = new Date().toISOString();
 
         for (const ackData of ackMessages) {
           const messageId = ackData.id || ackData.key?.id;
@@ -2764,11 +2786,23 @@ serve(async (req) => {
 
           logDebug('ACK', `Processing ACK`, { requestId, messageId, ack });
 
-          if (ack >= 4) {
+          if (ack === 3) {
+            const { error } = await supabaseClient
+              .from('messages')
+              .update({ status: 'delivered', delivered_at: nowIso })
+              .eq('whatsapp_message_id', messageId)
+              .is('read_at', null);
+
+            if (error) {
+              logDebug('ERROR', `Failed to update delivered status`, { requestId, error });
+            } else {
+              logDebug('ACK', `Message marked as delivered`, { requestId, messageId });
+            }
+          } else if (ack >= 4) {
             // Read or played
             const { error } = await supabaseClient
               .from('messages')
-              .update({ read_at: new Date().toISOString() })
+              .update({ status: 'read', read_at: nowIso, delivered_at: nowIso })
               .eq('whatsapp_message_id', messageId);
 
             if (error) {
