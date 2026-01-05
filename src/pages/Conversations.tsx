@@ -281,6 +281,12 @@ export default function Conversations() {
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesScrollAreaRef = useRef<HTMLDivElement>(null);
+  const setMessagesScrollAreaNode = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    // Prefer the currently visible scroll area (mobile vs desktop)
+    if (node.offsetParent === null && node.getClientRects().length === 0) return;
+    messagesScrollAreaRef.current = node;
+  }, []);
   const isAtBottomRef = useRef(true);
   const pendingOutgoingRef = useRef<Array<{ tempId: string; content: string; sentAt: number }>>([]);
 
@@ -457,18 +463,29 @@ export default function Conversations() {
     ) as HTMLDivElement | null;
     if (!viewport) return;
 
+    let skipFirst = true;
+
     const onScroll = () => {
       const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 40;
       isAtBottomRef.current = atBottom;
       setIsAtBottom(atBottom);
       if (atBottom) setUnseenMessages(0);
+
+      // Skip pagination on initial bind; only load more when user scrolls up
+      if (skipFirst) {
+        skipFirst = false;
+        return;
+      }
+
+      // Pagination: load older messages when near the top
+      handleMessagesScrollToTop(viewport);
     };
 
     viewport.addEventListener("scroll", onScroll, { passive: true } as any);
     onScroll();
 
     return () => viewport.removeEventListener("scroll", onScroll as any);
-  }, [selectedConversationId]);
+  }, [selectedConversationId, handleMessagesScrollToTop]);
 
   // Scroll to bottom when details panel is closed (layout reflow)
   useEffect(() => {
@@ -1663,7 +1680,7 @@ export default function Conversations() {
                 </div>
 
                 {/* Mobile Messages */}
-                <ScrollArea className="flex-1 min-h-0" onScrollCapture={handleMessagesScrollToTop}>
+                <ScrollArea ref={setMessagesScrollAreaNode} className="flex-1 min-h-0">
                   <div className="p-4 space-y-4">
                     {messagesLoading ? (
                       <div className="flex items-center justify-center py-8">
@@ -2199,10 +2216,9 @@ export default function Conversations() {
             {/* Messages */}
             <div className="relative flex-1 min-h-0 min-w-0 overflow-x-hidden">
               <ScrollArea 
-                ref={messagesScrollAreaRef} 
+                ref={setMessagesScrollAreaNode} 
                 className="h-full w-full min-w-0" 
                 viewportClassName="min-w-0 overflow-x-hidden"
-                onScrollCapture={handleMessagesScrollToTop}
               >
                 <div className="py-4 space-y-4 w-full min-w-0 px-3 lg:px-4">
                   {messagesLoading ? (

@@ -43,7 +43,7 @@ interface UseMessagesWithPaginationReturn {
   hasMoreMessages: boolean;
   totalCount: number;
   loadMore: () => Promise<void>;
-  handleScrollToTop: (e: React.UIEvent<HTMLElement>) => void;
+  handleScrollToTop: (viewport: HTMLDivElement | null) => void;
 }
 
 export function useMessagesWithPagination({
@@ -207,14 +207,25 @@ export function useMessagesWithPagination({
     }
   }, [conversationId, hasMoreMessages, loadMoreBatchSize]);
 
-  // Handle scroll to top to load more
-  const handleScrollToTop = useCallback((e: React.UIEvent<HTMLElement>) => {
-    const target = e.currentTarget;
-    const scrollTop = target.scrollTop;
-    
+  // Handle scroll to top to load more (viewport element, not root)
+  const handleScrollToTop = useCallback((viewport: HTMLDivElement | null) => {
+    if (!viewport) return;
+
+    const scrollTop = viewport.scrollTop;
+
     // If scrolled near top (within 100px), load more
     if (scrollTop < 100 && hasMoreMessages && !isLoadingMore) {
-      loadMore();
+      const prevScrollHeight = viewport.scrollHeight;
+      const prevScrollTop = viewport.scrollTop;
+
+      void loadMore().then(() => {
+        // Keep the user's visible content anchored after prepending older messages
+        requestAnimationFrame(() => {
+          const newScrollHeight = viewport.scrollHeight;
+          const delta = newScrollHeight - prevScrollHeight;
+          viewport.scrollTop = prevScrollTop + delta;
+        });
+      });
     }
   }, [loadMore, hasMoreMessages, isLoadingMore]);
 

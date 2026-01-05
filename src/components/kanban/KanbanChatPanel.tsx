@@ -495,6 +495,9 @@ export function KanbanChatPanel({
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
@@ -591,10 +594,51 @@ export function KanbanChatPanel({
     });
   }, [messages, inlineActivities]);
 
-  // Auto-scroll to bottom when messages load initially
+  // Setup viewport tracking and pagination
   useEffect(() => {
-    if (!isLoading && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    const root = scrollRef.current;
+    const viewport = root?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
+    if (!viewport) return;
+
+    viewportRef.current = viewport;
+
+    let skipFirst = true;
+
+    const onScroll = () => {
+      const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 40;
+      isAtBottomRef.current = atBottom;
+      setIsAtBottom(atBottom);
+
+      // Skip pagination on initial bind; only load more when user scrolls up
+      if (skipFirst) {
+        skipFirst = false;
+        return;
+      }
+
+      // Trigger pagination when scrolling to top
+      handleScrollToTop(viewport);
+    };
+
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, [conversationId, handleScrollToTop]);
+
+  // Auto-scroll to bottom only when opening conversation or when user sends message
+  useEffect(() => {
+    if (isLoading) return;
+    
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) return;
+    
+    // Only auto-scroll if: initial load, user sent message, or user is already at bottom
+    const shouldScroll = messages.length === 1 || lastMessage.is_from_me || isAtBottomRef.current;
+    
+    if (shouldScroll && messagesEndRef.current) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: messages.length === 1 ? "auto" : "smooth" });
+      });
     }
   }, [messages.length, isLoading]);
 
@@ -1306,7 +1350,6 @@ export function KanbanChatPanel({
       <ScrollArea 
         className="flex-1 min-h-0 p-4" 
         ref={scrollRef}
-        onScrollCapture={handleScrollToTop}
       >
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
