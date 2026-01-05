@@ -627,15 +627,24 @@ interface MessageData {
 // ACK data structure for message status updates
 interface MessageAckData {
   remoteJid?: string;
+  /** Evolution often sends WhatsApp message id as keyId */
+  keyId?: string;
+  /** Instance id (maps to whatsapp_instances.id) */
+  instanceId?: string;
+  /** Evolution internal message id (not our DB message id) */
+  messageId?: string;
+
   id?: string;
   fromMe?: boolean;
   ack?: number; // 0=error, 1=pending, 2=sent, 3=delivered, 4=read, 5=played
+
   // Alternative structure
   key?: {
     remoteJid: string;
     fromMe: boolean;
     id: string;
   };
+
   status?: string;
   ids?: string[];
 }

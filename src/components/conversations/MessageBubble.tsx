@@ -1076,10 +1076,20 @@ export function MessageBubble({
   // Determine actual status based on read_at if available
   const actualStatus: MessageStatus = (() => {
     if (!isFromMe) return status;
-    if (readAt) return "read";
+    if (readAt || status === "read") return "read";
     if (status === "sending" || status === "error") return status;
-    // 1 tick until delivery confirmation arrives via ACK (status='delivered')
-    return status === "delivered" ? "delivered" : "sent";
+    if (status === "delivered") return "delivered";
+
+    // Fallback (WhatsApp-like): if no delivery ACK arrived, assume delivered after a short delay
+    // (only for external outgoing messages that have a WhatsApp id)
+    const createdMs = new Date(createdAt).getTime();
+    const assumeDelivered =
+      !isInternal &&
+      !!whatsappMessageId &&
+      Number.isFinite(createdMs) &&
+      Date.now() - createdMs > 15000;
+
+    return assumeDelivered ? "delivered" : "sent";
   })();
 
   const renderStatusIcon = () => {

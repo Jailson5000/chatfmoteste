@@ -207,26 +207,6 @@ export default function Conversations() {
     searchName: string;
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
-
-  // Fallback: if the client replied after an outgoing message, it was delivered (2 ticks)
-  const deliveredByReplyIds = useMemo(() => {
-    const set = new Set<string>();
-    let hasClientAfter = false;
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (!m.is_from_me) {
-        hasClientAfter = true;
-        continue;
-      }
-      if (hasClientAfter && !m.is_internal && (m.status === "sent" || !m.status)) {
-        set.add(m.id);
-      }
-    }
-
-    return set;
-  }, [messages]);
-
   // Get inline activities for the selected conversation (after selectedConversationId is declared)
   const { activities: inlineActivities } = useInlineActivities(
     selectedConversationId,
@@ -1825,12 +1805,7 @@ export default function Conversations() {
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
-                              status={
-                                deliveredByReplyIds.has(item.data.id) &&
-                                (item.data.status === "sent" || !item.data.status)
-                                  ? "delivered"
-                                  : (item.data.status || "sent")
-                              }
+                              status={item.data.status || "sent"}
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
@@ -2339,12 +2314,7 @@ export default function Conversations() {
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
-                              status={
-                                deliveredByReplyIds.has(item.data.id) &&
-                                (item.data.status === "sent" || !item.data.status)
-                                  ? "delivered"
-                                  : (item.data.status || "sent")
-                              }
+                              status={item.data.status || "sent"}
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
