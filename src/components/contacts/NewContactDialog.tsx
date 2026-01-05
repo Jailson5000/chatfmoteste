@@ -137,7 +137,7 @@ export function NewContactDialog({
                   <SelectValue placeholder="Selecione uma conexão" />
                 )}
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="z-[9999]">
                 {connectedInstances.map((instance) => (
                   <SelectItem key={instance.id} value={instance.id}>
                     <div className="flex items-center gap-2">
