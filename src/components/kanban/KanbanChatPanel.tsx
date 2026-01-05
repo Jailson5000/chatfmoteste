@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useReducer } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -484,6 +484,34 @@ export function KanbanChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  const [, bumpDeliveryRender] = useReducer((x: number) => x + 1, 0);
+
+  useEffect(() => {
+    // Force a re-render at the earliest "assume delivered after 3s" deadline
+    const now = Date.now();
+    let nextMs: number | null = null;
+
+    for (const m of messages) {
+      if (!m.is_from_me) continue;
+      if (m.is_internal) continue;
+      if (!m.whatsapp_message_id) continue;
+      if (m.status === "read" || m.status === "delivered" || m.status === "sending" || m.status === "error") continue;
+
+      const createdMs = new Date(m.created_at).getTime();
+      if (!Number.isFinite(createdMs)) continue;
+
+      const remaining = createdMs + 3000 - now;
+      if (remaining <= 0) continue;
+
+      if (nextMs === null || remaining < nextMs) nextMs = remaining;
+    }
+
+    if (nextMs === null) return;
+
+    const t = window.setTimeout(() => bumpDeliveryRender(), nextMs);
+    return () => window.clearTimeout(t);
+  }, [messages, bumpDeliveryRender]);
 
   // Edit name state
   const [editNameOpen, setEditNameOpen] = useState(false);
