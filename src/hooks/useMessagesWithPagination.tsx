@@ -68,6 +68,9 @@ export function useMessagesWithPagination({
     { prevScrollHeight: number; prevScrollTop: number } | null
   >(null);
 
+  // Prevent pagination loops: only trigger again after user scrolls away and back to the top
+  const nearTopArmedRef = useRef(true);
+
   // Reset when conversation changes
   useEffect(() => {
     if (!conversationId) {
@@ -161,7 +164,14 @@ export function useMessagesWithPagination({
 
   // Load more older messages
   const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMoreMessages || !conversationId || !oldestTimestampRef.current) {
+    if (
+      loadingMoreRef.current ||
+      !hasMoreMessages ||
+      !conversationId ||
+      !oldestTimestampRef.current
+    ) {
+      // If we were preparing a restore but couldn't actually load, clear it
+      pendingRestoreRef.current = null;
       return;
     }
 
@@ -179,6 +189,7 @@ export function useMessagesWithPagination({
 
       if (error) {
         console.error("Error loading more messages:", error);
+        pendingRestoreRef.current = null;
         return;
       }
 
@@ -203,6 +214,7 @@ export function useMessagesWithPagination({
           setHasMoreMessages(false);
         }
       } else {
+        pendingRestoreRef.current = null;
         setHasMoreMessages(false);
       }
     } catch (err) {
@@ -220,8 +232,21 @@ export function useMessagesWithPagination({
 
       viewportRef.current = viewport;
 
-      // If scrolled near top (within 100px), load more
-      if (viewport.scrollTop < 100 && hasMoreMessages && !isLoadingMore) {
+      // Rearm when user scrolls away from the top zone
+      if (viewport.scrollTop > 140) {
+        nearTopArmedRef.current = true;
+      }
+
+      // If scrolled near top (within 100px), load more (once per "crossing")
+      if (
+        viewport.scrollTop < 100 &&
+        nearTopArmedRef.current &&
+        hasMoreMessages &&
+        !loadingMoreRef.current &&
+        !!oldestTimestampRef.current
+      ) {
+        nearTopArmedRef.current = false;
+
         pendingRestoreRef.current = {
           prevScrollHeight: viewport.scrollHeight,
           prevScrollTop: viewport.scrollTop,
@@ -230,7 +255,7 @@ export function useMessagesWithPagination({
         void loadMore();
       }
     },
-    [loadMore, hasMoreMessages, isLoadingMore]
+    [loadMore, hasMoreMessages]
   );
 
   // After older messages are prepended, restore scroll so the same content stays visible

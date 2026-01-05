@@ -161,7 +161,7 @@ export function KanbanCard({
       className={cn(
         "group relative rounded-lg bg-card border border-border/50 p-3 cursor-grab active:cursor-grabbing",
         "transition-all duration-200 hover:border-border hover:shadow-md hover:-translate-y-0.5",
-        isDragging && "opacity-60 ring-2 ring-primary/50 scale-[0.98]"
+        isDragging && "opacity-50 scale-95"
       )}
       draggable
       onDragStart={(e) => {
