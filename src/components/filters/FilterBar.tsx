@@ -517,7 +517,7 @@ export function FilterBar({
                     </CollapsibleContent>
                   </Collapsible>
 
-                  {/* Origem (Responsável) */}
+                  {/* Responsável */}
                   <Collapsible open={responsibleExpanded} onOpenChange={setResponsibleExpanded}>
                     <CollapsibleTrigger asChild>
                       <div className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
@@ -549,7 +549,7 @@ export function FilterBar({
                               <span className="text-xs text-muted-foreground">Buscar...</span>
                             </div>
                           ) : (
-                            <span className="text-sm text-muted-foreground">Origem</span>
+                            <span className="text-sm text-muted-foreground">Responsável</span>
                           )}
                         </div>
                         <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform shrink-0", responsibleExpanded && "rotate-180")} />
@@ -590,6 +590,152 @@ export function FilterBar({
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
+
+                  {/* Departamento */}
+                  {departments.length > 0 && (
+                    <Collapsible open={deptExpanded} onOpenChange={setDeptExpanded}>
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                          <Building2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            {selectedDepartments.length > 0 ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {selectedDepartments.map(id => (
+                                  <Badge 
+                                    key={id}
+                                    variant="outline" 
+                                    className="h-6 gap-1 text-xs px-2 cursor-pointer group"
+                                    style={{ 
+                                      backgroundColor: `${getDepartmentColor(id)}20`,
+                                      borderColor: getDepartmentColor(id),
+                                      color: getDepartmentColor(id),
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const newSelection = selectedDepartments.filter(d => d !== id);
+                                      onDepartmentsChange?.(newSelection);
+                                    }}
+                                  >
+                                    {getDepartmentName(id)}
+                                    <X className="h-3 w-3 ml-0.5 opacity-60 group-hover:opacity-100" />
+                                  </Badge>
+                                ))}
+                                <span className="text-xs text-muted-foreground">Buscar...</span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Departamento</span>
+                            )}
+                          </div>
+                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform shrink-0", deptExpanded && "rotate-180")} />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-1">
+                        <div className="border border-border rounded-lg bg-background/50 max-h-[200px] overflow-auto">
+                          {departments.map(dept => {
+                            const isSelected = selectedDepartments.includes(dept.id);
+                            return (
+                              <button
+                                key={dept.id}
+                                onClick={() => {
+                                  const newSelection = isSelected 
+                                    ? selectedDepartments.filter(d => d !== dept.id)
+                                    : [...selectedDepartments, dept.id];
+                                  onDepartmentsChange?.(newSelection);
+                                }}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors",
+                                  isSelected && "bg-primary/10"
+                                )}
+                              >
+                                <Checkbox checked={isSelected} className="pointer-events-none" />
+                                <Badge
+                                  variant="outline"
+                                  className="font-normal"
+                                  style={{
+                                    backgroundColor: `${dept.color}20`,
+                                    borderColor: dept.color,
+                                    color: dept.color,
+                                  }}
+                                >
+                                  {dept.name}
+                                </Badge>
+                                {isSelected && <Check className="h-4 w-4 text-primary ml-auto" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+
+                  {/* Conexão */}
+                  {connections.length > 0 && (
+                    <Collapsible open={connExpanded} onOpenChange={setConnExpanded}>
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                          <Smartphone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            {selectedConnections.length > 0 ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {selectedConnections.map(id => (
+                                  <Badge 
+                                    key={id}
+                                    variant="outline" 
+                                    className="h-6 gap-1 text-xs px-2 cursor-pointer group"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const newSelection = selectedConnections.filter(c => c !== id);
+                                      onConnectionsChange?.(newSelection);
+                                    }}
+                                  >
+                                    <Smartphone className="h-3 w-3" />
+                                    {getConnectionName(id)}
+                                    <X className="h-3 w-3 ml-0.5 opacity-60 group-hover:opacity-100" />
+                                  </Badge>
+                                ))}
+                                <span className="text-xs text-muted-foreground">Buscar...</span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Conexão</span>
+                            )}
+                          </div>
+                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform shrink-0", connExpanded && "rotate-180")} />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-1">
+                        <div className="border border-border rounded-lg bg-background/50 max-h-[200px] overflow-auto">
+                          {connections.map(conn => {
+                            const isSelected = selectedConnections.includes(conn.id);
+                            return (
+                              <button
+                                key={conn.id}
+                                onClick={() => {
+                                  const newSelection = isSelected 
+                                    ? selectedConnections.filter(c => c !== conn.id)
+                                    : [...selectedConnections, conn.id];
+                                  onConnectionsChange?.(newSelection);
+                                }}
+                                className={cn(
+                                  "flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors",
+                                  isSelected && "bg-primary/10"
+                                )}
+                              >
+                                <Checkbox checked={isSelected} className="pointer-events-none" />
+                                <Smartphone className="h-4 w-4 text-muted-foreground" />
+                                <div className="flex-1 text-left">
+                                  <span className="text-sm">{conn.name}</span>
+                                  {conn.phone && (
+                                    <span className="text-xs text-muted-foreground ml-2">{conn.phone}</span>
+                                  )}
+                                </div>
+                                {isSelected && <Check className="h-4 w-4 text-primary ml-auto" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
                 </div>
 
                 {/* Período Section */}
