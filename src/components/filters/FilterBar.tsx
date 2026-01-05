@@ -409,7 +409,18 @@ export function FilterBar({
 
       {/* Advanced Filters Button - Opens Dialog */}
       {!hideAdvanced && (
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog
+          open={dialogOpen}
+          modal={false}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (open) {
+              // Ensure the small popover filters are closed so they don't interfere with pointer events inside the dialog
+              setResponsibleOpen(false);
+              setStatusOpen(false);
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button
               variant="outline"
