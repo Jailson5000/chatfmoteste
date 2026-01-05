@@ -1080,14 +1080,14 @@ export function MessageBubble({
     if (status === "sending" || status === "error") return status;
     if (status === "delivered") return "delivered";
 
-    // Fallback (WhatsApp-like): if no delivery ACK arrived, assume delivered after a short delay
+    // Fallback (WhatsApp-like): if no delivery ACK arrived, assume delivered after 3s
     // (only for external outgoing messages that have a WhatsApp id)
     const createdMs = new Date(createdAt).getTime();
     const assumeDelivered =
       !isInternal &&
       !!whatsappMessageId &&
       Number.isFinite(createdMs) &&
-      Date.now() - createdMs > 15000;
+      Date.now() - createdMs > 3000;
 
     return assumeDelivered ? "delivered" : "sent";
   })();

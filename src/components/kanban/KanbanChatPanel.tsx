@@ -1422,7 +1422,7 @@ export function KanbanChatPanel({
                             ? msg.status
                             : (msg.status === "sent" || !msg.status) &&
                                 msg.whatsapp_message_id &&
-                                Date.now() - new Date(msg.created_at).getTime() > 15000
+                                Date.now() - new Date(msg.created_at).getTime() > 3000
                               ? "delivered"
                               : msg.status,
                         isFromMe
