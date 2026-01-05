@@ -241,9 +241,8 @@ export function FilterBar({
   const getTagColor = (id: string) => tags.find(t => t.id === id)?.color || '#888';
   const getConnectionName = (id: string) => connections.find(c => c.id === id)?.name || id;
 
-  // Check if there are any active filters to show
+  // Check if there are any active filters to show (excluding those with dedicated popovers)
   const hasActiveFilters = selectedStatuses.length > 0 || 
-    selectedResponsibles.length > 0 || 
     selectedDepartments.length > 0 || 
     selectedTags.length > 0 || 
     selectedConnections.length > 0 ||
@@ -718,30 +717,6 @@ export function FilterBar({
               <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
             </Badge>
           ))}
-
-          {/* Responsible tags */}
-          {selectedResponsibles.map(id => {
-            const member = teamMembers.find(m => m.id === id);
-            return (
-              <Badge 
-                key={`resp-${id}`}
-                variant="secondary" 
-                className={cn(
-                  "h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20",
-                  member?.type === 'ai' && "bg-violet-500/20 text-violet-400 border-violet-500/30"
-                )}
-                onClick={() => toggleResponsible(id)}
-              >
-                {member?.type === 'ai' ? (
-                  <Bot className="h-3 w-3" />
-                ) : (
-                  <Users className="h-3 w-3" />
-                )}
-                {getResponsibleName(id)}
-                <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
-              </Badge>
-            );
-          })}
 
           {/* Department tags */}
           {selectedDepartments.map(id => (
