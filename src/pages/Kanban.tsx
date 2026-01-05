@@ -378,8 +378,8 @@ export default function Kanban() {
           {/* Right: Group by selector and new contact button */}
           <div className="flex items-center gap-2">
             <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
-              <SelectTrigger className="w-[220px] h-9">
-                <LayoutGrid className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectTrigger className="w-[200px] h-9 text-xs">
+                <LayoutGrid className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
                 <span className="text-muted-foreground mr-1">Agrupar:</span>
                 <SelectValue />
               </SelectTrigger>
