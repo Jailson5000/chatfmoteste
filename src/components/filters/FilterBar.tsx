@@ -12,11 +12,7 @@ import {
   Tag, 
   Calendar as CalendarIcon,
   Bot,
-  Mail,
-  MessageCircle,
-  Eye,
-  Focus,
-  Clock
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -235,8 +231,27 @@ export function FilterBar({
     onAdvancedFiltersChange?.({});
   };
 
+  // Helper functions to get names
+  const getStatusName = (id: string) => statuses.find(s => s.id === id)?.name || id;
+  const getStatusColor = (id: string) => statuses.find(s => s.id === id)?.color || '#888';
+  const getResponsibleName = (id: string) => teamMembers.find(m => m.id === id)?.full_name || id;
+  const getDepartmentName = (id: string) => departments.find(d => d.id === id)?.name || id;
+  const getDepartmentColor = (id: string) => departments.find(d => d.id === id)?.color || '#888';
+  const getTagName = (id: string) => tags.find(t => t.id === id)?.name || id;
+  const getTagColor = (id: string) => tags.find(t => t.id === id)?.color || '#888';
+  const getConnectionName = (id: string) => connections.find(c => c.id === id)?.name || id;
+
+  // Check if there are any active filters to show
+  const hasActiveFilters = selectedStatuses.length > 0 || 
+    selectedResponsibles.length > 0 || 
+    selectedDepartments.length > 0 || 
+    selectedTags.length > 0 || 
+    selectedConnections.length > 0 ||
+    dateRange?.from ||
+    advancedTogglesCount > 0;
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
       {/* Responsible Filter */}
       {!hideResponsible && (
         <Popover open={responsibleOpen} onOpenChange={setResponsibleOpen}>
@@ -793,6 +808,141 @@ export function FilterBar({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Active Filters Tags - Show when dialog is closed and filters are active */}
+      {!dialogOpen && hasActiveFilters && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Status tags */}
+          {selectedStatuses.map(id => (
+            <Badge 
+              key={`status-${id}`}
+              variant="secondary" 
+              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
+              style={{ 
+                backgroundColor: `${getStatusColor(id)}20`,
+                borderColor: getStatusColor(id),
+                color: getStatusColor(id),
+              }}
+              onClick={() => toggleStatus(id)}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getStatusColor(id) }} />
+              {getStatusName(id)}
+              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+            </Badge>
+          ))}
+
+          {/* Responsible tags */}
+          {selectedResponsibles.map(id => {
+            const member = teamMembers.find(m => m.id === id);
+            return (
+              <Badge 
+                key={`resp-${id}`}
+                variant="secondary" 
+                className={cn(
+                  "h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20",
+                  member?.type === 'ai' && "bg-violet-500/20 text-violet-400 border-violet-500/30"
+                )}
+                onClick={() => toggleResponsible(id)}
+              >
+                {member?.type === 'ai' ? (
+                  <Bot className="h-3 w-3" />
+                ) : (
+                  <Users className="h-3 w-3" />
+                )}
+                {getResponsibleName(id)}
+                <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+              </Badge>
+            );
+          })}
+
+          {/* Department tags */}
+          {selectedDepartments.map(id => (
+            <Badge 
+              key={`dept-${id}`}
+              variant="secondary" 
+              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
+              style={{ 
+                backgroundColor: `${getDepartmentColor(id)}20`,
+                color: getDepartmentColor(id),
+              }}
+              onClick={() => {
+                const newSelection = selectedDepartments.filter(d => d !== id);
+                onDepartmentsChange?.(newSelection);
+              }}
+            >
+              <Building2 className="h-3 w-3" />
+              {getDepartmentName(id)}
+              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+            </Badge>
+          ))}
+
+          {/* Tag tags */}
+          {selectedTags.map(id => (
+            <Badge 
+              key={`tag-${id}`}
+              variant="secondary" 
+              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
+              style={{ 
+                backgroundColor: `${getTagColor(id)}20`,
+                color: getTagColor(id),
+              }}
+              onClick={() => {
+                const newSelection = selectedTags.filter(t => t !== id);
+                onTagsChange?.(newSelection);
+              }}
+            >
+              <Tag className="h-3 w-3" />
+              {getTagName(id)}
+              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+            </Badge>
+          ))}
+
+          {/* Connection tags */}
+          {selectedConnections.map(id => (
+            <Badge 
+              key={`conn-${id}`}
+              variant="secondary" 
+              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
+              onClick={() => {
+                const newSelection = selectedConnections.filter(c => c !== id);
+                onConnectionsChange?.(newSelection);
+              }}
+            >
+              <Smartphone className="h-3 w-3" />
+              {getConnectionName(id)}
+              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+            </Badge>
+          ))}
+
+          {/* Date range tag */}
+          {dateRange?.from && (
+            <Badge 
+              variant="secondary" 
+              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
+              onClick={() => onDateRangeChange?.(undefined)}
+            >
+              <CalendarIcon className="h-3 w-3" />
+              {dateRange.to 
+                ? `${format(dateRange.from, "dd/MM")} - ${format(dateRange.to, "dd/MM")}`
+                : format(dateRange.from, "dd/MM/yy")
+              }
+              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+            </Badge>
+          )}
+
+          {/* Clear all button */}
+          {advancedFiltersCount > 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs px-2 text-muted-foreground hover:text-destructive"
+              onClick={clearAllFilters}
+            >
+              Limpar tudo
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );
