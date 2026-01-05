@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -59,17 +59,17 @@ export function useMessagesWithPagination({
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
   
+  // Guards to prevent loops
   const loadingMoreRef = useRef(false);
   const oldestTimestampRef = useRef<string | null>(null);
+  const lastLoadTimeRef = useRef(0);
 
-  // Scroll anchoring for incremental history loading (prepend)
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const pendingRestoreRef = useRef<
-    { prevScrollHeight: number; prevScrollTop: number } | null
-  >(null);
-
-  // Prevent pagination loops: only trigger again after user scrolls away and back to the top
-  const nearTopArmedRef = useRef(true);
+  // Scroll anchoring for prepend
+  const pendingRestoreRef = useRef<{
+    viewport: HTMLDivElement;
+    prevScrollHeight: number;
+    prevScrollTop: number;
+  } | null>(null);
 
   // Reset when conversation changes
   useEffect(() => {
@@ -78,6 +78,7 @@ export function useMessagesWithPagination({
       setHasMoreMessages(true);
       setTotalCount(0);
       oldestTimestampRef.current = null;
+      loadingMoreRef.current = false;
       return;
     }
 
@@ -85,6 +86,7 @@ export function useMessagesWithPagination({
       setIsLoading(true);
       setHasMoreMessages(true);
       oldestTimestampRef.current = null;
+      loadingMoreRef.current = false;
 
       try {
         // Get total count first
@@ -164,16 +166,15 @@ export function useMessagesWithPagination({
 
   // Load more older messages
   const loadMore = useCallback(async () => {
-    if (
-      loadingMoreRef.current ||
-      !hasMoreMessages ||
-      !conversationId ||
-      !oldestTimestampRef.current
-    ) {
-      // If we were preparing a restore but couldn't actually load, clear it
-      pendingRestoreRef.current = null;
-      return;
-    }
+    // Triple guard: ref, state, and timestamp
+    if (loadingMoreRef.current) return;
+    if (!hasMoreMessages) return;
+    if (!conversationId || !oldestTimestampRef.current) return;
+    
+    // Debounce: minimum 150ms between loads
+    const now = Date.now();
+    if (now - lastLoadTimeRef.current < 150) return;
+    lastLoadTimeRef.current = now;
 
     loadingMoreRef.current = true;
     setIsLoadingMore(true);
@@ -200,7 +201,7 @@ export function useMessagesWithPagination({
         // Map reply_to data
         const newMessagesWithReplies = chronologicalNewMessages.map(msg => ({
           ...msg,
-          reply_to: null // For simplicity; reply context usually within visible range
+          reply_to: null
         })) as PaginatedMessage[];
 
         // Prepend older messages to the beginning
@@ -219,58 +220,57 @@ export function useMessagesWithPagination({
       }
     } catch (err) {
       console.error("Error loading more messages:", err);
+      pendingRestoreRef.current = null;
     } finally {
       setIsLoadingMore(false);
       loadingMoreRef.current = false;
     }
   }, [conversationId, hasMoreMessages, loadMoreBatchSize]);
 
-  // Handle scroll to top to load more (viewport element, not root)
+  // Handle scroll to top to load more
   const handleScrollToTop = useCallback(
     (viewport: HTMLDivElement | null) => {
       if (!viewport) return;
+      
+      // Skip if already loading
+      if (loadingMoreRef.current || isLoadingMore) return;
+      if (!hasMoreMessages) return;
+      if (!oldestTimestampRef.current) return;
 
-      viewportRef.current = viewport;
+      const scrollTop = viewport.scrollTop;
 
-      // Rearm when user scrolls away from the top zone
-      if (viewport.scrollTop > 140) {
-        nearTopArmedRef.current = true;
-      }
-
-      // If scrolled near top (within 100px), load more (once per "crossing")
-      if (
-        viewport.scrollTop < 100 &&
-        nearTopArmedRef.current &&
-        hasMoreMessages &&
-        !loadingMoreRef.current &&
-        !!oldestTimestampRef.current
-      ) {
-        nearTopArmedRef.current = false;
-
+      // If scrolled near top (within 100px), load more
+      if (scrollTop < 100) {
+        // Save scroll position BEFORE loading
         pendingRestoreRef.current = {
+          viewport,
           prevScrollHeight: viewport.scrollHeight,
-          prevScrollTop: viewport.scrollTop,
+          prevScrollTop: scrollTop,
         };
 
         void loadMore();
       }
     },
-    [loadMore, hasMoreMessages]
+    [loadMore, hasMoreMessages, isLoadingMore]
   );
 
   // After older messages are prepended, restore scroll so the same content stays visible
+  // This runs synchronously before browser paint
   useLayoutEffect(() => {
-    const viewport = viewportRef.current;
     const pending = pendingRestoreRef.current;
-    if (!viewport || !pending) return;
+    if (!pending) return;
 
+    const { viewport, prevScrollHeight, prevScrollTop } = pending;
     const newScrollHeight = viewport.scrollHeight;
-    const delta = newScrollHeight - pending.prevScrollHeight;
+    const delta = newScrollHeight - prevScrollHeight;
 
-    viewport.scrollTop = pending.prevScrollTop + delta;
+    // Only adjust if content was actually added
+    if (delta > 0) {
+      viewport.scrollTop = prevScrollTop + delta;
+    }
 
     pendingRestoreRef.current = null;
-  }, [messages.length]);
+  }, [messages]); // Run when messages array changes
 
   // Real-time subscriptions
   useEffect(() => {
