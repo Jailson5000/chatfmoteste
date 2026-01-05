@@ -5,12 +5,18 @@ import {
   SlidersHorizontal, 
   Check, 
   Search, 
-  ChevronDown, 
+  ChevronDown,
+  ChevronUp,
   Building2, 
   Smartphone, 
   Tag, 
   Calendar as CalendarIcon,
-  Bot
+  Bot,
+  Mail,
+  MessageCircle,
+  Eye,
+  Focus,
+  Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,27 +25,28 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Calendar } from "@/components/ui/calendar";
+import { Switch } from "@/components/ui/switch";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isWithinInterval } from "date-fns";
+import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 
@@ -74,6 +81,14 @@ export interface Connection {
   phone?: string | null;
 }
 
+export interface AdvancedFilters {
+  onlyUnread?: boolean;
+  onlyNoResponse?: boolean;
+  shadowMode?: boolean;
+  focusMode?: boolean;
+  showInactive?: boolean;
+}
+
 export interface FilterBarProps {
   // Responsible filter
   selectedResponsibles: string[];
@@ -85,7 +100,7 @@ export interface FilterBarProps {
   onStatusesChange: (ids: string[]) => void;
   statuses: Status[];
   
-  // Advanced filters (shown in sheet)
+  // Advanced filters (shown in dialog)
   selectedDepartments?: string[];
   onDepartmentsChange?: (ids: string[]) => void;
   departments?: Department[];
@@ -102,7 +117,11 @@ export interface FilterBarProps {
   dateRange?: DateRange;
   onDateRangeChange?: (range: DateRange | undefined) => void;
   
-  // Results count for the sheet
+  // Advanced toggle filters
+  advancedFilters?: AdvancedFilters;
+  onAdvancedFiltersChange?: (filters: AdvancedFilters) => void;
+  
+  // Results count for the dialog
   resultsCount?: number;
   
   // Optional: hide certain filters
@@ -144,6 +163,8 @@ export function FilterBar({
   connections = [],
   dateRange,
   onDateRangeChange,
+  advancedFilters = {},
+  onAdvancedFiltersChange,
   resultsCount,
   hideResponsible,
   hideStatus,
@@ -151,17 +172,20 @@ export function FilterBar({
 }: FilterBarProps) {
   const [responsibleOpen, setResponsibleOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [responsibleSearch, setResponsibleSearch] = useState("");
   const [statusSearch, setStatusSearch] = useState("");
   
-  // Sheet internal state for collapsible sections
+  // Dialog internal state for collapsible sections
   const [statusExpanded, setStatusExpanded] = useState(false);
   const [responsibleExpanded, setResponsibleExpanded] = useState(false);
   const [deptExpanded, setDeptExpanded] = useState(false);
   const [periodExpanded, setPeriodExpanded] = useState(false);
   const [connExpanded, setConnExpanded] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+
+  const advancedTogglesCount = Object.values(advancedFilters).filter(Boolean).length;
 
   const advancedFiltersCount = 
     selectedStatuses.length +
@@ -169,7 +193,8 @@ export function FilterBar({
     selectedDepartments.length + 
     selectedTags.length + 
     selectedConnections.length +
-    (dateRange?.from ? 1 : 0);
+    (dateRange?.from ? 1 : 0) +
+    advancedTogglesCount;
 
   const toggleResponsible = (id: string) => {
     const newSelection = selectedResponsibles.includes(id)
@@ -183,6 +208,13 @@ export function FilterBar({
       ? selectedStatuses.filter(s => s !== id)
       : [...selectedStatuses, id];
     onStatusesChange(newSelection);
+  };
+
+  const updateAdvancedFilter = (key: keyof AdvancedFilters, value: boolean) => {
+    onAdvancedFiltersChange?.({
+      ...advancedFilters,
+      [key]: value,
+    });
   };
 
   const filteredMembers = teamMembers.filter(m => 
@@ -200,6 +232,7 @@ export function FilterBar({
     onTagsChange?.([]);
     onConnectionsChange?.([]);
     onDateRangeChange?.(undefined);
+    onAdvancedFiltersChange?.({});
   };
 
   return (
@@ -226,7 +259,7 @@ export function FilterBar({
               <ChevronDown className="h-3 w-3 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="start">
+          <PopoverContent className="w-72 p-0 bg-popover" align="start">
             <div className="p-2 border-b border-border">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -306,7 +339,7 @@ export function FilterBar({
               <ChevronDown className="h-3 w-3 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="start">
+          <PopoverContent className="w-72 p-0 bg-popover" align="start">
             <div className="p-2 border-b border-border">
               <div className="relative">
                 <Circle className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -361,10 +394,10 @@ export function FilterBar({
         </Popover>
       )}
 
-      {/* Advanced Filters Button */}
+      {/* Advanced Filters Button - Opens Dialog */}
       {!hideAdvanced && (
-        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetTrigger asChild>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
             <Button
               variant="outline"
               size="sm"
@@ -381,17 +414,17 @@ export function FilterBar({
                 </Badge>
               )}
             </Button>
-          </SheetTrigger>
-          <SheetContent className="w-[400px] sm:w-[540px] flex flex-col">
-            <SheetHeader>
-              <SheetTitle>Filtros</SheetTitle>
-              <SheetDescription>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg max-h-[85vh] flex flex-col p-0 gap-0">
+            <DialogHeader className="p-6 pb-4">
+              <DialogTitle>Filtros</DialogTitle>
+              <DialogDescription>
                 Configure todos os filtros para refinar sua busca por conversas e veja os resultados em tempo real
-              </SheetDescription>
-            </SheetHeader>
+              </DialogDescription>
+            </DialogHeader>
 
-            <ScrollArea className="flex-1 -mx-6 px-6">
-              <div className="space-y-4 py-4">
+            <ScrollArea className="flex-1 px-6">
+              <div className="space-y-4 pb-4">
                 {/* Classification Section */}
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-muted-foreground">Classificação</h4>
@@ -501,86 +534,43 @@ export function FilterBar({
                       </CollapsibleContent>
                     </Collapsible>
                   )}
-                </div>
 
-                {/* Período Section */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">Período</h4>
-                  <Collapsible open={periodExpanded} onOpenChange={setPeriodExpanded}>
-                    <CollapsibleTrigger asChild>
-                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                        <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm flex-1">
-                          {dateRange?.from ? (
-                            dateRange.to ? (
-                              `${format(dateRange.from, "dd/MM/yy")} - ${format(dateRange.to, "dd/MM/yy")}`
-                            ) : (
-                              format(dateRange.from, "dd/MM/yyyy")
-                            )
-                          ) : (
-                            "Período"
-                          )}
-                        </span>
-                        {dateRange?.from && (
-                          <Badge variant="secondary" className="h-5 px-1.5 text-xs">1</Badge>
-                        )}
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", periodExpanded && "rotate-180")} />
-                      </div>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2">
-                      <div className="rounded-lg border border-border bg-muted/20 p-3">
-                        <div className="flex gap-4">
-                          {/* Quick periods */}
-                          <div className="space-y-1 min-w-[140px]">
-                            <p className="text-xs font-medium text-muted-foreground mb-2">PERÍODOS RÁPIDOS</p>
-                            {quickPeriods.map((period) => (
-                              <button
-                                key={period.label}
-                                onClick={() => onDateRangeChange?.(period.getValue())}
-                                className={cn(
-                                  "block w-full text-left text-sm px-2 py-1.5 rounded hover:bg-muted/50 transition-colors",
-                                  !dateRange?.from && period.label === "Todo o tempo" && "text-primary font-medium"
-                                )}
-                              >
-                                {period.label}
-                              </button>
-                            ))}
-                          </div>
-                          
-                          {/* Calendar */}
-                          <div className="flex-1">
-                            <Calendar
-                              mode="range"
-                              selected={dateRange}
-                              onSelect={onDateRangeChange}
-                              locale={ptBR}
-                              className="rounded-md"
-                              numberOfMonths={1}
-                            />
-                          </div>
-                        </div>
-                        
-                        {dateRange?.from && (
-                          <div className="mt-3 pt-3 border-t border-border">
-                            <Badge variant="secondary" className="gap-1">
-                              <CalendarIcon className="h-3 w-3" />
-                              {dateRange.to ? (
-                                `${format(dateRange.from, "dd MMM", { locale: ptBR })} - ${format(dateRange.to, "dd MMM yyyy", { locale: ptBR })}`
-                              ) : (
-                                format(dateRange.from, "dd MMM yyyy", { locale: ptBR })
-                              )}
+                  {/* Tags */}
+                  {tags.length > 0 && (
+                    <Collapsible open={tagsExpanded} onOpenChange={setTagsExpanded}>
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                          <Tag className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm flex-1">Tags</span>
+                          {selectedTags.length > 0 && (
+                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                              {selectedTags.length}
                             </Badge>
-                          </div>
-                        )}
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
+                          )}
+                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsExpanded && "rotate-180")} />
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-2 space-y-1">
+                        {tags.map(tag => (
+                          <button
+                            key={tag.id}
+                            onClick={() => {
+                              const newSelection = selectedTags.includes(tag.id)
+                                ? selectedTags.filter(t => t !== tag.id)
+                                : [...selectedTags, tag.id];
+                              onTagsChange?.(newSelection);
+                            }}
+                            className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
+                          >
+                            <Checkbox checked={selectedTags.includes(tag.id)} className="pointer-events-none" />
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                            <span className="text-sm">{tag.name}</span>
+                          </button>
+                        ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
 
-                {/* Avançado Section */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">Avançado</h4>
-                  
                   {/* Conexão */}
                   {connections.length > 0 && (
                     <Collapsible open={connExpanded} onOpenChange={setConnExpanded}>
@@ -619,47 +609,166 @@ export function FilterBar({
                       </CollapsibleContent>
                     </Collapsible>
                   )}
+                </div>
 
-                  {/* Etiquetas */}
-                  {tags.length > 0 && (
-                    <Collapsible open={tagsExpanded} onOpenChange={setTagsExpanded}>
-                      <CollapsibleTrigger asChild>
-                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                          <Tag className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm flex-1">Etiquetas</span>
-                          {selectedTags.length > 0 && (
-                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                              {selectedTags.length}
-                            </Badge>
+                {/* Período Section */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Período</h4>
+                  <Collapsible open={periodExpanded} onOpenChange={setPeriodExpanded}>
+                    <CollapsibleTrigger asChild>
+                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm flex-1">
+                          {dateRange?.from ? (
+                            dateRange.to ? (
+                              `${format(dateRange.from, "dd/MM/yy")} - ${format(dateRange.to, "dd/MM/yy")}`
+                            ) : (
+                              format(dateRange.from, "dd/MM/yyyy")
+                            )
+                          ) : (
+                            "Período"
                           )}
-                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsExpanded && "rotate-180")} />
+                        </span>
+                        {dateRange?.from && (
+                          <Badge variant="secondary" className="h-5 px-1.5 text-xs">1</Badge>
+                        )}
+                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", periodExpanded && "rotate-180")} />
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2">
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 overflow-visible">
+                        <div className="flex gap-4 flex-wrap">
+                          {/* Quick periods */}
+                          <div className="space-y-1 min-w-[130px]">
+                            <p className="text-xs font-medium text-muted-foreground mb-2">PERÍODOS RÁPIDOS</p>
+                            {quickPeriods.map((period) => (
+                              <button
+                                key={period.label}
+                                onClick={() => onDateRangeChange?.(period.getValue())}
+                                className={cn(
+                                  "block w-full text-left text-sm px-2 py-1.5 rounded hover:bg-muted/50 transition-colors",
+                                  !dateRange?.from && period.label === "Todo o tempo" && "text-primary font-medium"
+                                )}
+                              >
+                                {period.label}
+                              </button>
+                            ))}
+                          </div>
+                          
+                          {/* Calendar */}
+                          <div className="flex-1 min-w-[280px]">
+                            <Calendar
+                              mode="range"
+                              selected={dateRange}
+                              onSelect={onDateRangeChange}
+                              locale={ptBR}
+                              className={cn("rounded-md pointer-events-auto")}
+                              numberOfMonths={1}
+                            />
+                          </div>
                         </div>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 space-y-1">
-                        {tags.map(tag => (
-                          <button
-                            key={tag.id}
-                            onClick={() => {
-                              const newSelection = selectedTags.includes(tag.id)
-                                ? selectedTags.filter(t => t !== tag.id)
-                                : [...selectedTags, tag.id];
-                              onTagsChange?.(newSelection);
-                            }}
-                            className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                          >
-                            <Checkbox checked={selectedTags.includes(tag.id)} className="pointer-events-none" />
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
-                            <span className="text-sm">{tag.name}</span>
-                          </button>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
+                        
+                        {dateRange?.from && (
+                          <div className="mt-3 pt-3 border-t border-border">
+                            <Badge variant="secondary" className="gap-1">
+                              <CalendarIcon className="h-3 w-3" />
+                              {dateRange.to ? (
+                                `${format(dateRange.from, "dd MMM", { locale: ptBR })} - ${format(dateRange.to, "dd MMM yyyy", { locale: ptBR })}`
+                              ) : (
+                                format(dateRange.from, "dd MMM yyyy", { locale: ptBR })
+                              )}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+
+                {/* Avançado Section */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Avançado</h4>
+                  <Collapsible open={advancedExpanded} onOpenChange={setAdvancedExpanded}>
+                    <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full">
+                      {advancedExpanded ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                      {advancedExpanded ? "Ver menos" : "Ver mais"}
+                      {advancedTogglesCount > 0 && (
+                        <Badge variant="secondary" className="h-5 px-1.5 text-xs ml-auto">
+                          {advancedTogglesCount}
+                        </Badge>
+                      )}
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-3 space-y-3">
+                      {/* Somente conversas não lidas */}
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <Switch
+                          checked={advancedFilters.onlyUnread || false}
+                          onCheckedChange={(checked) => updateAdvancedFilter('onlyUnread', checked)}
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Somente conversas não lidas</p>
+                          <p className="text-xs text-muted-foreground">Mostra apenas conversas que ainda não foram visualizadas.</p>
+                        </div>
+                      </div>
+
+                      {/* Somente conversas sem resposta */}
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <Switch
+                          checked={advancedFilters.onlyNoResponse || false}
+                          onCheckedChange={(checked) => updateAdvancedFilter('onlyNoResponse', checked)}
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Somente conversas sem resposta</p>
+                          <p className="text-xs text-muted-foreground">Filtra conversas onde o último contato foi feito pelo cliente.</p>
+                        </div>
+                      </div>
+
+                      {/* Modo Sombra */}
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <Switch
+                          checked={advancedFilters.shadowMode || false}
+                          onCheckedChange={(checked) => updateAdvancedFilter('shadowMode', checked)}
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Modo Sombra</p>
+                          <p className="text-xs text-muted-foreground">Permite olhar conversas sem marcar como lidas.</p>
+                        </div>
+                      </div>
+
+                      {/* Modo Foco */}
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <Switch
+                          checked={advancedFilters.focusMode || false}
+                          onCheckedChange={(checked) => updateAdvancedFilter('focusMode', checked)}
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Modo Foco</p>
+                          <p className="text-xs text-muted-foreground">Mostra todas conversas pendentes e apenas suas conversas ativas.</p>
+                        </div>
+                      </div>
+
+                      {/* Mostrar conversas com inatividade */}
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                        <Switch
+                          checked={advancedFilters.showInactive || false}
+                          onCheckedChange={(checked) => updateAdvancedFilter('showInactive', checked)}
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Mostrar conversas com inatividade</p>
+                          <p className="text-xs text-muted-foreground">Identifica conversas que não tiveram interação do cliente.</p>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
               </div>
             </ScrollArea>
 
-            <SheetFooter className="border-t border-border pt-4 mt-auto flex-row gap-2">
+            <DialogFooter className="border-t border-border p-6 pt-4 flex-row gap-2">
               <Button 
                 variant="outline" 
                 onClick={clearAllFilters}
@@ -668,14 +777,14 @@ export function FilterBar({
                 Limpar todos
               </Button>
               <Button 
-                onClick={() => setSheetOpen(false)}
+                onClick={() => setDialogOpen(false)}
                 className="flex-1"
               >
                 Mostrar {resultsCount?.toLocaleString('pt-BR') || 0} resultados
               </Button>
-            </SheetFooter>
-          </SheetContent>
-        </Sheet>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
