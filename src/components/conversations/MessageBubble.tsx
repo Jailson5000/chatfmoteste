@@ -1085,22 +1085,25 @@ export function MessageBubble({
   const renderStatusIcon = () => {
     if (!isFromMe) return null;
 
+    // Use inherited color from parent div (which has proper theme-aware colors)
+    const iconClass = "h-3.5 w-3.5";
+    
     switch (actualStatus) {
       case "sending":
         return (
           <div className="flex items-center">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            <Loader2 className={cn(iconClass, "animate-spin")} />
           </div>
         );
       case "sent":
         // 1 tick - message sent to server
-        return <Check className="h-3.5 w-3.5 text-muted-foreground" />;
+        return <Check className={iconClass} />;
       case "delivered":
         // 2 gray ticks - message delivered to recipient
-        return <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />;
+        return <CheckCheck className={iconClass} />;
       case "read":
         // 2 blue ticks - message read by recipient
-        return <CheckCheck className="h-3.5 w-3.5 text-blue-500" />;
+        return <CheckCheck className={cn(iconClass, "text-blue-600 dark:text-blue-400")} />;
       case "error":
         return (
           <button
@@ -1114,7 +1117,7 @@ export function MessageBubble({
         );
       default:
         // Default to delivered (2 checks) if no status is specified
-        return <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />;
+        return <CheckCheck className={iconClass} />;
     }
   };
 
@@ -1322,7 +1325,15 @@ export function MessageBubble({
         
         <div className={cn(
           "flex items-center justify-end gap-1 mt-1",
-          isFromMe ? "text-primary-foreground/70" : "text-muted-foreground"
+          isInternal
+            ? "text-yellow-700/80 dark:text-yellow-300/80"
+            : isFromMe
+              ? aiGenerated
+                ? "text-purple-700/80 dark:text-purple-300/80"
+                : status === "error"
+                  ? "text-red-700/80 dark:text-red-300/80"
+                  : "text-green-700/80 dark:text-green-300/80"
+              : "text-muted-foreground"
         )}>
           <span className="text-xs">
             {new Date(createdAt).toLocaleTimeString('pt-BR', { 
