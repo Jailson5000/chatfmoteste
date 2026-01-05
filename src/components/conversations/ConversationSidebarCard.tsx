@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -75,7 +76,7 @@ interface ConversationSidebarCardProps {
   onClick: () => void;
 }
 
-export function ConversationSidebarCard({ conversation, selected, onClick }: ConversationSidebarCardProps) {
+function ConversationSidebarCardComponent({ conversation, selected, onClick }: ConversationSidebarCardProps) {
   const isAI = conversation.handler === "ai";
   // Show "IA · AgentName" or just "AgentName" if the name already contains agent info
   const agentName = conversation.aiAgentName && conversation.aiAgentName !== "IA" 
@@ -267,3 +268,6 @@ export function ConversationSidebarCard({ conversation, selected, onClick }: Con
     </button>
   );
 }
+
+// Memoize to prevent re-renders when parent state changes (e.g., input typing)
+export const ConversationSidebarCard = memo(ConversationSidebarCardComponent);
