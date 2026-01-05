@@ -1,6 +1,8 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Upload, Download, User, SlidersHorizontal, MoreVertical, Trash2, Merge, MessageCircle } from "lucide-react";
+import { NewContactDialog } from "@/components/contacts/NewContactDialog";
+import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -14,15 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,8 +40,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useClients } from "@/hooks/useClients";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -74,7 +65,6 @@ export default function Contacts() {
   const [filterResponsible, setFilterResponsible] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDepartment, setFilterDepartment] = useState<string>("all");
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Delete confirmation state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -83,19 +73,6 @@ export default function Contacts() {
   
   // Bulk delete state
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
-  
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    document: "",
-    address: "",
-    notes: "",
-    lgpd_consent: false,
-    lgpd_consent_date: null as string | null,
-    custom_status_id: null as string | null,
-    department_id: null as string | null,
-  });
 
   const filteredClients = clients.filter((client) => {
     const matchesSearch =
@@ -110,12 +87,10 @@ export default function Contacts() {
   });
 
 
-  const handleCreate = async () => {
-    await createClient.mutateAsync(formData);
-    setDialogOpen(false);
-    setFormData({
-      name: "",
-      phone: "",
+  const handleCreateFromPhone = async (phone: string) => {
+    await createClient.mutateAsync({
+      name: `Contato ${phone.slice(-4)}`,
+      phone,
       email: "",
       document: "",
       address: "",
@@ -125,50 +100,54 @@ export default function Contacts() {
       custom_status_id: null,
       department_id: null,
     });
+    setDialogOpen(false);
+    // Navigate to conversations to start chat
+    navigate(`/conversations?phone=${encodeURIComponent(phone)}`);
   };
 
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleImportContacts = async (file: File, connectionId?: string) => {
     const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target?.result as string;
-        const lines = text.split('\n').filter(line => line.trim());
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-        
-        let imported = 0;
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-          const nameIdx = headers.findIndex(h => h.includes('nome') || h === 'name');
-          const phoneIdx = headers.findIndex(h => h.includes('telefone') || h.includes('phone') || h.includes('celular'));
-          const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail'));
+    
+    return new Promise<void>((resolve, reject) => {
+      reader.onload = async (event) => {
+        try {
+          const text = event.target?.result as string;
+          const lines = text.split('\n').filter(line => line.trim());
+          const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
           
-          if (nameIdx >= 0 && phoneIdx >= 0 && values[nameIdx] && values[phoneIdx]) {
-            await createClient.mutateAsync({
-              name: values[nameIdx],
-              phone: values[phoneIdx],
-              email: emailIdx >= 0 ? values[emailIdx] : "",
-              document: "",
-              address: "",
-              notes: "",
-              lgpd_consent: false,
-              lgpd_consent_date: null,
-              custom_status_id: null,
-              department_id: null,
-            });
-            imported++;
+          let imported = 0;
+          for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const nameIdx = headers.findIndex(h => h.includes('nome') || h === 'name');
+            const phoneIdx = headers.findIndex(h => h.includes('telefone') || h.includes('phone') || h.includes('celular'));
+            const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail'));
+            
+            if (nameIdx >= 0 && phoneIdx >= 0 && values[nameIdx] && values[phoneIdx]) {
+              await createClient.mutateAsync({
+                name: values[nameIdx],
+                phone: values[phoneIdx],
+                email: emailIdx >= 0 ? values[emailIdx] : "",
+                document: "",
+                address: "",
+                notes: "",
+                lgpd_consent: false,
+                lgpd_consent_date: null,
+                custom_status_id: null,
+                department_id: null,
+              });
+              imported++;
+            }
           }
+          
+          toast({ title: `${imported} contatos importados com sucesso` });
+          resolve();
+        } catch (error) {
+          toast({ title: "Erro ao importar arquivo", variant: "destructive" });
+          reject(error);
         }
-        
-        toast({ title: `${imported} contatos importados com sucesso` });
-        setImportDialogOpen(false);
-      } catch (error) {
-        toast({ title: "Erro ao importar arquivo", variant: "destructive" });
-      }
-    };
-    reader.readAsText(file);
+      };
+      reader.readAsText(file);
+    });
   };
 
   const formatPhone = (phone: string) => {
@@ -323,9 +302,8 @@ export default function Contacts() {
 
           <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
             <Upload className="h-4 w-4" />
-            Importar
+            Importar em Massa
           </Button>
-
           <Button variant="outline" className="gap-2" onClick={handleExport}>
             <Download className="h-4 w-4" />
             Exportar
@@ -352,92 +330,26 @@ export default function Contacts() {
             </Button>
           )}
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                Novo Contato
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Novo Contato</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nome *</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Nome completo"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Telefone *</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      placeholder="(11) 99999-9999"
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      placeholder="email@exemplo.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="document">CPF/CNPJ</Label>
-                    <Input
-                      id="document"
-                      value={formData.document}
-                      onChange={(e) => setFormData({ ...formData, document: e.target.value })}
-                      placeholder="000.000.000-00"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="address">Endereço</Label>
-                  <Input
-                    id="address"
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    placeholder="Rua, número, bairro, cidade"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Observações</Label>
-                  <Textarea
-                    id="notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Notas sobre o contato..."
-                    rows={3}
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={handleCreate}
-                    disabled={!formData.name || !formData.phone || createClient.isPending}
-                  >
-                    {createClient.isPending ? "Salvando..." : "Salvar"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button className="gap-2" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Novo Contato
+          </Button>
+
+          {/* New Contact Dialog */}
+          <NewContactDialog
+            open={dialogOpen}
+            onClose={() => setDialogOpen(false)}
+            onCreate={handleCreateFromPhone}
+            onOpenImport={() => setImportDialogOpen(true)}
+            isCreating={createClient.isPending}
+          />
+
+          {/* Import Contacts Dialog */}
+          <ImportContactsDialog
+            open={importDialogOpen}
+            onClose={() => setImportDialogOpen(false)}
+            onImport={handleImportContacts}
+          />
         </div>
       </div>
 
@@ -637,34 +549,6 @@ export default function Contacts() {
           </Table>
         )}
       </div>
-
-      {/* Import Dialog */}
-      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Importar Contatos</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <p className="text-sm text-muted-foreground">
-              Selecione um arquivo CSV com as colunas: Nome, Telefone, Email (opcional)
-            </p>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".csv,.txt"
-              onChange={handleImportFile}
-              className="hidden"
-            />
-            <Button 
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Selecionar Arquivo CSV
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Single Contact Confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
