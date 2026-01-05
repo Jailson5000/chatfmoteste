@@ -19,7 +19,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.get-agent-knowledge]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-summary]
 verify_jwt = false
