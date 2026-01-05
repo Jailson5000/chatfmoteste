@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
-import { FolderPlus, MessageSquare, Plus, Users, CircleDot, SlidersHorizontal, LayoutGrid, Phone } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, LayoutGrid, Phone, Search, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useConversations } from "@/hooks/useConversations";
@@ -10,7 +11,7 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useClients } from "@/hooks/useClients";
-import { KanbanFilters } from "@/components/kanban/KanbanFilters";
+import { FilterBar } from "@/components/filters/FilterBar";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
 import { CreateDepartmentDialog } from "@/components/kanban/CreateDepartmentDialog";
@@ -22,11 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
@@ -50,16 +46,14 @@ export default function Kanban() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<'department' | 'status'>('department');
-  const [filterHandler, setFilterHandler] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterConnection, setFilterConnection] = useState<string>('all');
-  const [filters, setFilters] = useState<{
-    statuses: string[];
-    handlers: Array<'ai' | 'human'>;
-    connections: string[];
-    departments: string[];
-    tags: string[];
-  }>({ statuses: [], handlers: [], connections: [], departments: [], tags: [] });
+  
+  // Multi-select filters
+  const [selectedResponsibles, setSelectedResponsibles] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
 
   // Get available connections with phone numbers from WhatsApp instances
   const availableInstancesWithPhone = useMemo(() => {
@@ -110,17 +104,16 @@ export default function Kanban() {
         if (!nameMatch && !phoneMatch) return false;
       }
       
-      // Handler dropdown filter
-      if (filterHandler !== 'all') {
-        if (filterHandler === 'ai' && conv.current_handler !== 'ai') return false;
-        if (filterHandler !== 'ai' && filterHandler !== 'all') {
-          // Check if assigned to specific member
-          if (conv.assigned_to !== filterHandler && conv.current_handler !== 'human') return false;
-        }
+      // Responsible filter (multi-select)
+      if (selectedResponsibles.length > 0) {
+        if (!conv.assigned_to || !selectedResponsibles.includes(conv.assigned_to)) return false;
       }
 
-      // Status dropdown filter
-      if (filterStatus !== 'all' && conv.status !== filterStatus) return false;
+      // Status filter (multi-select) - filter by client status
+      if (selectedStatuses.length > 0) {
+        const clientStatusId = conv.client?.custom_status_id;
+        if (!clientStatusId || !selectedStatuses.includes(clientStatusId)) return false;
+      }
 
       // Connection dropdown filter (when grouping by status)
       if (filterConnection !== 'all') {
@@ -130,21 +123,10 @@ export default function Kanban() {
         }
       }
       
-      // Advanced filters
-      if (filters.handlers.length > 0) {
-        if (!filters.handlers.includes(conv.current_handler)) return false;
-      }
-      
-      if (filters.connections.length > 0) {
-        if (!conv.whatsapp_instance?.instance_name || 
-            !filters.connections.includes(conv.whatsapp_instance.instance_name)) {
-          return false;
-        }
-      }
-      
-      if (filters.departments.length > 0) {
-        const hasNoneFilter = filters.departments.includes("none");
-        const otherDeptFilters = filters.departments.filter(d => d !== "none");
+      // Department filter (multi-select)
+      if (selectedDepartments.length > 0) {
+        const hasNoneFilter = selectedDepartments.includes("none");
+        const otherDeptFilters = selectedDepartments.filter(d => d !== "none");
         
         if (hasNoneFilter && otherDeptFilters.length > 0) {
           if (conv.department_id && !otherDeptFilters.includes(conv.department_id)) return false;
@@ -155,13 +137,22 @@ export default function Kanban() {
         }
       }
       
-      if (filters.tags.length > 0) {
-        if (!conv.tags || !conv.tags.some(t => filters.tags.includes(t))) return false;
+      // Tags filter (multi-select)
+      if (selectedTags.length > 0) {
+        if (!conv.tags || !conv.tags.some(t => selectedTags.includes(t))) return false;
+      }
+
+      // Connections filter (multi-select from advanced)
+      if (selectedConnections.length > 0) {
+        if (!conv.whatsapp_instance?.instance_name || 
+            !selectedConnections.includes(conv.whatsapp_instance.instance_name)) {
+          return false;
+        }
       }
       
       return true;
     });
-  }, [conversations, filters, searchQuery, filterHandler, filterStatus]);
+  }, [conversations, searchQuery, selectedResponsibles, selectedStatuses, selectedDepartments, selectedTags, selectedConnections, filterConnection]);
 
   const handleConversationDrop = (departmentId: string | null) => {
     if (draggedConversation) {
@@ -238,26 +229,6 @@ export default function Kanban() {
   const activeDepartments = departments.filter(d => d.is_active);
   const isLoading = deptsLoading || convsLoading;
 
-  // Get handlers for dropdown (AI + team members)
-  const handlerOptions = useMemo(() => {
-    const options = [
-      { value: 'all', label: 'Todos' },
-      { value: 'ai', label: 'IA' },
-    ];
-    members.forEach(m => {
-      options.push({ value: m.id, label: m.full_name.split(' ')[0] });
-    });
-    return options;
-  }, [members]);
-
-  // Status options for dropdown
-  const statusOptions = useMemo(() => {
-    const options = [{ value: 'all', label: 'Todos' }];
-    customStatuses.forEach(s => {
-      options.push({ value: s.name, label: s.name });
-    });
-    return options;
-  }, [customStatuses]);
 
   if (isLoading) {
     return (
@@ -307,45 +278,61 @@ export default function Kanban() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           {/* Left: Search and main filters */}
           <div className="flex items-center gap-2 flex-1">
-            <KanbanFilters 
-              filters={filters}
-              onFiltersChange={setFilters}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              availableConnections={availableConnections}
-              availableDepartments={departments}
-              availableTags={tags}
-            />
-            
-            {/* Responsável dropdown */}
-            <Select value={filterHandler} onValueChange={setFilterHandler}>
-              <SelectTrigger className="w-[140px] h-9">
-                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Responsável" />
-              </SelectTrigger>
-              <SelectContent>
-                {handlerOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Search Input */}
+            <div className="relative min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nome ou telefone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+              {searchQuery && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+                  onClick={() => setSearchQuery('')}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
 
-            {/* Status dropdown */}
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[130px] h-9">
-                <CircleDot className="h-4 w-4 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <FilterBar
+              selectedResponsibles={selectedResponsibles}
+              onResponsiblesChange={setSelectedResponsibles}
+              teamMembers={members.map(m => ({
+                id: m.id,
+                full_name: m.full_name,
+                avatar_url: m.avatar_url,
+              }))}
+              selectedStatuses={selectedStatuses}
+              onStatusesChange={setSelectedStatuses}
+              statuses={customStatuses.map(s => ({
+                id: s.id,
+                name: s.name,
+                color: s.color,
+              }))}
+              selectedDepartments={selectedDepartments}
+              onDepartmentsChange={setSelectedDepartments}
+              departments={departments.map(d => ({
+                id: d.id,
+                name: d.name,
+                color: d.color,
+              }))}
+              selectedTags={selectedTags}
+              onTagsChange={setSelectedTags}
+              tags={tags.map(t => ({
+                id: t.id,
+                name: t.name,
+                color: t.color,
+              }))}
+              selectedConnections={selectedConnections}
+              onConnectionsChange={setSelectedConnections}
+              connections={availableConnections}
+              resultsCount={filteredConversations.length}
+            />
 
             {/* Connection dropdown - visible when grouping by status */}
             {groupBy === 'status' && (
@@ -364,21 +351,6 @@ export default function Kanban() {
                 </SelectContent>
               </Select>
             )}
-
-            {/* More filters button */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9 gap-2">
-                  <SlidersHorizontal className="h-4 w-4" />
-                  Mais filtros
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-64 p-4" align="start">
-                <p className="text-sm text-muted-foreground">
-                  Use o painel de filtros para opções avançadas.
-                </p>
-              </PopoverContent>
-            </Popover>
           </div>
 
           {/* Right: Group by selector */}

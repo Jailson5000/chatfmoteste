@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Upload, Download, User, SlidersHorizontal, MoreVertical, Trash2, Merge, MessageCircle } from "lucide-react";
+import { Plus, Search, Upload, Download, MoreVertical, Trash2, Merge, MessageCircle, User } from "lucide-react";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
+import { FilterBar } from "@/components/filters/FilterBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -62,9 +63,12 @@ export default function Contacts() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
-  const [filterResponsible, setFilterResponsible] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterDepartment, setFilterDepartment] = useState<string>("all");
+  
+  // Multi-select filters
+  const [selectedResponsibles, setSelectedResponsibles] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
   // Delete confirmation state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -80,8 +84,10 @@ export default function Contacts() {
       client.phone.includes(search) ||
       client.email?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = filterStatus === "all" || client.custom_status_id === filterStatus;
-    const matchesDepartment = filterDepartment === "all" || client.department_id === filterDepartment;
+    const matchesStatus = selectedStatuses.length === 0 || 
+      (client.custom_status_id && selectedStatuses.includes(client.custom_status_id));
+    const matchesDepartment = selectedDepartments.length === 0 || 
+      (client.department_id && selectedDepartments.includes(client.department_id));
 
     return matchesSearch && matchesStatus && matchesDepartment;
   });
@@ -252,53 +258,37 @@ export default function Contacts() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Select value={filterResponsible} onValueChange={setFilterResponsible}>
-            <SelectTrigger className="w-[150px] bg-muted/30">
-              <User className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Responsável" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {teamMembers.map((member) => (
-                <SelectItem key={member.id} value={member.id}>
-                  {member.full_name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[130px] bg-muted/30">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {statuses.map((status) => (
-                <SelectItem key={status.id} value={status.id}>
-                  {status.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={filterDepartment} onValueChange={setFilterDepartment}>
-            <SelectTrigger className="w-[150px] bg-muted/30">
-              <SelectValue placeholder="Departamento" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              {departments.map((dept) => (
-                <SelectItem key={dept.id} value={dept.id}>
-                  {dept.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" className="gap-2">
-            <SlidersHorizontal className="h-4 w-4" />
-            Mais filtros
-          </Button>
+          <FilterBar
+            selectedResponsibles={selectedResponsibles}
+            onResponsiblesChange={setSelectedResponsibles}
+            teamMembers={teamMembers.map(m => ({
+              id: m.id,
+              full_name: m.full_name,
+              avatar_url: m.avatar_url,
+            }))}
+            selectedStatuses={selectedStatuses}
+            onStatusesChange={setSelectedStatuses}
+            statuses={statuses.map(s => ({
+              id: s.id,
+              name: s.name,
+              color: s.color,
+            }))}
+            selectedDepartments={selectedDepartments}
+            onDepartmentsChange={setSelectedDepartments}
+            departments={departments.map(d => ({
+              id: d.id,
+              name: d.name,
+              color: d.color,
+            }))}
+            selectedTags={selectedTags}
+            onTagsChange={setSelectedTags}
+            tags={tags.map(t => ({
+              id: t.id,
+              name: t.name,
+              color: t.color,
+            }))}
+            resultsCount={filteredClients.length}
+          />
 
           <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
             <Upload className="h-4 w-4" />
