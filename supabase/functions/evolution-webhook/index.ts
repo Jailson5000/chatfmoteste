@@ -2707,7 +2707,8 @@ serve(async (req) => {
 
         for (const ackData of ackMessages) {
           // Get message ID and ack status
-          const messageId = ackData.id || ackData.key?.id;
+          // Evolution sends WhatsApp message id as `keyId`
+          const messageId = (ackData as any).keyId || ackData.id || ackData.key?.id;
           const ack =
             ackData.ack ??
             (ackData.status === 'READ'
@@ -2776,7 +2777,7 @@ serve(async (req) => {
         const nowIso = new Date().toISOString();
 
         for (const ackData of ackMessages) {
-          const messageId = ackData.id || ackData.key?.id;
+          const messageId = (ackData as any).keyId || ackData.id || ackData.key?.id;
           const ack = ackData.ack;
 
           if (!messageId || ack === undefined) {

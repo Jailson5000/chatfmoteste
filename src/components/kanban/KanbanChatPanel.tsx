@@ -550,6 +550,25 @@ export function KanbanChatPanel({
     });
   }, [messages, inlineActivities]);
 
+  // Fallback: if the client replied after an outgoing message, it was delivered (2 ticks)
+  const deliveredByReplyIds = useMemo(() => {
+    const set = new Set<string>();
+    let hasClientAfter = false;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m.is_from_me) {
+        hasClientAfter = true;
+        continue;
+      }
+      if (hasClientAfter && !m.is_internal && (m.status === "sent" || !m.status)) {
+        set.add(m.id);
+      }
+    }
+
+    return set;
+  }, [messages]);
+
   // Fetch messages
   useEffect(() => {
     const fetchMessages = async () => {
@@ -1416,7 +1435,12 @@ export function KanbanChatPanel({
                       isFromMe && !isInternal ? "text-white/70" : "opacity-70"
                     )}>
                       <span className="text-xs">{formatTime(msg.created_at)}</span>
-                      {renderStatusIcon(msg.status, isFromMe)}
+                      {renderStatusIcon(
+                        deliveredByReplyIds.has(msg.id) && (msg.status === "sent" || !msg.status)
+                          ? "delivered"
+                          : msg.status,
+                        isFromMe
+                      )}
                     </div>
                   </div>
                 </div>
