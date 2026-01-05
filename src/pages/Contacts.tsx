@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Upload, Download, MoreVertical, Trash2, Merge, MessageCircle, User } from "lucide-react";
+import type { DateRange } from "react-day-picker";
+import { parseISO, startOfDay, endOfDay } from "date-fns";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { FilterBar } from "@/components/filters/FilterBar";
@@ -63,18 +65,19 @@ export default function Contacts() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
-  
+
   // Multi-select filters
   const [selectedResponsibles, setSelectedResponsibles] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
   // Delete confirmation state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [contactToDelete, setContactToDelete] = useState<{ id: string; name: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  
+
   // Bulk delete state
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
@@ -84,12 +87,25 @@ export default function Contacts() {
       client.phone.includes(search) ||
       client.email?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = selectedStatuses.length === 0 || 
+    const matchesStatus =
+      selectedStatuses.length === 0 ||
       (client.custom_status_id && selectedStatuses.includes(client.custom_status_id));
-    const matchesDepartment = selectedDepartments.length === 0 || 
+
+    const matchesDepartment =
+      selectedDepartments.length === 0 ||
       (client.department_id && selectedDepartments.includes(client.department_id));
 
-    return matchesSearch && matchesStatus && matchesDepartment;
+    const matchesDateRange = (() => {
+      if (!dateRange?.from) return true;
+
+      const clientDate = parseISO(client.created_at);
+      const start = startOfDay(dateRange.from);
+      const end = endOfDay(dateRange.to ?? dateRange.from);
+
+      return clientDate >= start && clientDate <= end;
+    })();
+
+    return matchesSearch && matchesStatus && matchesDepartment && matchesDateRange;
   });
 
 
@@ -288,6 +304,8 @@ export default function Contacts() {
               name: t.name,
               color: t.color,
             }))}
+            dateRange={dateRange}
+            onDateRangeChange={setDateRange}
             connections={[]}
             resultsCount={filteredClients.length}
           />
