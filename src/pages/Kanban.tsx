@@ -50,7 +50,7 @@ export default function Kanban() {
   );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [groupBy, setGroupBy] = useState<'department' | 'status' | 'responsible' | 'ticket' | 'origin' | 'connection'>('department');
+  const [groupBy, setGroupBy] = useState<'department' | 'status' | 'responsible' | 'connection'>('department');
   const [filterConnection, setFilterConnection] = useState<string>('all');
   
   // Multi-select filters
@@ -389,10 +389,8 @@ export default function Kanban() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="responsible">Responsável</SelectItem>
-                <SelectItem value="ticket">Ticket</SelectItem>
                 <SelectItem value="status">Status</SelectItem>
                 <SelectItem value="department">Departamento</SelectItem>
-                <SelectItem value="origin">Origem</SelectItem>
                 <SelectItem value="connection">Conexão</SelectItem>
               </SelectContent>
             </Select>
