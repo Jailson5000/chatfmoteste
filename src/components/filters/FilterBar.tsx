@@ -415,19 +415,19 @@ export function FilterBar({
               )}
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-            <DialogHeader className="p-6 pb-4">
+          <DialogContent className="max-w-xl w-[min(92vw,36rem)] max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden text-[13px]">
+            <DialogHeader className="p-5 pb-3">
               <DialogTitle>Filtros</DialogTitle>
               <DialogDescription>
                 Configure todos os filtros para refinar sua busca por conversas e veja os resultados em tempo real
               </DialogDescription>
             </DialogHeader>
 
-            <ScrollArea className="flex-1 px-6">
-              <div className="space-y-4 pb-4">
+            <ScrollArea className="flex-1 min-h-0 px-5">
+              <div className="space-y-4 pb-6">
                 {/* Classification Section */}
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">Classificação</h4>
+                  <h4 className="text-xs font-medium text-muted-foreground">Classificação</h4>
                   
                   {/* Status */}
                   <Collapsible open={statusExpanded} onOpenChange={setStatusExpanded}>
@@ -618,7 +618,7 @@ export function FilterBar({
                     <CollapsibleTrigger asChild>
                       <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
                         <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm flex-1">
+                        <span className="text-[13px] flex-1">
                           {dateRange?.from ? (
                             dateRange.to ? (
                               `${format(dateRange.from, "dd/MM/yy")} - ${format(dateRange.to, "dd/MM/yy")}`
@@ -646,7 +646,7 @@ export function FilterBar({
                                 key={period.label}
                                 onClick={() => onDateRangeChange?.(period.getValue())}
                                 className={cn(
-                                  "block w-full text-left text-sm px-2 py-1.5 rounded hover:bg-muted/50 transition-colors",
+                                  "block w-full text-left text-[13px] px-2 py-1.5 rounded hover:bg-muted/50 transition-colors",
                                   !dateRange?.from && period.label === "Todo o tempo" && "text-primary font-medium"
                                 )}
                               >
@@ -656,13 +656,21 @@ export function FilterBar({
                           </div>
                           
                           {/* Calendar */}
-                          <div className="flex-1 min-w-[280px]">
+                          <div className="flex-1 min-w-[264px]">
                             <Calendar
                               mode="range"
                               selected={dateRange}
                               onSelect={onDateRangeChange}
                               locale={ptBR}
-                              className={cn("rounded-md pointer-events-auto")}
+                              className={cn("rounded-md pointer-events-auto p-2")}
+                              classNames={{
+                                month: "space-y-3",
+                                caption_label: "text-xs font-medium",
+                                head_cell: "text-muted-foreground rounded-md w-8 font-normal text-[0.72rem]",
+                                cell: "h-8 w-8 text-center text-[13px] p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+                                day: "h-8 w-8 p-0 font-normal text-[13px] aria-selected:opacity-100 hover:bg-accent hover:text-accent-foreground rounded-md",
+                                nav_button: "h-6 w-6 bg-transparent p-0 opacity-60 hover:opacity-100",
+                              }}
                               numberOfMonths={1}
                             />
                           </div>
@@ -687,9 +695,9 @@ export function FilterBar({
 
                 {/* Avançado Section */}
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">Avançado</h4>
+                  <h4 className="text-xs font-medium text-muted-foreground">Avançado</h4>
                   <Collapsible open={advancedExpanded} onOpenChange={setAdvancedExpanded}>
-                    <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full">
+                    <CollapsibleTrigger className="flex items-center gap-2 text-[13px] text-muted-foreground hover:text-foreground transition-colors w-full">
                       {advancedExpanded ? (
                         <ChevronUp className="h-4 w-4" />
                       ) : (
@@ -710,7 +718,7 @@ export function FilterBar({
                           onCheckedChange={(checked) => updateAdvancedFilter('onlyUnread', checked)}
                         />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Somente conversas não lidas</p>
+                          <p className="text-[13px] font-medium">Somente conversas não lidas</p>
                           <p className="text-xs text-muted-foreground">Mostra apenas conversas que ainda não foram visualizadas.</p>
                         </div>
                       </div>
@@ -722,7 +730,7 @@ export function FilterBar({
                           onCheckedChange={(checked) => updateAdvancedFilter('onlyNoResponse', checked)}
                         />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Somente conversas sem resposta</p>
+                          <p className="text-[13px] font-medium">Somente conversas sem resposta</p>
                           <p className="text-xs text-muted-foreground">Filtra conversas onde o último contato foi feito pelo cliente.</p>
                         </div>
                       </div>
@@ -734,7 +742,7 @@ export function FilterBar({
                           onCheckedChange={(checked) => updateAdvancedFilter('shadowMode', checked)}
                         />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Modo Sombra</p>
+                          <p className="text-[13px] font-medium">Modo Sombra</p>
                           <p className="text-xs text-muted-foreground">Permite olhar conversas sem marcar como lidas.</p>
                         </div>
                       </div>
@@ -746,7 +754,7 @@ export function FilterBar({
                           onCheckedChange={(checked) => updateAdvancedFilter('focusMode', checked)}
                         />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Modo Foco</p>
+                          <p className="text-[13px] font-medium">Modo Foco</p>
                           <p className="text-xs text-muted-foreground">Mostra todas conversas pendentes e apenas suas conversas ativas.</p>
                         </div>
                       </div>
@@ -758,7 +766,7 @@ export function FilterBar({
                           onCheckedChange={(checked) => updateAdvancedFilter('showInactive', checked)}
                         />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">Mostrar conversas com inatividade</p>
+                          <p className="text-[13px] font-medium">Mostrar conversas com inatividade</p>
                           <p className="text-xs text-muted-foreground">Identifica conversas que não tiveram interação do cliente.</p>
                         </div>
                       </div>
@@ -768,7 +776,7 @@ export function FilterBar({
               </div>
             </ScrollArea>
 
-            <DialogFooter className="border-t border-border p-6 pt-4 flex-row gap-2">
+            <DialogFooter className="border-t border-border p-5 pt-3 flex-row gap-2">
               <Button 
                 variant="outline" 
                 onClick={clearAllFilters}
