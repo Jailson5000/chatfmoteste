@@ -1698,8 +1698,8 @@ export default function Conversations() {
                               content={item.data.content}
                               createdAt={item.data.created_at}
                               isFromMe={item.data.is_from_me}
-                              senderType={item.data.sender_type}
-                              aiGenerated={item.data.ai_generated}
+                              senderType={item.data.sender_type || "user"}
+                              aiGenerated={item.data.ai_generated || false}
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
@@ -2238,8 +2238,8 @@ export default function Conversations() {
                               content={item.data.content}
                               createdAt={item.data.created_at}
                               isFromMe={item.data.is_from_me}
-                              senderType={item.data.sender_type}
-                              aiGenerated={item.data.ai_generated}
+                              senderType={item.data.sender_type || "user"}
+                              aiGenerated={item.data.ai_generated || false}
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
