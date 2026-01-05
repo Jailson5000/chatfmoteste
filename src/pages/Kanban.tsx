@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FolderPlus, MessageSquare, Plus, LayoutGrid, Phone, Search, X } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Phone, Search, X } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,7 +50,7 @@ export default function Kanban() {
   );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [groupBy, setGroupBy] = useState<'department' | 'status'>('department');
+  const [groupBy, setGroupBy] = useState<'department' | 'status' | 'responsible' | 'ticket' | 'origin' | 'connection'>('department');
   const [filterConnection, setFilterConnection] = useState<string>('all');
   
   // Multi-select filters
@@ -340,9 +340,8 @@ export default function Kanban() {
               )}
             </div>
             
-            <Button size="sm" variant="default" className="h-9 gap-1 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Novo</span>
+            <Button size="icon" variant="default" className="h-9 w-9 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
+              <UserPlus className="h-4 w-4" />
             </Button>
 
             <FilterBar
@@ -382,15 +381,19 @@ export default function Kanban() {
 
           {/* Right: Group by selector */}
           <div className="flex items-center gap-2">
-            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as 'department' | 'status')}>
-              <SelectTrigger className="w-[180px] h-9">
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="w-[220px] h-9">
                 <LayoutGrid className="h-4 w-4 mr-2 text-muted-foreground" />
                 <span className="text-muted-foreground mr-1">Agrupar:</span>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="department">Departamento</SelectItem>
+                <SelectItem value="responsible">Responsável</SelectItem>
+                <SelectItem value="ticket">Ticket</SelectItem>
                 <SelectItem value="status">Status</SelectItem>
+                <SelectItem value="department">Departamento</SelectItem>
+                <SelectItem value="origin">Origem</SelectItem>
+                <SelectItem value="connection">Conexão</SelectItem>
               </SelectContent>
             </Select>
           </div>
