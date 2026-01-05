@@ -1113,7 +1113,8 @@ export function MessageBubble({
           </button>
         );
       default:
-        return <Check className="h-3.5 w-3.5 text-muted-foreground" />;
+        // Default to delivered (2 checks) if no status is specified
+        return <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />;
     }
   };
 
