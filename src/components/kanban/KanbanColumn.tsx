@@ -1,7 +1,9 @@
+import { useCallback, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KanbanCard } from "./KanbanCard";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 
 interface Conversation {
   id: string;
@@ -64,6 +66,13 @@ export function KanbanColumn({
   onConversationDragStart,
   onConversationClick,
 }: KanbanColumnProps) {
+  // Infinite scroll for cards in this column (20 initial, +15 on scroll)
+  const cardScroll = useInfiniteScroll(conversations, {
+    initialBatchSize: 20,
+    batchIncrement: 15,
+    threshold: 100,
+  });
+
   const getCustomStatus = (conversation: Conversation) => {
     const statusId = conversation.client?.custom_status_id;
     if (!statusId) return null;
@@ -162,8 +171,11 @@ export function KanbanColumn({
         </div>
 
         {/* Cards */}
-        <div className="p-2 space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
-          {conversations.map((conv) => (
+        <div 
+          className="p-2 space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto"
+          onScroll={cardScroll.handleScroll}
+        >
+          {cardScroll.visibleData.map((conv) => (
             <KanbanCard
               key={conv.id}
               conversation={conv}
@@ -175,6 +187,14 @@ export function KanbanColumn({
               onClick={() => onConversationClick(conv)}
             />
           ))}
+          {/* Load more indicator */}
+          {cardScroll.hasMore && (
+            <div className="py-2 text-center">
+              <p className="text-[10px] text-muted-foreground">
+                +{cardScroll.totalCount - cardScroll.displayedCount} cards
+              </p>
+            </div>
+          )}
           {conversations.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-xs">
               Arraste conversas para cá
