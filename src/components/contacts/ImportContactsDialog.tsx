@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from "react";
-import { ArrowLeft, Upload, FileText, CheckCircle2, Download, Info } from "lucide-react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { ArrowLeft, Upload, FileText, CheckCircle2, Download, Info, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,9 +35,17 @@ export function ImportContactsDialog({
   const [isDragging, setIsDragging] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { instances } = useWhatsAppInstances();
+  const { instances, isLoading: isLoadingInstances } = useWhatsAppInstances();
 
+  // Filter connected instances for import
   const connectedInstances = instances.filter(i => i.status === "connected");
+  
+  // Auto-select first connected instance when available
+  useEffect(() => {
+    if (connectedInstances.length > 0 && !selectedConnection) {
+      setSelectedConnection(connectedInstances[0].id);
+    }
+  }, [connectedInstances, selectedConnection]);
 
   const handleClose = () => {
     setStep("upload");
@@ -112,13 +120,6 @@ export function ImportContactsDialog({
 
   const currentStepIndex = steps.findIndex(s => s.key === step);
 
-  // Get selected connection display
-  const selectedInstance = connectedInstances.find(i => i.id === selectedConnection);
-  const connectionDisplay = selectedInstance 
-    ? `${selectedInstance.display_name || selectedInstance.instance_name}${selectedInstance.phone_number ? ` - ${formatPhone(selectedInstance.phone_number)}` : ""}`
-    : connectedInstances[0]
-      ? `${connectedInstances[0].display_name || connectedInstances[0].instance_name}${connectedInstances[0].phone_number ? ` - ${formatPhone(connectedInstances[0].phone_number)}` : ""}`
-      : "Nenhuma conexão disponível";
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
@@ -272,35 +273,44 @@ export function ImportContactsDialog({
               <div className="border rounded-lg p-4 space-y-3">
                 <label className="text-sm font-medium">Conexão WhatsApp</label>
                 <Select
-                  value={selectedConnection || connectedInstances[0]?.id || ""}
+                  value={selectedConnection}
                   onValueChange={setSelectedConnection}
+                  disabled={connectedInstances.length === 0}
                 >
                   <SelectTrigger className="w-full bg-muted/30">
-                    <SelectValue placeholder="Selecione uma conexão">
-                      {connectionDisplay}
-                    </SelectValue>
+                    {isLoadingInstances ? (
+                      <span className="text-muted-foreground">Carregando conexões...</span>
+                    ) : connectedInstances.length === 0 ? (
+                      <span className="text-muted-foreground">Nenhuma conexão disponível</span>
+                    ) : (
+                      <SelectValue placeholder="Selecione uma conexão" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     {connectedInstances.map((instance) => (
                       <SelectItem key={instance.id} value={instance.id}>
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                          <span>{instance.display_name || instance.instance_name}</span>
-                          {instance.phone_number && (
-                            <span className="text-muted-foreground">
-                              {formatPhone(instance.phone_number)}
+                        <div className="flex items-center gap-3">
+                          <Smartphone className="h-4 w-4 text-emerald-500 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">
+                              {instance.display_name || instance.instance_name}
                             </span>
-                          )}
+                            {instance.phone_number && (
+                              <span className="text-xs text-muted-foreground">
+                                {formatPhone(instance.phone_number)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </SelectItem>
                     ))}
-                    {connectedInstances.length === 0 && (
-                      <SelectItem value="none" disabled>
-                        Nenhuma conexão disponível
-                      </SelectItem>
-                    )}
                   </SelectContent>
                 </Select>
+                {connectedInstances.length === 0 && !isLoadingInstances && (
+                  <p className="text-xs text-muted-foreground">
+                    Conecte uma instância WhatsApp em Conexões para vincular contatos.
+                  </p>
+                )}
               </div>
 
               {/* Template Download */}

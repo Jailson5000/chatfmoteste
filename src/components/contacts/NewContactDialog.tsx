@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Info, Phone, Upload, AlertTriangle, Link2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Info, Phone, Upload, AlertTriangle, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,10 +35,17 @@ export function NewContactDialog({
 }: NewContactDialogProps) {
   const [phone, setPhone] = useState("");
   const [selectedConnection, setSelectedConnection] = useState<string>("");
-  const { instances } = useWhatsAppInstances();
+  const { instances, isLoading: isLoadingInstances } = useWhatsAppInstances();
 
   const connectedInstances = instances.filter(i => i.status === "connected");
   const selectedInstance = connectedInstances.find(i => i.id === selectedConnection);
+
+  // Auto-select first connection when available
+  useEffect(() => {
+    if (connectedInstances.length > 0 && !selectedConnection) {
+      setSelectedConnection(connectedInstances[0].id);
+    }
+  }, [connectedInstances, selectedConnection]);
 
   const phoneDigits = unmask(phone);
   const isPhoneValid = phoneDigits.length >= 8;
@@ -71,13 +78,6 @@ export function NewContactDialog({
 
   // Format display phone
   const displayPhone = phone ? formatPhone(phone) : "";
-  
-  // Get connection display phone
-  const connectionPhone = selectedInstance?.phone_number 
-    ? formatPhone(selectedInstance.phone_number)
-    : connectedInstances[0]?.phone_number 
-      ? formatPhone(connectedInstances[0].phone_number)
-      : null;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
@@ -122,13 +122,37 @@ export function NewContactDialog({
               </div>
             </div>
 
-            {/* Connection display */}
-            {connectionPhone && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Link2 className="h-4 w-4" />
-                <span>{connectionPhone}</span>
-              </div>
-            )}
+            {/* Connection Selector */}
+            <Select
+              value={selectedConnection}
+              onValueChange={setSelectedConnection}
+              disabled={connectedInstances.length === 0}
+            >
+              <SelectTrigger className="w-full bg-muted/30">
+                {isLoadingInstances ? (
+                  <span className="text-muted-foreground">Carregando...</span>
+                ) : connectedInstances.length === 0 ? (
+                  <span className="text-muted-foreground">Nenhuma conexão</span>
+                ) : (
+                  <SelectValue placeholder="Selecione uma conexão" />
+                )}
+              </SelectTrigger>
+              <SelectContent>
+                {connectedInstances.map((instance) => (
+                  <SelectItem key={instance.id} value={instance.id}>
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="h-4 w-4 text-emerald-500" />
+                      <span>{instance.display_name || instance.instance_name}</span>
+                      {instance.phone_number && (
+                        <span className="text-muted-foreground text-xs">
+                          {formatPhone(instance.phone_number)}
+                        </span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Validation Warning */}
