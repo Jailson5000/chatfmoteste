@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { FolderPlus, MessageSquare, Plus, LayoutGrid, Phone, Search, X } from "lucide-react";
+import { DateRange } from "react-day-picker";
+import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +56,7 @@ export default function Kanban() {
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   // Get available connections with phone numbers from WhatsApp instances
   const availableConnections = useMemo(() => {
@@ -163,10 +166,25 @@ export default function Kanban() {
           return false;
         }
       }
+
+      // Date range filter - filter by conversation created_at or last_message_at
+      if (dateRange?.from) {
+        const convDate = parseISO(conv.last_message_at || conv.created_at);
+        const startDate = startOfDay(dateRange.from);
+        const afterStart = isAfter(convDate, startDate) || convDate >= startDate;
+        
+        if (!afterStart) return false;
+        
+        if (dateRange.to) {
+          const endDate = endOfDay(dateRange.to);
+          const beforeEnd = isBefore(convDate, endDate) || convDate <= endDate;
+          if (!beforeEnd) return false;
+        }
+      }
       
       return true;
     });
-  }, [conversations, searchQuery, selectedResponsibles, selectedStatuses, selectedDepartments, selectedTags, selectedConnections, filterConnection]);
+  }, [conversations, searchQuery, selectedResponsibles, selectedStatuses, selectedDepartments, selectedTags, selectedConnections, filterConnection, dateRange]);
 
   const handleConversationDrop = (departmentId: string | null) => {
     if (draggedConversation) {
@@ -341,6 +359,8 @@ export default function Kanban() {
               selectedConnections={selectedConnections}
               onConnectionsChange={setSelectedConnections}
               connections={availableConnections}
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
               resultsCount={filteredConversations.length}
             />
           </div>
