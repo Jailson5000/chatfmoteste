@@ -265,6 +265,7 @@ export default function Contacts() {
               id: m.id,
               full_name: m.full_name,
               avatar_url: m.avatar_url,
+              type: 'human' as const,
             }))}
             selectedStatuses={selectedStatuses}
             onStatusesChange={setSelectedStatuses}
@@ -287,6 +288,7 @@ export default function Contacts() {
               name: t.name,
               color: t.color,
             }))}
+            connections={[]}
             resultsCount={filteredClients.length}
           />
 
