@@ -56,12 +56,14 @@ export default function Kanban() {
   const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
 
   // Get available connections with phone numbers from WhatsApp instances
-  const availableInstancesWithPhone = useMemo(() => {
-    const instancesMap = new Map<string, { name: string; phone?: string | null }>();
+  const availableConnections = useMemo(() => {
+    const instancesMap = new Map<string, { id: string; name: string; phone?: string | null }>();
     conversations.forEach(conv => {
       if (conv.whatsapp_instance?.instance_name) {
-        instancesMap.set(conv.whatsapp_instance.instance_name, {
-          name: conv.whatsapp_instance.instance_name,
+        const instanceName = conv.whatsapp_instance.instance_name;
+        instancesMap.set(instanceName, {
+          id: instanceName,
+          name: conv.whatsapp_instance.display_name || instanceName,
           phone: conv.whatsapp_instance.phone_number
         });
       }
@@ -69,16 +71,26 @@ export default function Kanban() {
     return Array.from(instancesMap.values());
   }, [conversations]);
 
-  // Get available connections from conversations
-  const availableConnections = useMemo(() => {
-    const connections = new Set<string>();
-    conversations.forEach(conv => {
-      if (conv.whatsapp_instance?.instance_name) {
-        connections.add(conv.whatsapp_instance.instance_name);
-      }
-    });
-    return Array.from(connections);
-  }, [conversations]);
+  // Build team members list including AI agents
+  const allResponsibles = useMemo(() => {
+    const humans = members.map(m => ({
+      id: m.id,
+      full_name: m.full_name,
+      avatar_url: m.avatar_url,
+      type: 'human' as const,
+    }));
+    
+    const aiAgents = automations
+      .filter(a => a.is_active)
+      .map(a => ({
+        id: a.id,
+        full_name: a.name,
+        avatar_url: null,
+        type: 'ai' as const,
+      }));
+    
+    return [...humans, ...aiAgents];
+  }, [members, automations]);
 
   // Real-time subscription
   useEffect(() => {
@@ -104,9 +116,11 @@ export default function Kanban() {
         if (!nameMatch && !phoneMatch) return false;
       }
       
-      // Responsible filter (multi-select)
+      // Responsible filter (multi-select) - includes both humans and AI agents
       if (selectedResponsibles.length > 0) {
-        if (!conv.assigned_to || !selectedResponsibles.includes(conv.assigned_to)) return false;
+        const matchesHuman = conv.assigned_to && selectedResponsibles.includes(conv.assigned_to);
+        const matchesAI = conv.current_automation_id && selectedResponsibles.includes(conv.current_automation_id);
+        if (!matchesHuman && !matchesAI) return false;
       }
 
       // Status filter (multi-select) - filter by client status
@@ -302,11 +316,7 @@ export default function Kanban() {
             <FilterBar
               selectedResponsibles={selectedResponsibles}
               onResponsiblesChange={setSelectedResponsibles}
-              teamMembers={members.map(m => ({
-                id: m.id,
-                full_name: m.full_name,
-                avatar_url: m.avatar_url,
-              }))}
+              teamMembers={allResponsibles}
               selectedStatuses={selectedStatuses}
               onStatusesChange={setSelectedStatuses}
               statuses={customStatuses.map(s => ({
@@ -333,24 +343,6 @@ export default function Kanban() {
               connections={availableConnections}
               resultsCount={filteredConversations.length}
             />
-
-            {/* Connection dropdown - visible when grouping by status */}
-            {groupBy === 'status' && (
-              <Select value={filterConnection} onValueChange={setFilterConnection}>
-                <SelectTrigger className="w-[160px] h-9">
-                  <Phone className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Conexão" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas conexões</SelectItem>
-                  {availableInstancesWithPhone.map(inst => (
-                    <SelectItem key={inst.name} value={inst.name}>
-                      {inst.name} {inst.phone ? `(${inst.phone.slice(-4)})` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
           </div>
 
           {/* Right: Group by selector */}
