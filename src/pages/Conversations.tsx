@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
 import { useSearchParams } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
@@ -189,8 +190,22 @@ export default function Conversations() {
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [newlyCreatedConversation, setNewlyCreatedConversation] = useState<any | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
+  
+  // Paginated messages with infinite scroll (load older messages on scroll up)
+  const {
+    messages,
+    setMessages,
+    isLoading: messagesLoading,
+    isLoadingMore: messagesLoadingMore,
+    hasMoreMessages,
+    handleScrollToTop: handleMessagesScrollToTop,
+  } = useMessagesWithPagination({
+    conversationId: selectedConversationId,
+    initialBatchSize: 50,
+    loadMoreBatchSize: 30,
+    onNewMessage: () => playNotification(),
+  });
+
   const [messageInput, setMessageInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
@@ -303,7 +318,7 @@ export default function Conversations() {
 
   // Merge messages with inline activities, sorted by timestamp
   type TimelineItem = 
-    | { type: 'message'; data: Message }
+    | { type: 'message'; data: PaginatedMessage }
     | { type: 'activity'; data: (typeof inlineActivities)[0] };
   
   const timelineItems = useMemo<TimelineItem[]>(() => {
@@ -620,169 +635,32 @@ export default function Conversations() {
   const handleReply = useCallback((messageId: string) => {
     const message = messages.find(m => m.id === messageId);
     if (message) {
-      setReplyToMessage(message);
+      setReplyToMessage(message as any);
     }
   }, [messages]);
 
-  // Load messages when conversation is selected
+  // Clear state when no conversation selected
   useEffect(() => {
     if (!selectedConversationId) {
-      setMessages([]);
       setReplyToMessage(null);
       setShowMessageSearch(false);
       setMessageSearchQuery("");
-      return;
     }
+  }, [selectedConversationId]);
 
-    const loadMessages = async () => {
-      setMessagesLoading(true);
-      const { data, error } = await supabase
-        .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name")
-        .eq("conversation_id", selectedConversationId)
-        .order("created_at", { ascending: true });
-      
-      if (!error && data) {
-        // Map reply_to data
-        const messagesWithReplies = data.map(msg => {
-          if (msg.reply_to_message_id) {
-            const replyTo = data.find(m => m.id === msg.reply_to_message_id);
-            return {
-              ...msg,
-              reply_to: replyTo ? {
-                id: replyTo.id,
-                content: replyTo.content,
-                is_from_me: replyTo.is_from_me,
-              } : null
-            };
-          }
-          return msg;
-        });
-        setMessages(messagesWithReplies);
-        
-        // Mark messages as read
-        await supabase.rpc('mark_messages_as_read', {
-          _conversation_id: selectedConversationId,
-          _user_id: (await supabase.auth.getUser()).data.user?.id
-        });
-      }
-      setMessagesLoading(false);
-    };
+  // Handle new incoming messages - update unseen count if not at bottom
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last) return;
+    if (last.is_from_me) return;
 
-    loadMessages();
-
-    // Subscribe to new messages (INSERT)
-    const insertChannel = supabase
-      .channel(`messages-insert-${selectedConversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${selectedConversationId}`
-        },
-        (payload) => {
-          const newMsg = payload.new as Message;
-
-          // Prevent duplicate messages / reconcile optimistic outgoing message with realtime insert
-          setMessages(prev => {
-            // 1) Exact ID match
-            if (prev.some(m => m.id === newMsg.id)) return prev;
-
-            // 2) Race-condition fix: if this is an outgoing message, replace the pending optimistic one by tempId
-            if (newMsg.is_from_me) {
-              const pendingIdx = pendingOutgoingRef.current.findIndex(p =>
-                p.content === newMsg.content && (Date.now() - p.sentAt) < 5 * 60 * 1000
-              );
-
-              if (pendingIdx !== -1) {
-                const pending = pendingOutgoingRef.current[pendingIdx];
-                pendingOutgoingRef.current.splice(pendingIdx, 1);
-
-                const optimisticIdx = prev.findIndex(m => m.id === pending.tempId);
-                if (optimisticIdx !== -1) {
-                  const updated = [...prev];
-                  updated[optimisticIdx] = { ...newMsg, status: "sent" as MessageStatus };
-                  return updated;
-                }
-              }
-            }
-
-            // 3) Fallback: replace optimistic by content + direction within a wider window
-            const optimisticIndex = prev.findIndex(m =>
-              m.is_from_me === newMsg.is_from_me &&
-              m.content === newMsg.content &&
-              (m.status === "sending" || m.status === "sent" || !m.whatsapp_message_id) &&
-              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
-            );
-
-            if (optimisticIndex !== -1) {
-              const updated = [...prev];
-              updated[optimisticIndex] = { ...newMsg, status: "sent" as MessageStatus };
-              return updated;
-            }
-
-            // 4) Last-resort duplicate guard
-            if (newMsg.is_from_me) {
-              const isDuplicate = prev.some(m =>
-                m.content === newMsg.content &&
-                m.is_from_me === true &&
-                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
-              );
-              if (isDuplicate) return prev;
-            }
-
-            return [...prev, newMsg];
-          });
-
-          if (!newMsg.is_from_me) {
-            playNotification();
-
-            // If user is reading older messages, don't auto-pull; show indicator instead.
-            if (isAtBottomRef.current) {
-              requestAnimationFrame(() => scrollMessagesToBottom("auto"));
-            } else {
-              setUnseenMessages((c) => c + 1);
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    // Subscribe to message updates (UPDATE) for real-time ticks
-    const updateChannel = supabase
-      .channel(`messages-update-${selectedConversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${selectedConversationId}`
-        },
-        (payload) => {
-          const updatedMsg = payload.new as Message;
-          // Update the message in state to reflect status ticks (delivered/read)
-          setMessages(prev => prev.map(m => 
-            m.id === updatedMsg.id 
-              ? { 
-                  ...m,
-                  status: updatedMsg.status,
-                  delivered_at: updatedMsg.delivered_at,
-                  read_at: updatedMsg.read_at,
-                }
-              : m
-          ));
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(insertChannel);
-      supabase.removeChannel(updateChannel);
-    };
-  }, [selectedConversationId, playNotification]);
+    // If user is reading older messages, show indicator
+    if (!isAtBottomRef.current) {
+      setUnseenMessages(c => c + 1);
+    } else {
+      requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+    }
+  }, [messages.length, scrollMessagesToBottom]);
 
   // Auto-scroll to bottom when opening a conversation (after messages load)
   useEffect(() => {
@@ -1785,7 +1663,7 @@ export default function Conversations() {
                 </div>
 
                 {/* Mobile Messages */}
-                <ScrollArea className="flex-1 min-h-0">
+                <ScrollArea className="flex-1 min-h-0" onScrollCapture={handleMessagesScrollToTop}>
                   <div className="p-4 space-y-4">
                     {messagesLoading ? (
                       <div className="flex items-center justify-center py-8">
@@ -1798,6 +1676,18 @@ export default function Conversations() {
                       </div>
                     ) : (
                       <>
+                        {/* Loading more indicator */}
+                        {messagesLoadingMore && (
+                          <div className="flex items-center justify-center py-2">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent mr-2" />
+                            <span className="text-xs text-muted-foreground">Carregando mais mensagens...</span>
+                          </div>
+                        )}
+                        {hasMoreMessages && !messagesLoadingMore && (
+                          <div className="text-center py-2">
+                            <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
+                          </div>
+                        )}
                         {timelineItems.map((item) => (
                           item.type === 'activity' ? (
                             <InlineActivityBadge key={item.data.id} activity={item.data} />
@@ -1813,7 +1703,7 @@ export default function Conversations() {
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
-                              status={item.data.status || "sent"}
+                              status={(item.data.status || "sent") as MessageStatus}
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
@@ -2308,7 +2198,12 @@ export default function Conversations() {
 
             {/* Messages */}
             <div className="relative flex-1 min-h-0 min-w-0 overflow-x-hidden">
-              <ScrollArea ref={messagesScrollAreaRef} className="h-full w-full min-w-0" viewportClassName="min-w-0 overflow-x-hidden">
+              <ScrollArea 
+                ref={messagesScrollAreaRef} 
+                className="h-full w-full min-w-0" 
+                viewportClassName="min-w-0 overflow-x-hidden"
+                onScrollCapture={handleMessagesScrollToTop}
+              >
                 <div className="py-4 space-y-4 w-full min-w-0 px-3 lg:px-4">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-8">
@@ -2321,6 +2216,18 @@ export default function Conversations() {
                     </div>
                   ) : (
                     <>
+                      {/* Loading more indicator */}
+                      {messagesLoadingMore && (
+                        <div className="flex items-center justify-center py-2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent mr-2" />
+                          <span className="text-xs text-muted-foreground">Carregando mais mensagens...</span>
+                        </div>
+                      )}
+                      {hasMoreMessages && !messagesLoadingMore && (
+                        <div className="text-center py-2">
+                          <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
+                        </div>
+                      )}
                       {timelineItems.map((item) => (
                         item.type === 'activity' ? (
                           <InlineActivityBadge key={item.data.id} activity={item.data} />
@@ -2336,7 +2243,7 @@ export default function Conversations() {
                               mediaUrl={item.data.media_url}
                               mediaMimeType={item.data.media_mime_type}
                               messageType={item.data.message_type}
-                              status={item.data.status || "sent"}
+                              status={(item.data.status || "sent") as MessageStatus}
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
