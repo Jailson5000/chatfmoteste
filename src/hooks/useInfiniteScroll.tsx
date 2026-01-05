@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 
 export interface UseInfiniteScrollOptions {
   initialBatchSize?: number;
@@ -46,6 +46,10 @@ export function useInfiniteScroll<T>(
   const scrollContainerRef = useRef<HTMLElement>(null);
   const loadingRef = useRef(false);
 
+  // Preserve user's current viewport position when incrementally revealing more items
+  const pendingScrollContainerRef = useRef<HTMLElement | null>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
+
   const totalCount = data.length;
   const hasMore = displayedCount < totalCount;
 
@@ -63,10 +67,10 @@ export function useInfiniteScroll<T>(
 
   const loadMore = useCallback(() => {
     if (loadingRef.current || !hasMore) return;
-    
+
     loadingRef.current = true;
     setIsLoadingMore(true);
-    
+
     // Small delay to show loading state and prevent rapid-fire loads
     requestAnimationFrame(() => {
       setDisplayedCount((prev) => Math.min(prev + batchIncrement, totalCount));
@@ -74,6 +78,18 @@ export function useInfiniteScroll<T>(
       loadingRef.current = false;
     });
   }, [hasMore, batchIncrement, totalCount]);
+
+  // Restore scrollTop after list grows (keeps same item visible)
+  useLayoutEffect(() => {
+    const container = pendingScrollContainerRef.current;
+    const top = pendingScrollTopRef.current;
+    if (!container || top === null) return;
+
+    container.scrollTop = top;
+
+    pendingScrollContainerRef.current = null;
+    pendingScrollTopRef.current = null;
+  }, [displayedCount]);
 
   const reset = useCallback(() => {
     setDisplayedCount(initialBatchSize);
@@ -85,9 +101,12 @@ export function useInfiniteScroll<T>(
       const scrollTop = target.scrollTop;
       const scrollHeight = target.scrollHeight;
       const clientHeight = target.clientHeight;
-      
+
       // Check if scrolled near bottom
       if (scrollHeight - scrollTop - clientHeight < threshold) {
+        // Save current position to avoid jumps after incremental render
+        pendingScrollContainerRef.current = target;
+        pendingScrollTopRef.current = scrollTop;
         loadMore();
       }
     },
@@ -105,6 +124,8 @@ export function useInfiniteScroll<T>(
       const clientHeight = container.clientHeight;
 
       if (scrollHeight - scrollTop - clientHeight < threshold) {
+        pendingScrollContainerRef.current = container;
+        pendingScrollTopRef.current = scrollTop;
         loadMore();
       }
     };

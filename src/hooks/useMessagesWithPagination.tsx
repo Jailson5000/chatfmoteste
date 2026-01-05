@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -61,6 +61,12 @@ export function useMessagesWithPagination({
   
   const loadingMoreRef = useRef(false);
   const oldestTimestampRef = useRef<string | null>(null);
+
+  // Scroll anchoring for incremental history loading (prepend)
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const pendingRestoreRef = useRef<
+    { prevScrollHeight: number; prevScrollTop: number } | null
+  >(null);
 
   // Reset when conversation changes
   useEffect(() => {
@@ -208,28 +214,38 @@ export function useMessagesWithPagination({
   }, [conversationId, hasMoreMessages, loadMoreBatchSize]);
 
   // Handle scroll to top to load more (viewport element, not root)
-  const handleScrollToTop = useCallback((viewport: HTMLDivElement | null) => {
-    if (!viewport) return;
+  const handleScrollToTop = useCallback(
+    (viewport: HTMLDivElement | null) => {
+      if (!viewport) return;
 
-    const scrollTop = viewport.scrollTop;
+      viewportRef.current = viewport;
 
-    // If scrolled near top (within 100px), load more
-    if (scrollTop < 100 && hasMoreMessages && !isLoadingMore) {
-      const prevScrollHeight = viewport.scrollHeight;
-      const prevScrollTop = viewport.scrollTop;
+      // If scrolled near top (within 100px), load more
+      if (viewport.scrollTop < 100 && hasMoreMessages && !isLoadingMore) {
+        pendingRestoreRef.current = {
+          prevScrollHeight: viewport.scrollHeight,
+          prevScrollTop: viewport.scrollTop,
+        };
 
-      void loadMore().then(() => {
-        // Keep the user's visible content anchored after prepending older messages
-        requestAnimationFrame(() => {
-          const newScrollHeight = viewport.scrollHeight;
-          const delta = newScrollHeight - prevScrollHeight;
-          const anchoredTop = prevScrollTop + delta;
-          // Avoid triggering a chain of automatic loadMore calls when content is short
-          viewport.scrollTop = Math.max(anchoredTop, 120);
-        });
-      });
-    }
-  }, [loadMore, hasMoreMessages, isLoadingMore]);
+        void loadMore();
+      }
+    },
+    [loadMore, hasMoreMessages, isLoadingMore]
+  );
+
+  // After older messages are prepended, restore scroll so the same content stays visible
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const pending = pendingRestoreRef.current;
+    if (!viewport || !pending) return;
+
+    const newScrollHeight = viewport.scrollHeight;
+    const delta = newScrollHeight - pending.prevScrollHeight;
+
+    viewport.scrollTop = pending.prevScrollTop + delta;
+
+    pendingRestoreRef.current = null;
+  }, [messages.length]);
 
   // Real-time subscriptions
   useEffect(() => {
