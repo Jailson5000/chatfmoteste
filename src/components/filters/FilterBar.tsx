@@ -444,186 +444,153 @@ export function FilterBar({
                 <div className="space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground">Classificação</h4>
                   
-                  {/* Status */}
+                  {/* Status - Multi-select with inline badges */}
                   <Collapsible open={statusExpanded} onOpenChange={setStatusExpanded}>
                     <CollapsibleTrigger asChild>
-                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                        <Circle className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm flex-1">Status</span>
-                        {selectedStatuses.length > 0 && (
-                          <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                            {selectedStatuses.length}
-                          </Badge>
-                        )}
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", statusExpanded && "rotate-180")} />
+                      <div className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <Circle className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          {selectedStatuses.length > 0 ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {selectedStatuses.map(id => (
+                                <Badge 
+                                  key={id}
+                                  variant="outline" 
+                                  className="h-6 gap-1 text-xs px-2 cursor-pointer group"
+                                  style={{ 
+                                    backgroundColor: `${getStatusColor(id)}20`,
+                                    borderColor: getStatusColor(id),
+                                    color: getStatusColor(id),
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleStatus(id);
+                                  }}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getStatusColor(id) }} />
+                                  {getStatusName(id)}
+                                  <X className="h-3 w-3 ml-0.5 opacity-60 group-hover:opacity-100" />
+                                </Badge>
+                              ))}
+                              <span className="text-xs text-muted-foreground">Buscar status...</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Buscar status...</span>
+                          )}
+                        </div>
+                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform shrink-0", statusExpanded && "rotate-180")} />
                       </div>
                     </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2 space-y-1">
-                      {statuses.map(status => (
-                        <button
-                          key={status.id}
-                          onClick={() => toggleStatus(status.id)}
-                          className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                        >
-                          <Checkbox checked={selectedStatuses.includes(status.id)} className="pointer-events-none" />
-                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: status.color }} />
-                          <span className="text-sm">{status.name}</span>
-                        </button>
-                      ))}
+                    <CollapsibleContent className="pt-1">
+                      <div className="border border-border rounded-lg bg-background/50 max-h-[200px] overflow-auto">
+                        {statuses.map(status => {
+                          const isSelected = selectedStatuses.includes(status.id);
+                          return (
+                            <button
+                              key={status.id}
+                              onClick={() => toggleStatus(status.id)}
+                              className={cn(
+                                "flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors",
+                                isSelected && "bg-primary/10"
+                              )}
+                            >
+                              <Checkbox checked={isSelected} className="pointer-events-none" />
+                              <Badge
+                                variant="outline"
+                                className="font-normal"
+                                style={{
+                                  backgroundColor: `${status.color}20`,
+                                  borderColor: status.color,
+                                  color: status.color,
+                                }}
+                              >
+                                <span className="w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: status.color }} />
+                                {status.name}
+                              </Badge>
+                              {isSelected && <Check className="h-4 w-4 text-primary ml-auto" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2 px-1">
+                        Use ↑ ↓ para navegar, ↵ para selecionar, Tab para próximo, Esc para fechar
+                      </p>
                     </CollapsibleContent>
                   </Collapsible>
 
-                  {/* Responsável */}
+                  {/* Origem (Responsável) */}
                   <Collapsible open={responsibleExpanded} onOpenChange={setResponsibleExpanded}>
                     <CollapsibleTrigger asChild>
-                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm flex-1">Responsável</span>
-                        {selectedResponsibles.length > 0 && (
-                          <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                            {selectedResponsibles.length}
-                          </Badge>
-                        )}
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", responsibleExpanded && "rotate-180")} />
+                      <div className="flex items-start gap-2 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <Users className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          {selectedResponsibles.length > 0 ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {selectedResponsibles.map(id => {
+                                const member = teamMembers.find(m => m.id === id);
+                                return (
+                                  <Badge 
+                                    key={id}
+                                    variant="outline" 
+                                    className={cn(
+                                      "h-6 gap-1 text-xs px-2 cursor-pointer group",
+                                      member?.type === 'ai' && "bg-violet-500/20 text-violet-400 border-violet-500/30"
+                                    )}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleResponsible(id);
+                                    }}
+                                  >
+                                    {member?.type === 'ai' && <Bot className="h-3 w-3" />}
+                                    {getResponsibleName(id)}
+                                    <X className="h-3 w-3 ml-0.5 opacity-60 group-hover:opacity-100" />
+                                  </Badge>
+                                );
+                              })}
+                              <span className="text-xs text-muted-foreground">Buscar...</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">Origem</span>
+                          )}
+                        </div>
+                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform shrink-0", responsibleExpanded && "rotate-180")} />
                       </div>
                     </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2 space-y-1">
-                      {teamMembers.map(member => (
-                        <button
-                          key={member.id}
-                          onClick={() => toggleResponsible(member.id)}
-                          className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                        >
-                          <Checkbox checked={selectedResponsibles.includes(member.id)} className="pointer-events-none" />
-                          {member.type === 'ai' ? (
-                            <Bot className="h-4 w-4 text-violet-500" />
-                          ) : (
-                            <Avatar className="h-5 w-5">
-                              <AvatarImage src={member.avatar_url || undefined} />
-                              <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
-                                {member.full_name.charAt(0).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                          )}
-                          <span className="text-sm">{member.full_name}</span>
-                          {member.type === 'ai' && (
-                            <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 bg-violet-500/20 text-violet-500 border-0">IA</Badge>
-                          )}
-                        </button>
-                      ))}
+                    <CollapsibleContent className="pt-1">
+                      <div className="border border-border rounded-lg bg-background/50 max-h-[200px] overflow-auto">
+                        {teamMembers.map(member => {
+                          const isSelected = selectedResponsibles.includes(member.id);
+                          return (
+                            <button
+                              key={member.id}
+                              onClick={() => toggleResponsible(member.id)}
+                              className={cn(
+                                "flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors",
+                                isSelected && "bg-primary/10"
+                              )}
+                            >
+                              <Checkbox checked={isSelected} className="pointer-events-none" />
+                              {member.type === 'ai' ? (
+                                <Bot className="h-4 w-4 text-violet-500" />
+                              ) : (
+                                <Avatar className="h-5 w-5">
+                                  <AvatarImage src={member.avatar_url || undefined} />
+                                  <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
+                                    {member.full_name.charAt(0).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                              )}
+                              <span className="text-sm">{member.full_name}</span>
+                              {member.type === 'ai' && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 bg-violet-500/20 text-violet-500 border-0">IA</Badge>
+                              )}
+                              {isSelected && <Check className="h-4 w-4 text-primary ml-auto" />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </CollapsibleContent>
                   </Collapsible>
-
-                  {/* Departamento */}
-                  {departments.length > 0 && (
-                    <Collapsible open={deptExpanded} onOpenChange={setDeptExpanded}>
-                      <CollapsibleTrigger asChild>
-                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                          <Building2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm flex-1">Departamento</span>
-                          {selectedDepartments.length > 0 && (
-                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                              {selectedDepartments.length}
-                            </Badge>
-                          )}
-                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", deptExpanded && "rotate-180")} />
-                        </div>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 space-y-1">
-                        {departments.map(dept => (
-                          <button
-                            key={dept.id}
-                            onClick={() => {
-                              const newSelection = selectedDepartments.includes(dept.id)
-                                ? selectedDepartments.filter(d => d !== dept.id)
-                                : [...selectedDepartments, dept.id];
-                              onDepartmentsChange?.(newSelection);
-                            }}
-                            className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                          >
-                            <Checkbox checked={selectedDepartments.includes(dept.id)} className="pointer-events-none" />
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: dept.color }} />
-                            <span className="text-sm">{dept.name}</span>
-                          </button>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
-
-                  {/* Tags */}
-                  {tags.length > 0 && (
-                    <Collapsible open={tagsExpanded} onOpenChange={setTagsExpanded}>
-                      <CollapsibleTrigger asChild>
-                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                          <Tag className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm flex-1">Tags</span>
-                          {selectedTags.length > 0 && (
-                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                              {selectedTags.length}
-                            </Badge>
-                          )}
-                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsExpanded && "rotate-180")} />
-                        </div>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 space-y-1">
-                        {tags.map(tag => (
-                          <button
-                            key={tag.id}
-                            onClick={() => {
-                              const newSelection = selectedTags.includes(tag.id)
-                                ? selectedTags.filter(t => t !== tag.id)
-                                : [...selectedTags, tag.id];
-                              onTagsChange?.(newSelection);
-                            }}
-                            className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                          >
-                            <Checkbox checked={selectedTags.includes(tag.id)} className="pointer-events-none" />
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
-                            <span className="text-sm">{tag.name}</span>
-                          </button>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
-
-                  {/* Conexão */}
-                  {connections.length > 0 && (
-                    <Collapsible open={connExpanded} onOpenChange={setConnExpanded}>
-                      <CollapsibleTrigger asChild>
-                        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                          <Smartphone className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm flex-1">Conexão</span>
-                          {selectedConnections.length > 0 && (
-                            <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                              {selectedConnections.length}
-                            </Badge>
-                          )}
-                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", connExpanded && "rotate-180")} />
-                        </div>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-2 space-y-1">
-                        {connections.map(conn => (
-                          <button
-                            key={conn.id}
-                            onClick={() => {
-                              const newSelection = selectedConnections.includes(conn.id)
-                                ? selectedConnections.filter(c => c !== conn.id)
-                                : [...selectedConnections, conn.id];
-                              onConnectionsChange?.(newSelection);
-                            }}
-                            className="flex items-center gap-2 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
-                          >
-                            <Checkbox checked={selectedConnections.includes(conn.id)} className="pointer-events-none" />
-                            <Smartphone className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm flex-1">{conn.name}</span>
-                            {conn.phone && (
-                              <span className="text-xs text-muted-foreground">{conn.phone}</span>
-                            )}
-                          </button>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  )}
                 </div>
 
                 {/* Período Section */}
@@ -708,86 +675,6 @@ export function FilterBar({
                   </Collapsible>
                 </div>
 
-                {/* Avançado Section */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-medium text-muted-foreground">Avançado</h4>
-                  <Collapsible open={advancedExpanded} onOpenChange={setAdvancedExpanded}>
-                    <CollapsibleTrigger className="flex items-center gap-2 text-[13px] text-muted-foreground hover:text-foreground transition-colors w-full">
-                      {advancedExpanded ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
-                      {advancedExpanded ? "Ver menos" : "Ver mais"}
-                      {advancedTogglesCount > 0 && (
-                        <Badge variant="secondary" className="h-5 px-1.5 text-xs ml-auto">
-                          {advancedTogglesCount}
-                        </Badge>
-                      )}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-3 space-y-3">
-                      {/* Somente conversas não lidas */}
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
-                        <Switch
-                          checked={advancedFilters.onlyUnread || false}
-                          onCheckedChange={(checked) => updateAdvancedFilter('onlyUnread', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="text-[13px] font-medium">Somente conversas não lidas</p>
-                          <p className="text-xs text-muted-foreground">Mostra apenas conversas que ainda não foram visualizadas.</p>
-                        </div>
-                      </div>
-
-                      {/* Somente conversas sem resposta */}
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
-                        <Switch
-                          checked={advancedFilters.onlyNoResponse || false}
-                          onCheckedChange={(checked) => updateAdvancedFilter('onlyNoResponse', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="text-[13px] font-medium">Somente conversas sem resposta</p>
-                          <p className="text-xs text-muted-foreground">Filtra conversas onde o último contato foi feito pelo cliente.</p>
-                        </div>
-                      </div>
-
-                      {/* Modo Sombra */}
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
-                        <Switch
-                          checked={advancedFilters.shadowMode || false}
-                          onCheckedChange={(checked) => updateAdvancedFilter('shadowMode', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="text-[13px] font-medium">Modo Sombra</p>
-                          <p className="text-xs text-muted-foreground">Permite olhar conversas sem marcar como lidas.</p>
-                        </div>
-                      </div>
-
-                      {/* Modo Foco */}
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
-                        <Switch
-                          checked={advancedFilters.focusMode || false}
-                          onCheckedChange={(checked) => updateAdvancedFilter('focusMode', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="text-[13px] font-medium">Modo Foco</p>
-                          <p className="text-xs text-muted-foreground">Mostra todas conversas pendentes e apenas suas conversas ativas.</p>
-                        </div>
-                      </div>
-
-                      {/* Mostrar conversas com inatividade */}
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
-                        <Switch
-                          checked={advancedFilters.showInactive || false}
-                          onCheckedChange={(checked) => updateAdvancedFilter('showInactive', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="text-[13px] font-medium">Mostrar conversas com inatividade</p>
-                          <p className="text-xs text-muted-foreground">Identifica conversas que não tiveram interação do cliente.</p>
-                        </div>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
               </div>
             </ScrollArea>
 
