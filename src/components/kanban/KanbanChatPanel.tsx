@@ -1016,7 +1016,8 @@ export function KanbanChatPanel({
       case "error":
         return <X className="h-3 w-3 text-destructive" />;
       default:
-        return <Check className="h-3 w-3 text-muted-foreground" />;
+        // Default to delivered (2 checks) if no status is specified
+        return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
     }
   };
 
