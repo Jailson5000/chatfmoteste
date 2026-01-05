@@ -241,9 +241,8 @@ export function FilterBar({
   const getTagColor = (id: string) => tags.find(t => t.id === id)?.color || '#888';
   const getConnectionName = (id: string) => connections.find(c => c.id === id)?.name || id;
 
-  // Check if there are any active filters to show (excluding those with dedicated popovers)
-  const hasActiveFilters = selectedStatuses.length > 0 || 
-    selectedDepartments.length > 0 || 
+  // Check if there are any active filters to show (excluding those with dedicated popovers like Status and Responsible)
+  const hasActiveFilters = selectedDepartments.length > 0 || 
     selectedTags.length > 0 || 
     selectedConnections.length > 0 ||
     dateRange?.from ||
@@ -845,25 +844,6 @@ export function FilterBar({
       {/* Active Filters Tags - Show when dialog is closed and filters are active */}
       {!dialogOpen && hasActiveFilters && (
         <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Status tags */}
-          {selectedStatuses.map(id => (
-            <Badge 
-              key={`status-${id}`}
-              variant="secondary" 
-              className="h-6 gap-1 text-xs px-2 cursor-pointer hover:bg-destructive/20"
-              style={{ 
-                backgroundColor: `${getStatusColor(id)}20`,
-                borderColor: getStatusColor(id),
-                color: getStatusColor(id),
-              }}
-              onClick={() => toggleStatus(id)}
-            >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getStatusColor(id) }} />
-              {getStatusName(id)}
-              <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
-            </Badge>
-          ))}
-
           {/* Department tags */}
           {selectedDepartments.map(id => (
             <Badge 
