@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useNavigate } from "react-router-dom";
 import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Phone, Search, X } from "lucide-react";
 import { DateRange } from "react-day-picker";

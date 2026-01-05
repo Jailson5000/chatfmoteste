@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useSearchParams } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
@@ -916,6 +917,13 @@ export default function Conversations() {
       }
     });
   }, [mappedConversations, conversationFilters, searchQuery, activeTab, userProfile?.full_name]);
+
+  // Infinite scroll for conversation list (30 initial, +20 on scroll)
+  const conversationScroll = useInfiniteScroll(filteredConversations, {
+    initialBatchSize: 30,
+    batchIncrement: 20,
+    threshold: 150,
+  });
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
@@ -1936,7 +1944,11 @@ export default function Conversations() {
         </div>
 
         {/* Conversation List */}
-        <ScrollArea className="flex-1 min-w-0" viewportClassName="min-w-0">
+        <ScrollArea 
+          className="flex-1 min-w-0" 
+          viewportClassName="min-w-0"
+          onScrollCapture={conversationScroll.handleScroll}
+        >
           <div className="p-2 space-y-1 min-w-0">
             {filteredConversations.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
@@ -1949,14 +1961,24 @@ export default function Conversations() {
                 </p>
               </div>
             ) : (
-              filteredConversations.map((conv) => (
-                <ConversationSidebarCard
-                  key={conv.id}
-                  conversation={conv}
-                  selected={selectedConversationId === conv.id}
-                  onClick={() => handleSelectConversation(conv.id)}
-                />
-              ))
+              <>
+                {conversationScroll.visibleData.map((conv) => (
+                  <ConversationSidebarCard
+                    key={conv.id}
+                    conversation={conv}
+                    selected={selectedConversationId === conv.id}
+                    onClick={() => handleSelectConversation(conv.id)}
+                  />
+                ))}
+                {/* Load more indicator */}
+                {conversationScroll.hasMore && (
+                  <div className="py-2 text-center">
+                    <p className="text-xs text-muted-foreground">
+                      {conversationScroll.isLoadingMore ? "Carregando..." : `+${conversationScroll.totalCount - conversationScroll.displayedCount} conversas`}
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </ScrollArea>
