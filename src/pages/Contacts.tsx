@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Upload, Download, MoreVertical, Trash2, Merge, MessageCircle, User } from "lucide-react";
+import { usePagination } from "@/hooks/usePagination";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import type { DateRange } from "react-day-picker";
 import { parseISO, startOfDay, endOfDay } from "date-fns";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
@@ -81,32 +83,37 @@ export default function Contacts() {
   // Bulk delete state
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
-  const filteredClients = clients.filter((client) => {
-    const matchesSearch =
-      client.name.toLowerCase().includes(search.toLowerCase()) ||
-      client.phone.includes(search) ||
-      client.email?.toLowerCase().includes(search.toLowerCase());
+  const filteredClients = useMemo(() => {
+    return clients.filter((client) => {
+      const matchesSearch =
+        client.name.toLowerCase().includes(search.toLowerCase()) ||
+        client.phone.includes(search) ||
+        client.email?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus =
-      selectedStatuses.length === 0 ||
-      (client.custom_status_id && selectedStatuses.includes(client.custom_status_id));
+      const matchesStatus =
+        selectedStatuses.length === 0 ||
+        (client.custom_status_id && selectedStatuses.includes(client.custom_status_id));
 
-    const matchesDepartment =
-      selectedDepartments.length === 0 ||
-      (client.department_id && selectedDepartments.includes(client.department_id));
+      const matchesDepartment =
+        selectedDepartments.length === 0 ||
+        (client.department_id && selectedDepartments.includes(client.department_id));
 
-    const matchesDateRange = (() => {
-      if (!dateRange?.from) return true;
+      const matchesDateRange = (() => {
+        if (!dateRange?.from) return true;
 
-      const clientDate = parseISO(client.created_at);
-      const start = startOfDay(dateRange.from);
-      const end = endOfDay(dateRange.to ?? dateRange.from);
+        const clientDate = parseISO(client.created_at);
+        const start = startOfDay(dateRange.from);
+        const end = endOfDay(dateRange.to ?? dateRange.from);
 
-      return clientDate >= start && clientDate <= end;
-    })();
+        return clientDate >= start && clientDate <= end;
+      })();
 
-    return matchesSearch && matchesStatus && matchesDepartment && matchesDateRange;
-  });
+      return matchesSearch && matchesStatus && matchesDepartment && matchesDateRange;
+    });
+  }, [clients, search, selectedStatuses, selectedDepartments, dateRange]);
+
+  // Pagination hook - applied AFTER filtering
+  const pagination = usePagination(filteredClients, { initialPageSize: 50 });
 
 
   const handleCreateFromPhone = async (phone: string) => {
@@ -188,10 +195,16 @@ export default function Contacts() {
   const getDepartmentById = (id: string | null) => departments.find((d) => d.id === id);
 
   const toggleSelectAll = () => {
-    if (selectedContacts.length === filteredClients.length) {
-      setSelectedContacts([]);
+    // Toggle selection for current page only
+    const currentPageIds = pagination.paginatedData.map((c) => c.id);
+    const allSelected = currentPageIds.every((id) => selectedContacts.includes(id));
+    
+    if (allSelected) {
+      // Deselect all from current page
+      setSelectedContacts((prev) => prev.filter((id) => !currentPageIds.includes(id)));
     } else {
-      setSelectedContacts(filteredClients.map((c) => c.id));
+      // Select all from current page
+      setSelectedContacts((prev) => [...new Set([...prev, ...currentPageIds])]);
     }
   };
 
@@ -381,7 +394,7 @@ export default function Contacts() {
               <TableRow className="bg-muted/30 hover:bg-muted/30">
                 <TableHead className="w-12">
                   <Checkbox
-                    checked={selectedContacts.length === filteredClients.length && filteredClients.length > 0}
+                    checked={selectedContacts.length === pagination.paginatedData.length && pagination.paginatedData.length > 0}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -399,7 +412,7 @@ export default function Contacts() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredClients.map((client) => {
+              {pagination.paginatedData.map((client) => {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
                 // Mock data for demonstration - would be fetched from conversations
@@ -557,6 +570,25 @@ export default function Contacts() {
               })}
             </TableBody>
           </Table>
+        )}
+        
+        {/* Pagination Controls */}
+        {!isLoading && filteredClients.length > 0 && (
+          <PaginationControls
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            pageSize={pagination.pageSize}
+            totalItems={pagination.totalItems}
+            startIndex={pagination.startIndex}
+            endIndex={pagination.endIndex}
+            hasNextPage={pagination.hasNextPage}
+            hasPrevPage={pagination.hasPrevPage}
+            pageSizeOptions={pagination.pageSizeOptions}
+            onPageChange={pagination.goToPage}
+            onPageSizeChange={pagination.setPageSize}
+            onNextPage={pagination.nextPage}
+            onPrevPage={pagination.prevPage}
+          />
         )}
       </div>
 
