@@ -625,22 +625,31 @@ export function KanbanChatPanel({
     return () => viewport.removeEventListener('scroll', onScroll);
   }, [conversationId, handleScrollToTop]);
 
-  // Auto-scroll to bottom only when opening conversation or when user sends message
+  const lastMessageIdRef = useRef<string | null>(null);
+
+  // Auto-scroll to bottom only when opening conversation or when a NEW message arrives
   useEffect(() => {
     if (isLoading) return;
-    
+
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) return;
-    
+    if (!lastMessage?.id) return;
+
+    const prevLastId = lastMessageIdRef.current;
+    const isFirst = prevLastId === null;
+    lastMessageIdRef.current = lastMessage.id;
+
+    // If last message didn't change, we probably just prepended older messages
+    if (!isFirst && prevLastId === lastMessage.id) return;
+
     // Only auto-scroll if: initial load, user sent message, or user is already at bottom
-    const shouldScroll = messages.length === 1 || lastMessage.is_from_me || isAtBottomRef.current;
-    
+    const shouldScroll = isFirst || lastMessage.is_from_me || isAtBottomRef.current;
+
     if (shouldScroll && messagesEndRef.current) {
       requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: messages.length === 1 ? "auto" : "smooth" });
+        messagesEndRef.current?.scrollIntoView({ behavior: isFirst ? "auto" : "smooth" });
       });
     }
-  }, [messages.length, isLoading]);
+  }, [messages, isLoading]);
 
   // Update editing name when contactName changes
   useEffect(() => {

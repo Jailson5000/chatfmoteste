@@ -288,6 +288,7 @@ export default function Conversations() {
     messagesScrollAreaRef.current = node;
   }, []);
   const isAtBottomRef = useRef(true);
+  const lastTailMessageIdRef = useRef<string | null>(null);
   const pendingOutgoingRef = useRef<Array<{ tempId: string; content: string; sentAt: number }>>([]);
 
   // Media preview state
@@ -668,16 +669,31 @@ export default function Conversations() {
   // Handle new incoming messages - update unseen count if not at bottom
   useEffect(() => {
     const last = messages[messages.length - 1];
-    if (!last) return;
+    if (!last?.id) return;
+
+    const prevLastId = lastTailMessageIdRef.current;
+
+    // First render / initial load: just initialize the tail marker
+    if (prevLastId === null) {
+      lastTailMessageIdRef.current = last.id;
+      return;
+    }
+
+    // Ignore pagination prepend (tail message didn't change)
+    if (prevLastId === last.id) return;
+
     if (last.is_from_me) return;
+
+    // Update tail marker for incoming messages
+    lastTailMessageIdRef.current = last.id;
 
     // If user is reading older messages, show indicator
     if (!isAtBottomRef.current) {
-      setUnseenMessages(c => c + 1);
+      setUnseenMessages((c) => c + 1);
     } else {
       requestAnimationFrame(() => scrollMessagesToBottom("auto"));
     }
-  }, [messages.length, scrollMessagesToBottom]);
+  }, [messages, scrollMessagesToBottom]);
 
   // Auto-scroll to bottom when opening a conversation (after messages load)
   useEffect(() => {
@@ -689,10 +705,26 @@ export default function Conversations() {
     });
   }, [selectedConversationId, messagesLoading, scrollMessagesToBottom]);
 
-  // Auto-scroll when YOU send a new message (do not force-scroll on incoming messages)
+  // Auto-scroll when YOU send a new message (do not trigger on pagination prepend)
   useEffect(() => {
     const last = messages[messages.length - 1];
-    if (!last?.is_from_me) return;
+    if (!last?.id) return;
+
+    const prevLastId = lastTailMessageIdRef.current;
+
+    // First render / initial load: just initialize the tail marker
+    if (prevLastId === null) {
+      lastTailMessageIdRef.current = last.id;
+      return;
+    }
+
+    // If last message didn't change, we probably prepended older messages
+    if (prevLastId === last.id) return;
+
+    if (!last.is_from_me) return;
+
+    // Update tail marker for outgoing messages
+    lastTailMessageIdRef.current = last.id;
 
     requestAnimationFrame(() => {
       scrollMessagesToBottom("smooth");
