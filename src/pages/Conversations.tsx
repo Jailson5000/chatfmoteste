@@ -35,7 +35,7 @@ import {
   Sparkles,
   Volume2,
 } from "lucide-react";
-import { MessageBubble, MessageStatus } from "@/components/conversations/MessageBubble";
+import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
 import { MessageSearch, highlightText } from "@/components/conversations/MessageSearch";
 import { ReplyPreview } from "@/components/conversations/ReplyPreview";

@@ -1,7 +1,7 @@
 import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
-import { useState, useRef, ReactNode, useEffect, useCallback } from "react";
+import { useState, useRef, ReactNode, useEffect, useCallback, memo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -1369,3 +1369,6 @@ export function MessageBubble({
     </div>
   );
 }
+
+// Memoize to prevent re-renders when parent state changes (e.g., input typing)
+export default memo(MessageBubble);
