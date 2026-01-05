@@ -371,7 +371,6 @@ export default function Kanban() {
               dateRange={dateRange}
               onDateRangeChange={setDateRange}
               resultsCount={filteredConversations.length}
-              hideStatus
             />
           </div>
 
