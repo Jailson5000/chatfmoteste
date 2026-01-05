@@ -1,9 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
-import { DateRange } from "react-day-picker";
-import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import {
   Bot,
   UserCheck,
@@ -74,9 +72,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FilterBar } from "@/components/filters/FilterBar";
-import { NewContactDialog } from "@/components/contacts/NewContactDialog";
-import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
@@ -212,14 +207,8 @@ export default function Conversations() {
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
   
-  // Date range filter
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   
-  // New contact dialog state
-  const navigate = useNavigate();
-  const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [isCreatingContact, setIsCreatingContact] = useState(false);
+  // Get inline activities for the selected conversation (after selectedConversationId is declared)
   
   // Get inline activities for the selected conversation (after selectedConversationId is declared)
   const { activities: inlineActivities } = useInlineActivities(
@@ -905,25 +894,6 @@ export default function Conversations() {
         }
       }
 
-      // Date range filter
-      if (dateRange?.from) {
-        // Find original conversation to get timestamp
-        const originalConv = conversations.find(c => c.id === conv.id);
-        if (originalConv) {
-          const convDate = parseISO(originalConv.last_message_at || originalConv.created_at);
-          const startDate = startOfDay(dateRange.from);
-          const afterStart = isAfter(convDate, startDate) || convDate >= startDate;
-          
-          if (!afterStart) return false;
-          
-          if (dateRange.to) {
-            const endDate = endOfDay(dateRange.to);
-            const beforeEnd = isBefore(convDate, endDate) || convDate <= endDate;
-            if (!beforeEnd) return false;
-          }
-        }
-      }
-
       // Tab filter - use archivedAt to determine archived status
       const isArchived = !!conv.archivedAt;
       switch (activeTab) {
@@ -943,7 +913,7 @@ export default function Conversations() {
           return true;
       }
     });
-  }, [mappedConversations, conversationFilters, searchQuery, activeTab, userProfile?.full_name, dateRange, conversations]);
+  }, [mappedConversations, conversationFilters, searchQuery, activeTab, userProfile?.full_name]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
@@ -1656,44 +1626,15 @@ export default function Conversations() {
               {getTabCount("archived")}
             </Badge>
           </Button>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar conversa..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-9"
-                />
-              </div>
-              <Button size="sm" variant="default" className="h-9 gap-1 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">Novo</span>
-              </Button>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar conversa..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
             </div>
-            <FilterBar
-              selectedResponsibles={[]}
-              onResponsiblesChange={() => {}}
-              teamMembers={teamMembers.map(m => ({
-                id: m.id,
-                full_name: m.full_name,
-                avatar_url: m.avatar_url,
-                type: 'human' as const,
-              }))}
-              selectedStatuses={conversationFilters.statuses}
-              onStatusesChange={(ids) => setConversationFilters(prev => ({ ...prev, statuses: ids }))}
-              statuses={availableStatuses}
-              selectedDepartments={conversationFilters.departments}
-              onDepartmentsChange={(ids) => setConversationFilters(prev => ({ ...prev, departments: ids }))}
-              departments={departments.filter(d => d.is_active).map(d => ({ id: d.id, name: d.name, color: d.color }))}
-              selectedTags={conversationFilters.tags}
-              onTagsChange={(ids) => setConversationFilters(prev => ({ ...prev, tags: ids }))}
-              tags={availableTags}
-              dateRange={dateRange}
-              onDateRangeChange={setDateRange}
-              resultsCount={filteredConversations.length}
-              hideResponsible
-            />
           </div>
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-1">
@@ -1981,44 +1922,15 @@ export default function Conversations() {
             </Badge>
           </Button>
 
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar conversa..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9"
-              />
-            </div>
-            <Button size="sm" variant="default" className="h-9 gap-1 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Novo</span>
-            </Button>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar conversa..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9"
+            />
           </div>
-          <FilterBar
-            selectedResponsibles={[]}
-            onResponsiblesChange={() => {}}
-            teamMembers={teamMembers.map(m => ({
-              id: m.id,
-              full_name: m.full_name,
-              avatar_url: m.avatar_url,
-              type: 'human' as const,
-            }))}
-            selectedStatuses={conversationFilters.statuses}
-            onStatusesChange={(ids) => setConversationFilters(prev => ({ ...prev, statuses: ids }))}
-            statuses={availableStatuses}
-            selectedDepartments={conversationFilters.departments}
-            onDepartmentsChange={(ids) => setConversationFilters(prev => ({ ...prev, departments: ids }))}
-            departments={departments.filter(d => d.is_active).map(d => ({ id: d.id, name: d.name, color: d.color }))}
-            selectedTags={conversationFilters.tags}
-            onTagsChange={(ids) => setConversationFilters(prev => ({ ...prev, tags: ids }))}
-            tags={availableTags}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-            resultsCount={filteredConversations.length}
-            hideResponsible
-          />
         </div>
 
         {/* Conversation List */}
@@ -2981,57 +2893,6 @@ export default function Conversations() {
         </DialogContent>
       </Dialog>
 
-      {/* New Contact Dialog */}
-      <NewContactDialog
-        open={newContactDialogOpen}
-        onClose={() => setNewContactDialogOpen(false)}
-        onCreate={async (phone) => {
-          setIsCreatingContact(true);
-          try {
-            // Create the conversation/contact and navigate to it
-            const { data: existingConv } = await supabase
-              .from("conversations")
-              .select("id")
-              .eq("contact_phone", phone)
-              .maybeSingle();
-
-            if (existingConv) {
-              // Navigate to existing conversation
-              setSelectedConversationId(existingConv.id);
-              setShowMobileChat(true);
-              setNewContactDialogOpen(false);
-              toast({ title: "Conversa existente encontrada" });
-            } else {
-              // Navigate to conversations with phone param to create new
-              navigate(`/conversations?phone=${encodeURIComponent(phone)}`);
-              setNewContactDialogOpen(false);
-            }
-          } catch (error) {
-            console.error("Erro ao criar contato:", error);
-            toast({
-              title: "Erro ao criar contato",
-              description: "Não foi possível criar o contato.",
-              variant: "destructive",
-            });
-          } finally {
-            setIsCreatingContact(false);
-          }
-        }}
-        onOpenImport={() => {
-          setNewContactDialogOpen(false);
-          setImportDialogOpen(true);
-        }}
-        isCreating={isCreatingContact}
-      />
-
-      {/* Import Contacts Dialog */}
-      <ImportContactsDialog
-        open={importDialogOpen}
-        onClose={() => setImportDialogOpen(false)}
-        onImport={async () => {
-          toast({ title: "Contatos importados com sucesso" });
-        }}
-      />
     </div>
     </TooltipProvider>
   );

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { FolderPlus, MessageSquare, Plus, LayoutGrid, Phone, Search, X } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
@@ -17,6 +18,8 @@ import { FilterBar } from "@/components/filters/FilterBar";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
 import { CreateDepartmentDialog } from "@/components/kanban/CreateDepartmentDialog";
+import { NewContactDialog } from "@/components/contacts/NewContactDialog";
+import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -57,6 +60,12 @@ export default function Kanban() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  
+  // New contact dialog state
+  const navigate = useNavigate();
+  const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [isCreatingContact, setIsCreatingContact] = useState(false);
 
   // Get available connections with phone numbers from WhatsApp instances
   const availableConnections = useMemo(() => {
@@ -330,6 +339,11 @@ export default function Kanban() {
                 </Button>
               )}
             </div>
+            
+            <Button size="sm" variant="default" className="h-9 gap-1 shrink-0" onClick={() => setNewContactDialogOpen(true)}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Novo</span>
+            </Button>
 
             <FilterBar
               selectedResponsibles={selectedResponsibles}
@@ -362,6 +376,7 @@ export default function Kanban() {
               dateRange={dateRange}
               onDateRangeChange={setDateRange}
               resultsCount={filteredConversations.length}
+              hideStatus
             />
           </div>
 
@@ -531,6 +546,43 @@ export default function Kanban() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* New Contact Dialog */}
+      <NewContactDialog
+        open={newContactDialogOpen}
+        onClose={() => setNewContactDialogOpen(false)}
+        onCreate={async (phone) => {
+          setIsCreatingContact(true);
+          try {
+            // Navigate to conversations with phone param to create new conversation
+            navigate(`/conversations?phone=${encodeURIComponent(phone)}`);
+            setNewContactDialogOpen(false);
+          } catch (error) {
+            console.error("Erro ao criar contato:", error);
+            toast({
+              title: "Erro ao criar contato",
+              description: "Não foi possível criar o contato.",
+              variant: "destructive",
+            });
+          } finally {
+            setIsCreatingContact(false);
+          }
+        }}
+        onOpenImport={() => {
+          setNewContactDialogOpen(false);
+          setImportDialogOpen(true);
+        }}
+        isCreating={isCreatingContact}
+      />
+
+      {/* Import Contacts Dialog */}
+      <ImportContactsDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImport={async () => {
+          toast({ title: "Contatos importados com sucesso" });
+        }}
+      />
     </div>
   );
 }
