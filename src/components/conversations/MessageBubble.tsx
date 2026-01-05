@@ -1,7 +1,7 @@
 import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
-import { useState, useRef, ReactNode, useEffect, useCallback, memo } from "react";
+import { useState, useRef, ReactNode, useEffect, useCallback, memo, useReducer } from "react";
 import {
   Dialog,
   DialogContent,
@@ -1072,6 +1072,24 @@ export function MessageBubble({
   isHighlighted = false,
 }: MessageBubbleProps) {
   const [showActions, setShowActions] = useState(false);
+  const [, bumpDeliveryRender] = useReducer((x: number) => x + 1, 0);
+
+  // Ensure the "assume delivered after 3s" fallback updates even when this bubble is memoized
+  useEffect(() => {
+    if (!isFromMe) return;
+    if (isInternal) return;
+    if (!whatsappMessageId) return;
+    if (readAt || status === "read" || status === "delivered" || status === "sending" || status === "error") return;
+
+    const createdMs = new Date(createdAt).getTime();
+    if (!Number.isFinite(createdMs)) return;
+
+    const remainingMs = createdMs + 3000 - Date.now();
+    if (remainingMs <= 0) return;
+
+    const t = window.setTimeout(() => bumpDeliveryRender(), remainingMs);
+    return () => window.clearTimeout(t);
+  }, [isFromMe, isInternal, whatsappMessageId, readAt, status, createdAt, bumpDeliveryRender]);
 
   // Determine actual status based on read_at if available
   const actualStatus: MessageStatus = (() => {
