@@ -46,6 +46,9 @@ export function useInfiniteScroll<T>(
   const scrollContainerRef = useRef<HTMLElement>(null);
   const loadingRef = useRef(false);
 
+  // Prevent load-more loops: only trigger again after user scrolls away and back
+  const nearEndArmedRef = useRef(true);
+
   // Preserve user's current viewport position when incrementally revealing more items
   const pendingScrollContainerRef = useRef<HTMLElement | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
@@ -58,10 +61,18 @@ export function useInfiniteScroll<T>(
     return data.slice(0, displayedCount);
   }, [data, displayedCount]);
 
-  // Reset when data changes significantly (e.g., filter applied)
+  // Keep displayedCount consistent when data shrinks temporarily (e.g. realtime/drag moves)
+  // so we don't end up "stuck" showing only 1 item.
   useEffect(() => {
+    const minCount = Math.min(initialBatchSize, data.length);
+
+    if (displayedCount < minCount) {
+      setDisplayedCount(minCount);
+      return;
+    }
+
     if (displayedCount > data.length + batchIncrement) {
-      setDisplayedCount(Math.min(initialBatchSize, data.length));
+      setDisplayedCount(minCount);
     }
   }, [data.length, displayedCount, initialBatchSize, batchIncrement]);
 
@@ -101,9 +112,17 @@ export function useInfiniteScroll<T>(
       const scrollTop = target.scrollTop;
       const scrollHeight = target.scrollHeight;
       const clientHeight = target.clientHeight;
+      const remaining = scrollHeight - scrollTop - clientHeight;
 
-      // Check if scrolled near bottom
-      if (scrollHeight - scrollTop - clientHeight < threshold) {
+      // Rearm once the user moves away from the threshold
+      if (remaining > threshold) {
+        nearEndArmedRef.current = true;
+      }
+
+      // Trigger only once per "crossing" into the threshold zone
+      if (remaining < threshold && nearEndArmedRef.current) {
+        nearEndArmedRef.current = false;
+
         // Save current position to avoid jumps after incremental render
         pendingScrollContainerRef.current = target;
         pendingScrollTopRef.current = scrollTop;
@@ -122,8 +141,14 @@ export function useInfiniteScroll<T>(
       const scrollTop = container.scrollTop;
       const scrollHeight = container.scrollHeight;
       const clientHeight = container.clientHeight;
+      const remaining = scrollHeight - scrollTop - clientHeight;
 
-      if (scrollHeight - scrollTop - clientHeight < threshold) {
+      if (remaining > threshold) {
+        nearEndArmedRef.current = true;
+      }
+
+      if (remaining < threshold && nearEndArmedRef.current) {
+        nearEndArmedRef.current = false;
         pendingScrollContainerRef.current = container;
         pendingScrollTopRef.current = scrollTop;
         loadMore();
