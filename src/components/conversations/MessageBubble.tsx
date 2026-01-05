@@ -1078,8 +1078,9 @@ export function MessageBubble({
     if (!isFromMe) return status;
     if (readAt) return "read";
     if (status === "sending" || status === "error") return status;
-    // For sent messages, use "sent" (1 tick), "delivered" will be set when we have delivery confirmation
-    return status === "delivered" ? "delivered" : "sent";
+    // Default to "delivered" (2 checks) for sent messages - most messages are delivered
+    // Only show single check if explicitly set to "sent"
+    return status === "sent" ? "sent" : "delivered";
   })();
 
   const renderStatusIcon = () => {
