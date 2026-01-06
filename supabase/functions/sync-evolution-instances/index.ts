@@ -81,7 +81,7 @@ async function fetchEvolutionInstances(
       return data.map((inst: any) => ({
         instanceName: inst.instanceName || inst.name || inst.instance?.instanceName,
         instanceId: inst.instanceId || inst.id || inst.instance?.instanceId,
-        owner: inst.owner || inst.instance?.owner,
+        owner: inst.owner || inst.instance?.owner || inst.profile?.owner || inst.profile?.id,
         profileName: inst.profileName || inst.instance?.profileName,
         profilePictureUrl: inst.profilePictureUrl || inst.instance?.profilePictureUrl,
         status: inst.status || inst.connectionStatus || inst.state || "unknown",
@@ -91,7 +91,16 @@ async function fetchEvolutionInstances(
     }
     
     if (data.instances && Array.isArray(data.instances)) {
-      return data.instances;
+      return data.instances.map((inst: any) => ({
+        instanceName: inst.instanceName || inst.name || inst.instance?.instanceName,
+        instanceId: inst.instanceId || inst.id || inst.instance?.instanceId,
+        owner: inst.owner || inst.instance?.owner || inst.profile?.owner || inst.profile?.id,
+        profileName: inst.profileName || inst.instance?.profileName,
+        profilePictureUrl: inst.profilePictureUrl || inst.instance?.profilePictureUrl,
+        status: inst.status || inst.connectionStatus || inst.state || "unknown",
+        connectionStatus: inst.connectionStatus || inst.status || "unknown",
+        integration: inst.integration,
+      }));
     }
     
     return [];
@@ -101,6 +110,51 @@ async function fetchEvolutionInstances(
       throw new Error("Evolution API timeout");
     }
     throw error;
+  }
+}
+
+// Fetch individual instance details to get phone number
+async function fetchInstanceDetails(
+  apiUrl: string,
+  apiKey: string,
+  instanceName: string
+): Promise<string | null> {
+  const url = `${normalizeUrl(apiUrl)}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`;
+  
+  console.log(`[Sync Evolution] Fetching details for instance: ${instanceName}`);
+  
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        apikey: apiKey,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      return null;
+    }
+    
+    const data = await response.json();
+    const candidates = Array.isArray(data) ? data : data?.instances ? data.instances : [data];
+    
+    const found = candidates?.find?.((i: any) => 
+      i?.instanceName === instanceName || i?.name === instanceName
+    ) ?? candidates?.[0];
+    
+    const ownerJid = found?.owner || found?.instance?.owner || found?.profile?.owner || found?.profile?.id || null;
+    return extractPhoneFromJid(ownerJid);
+  } catch (error: any) {
+    clearTimeout(timeout);
+    console.log(`[Sync Evolution] Failed to fetch details for ${instanceName}:`, error.message);
+    return null;
   }
 }
 
@@ -238,27 +292,56 @@ serve(async (req) => {
               realStatus = "connecting";
             }
 
+            // Extract phone number from owner field or fetch if connected but missing
+            let phoneNumber = extractPhoneFromJid(evoInstance.owner) || matchingDbInstance.phone_number;
+            
+            // If connected but no phone number, try to fetch it
+            if (realStatus === "connected" && !phoneNumber) {
+              console.log(`[Sync Evolution] Instance ${evoInstance.instanceName} connected but missing phone, fetching details...`);
+              try {
+                phoneNumber = await fetchInstanceDetails(
+                  connection.api_url,
+                  connection.api_key,
+                  evoInstance.instanceName
+                );
+                if (phoneNumber) {
+                  console.log(`[Sync Evolution] Found phone number: ${phoneNumber}`);
+                }
+              } catch (e) {
+                console.log(`[Sync Evolution] Failed to fetch phone for ${evoInstance.instanceName}`);
+              }
+            }
+
             matchedInstances.push({
               instance_name: evoInstance.instanceName,
               db_id: matchingDbInstance.id,
               company_name: company?.name || null,
               law_firm_name: lawFirm?.name || null,
-              phone_number: extractPhoneFromJid(evoInstance.owner) || matchingDbInstance.phone_number,
+              phone_number: phoneNumber,
               status: realStatus,
               is_orphan: false,
               is_stale: false,
             });
 
-            // Update DB instance status if it differs
-            if (realStatus !== "unknown" && realStatus !== matchingDbInstance.status) {
-              console.log(`[Sync Evolution] Updating status for ${evoInstance.instanceName}: ${matchingDbInstance.status} -> ${realStatus}`);
+            // Update DB instance if status or phone differs
+            const needsStatusUpdate = realStatus !== "unknown" && realStatus !== matchingDbInstance.status;
+            const needsPhoneUpdate = phoneNumber && phoneNumber !== matchingDbInstance.phone_number;
+            
+            if (needsStatusUpdate || needsPhoneUpdate) {
+              console.log(`[Sync Evolution] Updating ${evoInstance.instanceName}:`, {
+                statusChange: needsStatusUpdate ? `${matchingDbInstance.status} -> ${realStatus}` : "no change",
+                phoneChange: needsPhoneUpdate ? `${matchingDbInstance.phone_number} -> ${phoneNumber}` : "no change"
+              });
+              
+              const updatePayload: Record<string, unknown> = {
+                updated_at: new Date().toISOString(),
+              };
+              if (needsStatusUpdate) updatePayload.status = realStatus;
+              if (needsPhoneUpdate) updatePayload.phone_number = phoneNumber;
+              
               await supabaseClient
                 .from("whatsapp_instances")
-                .update({
-                  status: realStatus,
-                  phone_number: extractPhoneFromJid(evoInstance.owner) || matchingDbInstance.phone_number,
-                  updated_at: new Date().toISOString(),
-                })
+                .update(updatePayload)
                 .eq("id", matchingDbInstance.id);
             }
           } else {
