@@ -113,55 +113,144 @@ async function fetchEvolutionInstances(
   }
 }
 
+function normalizePhoneCandidate(raw?: string | null): string | null {
+  if (!raw) return null;
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  // JID formats: 5511999999999@s.whatsapp.net, 5511999999999@c.us
+  const atIdx = str.indexOf("@");
+  if (atIdx !== -1) {
+    const left = str.slice(0, atIdx);
+    const digitsLeft = left.replace(/\D/g, "");
+    if (digitsLeft.length >= 10 && digitsLeft.length <= 15) return digitsLeft;
+  }
+
+  // Some APIs return plain digits (or with symbols)
+  const digits = str.replace(/\D/g, "");
+  if (digits.length >= 10 && digits.length <= 15) return digits;
+
+  return null;
+}
+
+function extractPhoneFromJid(jid?: string | null): string | null {
+  return normalizePhoneCandidate(jid);
+}
+
+function extractPhoneFromUnknownPayload(payload: any): string | null {
+  // Quick common paths (varies between Evolution versions)
+  const directCandidates = [
+    payload?.owner,
+    payload?.instance?.owner,
+    payload?.profile?.owner,
+    payload?.profile?.id,
+    payload?.me?.id,
+    payload?.me?.jid,
+    payload?.instance?.me?.id,
+    payload?.instance?.me?.jid,
+    payload?.data?.me?.id,
+    payload?.state?.me?.id,
+  ];
+
+  for (const c of directCandidates) {
+    if (typeof c === "string") {
+      const phone = normalizePhoneCandidate(c);
+      if (phone) return phone;
+    }
+  }
+
+  // Deep scan for any string that looks like a JID / phone
+  const visited = new Set<any>();
+  const stack: any[] = [payload];
+  let scanned = 0;
+
+  while (stack.length && scanned < 3000) {
+    const cur = stack.pop();
+    scanned += 1;
+
+    if (!cur) continue;
+
+    if (typeof cur === "string") {
+      const phone = normalizePhoneCandidate(cur);
+      if (phone) return phone;
+      continue;
+    }
+
+    if (typeof cur !== "object") continue;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+
+    if (Array.isArray(cur)) {
+      for (const item of cur) stack.push(item);
+      continue;
+    }
+
+    for (const k of Object.keys(cur)) {
+      stack.push((cur as any)[k]);
+    }
+  }
+
+  return null;
+}
+
 // Fetch individual instance details to get phone number
 async function fetchInstanceDetails(
   apiUrl: string,
   apiKey: string,
   instanceName: string
 ): Promise<string | null> {
-  const url = `${normalizeUrl(apiUrl)}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`;
-  
-  console.log(`[Sync Evolution] Fetching details for instance: ${instanceName}`);
-  
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        apikey: apiKey,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeout);
-    
-    if (!response.ok) {
-      return null;
-    }
-    
-    const data = await response.json();
-    const candidates = Array.isArray(data) ? data : data?.instances ? data.instances : [data];
-    
-    const found = candidates?.find?.((i: any) => 
-      i?.instanceName === instanceName || i?.name === instanceName
-    ) ?? candidates?.[0];
-    
-    const ownerJid = found?.owner || found?.instance?.owner || found?.profile?.owner || found?.profile?.id || null;
-    return extractPhoneFromJid(ownerJid);
-  } catch (error: any) {
-    clearTimeout(timeout);
-    console.log(`[Sync Evolution] Failed to fetch details for ${instanceName}:`, error.message);
-    return null;
-  }
-}
+  const base = normalizeUrl(apiUrl);
+  const endpoints = [
+    {
+      name: "fetchInstances",
+      url: `${base}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`,
+    },
+    {
+      name: "connectionState",
+      url: `${base}/instance/connectionState/${encodeURIComponent(instanceName)}`,
+    },
+  ];
 
-function extractPhoneFromJid(jid?: string | null): string | null {
-  if (!jid) return null;
-  const number = jid.split("@")[0];
-  return number || null;
+  for (const endpoint of endpoints) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      console.log(`[Sync Evolution] Phone lookup via ${endpoint.name} for: ${instanceName}`);
+
+      const response = await fetch(endpoint.url, {
+        method: "GET",
+        headers: {
+          apikey: apiKey,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        console.log(`[Sync Evolution] ${endpoint.name} returned ${response.status} for ${instanceName}`);
+        continue;
+      }
+
+      const data = await response.json().catch(() => null);
+      const phone = extractPhoneFromUnknownPayload(data);
+
+      if (phone) {
+        const masked = `${phone.slice(0, 2)}***${phone.slice(-4)}`;
+        console.log(`[Sync Evolution] Phone found via ${endpoint.name}: ${masked}`);
+        return phone;
+      }
+
+      console.log(`[Sync Evolution] Phone not found via ${endpoint.name} for ${instanceName}`);
+    } catch (error: any) {
+      clearTimeout(timeout);
+      console.log(`[Sync Evolution] ${endpoint.name} phone lookup failed for ${instanceName}:`, error?.message || error);
+    }
+  }
+
+  return null;
 }
 
 serve(async (req) => {
