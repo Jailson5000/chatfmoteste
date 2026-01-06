@@ -1571,7 +1571,7 @@ export default function Conversations() {
         <div className="h-full flex flex-col bg-card">
           {/* Mobile Header */}
           <div className="p-3 border-b border-border space-y-3">
-            <h1 className="font-display text-lg font-bold">Atendimentos</h1>
+            <h1 className="text-lg font-bold text-foreground">Atendimentos</h1>
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
               <TabsList className="grid w-full grid-cols-3 h-8">
                 <TabsTrigger value="chat" className="gap-1 text-xs h-7">
@@ -1876,7 +1876,7 @@ export default function Conversations() {
         <div className="bg-card flex flex-col min-h-0 min-w-0 border-r border-border overflow-hidden" style={{ width: '320px', minWidth: '320px' }}>
         {/* Header */}
         <div className="p-3 border-b border-border space-y-3">
-          <h1 className="font-display text-lg font-bold">Atendimentos</h1>
+          <h1 className="text-lg font-bold text-foreground">Atendimentos</h1>
           
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
