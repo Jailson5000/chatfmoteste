@@ -1084,7 +1084,7 @@ export function MessageBubble({
     const createdMs = new Date(createdAt).getTime();
     if (!Number.isFinite(createdMs)) return;
 
-    const remainingMs = createdMs + 3000 - Date.now();
+    const remainingMs = createdMs + 2000 - Date.now();
     if (remainingMs <= 0) return;
 
     const t = window.setTimeout(() => bumpDeliveryRender(), remainingMs);
@@ -1105,7 +1105,7 @@ export function MessageBubble({
       !isInternal &&
       !!whatsappMessageId &&
       Number.isFinite(createdMs) &&
-      Date.now() - createdMs > 3000;
+      Date.now() - createdMs > 2000;
 
     return assumeDelivered ? "delivered" : "sent";
   })();
