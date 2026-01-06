@@ -70,6 +70,7 @@ export function useMessagesWithPagination({
     viewport: HTMLDivElement;
     anchorId: string;
     anchorOffsetTop: number; // px from viewport top
+    stage: "loading" | "done"; // keep restoring during spinner + message prepend
   } | null>(null);
 
   const cssEscape = (value: string) => {
@@ -250,6 +251,11 @@ export function useMessagesWithPagination({
       restoringScrollRef.current = false;
       loadingMoreRef.current = false;
     } finally {
+      // Mark fetch complete; we keep restoring until the final render settles.
+      if (pendingRestoreRef.current) {
+        pendingRestoreRef.current.stage = "done";
+      }
+
       setIsLoadingMore(false);
       // IMPORTANT: não liberar loadingMoreRef aqui se ainda vamos restaurar scroll;
       // a liberação acontece no useLayoutEffect após a restauração.
@@ -288,6 +294,7 @@ export function useMessagesWithPagination({
           viewport,
           anchorId: anchor.anchorId,
           anchorOffsetTop: anchor.anchorOffsetTop,
+          stage: "loading",
         };
 
         void loadMore();
@@ -296,7 +303,8 @@ export function useMessagesWithPagination({
     [loadMore, hasMoreMessages, isLoadingMore]
   );
 
-  // After older messages are prepended, restore scroll so the same content stays visible
+  // After older messages are prepended (and while the "loading more" UI is shown),
+  // restore scroll so the same content stays visible.
   // Anchor-based restore (no scrollHeight math)
   useLayoutEffect(() => {
     const pending = pendingRestoreRef.current;
@@ -308,23 +316,30 @@ export function useMessagesWithPagination({
       try {
         const selector = `[data-message-id="${cssEscape(anchorId)}"]`;
         const el = viewport.querySelector<HTMLElement>(selector);
-        if (!el) return;
 
-        const viewportRect = viewport.getBoundingClientRect();
-        const rect = el.getBoundingClientRect();
-        const currentOffset = rect.top - viewportRect.top;
-        const delta = currentOffset - anchorOffsetTop;
+        if (el) {
+          const viewportRect = viewport.getBoundingClientRect();
+          const rect = el.getBoundingClientRect();
+          const currentOffset = rect.top - viewportRect.top;
+          const delta = currentOffset - anchorOffsetTop;
 
-        if (delta !== 0) {
-          viewport.scrollTop = viewport.scrollTop + delta;
+          if (delta !== 0) {
+            viewport.scrollTop = viewport.scrollTop + delta;
+          }
         }
       } finally {
-        pendingRestoreRef.current = null;
-        restoringScrollRef.current = false;
-        loadingMoreRef.current = false;
+        // Only release the lock after the fetch finished AND the final render happened.
+        const current = pendingRestoreRef.current;
+        const canRelease = !!current && current.stage === "done" && !isLoadingMore;
+
+        if (canRelease) {
+          pendingRestoreRef.current = null;
+          restoringScrollRef.current = false;
+          loadingMoreRef.current = false;
+        }
       }
     });
-  }, [messages]);
+  }, [messages, isLoadingMore]);
 
   // Real-time subscriptions
   useEffect(() => {
