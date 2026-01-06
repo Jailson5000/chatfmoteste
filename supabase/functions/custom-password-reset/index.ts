@@ -51,8 +51,48 @@ serve(async (req) => {
 
     console.log(`[custom-password-reset] Processing reset for: ${email}`);
 
-    // Determine the correct redirect URL - always use miauchat.com.br domain
-    const productionRedirect = redirect_to || 'https://www.miauchat.com.br/reset-password';
+    // Determine the correct redirect URL.
+    // Prefer the tenant subdomain (keeps the user session on the correct origin),
+    // and only accept an explicit redirect_to when it points to a miauchat.com.br URL.
+    let productionRedirect = 'https://www.miauchat.com.br/reset-password';
+
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('law_firm_id')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (profile?.law_firm_id) {
+        const { data: lawFirm } = await supabase
+          .from('law_firms')
+          .select('subdomain')
+          .eq('id', profile.law_firm_id)
+          .maybeSingle();
+
+        if (lawFirm?.subdomain) {
+          productionRedirect = `https://${lawFirm.subdomain}.miauchat.com.br/reset-password`;
+        }
+      }
+    } catch (err) {
+      console.warn('[custom-password-reset] Failed to resolve tenant redirect:', err);
+    }
+
+    if (redirect_to) {
+      try {
+        const u = new URL(redirect_to);
+        const isMiauDomain =
+          u.hostname === 'miauchat.com.br' ||
+          u.hostname === 'www.miauchat.com.br' ||
+          u.hostname.endsWith('.miauchat.com.br');
+
+        if (isMiauDomain && u.pathname.startsWith('/reset-password')) {
+          productionRedirect = redirect_to;
+        }
+      } catch {
+        // Ignore invalid URLs
+      }
+    }
     
     // Generate password reset link using Supabase Admin API
     const { data, error } = await supabase.auth.admin.generateLink({

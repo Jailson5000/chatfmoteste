@@ -115,11 +115,12 @@ export default function Auth() {
     setIsLoading(true);
     
     try {
-      // Use custom password reset function to send via Resend
+      // Use custom password reset function (email white-label)
+      // NOTE: Do NOT pass window.location.origin here because preview domains may not be allowed as redirect URLs.
+      // The backend will resolve the correct tenant subdomain for the user whenever possible.
       const { data, error } = await supabase.functions.invoke('custom-password-reset', {
         body: {
           email: forgotPasswordEmail,
-          redirect_to: `${window.location.origin}/reset-password`,
         },
       });
 
