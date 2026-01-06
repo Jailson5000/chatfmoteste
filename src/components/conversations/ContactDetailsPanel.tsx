@@ -458,19 +458,19 @@ export function ContactDetailsPanel({
               Propriedades
             </h5>
 
-            {/* Status - Collapsible, single selection */}
+            {/* Status - Collapsible accordion style with checkbox list */}
             <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
               <CollapsibleTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50 overflow-hidden"
+                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
                 >
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2.5 flex-shrink-0">
                     <CircleDot className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Status</span>
+                    <span className="text-sm font-medium">Status</span>
                   </div>
                   <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                    {currentStatus ? (
+                    {currentStatus && (
                       <Badge
                         variant="outline"
                         className="text-xs truncate max-w-[100px]"
@@ -482,51 +482,63 @@ export function ContactDetailsPanel({
                       >
                         <span className="truncate">{currentStatus.name}</span>
                       </Badge>
-                    ) : null}
-                    {statusOpen ? <ChevronDown className="h-4 w-4 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 flex-shrink-0" />}
+                    )}
+                    <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", statusOpen && "rotate-180")} />
                   </div>
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2 pl-6 space-y-1">
-                {statuses.map(status => {
-                  const isSelected = currentStatus?.id === status.id;
-                  return (
-                    <Badge
-                      key={status.id}
-                      variant="outline"
-                      className={cn(
-                        "cursor-pointer transition-all text-xs mr-1 mb-1",
-                        isSelected 
-                          ? "ring-2 ring-offset-1" 
-                          : "opacity-70 hover:opacity-100"
-                      )}
-                      style={{
-                        borderColor: status.color,
-                        backgroundColor: isSelected ? `${status.color}30` : 'transparent',
-                        color: status.color,
-                      }}
-                      onClick={() => handleStatusSelect(status.id)}
-                    >
-                      {status.name}
-                    </Badge>
-                  );
-                })}
-                {statuses.length === 0 && (
-                  <span className="text-xs text-muted-foreground">Nenhum status cadastrado</span>
-                )}
+              <CollapsibleContent className="pt-1">
+                <ScrollArea className="max-h-48">
+                  <div className="space-y-0.5 pl-2">
+                    {statuses.map(status => {
+                      const isSelected = currentStatus?.id === status.id;
+                      return (
+                        <button
+                          key={status.id}
+                          onClick={() => handleStatusSelect(status.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                            "hover:bg-muted/50",
+                            isSelected && "bg-muted/50"
+                          )}
+                        >
+                          <div 
+                            className={cn(
+                              "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                            )}
+                          >
+                            {isSelected && (
+                              <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
+                            )}
+                          </div>
+                          <span 
+                            className="text-sm truncate"
+                            style={{ color: status.color }}
+                          >
+                            {status.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {statuses.length === 0 && (
+                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum status cadastrado</span>
+                    )}
+                  </div>
+                </ScrollArea>
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Tags - Collapsible, max 4 selections */}
+            {/* Tags - Collapsible accordion style with checkbox list */}
             <Collapsible open={tagsOpen} onOpenChange={setTagsOpen}>
               <CollapsibleTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 rounded-lg border border-transparent hover:border-border"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <Tag className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Etiquetas</span>
+                    <span className="text-sm font-medium">Etiquetas</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {conversationTags.length > 0 && (
@@ -550,61 +562,71 @@ export function ContactDetailsPanel({
                         )}
                       </div>
                     )}
-                    {tagsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsOpen && "rotate-180")} />
                   </div>
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2 pl-6">
-                <div className="flex flex-wrap gap-1">
-                  {tags.map(tag => {
-                    const isSelected = conversationTags.some(t => t.id === tag.id);
-                    const isDisabled = !isSelected && conversationTags.length >= 4;
-                    return (
-                      <Badge
-                        key={tag.id}
-                        variant="outline"
-                        className={cn(
-                          "cursor-pointer transition-all text-xs",
-                          isSelected 
-                            ? "ring-2 ring-offset-1" 
-                            : isDisabled 
-                              ? "opacity-30 cursor-not-allowed"
-                              : "opacity-70 hover:opacity-100"
-                        )}
-                        style={{
-                          borderColor: tag.color,
-                          backgroundColor: isSelected ? `${tag.color}30` : 'transparent',
-                          color: tag.color,
-                        }}
-                        onClick={() => !isDisabled && handleTagToggle(tag)}
-                      >
-                        {tag.name}
-                      </Badge>
-                    );
-                  })}
-                  {tags.length === 0 && (
-                    <span className="text-xs text-muted-foreground">Nenhuma etiqueta cadastrada</span>
-                  )}
-                </div>
+              <CollapsibleContent className="pt-1">
+                <ScrollArea className="max-h-48">
+                  <div className="space-y-0.5 pl-2">
+                    {tags.map(tag => {
+                      const isSelected = conversationTags.some(t => t.id === tag.id);
+                      const isDisabled = !isSelected && conversationTags.length >= 4;
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() => !isDisabled && handleTagToggle(tag)}
+                          disabled={isDisabled}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                            "hover:bg-muted/50",
+                            isSelected && "bg-muted/50",
+                            isDisabled && "opacity-40 cursor-not-allowed"
+                          )}
+                        >
+                          <div 
+                            className={cn(
+                              "w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0",
+                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                            )}
+                          >
+                            {isSelected && (
+                              <Check className="h-3 w-3 text-primary-foreground" />
+                            )}
+                          </div>
+                          <span 
+                            className="text-sm truncate"
+                            style={{ color: tag.color }}
+                          >
+                            {tag.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {tags.length === 0 && (
+                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhuma etiqueta cadastrada</span>
+                    )}
+                  </div>
+                </ScrollArea>
                 {conversationTags.length >= 4 && (
-                  <p className="text-[10px] text-muted-foreground mt-2">Máximo de 4 etiquetas</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 px-3">Máximo de 4 etiquetas</p>
                 )}
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Department - Collapsible, single selection */}
+            {/* Department - Collapsible accordion style with checkbox list */}
             <Collapsible open={departmentOpen} onOpenChange={setDepartmentOpen}>
               <CollapsibleTrigger asChild>
                 <Button 
                   variant="ghost" 
-                  className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50 overflow-hidden"
+                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
                 >
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2.5 flex-shrink-0">
                     <Folder className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Departamento</span>
+                    <span className="text-sm font-medium">Departamento</span>
                   </div>
                   <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                    {currentDepartment ? (
+                    {currentDepartment && (
                       <Badge
                         variant="outline"
                         className="text-xs truncate max-w-[100px]"
@@ -616,38 +638,50 @@ export function ContactDetailsPanel({
                       >
                         <span className="truncate">{currentDepartment.name}</span>
                       </Badge>
-                    ) : null}
-                    {departmentOpen ? <ChevronDown className="h-4 w-4 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 flex-shrink-0" />}
+                    )}
+                    <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", departmentOpen && "rotate-180")} />
                   </div>
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2 pl-6 space-y-1">
-                {departments.map(dept => {
-                  const isSelected = currentDepartment?.id === dept.id;
-                  return (
-                    <Badge
-                      key={dept.id}
-                      variant="outline"
-                      className={cn(
-                        "cursor-pointer transition-all text-xs mr-1 mb-1",
-                        isSelected 
-                          ? "ring-2 ring-offset-1" 
-                          : "opacity-70 hover:opacity-100"
-                      )}
-                      style={{
-                        borderColor: dept.color,
-                        backgroundColor: isSelected ? `${dept.color}30` : 'transparent',
-                        color: dept.color,
-                      }}
-                      onClick={() => handleDepartmentSelect(dept.id)}
-                    >
-                      {dept.name}
-                    </Badge>
-                  );
-                })}
-                {departments.length === 0 && (
-                  <span className="text-xs text-muted-foreground">Nenhum departamento cadastrado</span>
-                )}
+              <CollapsibleContent className="pt-1">
+                <ScrollArea className="max-h-48">
+                  <div className="space-y-0.5 pl-2">
+                    {departments.map(dept => {
+                      const isSelected = currentDepartment?.id === dept.id;
+                      return (
+                        <button
+                          key={dept.id}
+                          onClick={() => handleDepartmentSelect(dept.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                            "hover:bg-muted/50",
+                            isSelected && "bg-muted/50"
+                          )}
+                        >
+                          <div 
+                            className={cn(
+                              "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                            )}
+                          >
+                            {isSelected && (
+                              <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
+                            )}
+                          </div>
+                          <span 
+                            className="text-sm truncate"
+                            style={{ color: dept.color }}
+                          >
+                            {dept.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {departments.length === 0 && (
+                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum departamento cadastrado</span>
+                    )}
+                  </div>
+                </ScrollArea>
               </CollapsibleContent>
             </Collapsible>
           </div>
