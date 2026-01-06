@@ -84,7 +84,7 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
     : null;
   const handlerLabel = isAI
     ? agentName ? `IA · ${agentName}` : "IA"
-    : conversation.assignedTo ? `Atendente · ${conversation.assignedTo}` : "Atendente";
+    : conversation.assignedTo || "Atendente";
 
   const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
 

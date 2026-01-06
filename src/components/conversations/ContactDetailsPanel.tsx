@@ -355,7 +355,7 @@ export function ContactDetailsPanel({
                         <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate">
                           <User className="h-3 w-3 mr-1 flex-shrink-0" />
                           <span className="truncate max-w-[120px]">
-                            {`Atendente · ${conversation.assigned_profile?.full_name || "Humano"}`}
+                            {conversation.assigned_profile?.full_name || "Atendente"}
                           </span>
                         </Badge>
                       )}
