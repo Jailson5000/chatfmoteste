@@ -865,10 +865,19 @@ export default function GlobalAdminConnections() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4 text-muted-foreground" />
-                            {instance.phone_number || "-"}
-                          </div>
+                          {instance.phone_number ? (
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-green-500" />
+                              <span className="font-mono text-sm">
+                                +{instance.phone_number.replace(/^55/, "55 ").replace(/(\d{2}) (\d{2})(\d{5})(\d{4})$/, "$1 ($2) $3-$4").replace(/(\d{2}) (\d{2})(\d{4})(\d{4})$/, "$1 ($2) $3-$4")}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Phone className="h-4 w-4" />
+                              <span className="text-sm">-</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant={statusColors[instance.status] || "outline"}>
