@@ -55,45 +55,80 @@ export default function ResetPassword() {
       }
     });
 
-    // Hydrate the recovery session from URL (code flow OR access_token in hash)
-    // This is required so the reset page works when coming from email links.
+    // Hydrate the recovery session from URL.
+    // Supports 3 flows:
+    // 1) token_hash (preferred, first-party link) -> verifyOtp
+    // 2) code (PKCE) -> exchangeCodeForSession
+    // 3) access_token in hash -> getSessionFromUrl
     const hydrateFromUrl = async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get('code');
+      const url = new URL(window.location.href);
 
-        if (code) {
-          await supabase.auth.exchangeCodeForSession(code);
-        } else {
-          // Handles links like /reset-password#access_token=...&refresh_token=...
-          // storeSession=true persists the session for the reset flow.
-          // @ts-expect-error: supabase-js supports getSessionFromUrl in auth client
-          await supabase.auth.getSessionFromUrl({ storeSession: true });
-        }
-      } catch (err) {
-        // Ignore: we'll fall back to getSession + timeout
-        console.warn('[ResetPassword] Failed to hydrate session from URL', err);
+      // Surface explicit errors early (avoid waiting for timeout)
+      const queryError = url.searchParams.get('error');
+      const queryErrorDesc = url.searchParams.get('error_description');
+      if (queryError) {
+        throw new Error(queryErrorDesc || queryError);
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        // Cleanup URL (remove token hash / query params) after session is stored
-        window.history.replaceState({}, document.title, '/reset-password');
-
-        window.clearTimeout(timeoutId);
-        resolveWithSession();
+      const hashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+      const hashError = hashParams.get('error');
+      const hashErrorDesc = hashParams.get('error_description');
+      if (hashError) {
+        throw new Error(hashErrorDesc || hashError);
       }
+
+      const tokenHash = url.searchParams.get('token_hash');
+      const tokenType = url.searchParams.get('type');
+      const code = url.searchParams.get('code');
+
+      if (tokenHash && (!tokenType || tokenType === 'recovery')) {
+        await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash });
+        return;
+      }
+
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code);
+        return;
+      }
+
+      // Handles links like /reset-password#access_token=...&refresh_token=...
+      // storeSession=true persists the session for the reset flow.
+      // @ts-expect-error: supabase-js supports getSessionFromUrl in auth client
+      await supabase.auth.getSessionFromUrl({ storeSession: true });
     };
 
-    // Check if user already has a valid recovery session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         window.clearTimeout(timeoutId);
         resolveWithSession();
         return;
       }
 
-      hydrateFromUrl();
+      try {
+        await hydrateFromUrl();
+      } catch (err) {
+        console.warn('[ResetPassword] Failed to hydrate session from URL', err);
+        const msg = err instanceof Error ? err.message : null;
+        if (msg) {
+          window.clearTimeout(timeoutId);
+          toast({
+            title: 'Link inválido',
+            description: msg,
+            variant: 'destructive',
+          });
+          navigate('/auth', { replace: true });
+          return;
+        }
+      }
+
+      const { data: { session: hydratedSession } } = await supabase.auth.getSession();
+      if (hydratedSession) {
+        // Cleanup URL (remove token hash / query params) after session is stored
+        window.history.replaceState({}, document.title, '/reset-password');
+
+        window.clearTimeout(timeoutId);
+        resolveWithSession();
+      }
     });
 
     return () => {

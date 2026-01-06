@@ -112,15 +112,36 @@ serve(async (req) => {
       );
     }
 
-    if (!data?.properties?.action_link) {
-      console.log('[custom-password-reset] No action link generated (user may not exist)');
+    if (!data?.properties?.action_link && !(data as any)?.properties?.hashed_token) {
+      console.log('[custom-password-reset] No token generated (user may not exist)');
       return new Response(
         JSON.stringify({ success: true, message: 'Se o email existir, você receberá um link de recuperação.' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const resetLink = data.properties.action_link;
+    // IMPORTANT: we prefer a first-party reset link pointing directly to the app.
+    // This avoids issues where email clients/security scanners prefetch the /verify link,
+    // consuming the one-time token before the user opens it.
+    const hashedToken = (data as any)?.properties?.hashed_token as string | undefined;
+
+    let resetLink = data?.properties?.action_link;
+
+    if (hashedToken) {
+      const u = new URL(productionRedirect);
+      u.searchParams.set('token_hash', hashedToken);
+      u.searchParams.set('type', 'recovery');
+      resetLink = u.toString();
+    }
+
+    if (!resetLink) {
+      console.log('[custom-password-reset] No reset link generated');
+      return new Response(
+        JSON.stringify({ success: true, message: 'Se o email existir, você receberá um link de recuperação.' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const userName = data.user?.user_metadata?.full_name || email.split('@')[0];
 
     // Send email via Resend
