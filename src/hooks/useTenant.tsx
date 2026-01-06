@@ -42,7 +42,7 @@ const TenantContext = createContext<TenantContextType>({
 // 
 // PRODUÇÃO:     miauchat.com.br
 // STAGING:      staging.miauchat.com.br
-// DESENVOLVIMENTO: localhost, lovableproject.com
+// DESENVOLVIMENTO: localhost
 //
 // ============================================================================
 
@@ -51,9 +51,7 @@ const MAIN_DOMAINS = [
   'www.miauchat.com.br',
   'staging.miauchat.com.br',
   'localhost',
-  'lovableproject.com',
 ];
-
 const RESERVED_SUBDOMAINS = [
   'www',
   'api',
@@ -86,8 +84,8 @@ export function extractSubdomain(hostname: string): string | null {
   // Remove porta se existir
   const host = hostname.split(':')[0];
   
-  // Verifica se é localhost ou domínio de desenvolvimento
-  if (host === 'localhost' || host.includes('lovableproject.com')) {
+  // Verifica se é localhost (desenvolvimento)
+  if (host === 'localhost') {
     // Em desenvolvimento, podemos simular subdomínio via query param
     // Ex: localhost:5173?tenant=empresa
     return null;
