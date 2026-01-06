@@ -48,6 +48,7 @@ type EvolutionAction =
   | "set_settings"
   | "refresh_status"
   | "refresh_phone"
+  | "fetch_phone"
   | "send_message"
   | "send_message_async"
   | "send_media"
@@ -206,6 +207,31 @@ async function getInstanceById(supabaseClient: any, lawFirmId: string | null, in
   return instance;
 }
 
+// Extract phone from any payload (deep scan)
+function extractPhoneFromPayload(payload: any): string | null {
+  const directCandidates = [
+    payload?.owner,
+    payload?.instance?.owner,
+    payload?.profile?.owner,
+    payload?.profile?.id,
+    payload?.me?.id,
+    payload?.me?.jid,
+    payload?.instance?.me?.id,
+    payload?.instance?.me?.jid,
+    payload?.data?.me?.id,
+    payload?.state?.me?.id,
+  ];
+
+  for (const c of directCandidates) {
+    if (typeof c === "string") {
+      const phone = extractPhoneFromJid(c);
+      if (phone && phone.length >= 10 && phone.length <= 15) return phone;
+    }
+  }
+
+  return null;
+}
+
 async function fetchConnectedPhoneNumber(
   apiUrl: string,
   apiKey: string,
@@ -236,6 +262,68 @@ async function fetchConnectedPhoneNumber(
 
   const ownerJid = found?.owner || found?.instance?.owner || found?.profile?.owner || found?.profile?.id || null;
   return extractPhoneFromJid(ownerJid);
+}
+
+// Enhanced phone fetching that tries multiple endpoints
+async function fetchPhoneNumberEnhanced(
+  apiUrl: string,
+  apiKey: string,
+  instanceName: string,
+): Promise<{ phone: string | null; reason: string }> {
+  const endpoints = [
+    {
+      name: "connectionState",
+      url: `${apiUrl}/instance/connectionState/${encodeURIComponent(instanceName)}`,
+    },
+    {
+      name: "fetchInstances",
+      url: `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`,
+    },
+    {
+      name: "connect",
+      url: `${apiUrl}/instance/connect/${encodeURIComponent(instanceName)}`,
+    },
+  ];
+
+  const reasons: string[] = [];
+
+  for (const endpoint of endpoints) {
+    try {
+      console.log(`[Evolution API] Trying ${endpoint.name} for phone number...`);
+      
+      const res = await fetchWithTimeout(endpoint.url, {
+        method: "GET",
+        headers: {
+          apikey: apiKey,
+          "Content-Type": "application/json",
+        },
+      }, 10000);
+
+      if (!res.ok) {
+        reasons.push(`${endpoint.name}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json().catch(() => null);
+      console.log(`[Evolution API] ${endpoint.name} response keys:`, data ? Object.keys(data) : []);
+      
+      const phone = extractPhoneFromPayload(data);
+      
+      if (phone) {
+        console.log(`[Evolution API] Phone found via ${endpoint.name}: ${phone.slice(0,4)}***`);
+        return { phone, reason: "success" };
+      }
+      
+      reasons.push(`${endpoint.name}: sem número no payload`);
+    } catch (error: any) {
+      const reason = error?.message === "timeout" 
+        ? `${endpoint.name}: timeout` 
+        : `${endpoint.name}: ${error?.message || "erro"}`;
+      reasons.push(reason);
+    }
+  }
+
+  return { phone: null, reason: reasons.join("; ") };
 }
 
 serve(async (req) => {
@@ -861,6 +949,42 @@ serve(async (req) => {
             success: true,
             phoneNumber,
             instance: updatedInstance,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Enhanced fetch_phone - tries multiple endpoints and returns reason if not found
+      case "fetch_phone": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        console.log(`[Evolution API] Fetching phone number (enhanced) for instance: ${body.instanceId}`);
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        const result = await fetchPhoneNumberEnhanced(apiUrl, instance.api_key || "", instance.instance_name);
+
+        if (result.phone) {
+          // Update database with found phone number
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({
+              phone_number: result.phone,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", body.instanceId);
+        }
+
+        console.log(`[Evolution API] Phone fetch result: ${result.phone || "not found"} - ${result.reason}`);
+
+        return new Response(
+          JSON.stringify({
+            success: !!result.phone,
+            phone: result.phone,
+            reason: result.phone ? undefined : result.reason,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
