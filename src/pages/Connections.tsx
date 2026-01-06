@@ -9,6 +9,7 @@ import {
   Loader2,
   Globe,
   Bot,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -496,7 +497,69 @@ export default function Connections() {
                               {instance.display_name || instance.instance_name}
                             </p>
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <span>{instance.phone_number || "Sem número"}</span>
+                              {instance.phone_number ? (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 text-emerald-500" />
+                                  <span className="text-foreground">
+                                    {(() => {
+                                      const raw = instance.phone_number.replace(/\D/g, '');
+                                      if (raw.length === 13) {
+                                        return `+${raw.slice(0,2)} (${raw.slice(2,4)}) ${raw.slice(4,9)}-${raw.slice(9)}`;
+                                      } else if (raw.length === 12) {
+                                        return `+${raw.slice(0,2)} (${raw.slice(2,4)}) ${raw.slice(4,8)}-${raw.slice(8)}`;
+                                      }
+                                      return instance.phone_number;
+                                    })()}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      refreshPhone.mutate(instance.id, {
+                                        onSuccess: (data) => {
+                                          if (data?.phoneNumber) {
+                                            toast({ title: "Número atualizado", description: data.phoneNumber });
+                                          } else {
+                                            toast({ title: "Sem número", description: data?.message || "Não foi possível obter o número", variant: "destructive" });
+                                          }
+                                          refetch();
+                                        }
+                                      });
+                                    }}
+                                    disabled={refreshPhone.isPending}
+                                  >
+                                    <RefreshCw className={`h-3 w-3 ${refreshPhone.isPending ? 'animate-spin' : ''}`} />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="h-3 w-3 text-muted-foreground" />
+                                  <span className="text-muted-foreground">Sem número</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 text-muted-foreground hover:text-primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      refreshPhone.mutate(instance.id, {
+                                        onSuccess: (data) => {
+                                          if (data?.phoneNumber) {
+                                            toast({ title: "Número encontrado!", description: data.phoneNumber });
+                                          } else {
+                                            toast({ title: "Número não encontrado", description: data?.message || "Não foi possível obter o número", variant: "destructive" });
+                                          }
+                                          refetch();
+                                        }
+                                      });
+                                    }}
+                                    disabled={refreshPhone.isPending}
+                                  >
+                                    <RefreshCw className={`h-3 w-3 ${refreshPhone.isPending ? 'animate-spin' : ''}`} />
+                                  </Button>
+                                </div>
+                              )}
                               {instance.instance_id && (
                                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                                   {instance.instance_id.slice(0, 4).toUpperCase()}
