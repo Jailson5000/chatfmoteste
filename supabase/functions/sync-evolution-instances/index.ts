@@ -198,18 +198,26 @@ async function fetchInstanceDetails(
   apiUrl: string,
   apiKey: string,
   instanceName: string
-): Promise<string | null> {
+): Promise<{ phone: string | null; reason: string }> {
   const base = normalizeUrl(apiUrl);
+  
+  // Try connectionState endpoint first (most reliable for connected instances)
   const endpoints = [
+    {
+      name: "connectionState",
+      url: `${base}/instance/connectionState/${encodeURIComponent(instanceName)}`,
+    },
     {
       name: "fetchInstances",
       url: `${base}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`,
     },
     {
-      name: "connectionState",
-      url: `${base}/instance/connectionState/${encodeURIComponent(instanceName)}`,
+      name: "connect",
+      url: `${base}/instance/connect/${encodeURIComponent(instanceName)}`,
     },
   ];
+
+  const allResponses: string[] = [];
 
   for (const endpoint of endpoints) {
     const controller = new AbortController();
@@ -230,27 +238,37 @@ async function fetchInstanceDetails(
       clearTimeout(timeout);
 
       if (!response.ok) {
-        console.log(`[Sync Evolution] ${endpoint.name} returned ${response.status} for ${instanceName}`);
+        const reason = `${endpoint.name}: HTTP ${response.status}`;
+        console.log(`[Sync Evolution] ${reason} for ${instanceName}`);
+        allResponses.push(reason);
         continue;
       }
 
       const data = await response.json().catch(() => null);
+      
+      // Log the raw response structure (keys only) for debugging
+      const keys = data ? Object.keys(data) : [];
+      console.log(`[Sync Evolution] ${endpoint.name} response keys:`, keys);
+      
       const phone = extractPhoneFromUnknownPayload(data);
 
       if (phone) {
         const masked = `${phone.slice(0, 2)}***${phone.slice(-4)}`;
         console.log(`[Sync Evolution] Phone found via ${endpoint.name}: ${masked}`);
-        return phone;
+        return { phone, reason: "success" };
       }
 
+      allResponses.push(`${endpoint.name}: sem número no payload`);
       console.log(`[Sync Evolution] Phone not found via ${endpoint.name} for ${instanceName}`);
     } catch (error: any) {
       clearTimeout(timeout);
-      console.log(`[Sync Evolution] ${endpoint.name} phone lookup failed for ${instanceName}:`, error?.message || error);
+      const reason = `${endpoint.name}: ${error?.message || "erro desconhecido"}`;
+      console.log(`[Sync Evolution] ${reason}`);
+      allResponses.push(reason);
     }
   }
 
-  return null;
+  return { phone: null, reason: allResponses.join("; ") };
 }
 
 serve(async (req) => {
@@ -387,17 +405,16 @@ serve(async (req) => {
             // If connected but no phone number, try to fetch it
             if (realStatus === "connected" && !phoneNumber) {
               console.log(`[Sync Evolution] Instance ${evoInstance.instanceName} connected but missing phone, fetching details...`);
-              try {
-                phoneNumber = await fetchInstanceDetails(
-                  connection.api_url,
-                  connection.api_key,
-                  evoInstance.instanceName
-                );
-                if (phoneNumber) {
-                  console.log(`[Sync Evolution] Found phone number: ${phoneNumber}`);
-                }
-              } catch (e) {
-                console.log(`[Sync Evolution] Failed to fetch phone for ${evoInstance.instanceName}`);
+              const result = await fetchInstanceDetails(
+                connection.api_url,
+                connection.api_key,
+                evoInstance.instanceName
+              );
+              phoneNumber = result.phone;
+              if (phoneNumber) {
+                console.log(`[Sync Evolution] Found phone number: ${phoneNumber}`);
+              } else {
+                console.log(`[Sync Evolution] Could not find phone: ${result.reason}`);
               }
             }
 

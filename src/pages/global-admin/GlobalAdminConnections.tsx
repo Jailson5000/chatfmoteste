@@ -186,6 +186,7 @@ export default function GlobalAdminConnections() {
     reactivateInstance,
     refreshAllStatuses,
     syncEvolutionInstances,
+    fetchPhoneNumber,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -865,19 +866,35 @@ export default function GlobalAdminConnections() {
                           )}
                         </TableCell>
                         <TableCell>
-                          {instance.phone_number ? (
-                            <div className="flex items-center gap-2">
-                              <Phone className="h-4 w-4 text-green-500" />
-                              <span className="font-mono text-sm">
-                                +{instance.phone_number.replace(/^55/, "55 ").replace(/(\d{2}) (\d{2})(\d{5})(\d{4})$/, "$1 ($2) $3-$4").replace(/(\d{2}) (\d{2})(\d{4})(\d{4})$/, "$1 ($2) $3-$4")}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Phone className="h-4 w-4" />
-                              <span className="text-sm">-</span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {instance.phone_number ? (
+                              <>
+                                <Phone className="h-4 w-4 text-green-500" />
+                                <span className="font-mono text-sm">
+                                  +{instance.phone_number.replace(/^55/, "55 ").replace(/(\d{2}) (\d{2})(\d{5})(\d{4})$/, "$1 ($2) $3-$4").replace(/(\d{2}) (\d{2})(\d{4})(\d{4})$/, "$1 ($2) $3-$4")}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Phone className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm text-muted-foreground">-</span>
+                              </>
+                            )}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => fetchPhoneNumber.mutate(instance.id)}
+                                  disabled={fetchPhoneNumber.isPending}
+                                >
+                                  <RefreshCw className={`h-3 w-3 ${fetchPhoneNumber.isPending ? "animate-spin" : ""}`} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Puxar número agora</TooltipContent>
+                            </Tooltip>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={statusColors[instance.status] || "outline"}>

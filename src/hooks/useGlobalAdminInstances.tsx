@@ -361,6 +361,43 @@ export function useGlobalAdminInstances() {
     },
   });
 
+  // Fetch phone number for a specific instance
+  const fetchPhoneNumber = useMutation({
+    mutationFn: async (instanceId: string) => {
+      const { data, error } = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "fetch_phone",
+          instanceId,
+        },
+      });
+
+      if (error) throw new Error(error.message);
+      return data as { success: boolean; phone?: string; reason?: string };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+      if (data.phone) {
+        toast({
+          title: "Número encontrado",
+          description: `Número: ${data.phone}`,
+        });
+      } else {
+        toast({
+          title: "Número não encontrado",
+          description: data.reason || "API não retornou o número",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao buscar número",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Sync instances from Evolution API
   const syncEvolutionInstances = useMutation({
     mutationFn: async (connectionId?: string) => {
@@ -441,5 +478,6 @@ export function useGlobalAdminInstances() {
     reactivateInstance,
     refreshAllStatuses,
     syncEvolutionInstances,
+    fetchPhoneNumber,
   };
 }
