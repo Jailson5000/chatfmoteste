@@ -499,8 +499,10 @@ export default function Conversations() {
   }, [selectedConversationId, handleMessagesScrollToTop]);
 
   // Scroll to bottom when details panel is closed (layout reflow)
+  // PROIBIDO auto-scroll a menos que o usuário esteja colado no fim
   useEffect(() => {
     if (!showDetailsPanel && selectedConversationId) {
+      if (!isAtBottomRef.current) return;
       // Small delay to allow layout to settle before scrolling
       const timer = setTimeout(() => {
         scrollMessagesToBottom("auto");
@@ -2326,7 +2328,7 @@ export default function Conversations() {
                         item.type === 'activity' ? (
                           <InlineActivityBadge key={item.data.id} activity={item.data} />
                         ) : (
-                          <div key={item.data.id} ref={(el) => { if (el) messageRefs.current.set(item.data.id, el); }}>
+                          <div key={item.data.id} data-message-id={item.data.id} ref={(el) => { if (el) messageRefs.current.set(item.data.id, el); }}>
                             <MessageBubble
                               id={item.data.id}
                               content={item.data.content}

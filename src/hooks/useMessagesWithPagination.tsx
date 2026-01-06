@@ -61,15 +61,40 @@ export function useMessagesWithPagination({
   
   // Guards to prevent loops
   const loadingMoreRef = useRef(false);
+  const restoringScrollRef = useRef(false);
   const oldestTimestampRef = useRef<string | null>(null);
   const lastLoadTimeRef = useRef(0);
 
-  // Scroll anchoring for prepend
+  // Scroll anchoring for prepend (anchor-based, not scrollHeight-based)
   const pendingRestoreRef = useRef<{
     viewport: HTMLDivElement;
-    prevScrollHeight: number;
-    prevScrollTop: number;
+    anchorId: string;
+    anchorOffsetTop: number; // px from viewport top
   } | null>(null);
+
+  const cssEscape = (value: string) => {
+    // CSS.escape may not exist in some environments
+    const esc = (globalThis as any).CSS?.escape;
+    return typeof esc === "function" ? esc(value) : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  };
+
+  const getFirstVisibleAnchor = (viewport: HTMLDivElement) => {
+    const viewportRect = viewport.getBoundingClientRect();
+    const nodes = Array.from(
+      viewport.querySelectorAll<HTMLElement>("[data-message-id]")
+    );
+
+    for (const el of nodes) {
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom > viewportRect.top + 1) {
+        const id = el.dataset.messageId;
+        if (!id) continue;
+        return { anchorId: id, anchorOffsetTop: rect.top - viewportRect.top };
+      }
+    }
+
+    return null;
+  };
 
   // Reset when conversation changes
   useEffect(() => {
@@ -166,15 +191,10 @@ export function useMessagesWithPagination({
 
   // Load more older messages
   const loadMore = useCallback(async () => {
-    // Triple guard: ref, state, and timestamp
+    // Guards: ref + state + cursor
     if (loadingMoreRef.current) return;
     if (!hasMoreMessages) return;
     if (!conversationId || !oldestTimestampRef.current) return;
-    
-    // Debounce: minimum 150ms between loads
-    const now = Date.now();
-    if (now - lastLoadTimeRef.current < 150) return;
-    lastLoadTimeRef.current = now;
 
     loadingMoreRef.current = true;
     setIsLoadingMore(true);
@@ -182,7 +202,9 @@ export function useMessagesWithPagination({
     try {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal")
+        .select(
+          "id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal"
+        )
         .eq("conversation_id", conversationId)
         .lt("created_at", oldestTimestampRef.current)
         .order("created_at", { ascending: false })
@@ -191,39 +213,49 @@ export function useMessagesWithPagination({
       if (error) {
         console.error("Error loading more messages:", error);
         pendingRestoreRef.current = null;
+        restoringScrollRef.current = false;
+        loadingMoreRef.current = false;
         return;
       }
 
       if (data && data.length > 0) {
         // Reverse to get chronological order
         const chronologicalNewMessages = [...data].reverse();
-        
+
         // Map reply_to data
-        const newMessagesWithReplies = chronologicalNewMessages.map(msg => ({
+        const newMessagesWithReplies = chronologicalNewMessages.map((msg) => ({
           ...msg,
-          reply_to: null
+          reply_to: null,
         })) as PaginatedMessage[];
 
         // Prepend older messages to the beginning
-        setMessages(prev => [...newMessagesWithReplies, ...prev]);
-        
+        setMessages((prev) => [...newMessagesWithReplies, ...prev]);
+
         // Update oldest timestamp
         oldestTimestampRef.current = data[data.length - 1].created_at;
-        
+
         // Check if more exist
         if (data.length < loadMoreBatchSize) {
           setHasMoreMessages(false);
         }
       } else {
         pendingRestoreRef.current = null;
+        restoringScrollRef.current = false;
         setHasMoreMessages(false);
+        loadingMoreRef.current = false;
       }
     } catch (err) {
       console.error("Error loading more messages:", err);
       pendingRestoreRef.current = null;
+      restoringScrollRef.current = false;
+      loadingMoreRef.current = false;
     } finally {
       setIsLoadingMore(false);
-      loadingMoreRef.current = false;
+      // IMPORTANT: não liberar loadingMoreRef aqui se ainda vamos restaurar scroll;
+      // a liberação acontece no useLayoutEffect após a restauração.
+      if (!pendingRestoreRef.current) {
+        loadingMoreRef.current = false;
+      }
     }
   }, [conversationId, hasMoreMessages, loadMoreBatchSize]);
 
@@ -231,8 +263,9 @@ export function useMessagesWithPagination({
   const handleScrollToTop = useCallback(
     (viewport: HTMLDivElement | null) => {
       if (!viewport) return;
-      
-      // Skip if already loading
+
+      // Skip if restoring or already loading
+      if (restoringScrollRef.current) return;
       if (loadingMoreRef.current || isLoadingMore) return;
       if (!hasMoreMessages) return;
       if (!oldestTimestampRef.current) return;
@@ -241,11 +274,20 @@ export function useMessagesWithPagination({
 
       // If scrolled near top (within 100px), load more
       if (scrollTop < 100) {
-        // Save scroll position BEFORE loading
+        // Debounce: minimum 200ms between triggers
+        const now = Date.now();
+        if (now - lastLoadTimeRef.current < 200) return;
+        lastLoadTimeRef.current = now;
+
+        // Capture anchor BEFORE loading (first visible message)
+        const anchor = getFirstVisibleAnchor(viewport);
+        if (!anchor) return;
+
+        restoringScrollRef.current = true;
         pendingRestoreRef.current = {
           viewport,
-          prevScrollHeight: viewport.scrollHeight,
-          prevScrollTop: scrollTop,
+          anchorId: anchor.anchorId,
+          anchorOffsetTop: anchor.anchorOffsetTop,
         };
 
         void loadMore();
@@ -255,22 +297,34 @@ export function useMessagesWithPagination({
   );
 
   // After older messages are prepended, restore scroll so the same content stays visible
-  // This runs synchronously before browser paint
+  // Anchor-based restore (no scrollHeight math)
   useLayoutEffect(() => {
     const pending = pendingRestoreRef.current;
     if (!pending) return;
 
-    const { viewport, prevScrollHeight, prevScrollTop } = pending;
-    const newScrollHeight = viewport.scrollHeight;
-    const delta = newScrollHeight - prevScrollHeight;
+    const { viewport, anchorId, anchorOffsetTop } = pending;
 
-    // Only adjust if content was actually added
-    if (delta > 0) {
-      viewport.scrollTop = prevScrollTop + delta;
-    }
+    requestAnimationFrame(() => {
+      try {
+        const selector = `[data-message-id="${cssEscape(anchorId)}"]`;
+        const el = viewport.querySelector<HTMLElement>(selector);
+        if (!el) return;
 
-    pendingRestoreRef.current = null;
-  }, [messages]); // Run when messages array changes
+        const viewportRect = viewport.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        const currentOffset = rect.top - viewportRect.top;
+        const delta = currentOffset - anchorOffsetTop;
+
+        if (delta !== 0) {
+          viewport.scrollTop = viewport.scrollTop + delta;
+        }
+      } finally {
+        pendingRestoreRef.current = null;
+        restoringScrollRef.current = false;
+        loadingMoreRef.current = false;
+      }
+    });
+  }, [messages]);
 
   // Real-time subscriptions
   useEffect(() => {
