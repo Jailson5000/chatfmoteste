@@ -48,6 +48,7 @@ export function useInfiniteScroll<T>(
   // Guards to prevent loops
   const loadingRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
+  const armedRef = useRef(true); // must "re-arm" by scrolling away from the threshold
 
   const totalCount = data.length;
   const hasMore = displayedCount < totalCount;
@@ -99,6 +100,7 @@ export function useInfiniteScroll<T>(
     setDisplayedCount(initialBatchSize);
     loadingRef.current = false;
     lastLoadTimeRef.current = 0;
+    armedRef.current = true;
   }, [initialBatchSize]);
 
   const handleScroll = useCallback(
@@ -113,8 +115,14 @@ export function useInfiniteScroll<T>(
       const clientHeight = target.clientHeight;
       const remaining = scrollHeight - scrollTop - clientHeight;
 
-      // Only load when near bottom
-      if (remaining < threshold) {
+      // Re-arm only after user moves away from the end
+      if (remaining >= threshold * 1.25) {
+        armedRef.current = true;
+      }
+
+      // Only load when near bottom AND armed
+      if (remaining < threshold && armedRef.current) {
+        armedRef.current = false;
         loadMore();
       }
     },
@@ -144,7 +152,13 @@ export function useInfiniteScroll<T>(
         const clientHeight = container.clientHeight;
         const remaining = scrollHeight - scrollTop - clientHeight;
 
-        if (remaining < threshold) {
+        // Re-arm only after user moves away from the end
+        if (remaining >= threshold * 1.25) {
+          armedRef.current = true;
+        }
+
+        if (remaining < threshold && armedRef.current) {
+          armedRef.current = false;
           loadMore();
         }
       });

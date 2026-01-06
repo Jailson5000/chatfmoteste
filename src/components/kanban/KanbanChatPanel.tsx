@@ -627,28 +627,9 @@ export function KanbanChatPanel({
 
   const lastMessageIdRef = useRef<string | null>(null);
 
-  // Auto-scroll to bottom only when opening conversation or when a NEW message arrives
+  // Auto-scroll: PROIBIDO no Kanban (evita "jump" ao carregar/paginar)
   useEffect(() => {
-    if (isLoading) return;
-
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage?.id) return;
-
-    const prevLastId = lastMessageIdRef.current;
-    const isFirst = prevLastId === null;
-    lastMessageIdRef.current = lastMessage.id;
-
-    // If last message didn't change, we probably just prepended older messages
-    if (!isFirst && prevLastId === lastMessage.id) return;
-
-    // Only auto-scroll if: initial load, user sent message, or user is already at bottom
-    const shouldScroll = isFirst || lastMessage.is_from_me || isAtBottomRef.current;
-
-    if (shouldScroll && messagesEndRef.current) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: isFirst ? "auto" : "smooth" });
-      });
-    }
+    return;
   }, [messages, isLoading]);
 
   // Update editing name when contactName changes
@@ -1396,6 +1377,7 @@ export function KanbanChatPanel({
               return (
                 <div
                   key={msg.id}
+                  data-message-id={msg.id}
                   className={cn(
                     "flex",
                     isFromMe ? "justify-end" : "justify-start"
