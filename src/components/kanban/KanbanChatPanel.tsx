@@ -517,7 +517,7 @@ export function KanbanChatPanel({
       const createdMs = new Date(m.created_at).getTime();
       if (!Number.isFinite(createdMs)) continue;
 
-      const remaining = createdMs + 3000 - now;
+      const remaining = createdMs + 2000 - now;
       if (remaining <= 0) continue;
 
       if (nextMs === null || remaining < nextMs) nextMs = remaining;
@@ -1452,7 +1452,7 @@ export function KanbanChatPanel({
                             ? msg.status
                             : (msg.status === "sent" || !msg.status) &&
                                 msg.whatsapp_message_id &&
-                                Date.now() - new Date(msg.created_at).getTime() > 3000
+                                Date.now() - new Date(msg.created_at).getTime() > 2000
                               ? "delivered"
                               : msg.status,
                         isFromMe
