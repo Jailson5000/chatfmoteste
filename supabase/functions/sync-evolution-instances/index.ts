@@ -277,7 +277,7 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
+    const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
@@ -288,15 +288,26 @@ serve(async (req) => {
       throw new Error("Missing authorization header");
     }
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    // Create a client with the user's token to validate
+    const supabaseUser = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      }
+    );
+
+    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
     
     if (authError || !user) {
+      console.error("[sync-evolution-instances] Auth error:", authError?.message);
       throw new Error("Unauthorized");
     }
 
     // Check admin role
-    const { data: isAdmin } = await supabaseClient.rpc("is_admin", { _user_id: user.id });
+    const { data: isAdmin } = await supabaseAdmin.rpc("is_admin", { _user_id: user.id });
     if (!isAdmin) {
       throw new Error("Admin access required");
     }
@@ -305,7 +316,7 @@ serve(async (req) => {
     const connectionId = body.connectionId; // Optional: sync specific connection only
 
     // Fetch Evolution API connections
-    let connectionsQuery = supabaseClient
+    let connectionsQuery = supabaseAdmin
       .from("evolution_api_connections")
       .select("*")
       .eq("is_active", true);
@@ -332,7 +343,7 @@ serve(async (req) => {
     }
 
     // Fetch all whatsapp_instances from our database
-    const { data: dbInstances, error: dbError } = await supabaseClient
+    const { data: dbInstances, error: dbError } = await supabaseAdmin
       .from("whatsapp_instances")
       .select("*");
 
@@ -341,11 +352,11 @@ serve(async (req) => {
     }
 
     // Fetch law firms and companies for mapping
-    const { data: lawFirms } = await supabaseClient
+    const { data: lawFirms } = await supabaseAdmin
       .from("law_firms")
       .select("id, name, subdomain");
 
-    const { data: companies } = await supabaseClient
+    const { data: companies } = await supabaseAdmin
       .from("companies")
       .select("id, name, law_firm_id");
 
@@ -366,7 +377,7 @@ serve(async (req) => {
         // Find DB instances that belong to this Evolution API (match by api_url)
         const normalizedApiUrl = normalizeUrl(connection.api_url);
         const dbInstancesForConnection = (dbInstances || []).filter(
-          (inst) => normalizeUrl(inst.api_url) === normalizedApiUrl
+          (inst: { api_url: string }) => normalizeUrl(inst.api_url) === normalizedApiUrl
         );
 
         console.log(`[Sync Evolution] Found ${dbInstancesForConnection.length} instances in DB for this connection`);
@@ -380,13 +391,13 @@ serve(async (req) => {
         // Process Evolution instances
         for (const evoInstance of evolutionInstances) {
           const matchingDbInstance = dbInstancesForConnection.find(
-            (dbi) => dbi.instance_name?.toLowerCase() === evoInstance.instanceName?.toLowerCase()
+            (dbi: { instance_name: string }) => dbi.instance_name?.toLowerCase() === evoInstance.instanceName?.toLowerCase()
           );
 
           if (matchingDbInstance) {
             // Found matching DB instance
-            const lawFirm = lawFirms?.find((lf) => lf.id === matchingDbInstance.law_firm_id);
-            const company = companies?.find((c) => c.law_firm_id === matchingDbInstance.law_firm_id);
+            const lawFirm = lawFirms?.find((lf: { id: string }) => lf.id === matchingDbInstance.law_firm_id);
+            const company = companies?.find((c: { law_firm_id: string }) => c.law_firm_id === matchingDbInstance.law_firm_id);
 
             // Determine real status from Evolution
             let realStatus = "unknown";
@@ -445,7 +456,7 @@ serve(async (req) => {
               if (needsStatusUpdate) updatePayload.status = realStatus;
               if (needsPhoneUpdate) updatePayload.phone_number = phoneNumber;
               
-              await supabaseClient
+              await supabaseAdmin
                 .from("whatsapp_instances")
                 .update(updatePayload)
                 .eq("id", matchingDbInstance.id);
@@ -468,8 +479,8 @@ serve(async (req) => {
         // Check for stale instances (in DB but not in Evolution)
         for (const dbInstance of dbInstancesForConnection) {
           if (!evolutionInstanceNames.has(dbInstance.instance_name?.toLowerCase())) {
-            const lawFirm = lawFirms?.find((lf) => lf.id === dbInstance.law_firm_id);
-            const company = companies?.find((c) => c.law_firm_id === dbInstance.law_firm_id);
+            const lawFirm = lawFirms?.find((lf: { id: string }) => lf.id === dbInstance.law_firm_id);
+            const company = companies?.find((c: { law_firm_id: string }) => c.law_firm_id === dbInstance.law_firm_id);
 
             matchedInstances.push({
               instance_name: dbInstance.instance_name,
@@ -500,7 +511,7 @@ serve(async (req) => {
         });
 
         // Update connection health status
-        await supabaseClient
+        await supabaseAdmin
           .from("evolution_api_connections")
           .update({
             health_status: "online",
@@ -524,7 +535,7 @@ serve(async (req) => {
         });
 
         // Update connection health status to offline
-        await supabaseClient
+        await supabaseAdmin
           .from("evolution_api_connections")
           .update({
             health_status: "offline",
