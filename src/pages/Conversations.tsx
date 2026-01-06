@@ -2097,7 +2097,7 @@ export default function Conversations() {
                       <div className="p-3 border-b">
                         <h4 className="font-medium text-sm">Transferir para</h4>
                       </div>
-                    <ScrollArea className="max-h-80">
+                    <ScrollArea className="max-h-[60vh]">
                       <div className="p-2 space-y-1">
                         {/* IA Section */}
                         {automations.filter(a => a.is_active).length > 0 && (
