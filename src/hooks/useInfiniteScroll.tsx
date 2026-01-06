@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect, type RefObject, type UIEvent } from "react";
+// @refresh reset
+import { useState, useMemo, useCallback, useRef, useEffect, type RefObject, type UIEvent } from "react";
 
 export interface UseInfiniteScrollOptions {
   initialBatchSize?: number;
@@ -129,44 +130,10 @@ export function useInfiniteScroll<T>(
     [loadMore, threshold, isLoadingMore, displayedCount, data.length]
   );
 
-  // Alternative: Ref-based scroll detection
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
+  // NOTE: We intentionally do NOT attach a ref-based scroll listener here.
+  // Consumers should use `handleScroll` on the scrollable container.
+  // This avoids duplicate listeners and eliminates potential refresh/runtime issues.
 
-    let ticking = false;
-
-    const handleContainerScroll = () => {
-      if (ticking) return;
-      ticking = true;
-
-      requestAnimationFrame(() => {
-        ticking = false;
-        
-        // Skip if loading
-        if (loadingRef.current || isLoadingMore) return;
-        if (displayedCount >= data.length) return;
-
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-        const remaining = scrollHeight - scrollTop - clientHeight;
-
-        // Re-arm only after user moves away from the end
-        if (remaining >= threshold * 1.25) {
-          armedRef.current = true;
-        }
-
-        if (remaining < threshold && armedRef.current) {
-          armedRef.current = false;
-          loadMore();
-        }
-      });
-    };
-
-    container.addEventListener("scroll", handleContainerScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleContainerScroll);
-  }, [loadMore, threshold, isLoadingMore, displayedCount, data.length]);
 
   return {
     visibleData,
