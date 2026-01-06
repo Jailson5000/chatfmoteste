@@ -74,7 +74,8 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
+    // Service role client for DB operations
+    const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
@@ -85,18 +86,30 @@ serve(async (req) => {
       throw new Error("Missing authorization header");
     }
 
+    // Create a client with the user's token to get user info
+    const supabaseUser = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      }
+    );
+
     // Get user from token
     const {
       data: { user },
       error: authError,
-    } = await supabaseClient.auth.getUser(authHeader.replace("Bearer ", ""));
+    } = await supabaseUser.auth.getUser();
 
     if (authError || !user) {
+      console.error("[Evolution Health] Auth error:", authError?.message);
       throw new Error("Invalid authorization token");
     }
 
     // Check if user is admin
-    const { data: adminRole } = await supabaseClient.rpc("is_admin", {
+    const { data: adminRole } = await supabaseAdmin.rpc("is_admin", {
       _user_id: user.id,
     });
 
@@ -164,20 +177,20 @@ serve(async (req) => {
     }
 
     // Get instances summary from database
-    const { data: instances } = await supabaseClient
+    const { data: instances } = await supabaseAdmin
       .from("whatsapp_instances")
       .select("status");
 
     const instancesSummary = {
       total: instances?.length || 0,
-      connected: instances?.filter((i) => i.status === "connected").length || 0,
+      connected: instances?.filter((i: { status: string }) => i.status === "connected").length || 0,
       disconnected:
-        instances?.filter((i) => i.status === "disconnected").length || 0,
+        instances?.filter((i: { status: string }) => i.status === "disconnected").length || 0,
       connecting:
         instances?.filter(
-          (i) => i.status === "connecting" || i.status === "awaiting_qr"
+          (i: { status: string }) => i.status === "connecting" || i.status === "awaiting_qr"
         ).length || 0,
-      error: instances?.filter((i) => i.status === "error").length || 0,
+      error: instances?.filter((i: { status: string }) => i.status === "error").length || 0,
     };
 
     const healthResult: EvolutionHealthResult = {
