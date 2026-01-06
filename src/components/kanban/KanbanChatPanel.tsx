@@ -1473,10 +1473,9 @@ export function KanbanChatPanel({
                           : msg.status === "read" || msg.status === "delivered"
                             ? msg.status
                             : (msg.status === "sent" || !msg.status) &&
-                                msg.whatsapp_message_id &&
                                 Date.now() - new Date(msg.created_at).getTime() > 2000
                               ? "delivered"
-                              : msg.status,
+                              : msg.status || "sent",
                         isFromMe
                       )}
                     </div>
