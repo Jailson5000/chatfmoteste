@@ -626,11 +626,33 @@ export function KanbanChatPanel({
   }, [conversationId, handleScrollToTop]);
 
   const lastMessageIdRef = useRef<string | null>(null);
+  const hasScrolledInitialRef = useRef(false);
 
-  // Auto-scroll: PROIBIDO no Kanban (evita "jump" ao carregar/paginar)
+  // Auto-scroll: Apenas na carga inicial (primeira abertura da conversa)
   useEffect(() => {
-    return;
-  }, [messages, isLoading]);
+    // Reset flag quando conversationId muda
+    if (!conversationId) {
+      hasScrolledInitialRef.current = false;
+      return;
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    // Não fazer nada se ainda está carregando ou se já fez o scroll inicial
+    if (isLoading || hasScrolledInitialRef.current) return;
+    if (messages.length === 0) return;
+
+    // Marcar que já fez o scroll inicial
+    hasScrolledInitialRef.current = true;
+
+    // Aguardar o próximo frame para garantir que o DOM está atualizado
+    requestAnimationFrame(() => {
+      const viewport = viewportRef.current;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+  }, [isLoading, messages.length]);
 
   // Update editing name when contactName changes
   useEffect(() => {
