@@ -1,3 +1,4 @@
+import React from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
@@ -257,20 +258,22 @@ export function GlobalAdminLayout() {
             <Breadcrumb className="hidden md:flex">
               <BreadcrumbList>
                 {breadcrumbs.map((crumb, index) => (
-                  <BreadcrumbItem key={crumb.path}>
-                    {crumb.isLast ? (
-                      <BreadcrumbPage className="text-white">{crumb.label}</BreadcrumbPage>
-                    ) : (
-                      <>
+                  <React.Fragment key={crumb.path}>
+                    <BreadcrumbItem>
+                      {crumb.isLast ? (
+                        <BreadcrumbPage className="text-white">{crumb.label}</BreadcrumbPage>
+                      ) : (
                         <BreadcrumbLink asChild>
                           <NavLink to={crumb.path} className="text-white/50 hover:text-white">{crumb.label}</NavLink>
                         </BreadcrumbLink>
-                        <BreadcrumbSeparator>
-                          <ChevronRight className="h-4 w-4 text-white/30" />
-                        </BreadcrumbSeparator>
-                      </>
+                      )}
+                    </BreadcrumbItem>
+                    {!crumb.isLast && (
+                      <BreadcrumbSeparator>
+                        <ChevronRight className="h-4 w-4 text-white/30" />
+                      </BreadcrumbSeparator>
                     )}
-                  </BreadcrumbItem>
+                  </React.Fragment>
                 ))}
               </BreadcrumbList>
             </Breadcrumb>
