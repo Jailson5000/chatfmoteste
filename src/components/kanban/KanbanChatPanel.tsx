@@ -626,33 +626,31 @@ export function KanbanChatPanel({
   }, [conversationId, handleScrollToTop]);
 
   const lastMessageIdRef = useRef<string | null>(null);
-  const hasScrolledInitialRef = useRef(false);
+  const hasScrolledInitialRef = useRef<string | null>(null); // Track which conversation was scrolled
 
   // Auto-scroll: Apenas na carga inicial (primeira abertura da conversa)
   useEffect(() => {
-    // Reset flag quando conversationId muda
-    if (!conversationId) {
-      hasScrolledInitialRef.current = false;
-      return;
-    }
-  }, [conversationId]);
-
-  useEffect(() => {
-    // Não fazer nada se ainda está carregando ou se já fez o scroll inicial
-    if (isLoading || hasScrolledInitialRef.current) return;
+    // Não fazer nada se ainda está carregando
+    if (isLoading) return;
     if (messages.length === 0) return;
+    if (!conversationId) return;
 
-    // Marcar que já fez o scroll inicial
-    hasScrolledInitialRef.current = true;
+    // Se já fez o scroll para esta conversa, não fazer de novo
+    if (hasScrolledInitialRef.current === conversationId) return;
 
-    // Aguardar o próximo frame para garantir que o DOM está atualizado
+    // Marcar que já fez o scroll inicial para esta conversa
+    hasScrolledInitialRef.current = conversationId;
+
+    // Aguardar múltiplos frames para garantir que o DOM está completamente renderizado
     requestAnimationFrame(() => {
-      const viewport = viewportRef.current;
-      if (viewport) {
-        viewport.scrollTop = viewport.scrollHeight;
-      }
+      requestAnimationFrame(() => {
+        const viewport = viewportRef.current;
+        if (viewport) {
+          viewport.scrollTop = viewport.scrollHeight;
+        }
+      });
     });
-  }, [isLoading, messages.length]);
+  }, [isLoading, messages.length, conversationId]);
 
   // Update editing name when contactName changes
   useEffect(() => {
