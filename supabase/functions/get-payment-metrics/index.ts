@@ -124,24 +124,50 @@ serve(async (req) => {
       }
     }
 
-    // Fetch ASAAS metrics
+    // Fetch ASAAS metrics - ONLY MiauChat subscriptions/payments
     const asaasKey = Deno.env.get("ASAAS_API_KEY");
     if (asaasKey) {
       try {
         const asaasBaseUrl = "https://api.asaas.com/v3";
         metrics.asaas.connected = true;
 
-        // Get subscriptions
+        // Get ALL subscriptions and filter by externalReference containing "miauchat"
         const subsResponse = await fetch(`${asaasBaseUrl}/subscriptions?status=ACTIVE&limit=100`, {
           headers: { "access_token": asaasKey },
         });
         const subsData = await subsResponse.json();
 
+        // Track MiauChat subscription IDs for filtering payments
+        const miauchatSubscriptionIds: string[] = [];
+
         if (subsData.data) {
-          metrics.asaas.activeSubscriptions = subsData.data.length;
+          // Filter only MiauChat subscriptions
+          const miauchatSubs = subsData.data.filter((sub: any) => {
+            try {
+              // Check if externalReference contains "miauchat" or description starts with "MiauChat"
+              if (sub.externalReference) {
+                const ref = typeof sub.externalReference === 'string' 
+                  ? sub.externalReference 
+                  : JSON.stringify(sub.externalReference);
+                if (ref.includes('miauchat') || ref.includes('MiauChat')) {
+                  return true;
+                }
+              }
+              // Also check description
+              if (sub.description?.includes('MiauChat')) {
+                return true;
+              }
+              return false;
+            } catch {
+              return false;
+            }
+          });
+
+          metrics.asaas.activeSubscriptions = miauchatSubs.length;
 
           let monthlyRevenue = 0;
-          for (const sub of subsData.data) {
+          for (const sub of miauchatSubs) {
+            miauchatSubscriptionIds.push(sub.id);
             let amount = sub.value || 0;
             
             if (sub.cycle === "YEARLY") {
@@ -152,13 +178,16 @@ serve(async (req) => {
             
             monthlyRevenue += amount;
 
-            // Try to identify plan from description or value
+            // Identify plan from description or externalReference
             let planName = "Outro";
-            if (sub.description?.toLowerCase().includes("starter") || sub.value === 297) {
+            const desc = sub.description?.toLowerCase() || "";
+            const extRef = sub.externalReference?.toLowerCase() || "";
+            
+            if (desc.includes("starter") || extRef.includes("starter")) {
               planName = "Starter";
-            } else if (sub.description?.toLowerCase().includes("professional") || sub.value === 697) {
+            } else if (desc.includes("professional") || extRef.includes("professional")) {
               planName = "Professional";
-            } else if (sub.description?.toLowerCase().includes("enterprise") || sub.value === 1497) {
+            } else if (desc.includes("enterprise") || extRef.includes("enterprise")) {
               planName = "Enterprise";
             }
             metrics.asaas.subscriptionsByPlan[planName] = (metrics.asaas.subscriptionsByPlan[planName] || 0) + 1;
@@ -168,32 +197,54 @@ serve(async (req) => {
           metrics.asaas.arr = monthlyRevenue * 12;
         }
 
-        // Get customers
-        const customersResponse = await fetch(`${asaasBaseUrl}/customers?limit=100`, {
-          headers: { "access_token": asaasKey },
-        });
-        const customersData = await customersResponse.json();
-        metrics.asaas.totalCustomers = customersData.data?.length || 0;
+        // Get customers that have MiauChat subscriptions
+        // Count unique customers from MiauChat subscriptions
+        const uniqueCustomers = new Set<string>();
+        if (subsData.data) {
+          for (const sub of subsData.data) {
+            if (miauchatSubscriptionIds.includes(sub.id) || 
+                sub.description?.includes('MiauChat') ||
+                sub.externalReference?.includes('miauchat')) {
+              if (sub.customer) uniqueCustomers.add(sub.customer);
+            }
+          }
+        }
+        metrics.asaas.totalCustomers = uniqueCustomers.size;
 
-        // Get recent payments
-        const paymentsResponse = await fetch(`${asaasBaseUrl}/payments?limit=10`, {
-          headers: { "access_token": asaasKey },
-        });
-        const paymentsData = await paymentsResponse.json();
-
-        if (paymentsData.data) {
-          metrics.asaas.recentPayments = paymentsData.data.map((payment: any) => ({
-            id: payment.id,
-            amount: payment.value || 0,
-            currency: "BRL",
-            status: payment.status,
-            customerEmail: payment.customer,
-            createdAt: payment.dateCreated,
-            description: payment.description,
-          }));
+        // Get payments only from MiauChat subscriptions
+        const miauchatPayments: any[] = [];
+        
+        for (const subId of miauchatSubscriptionIds.slice(0, 5)) { // Limit to avoid too many API calls
+          try {
+            const subPaymentsResponse = await fetch(
+              `${asaasBaseUrl}/subscriptions/${subId}/payments?limit=5`,
+              { headers: { "access_token": asaasKey } }
+            );
+            const subPaymentsData = await subPaymentsResponse.json();
+            if (subPaymentsData.data) {
+              miauchatPayments.push(...subPaymentsData.data);
+            }
+          } catch (e) {
+            console.error(`[PAYMENT-METRICS] Error fetching payments for subscription ${subId}:`, e);
+          }
         }
 
-        console.log("[PAYMENT-METRICS] ASAAS metrics fetched successfully");
+        // Sort by date and take last 10
+        miauchatPayments.sort((a, b) => 
+          new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()
+        );
+
+        metrics.asaas.recentPayments = miauchatPayments.slice(0, 10).map((payment: any) => ({
+          id: payment.id,
+          amount: payment.value || 0,
+          currency: "BRL",
+          status: payment.status,
+          customerEmail: payment.customer,
+          createdAt: payment.dateCreated,
+          description: payment.description,
+        }));
+
+        console.log("[PAYMENT-METRICS] ASAAS metrics fetched successfully (MiauChat only)");
       } catch (asaasError) {
         console.error("[PAYMENT-METRICS] ASAAS error:", asaasError);
       }
