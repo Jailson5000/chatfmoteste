@@ -28,6 +28,7 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import AIVoice from "./pages/AIVoice";
 import Profile from "./pages/Profile";
 import Register from "./pages/Register";
+import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
 import Calendar from "./pages/Calendar";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
@@ -68,6 +69,7 @@ const App = () => (
           <Route path="/auth" element={<Auth />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/integrations/google-calendar/callback" element={<GoogleCalendarCallback />} />
