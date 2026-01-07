@@ -212,39 +212,49 @@ serve(async (req) => {
         metrics.asaas.totalCustomers = uniqueCustomers.size;
 
         // Get payments only from MiauChat subscriptions
-        const miauchatPayments: any[] = [];
-        
-        for (const subId of miauchatSubscriptionIds.slice(0, 5)) { // Limit to avoid too many API calls
-          try {
-            const subPaymentsResponse = await fetch(
-              `${asaasBaseUrl}/subscriptions/${subId}/payments?limit=5`,
-              { headers: { "access_token": asaasKey } }
-            );
-            const subPaymentsData = await subPaymentsResponse.json();
-            if (subPaymentsData.data) {
-              miauchatPayments.push(...subPaymentsData.data);
+        // If no MiauChat subscriptions exist, don't fetch any payments
+        if (miauchatSubscriptionIds.length === 0) {
+          console.log("[PAYMENT-METRICS] No MiauChat subscriptions found, skipping payments fetch");
+          metrics.asaas.recentPayments = [];
+        } else {
+          const miauchatPayments: any[] = [];
+          
+          for (const subId of miauchatSubscriptionIds.slice(0, 5)) { // Limit to avoid too many API calls
+            try {
+              const subPaymentsResponse = await fetch(
+                `${asaasBaseUrl}/subscriptions/${subId}/payments?limit=5`,
+                { headers: { "access_token": asaasKey } }
+              );
+              const subPaymentsData = await subPaymentsResponse.json();
+              if (subPaymentsData.data) {
+                miauchatPayments.push(...subPaymentsData.data);
+              }
+            } catch (e) {
+              console.error(`[PAYMENT-METRICS] Error fetching payments for subscription ${subId}:`, e);
             }
-          } catch (e) {
-            console.error(`[PAYMENT-METRICS] Error fetching payments for subscription ${subId}:`, e);
           }
+
+          // Sort by date and take last 10
+          miauchatPayments.sort((a, b) => 
+            new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()
+          );
+
+          metrics.asaas.recentPayments = miauchatPayments.slice(0, 10).map((payment: any) => ({
+            id: payment.id,
+            amount: payment.value || 0,
+            currency: "BRL",
+            status: payment.status,
+            customerEmail: payment.customer,
+            createdAt: payment.dateCreated,
+            description: payment.description,
+          }));
         }
 
-        // Sort by date and take last 10
-        miauchatPayments.sort((a, b) => 
-          new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()
-        );
-
-        metrics.asaas.recentPayments = miauchatPayments.slice(0, 10).map((payment: any) => ({
-          id: payment.id,
-          amount: payment.value || 0,
-          currency: "BRL",
-          status: payment.status,
-          customerEmail: payment.customer,
-          createdAt: payment.dateCreated,
-          description: payment.description,
-        }));
-
-        console.log("[PAYMENT-METRICS] ASAAS metrics fetched successfully (MiauChat only)");
+        console.log("[PAYMENT-METRICS] ASAAS metrics:", {
+          subscriptions: metrics.asaas.activeSubscriptions,
+          customers: metrics.asaas.totalCustomers,
+          payments: metrics.asaas.recentPayments.length,
+        });
       } catch (asaasError) {
         console.error("[PAYMENT-METRICS] ASAAS error:", asaasError);
       }
