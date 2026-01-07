@@ -39,6 +39,7 @@ import {
   GlobalAdminCompanies,
   GlobalAdminConnections,
   GlobalAdminPlans,
+  GlobalAdminPayments,
   GlobalAdminUsers,
   GlobalAdminMonitoring,
   GlobalAdminSettings,
@@ -246,6 +247,7 @@ const App = () => (
             <Route path="companies" element={<GlobalAdminCompanies />} />
             <Route path="connections" element={<GlobalAdminConnections />} />
             <Route path="plans" element={<GlobalAdminPlans />} />
+            <Route path="payments" element={<GlobalAdminPayments />} />
             <Route
               path="users"
               element={
