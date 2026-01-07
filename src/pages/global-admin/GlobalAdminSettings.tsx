@@ -154,26 +154,6 @@ export default function GlobalAdminSettings() {
               )}
             </div>
           </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Habilitar Recursos de IA</Label>
-              <p className="text-sm text-muted-foreground">
-                Ativa os recursos de inteligência artificial
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={getSetting("enable_ai_features") === "true" || getSetting("enable_ai_features") === true}
-                onCheckedChange={(checked) => handleChange("enable_ai_features", checked.toString())}
-              />
-              {localSettings["enable_ai_features"] !== undefined && (
-                <Button size="sm" onClick={() => handleSave("enable_ai_features")}>
-                  <Save className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
         </CardContent>
       </Card>
 
