@@ -122,9 +122,7 @@ export function KanbanCard({
   const handlerName =
     conversation.current_handler === "ai"
       ? `IA · ${automationName || "Assistente"}`
-      : conversation.assigned_profile?.full_name
-        ? `Atendente · ${conversation.assigned_profile.full_name}`
-        : "Atendente · Sem responsável";
+      : conversation.assigned_profile?.full_name || "Sem responsável";
 
   const isAI = conversation.current_handler === 'ai';
 
