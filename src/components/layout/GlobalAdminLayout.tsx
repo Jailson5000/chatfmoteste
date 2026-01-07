@@ -61,6 +61,7 @@ const principalNavItems = [
 const adminNavItems = [
   { icon: Users, label: "Usuários Admin", path: "/global-admin/users", roles: ["super_admin"] },
   { icon: CreditCard, label: "Planos", path: "/global-admin/plans", roles: ["super_admin", "admin_financeiro"] },
+  { icon: Settings, label: "Config. Pagamentos", path: "/global-admin/settings", roles: ["super_admin", "admin_financeiro"] },
   { icon: Bell, label: "Histórico de Alertas", path: "/global-admin/alert-history", roles: ["super_admin", "admin_operacional"] },
   { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
 ];
@@ -79,7 +80,7 @@ const breadcrumbMap: Record<string, string> = {
   users: "Usuários Admin",
   monitoring: "Monitoramento",
   provisioning: "Provisionamento",
-  settings: "Configurações",
+  settings: "Config. Pagamentos",
   "n8n-settings": "Configuração n8n",
   "ai-apis": "IAs APIs",
   "audit-logs": "Logs de Auditoria",
