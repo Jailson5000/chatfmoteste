@@ -111,7 +111,7 @@ serve(async (req) => {
         phone: adminPhone?.replace(/\D/g, "") || undefined,
         cpfCnpj: document?.replace(/\D/g, "") || undefined,
         company: companyName,
-        externalReference: `company_${companyName.toLowerCase().replace(/\s+/g, "_")}`,
+        externalReference: `company_${companyName.toLowerCase().replace(/\s+/g, "_")}`.slice(0, 100),
       };
 
       const createCustomerResponse = await fetch(`${asaasBaseUrl}/customers`, {
@@ -138,16 +138,8 @@ serve(async (req) => {
     }
 
     // 2. Create subscription with identifiable external reference
-    const externalRefData = {
-      source: "miauchat",
-      plan: planKey,
-      billing_period: billingPeriod,
-      company_name: companyName,
-      admin_name: adminName,
-      admin_email: adminEmail,
-      admin_phone: adminPhone || "",
-      document: document || "",
-    };
+    // NOTE: ASAAS externalReference has a max length of 100 characters.
+    const externalReference = `source:miauchat;plan:${planKey};period:${billingPeriod}`.slice(0, 100);
 
     const subscriptionPayload = {
       customer: customerId,
@@ -156,7 +148,7 @@ serve(async (req) => {
       nextDueDate: new Date().toISOString().split("T")[0],
       description: `MiauChat ${PLAN_NAMES[planKey]} - ${billingPeriod === "yearly" ? "Anual" : "Mensal"}`,
       cycle: billingPeriod === "yearly" ? "YEARLY" : "MONTHLY",
-      externalReference: JSON.stringify(externalRefData),
+      externalReference,
     };
 
     console.log("[ASAAS-CHECKOUT] Creating subscription:", subscriptionPayload);
@@ -214,12 +206,7 @@ serve(async (req) => {
         subscriptionCycle: billingPeriod === "yearly" ? "YEARLY" : "MONTHLY",
         chargeType: "RECURRENT",
         dueDateLimitDays: 7,
-        externalReference: JSON.stringify({
-          plan: planKey,
-          billing_period: billingPeriod,
-          company_name: companyName,
-          admin_email: adminEmail,
-        }),
+        externalReference,
         callback: {
           successUrl: `${origin}/payment-success?provider=asaas&subscription_id=${subscriptionData.id}`,
           autoRedirect: true,
