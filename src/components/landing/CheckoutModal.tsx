@@ -185,6 +185,9 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
                 <span className="text-xs text-green-400">
                   1 mês grátis (R$ {savings.toFixed(0)})
                 </span>
+                <span className="text-[10px] text-white/50 text-center leading-tight mt-1">
+                  + Suporte para implementação do sistema da sua empresa
+                </span>
               </label>
             </RadioGroup>
           </div>
