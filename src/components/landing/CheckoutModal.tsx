@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ interface CheckoutModalProps {
 
 export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentProvider, setPaymentProvider] = useState<"stripe" | "asaas">("stripe");
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
   const [formData, setFormData] = useState({
     companyName: "",
@@ -29,6 +30,32 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
     adminPhone: "",
     document: "",
   });
+
+  // Fetch payment provider setting on mount
+  useEffect(() => {
+    const fetchPaymentProvider = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("system_settings")
+          .select("value")
+          .eq("key", "payment_provider")
+          .single();
+
+        if (!error && data?.value) {
+          const provider = String(data.value).replace(/"/g, "");
+          if (provider === "stripe" || provider === "asaas") {
+            setPaymentProvider(provider);
+          }
+        }
+      } catch (err) {
+        console.log("Using default payment provider (stripe)");
+      }
+    };
+
+    if (open) {
+      fetchPaymentProvider();
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +75,12 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      // Choose the correct edge function based on payment provider
+      const functionName = paymentProvider === "asaas" 
+        ? "create-asaas-checkout" 
+        : "create-checkout-session";
+
+      const { data, error } = await supabase.functions.invoke(functionName, {
         body: {
           plan: plan.name,
           billingPeriod,
@@ -67,7 +99,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
       }
 
       if (data?.url) {
-        // Redirect to Stripe Checkout
+        // Redirect to checkout
         window.location.href = data.url;
       } else {
         toast.error("URL de checkout não recebida");
@@ -93,6 +125,8 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
   const yearlyPrice = monthlyPrice * 11; // 1 month discount
   const yearlyMonthly = yearlyPrice / 12;
   const savings = monthlyPrice * 12 - yearlyPrice;
+
+  const providerLabel = paymentProvider === "asaas" ? "ASAAS" : "Stripe";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -248,7 +282,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
           </Button>
 
           <p className="text-xs text-center text-white/40">
-            Você será redirecionado para o checkout seguro do Stripe
+            Você será redirecionado para o checkout seguro do {providerLabel}
           </p>
         </form>
       </DialogContent>

@@ -6,12 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { Json } from "@/integrations/supabase/types";
 
 export default function GlobalAdminSettings() {
-  const { settings, isLoading, updateSetting } = useSystemSettings();
+  const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
   const [localSettings, setLocalSettings] = useState<Record<string, Json>>({});
 
   const getSetting = (key: string) => {
@@ -27,13 +28,21 @@ export default function GlobalAdminSettings() {
   const handleSave = async (key: string) => {
     const value = localSettings[key];
     if (value !== undefined) {
-      await updateSetting.mutateAsync({ key, value });
+      // Check if setting exists
+      const existingSetting = settings.find((s) => s.key === key);
+      if (existingSetting) {
+        await updateSetting.mutateAsync({ key, value });
+      } else {
+        await createSetting.mutateAsync({ key, value, category: "payments" });
+      }
       setLocalSettings((prev) => {
         const { [key]: _, ...rest } = prev;
         return rest;
       });
     }
   };
+
+  const currentPaymentProvider = String(getSetting("payment_provider") || "stripe").replace(/"/g, "");
 
   if (isLoading) {
     return (
@@ -52,6 +61,67 @@ export default function GlobalAdminSettings() {
           Configurações globais do sistema MiauChat
         </p>
       </div>
+
+      {/* Payment Provider Settings */}
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Plataforma de Pagamento
+          </CardTitle>
+          <CardDescription>
+            Escolha qual plataforma de pagamento será usada para cobranças
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <RadioGroup
+              value={currentPaymentProvider}
+              onValueChange={(value) => handleChange("payment_provider", value)}
+              className="grid gap-4"
+            >
+              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
+                <RadioGroupItem value="stripe" id="stripe" />
+                <Label htmlFor="stripe" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Stripe</p>
+                      <p className="text-sm text-muted-foreground">
+                        Plataforma internacional com suporte a cartões internacionais
+                      </p>
+                    </div>
+                    <Badge variant={currentPaymentProvider === "stripe" ? "default" : "outline"}>
+                      {currentPaymentProvider === "stripe" ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </div>
+                </Label>
+              </div>
+              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
+                <RadioGroupItem value="asaas" id="asaas" />
+                <Label htmlFor="asaas" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">ASAAS</p>
+                      <p className="text-sm text-muted-foreground">
+                        Plataforma brasileira com boleto, PIX e cartão de crédito
+                      </p>
+                    </div>
+                    <Badge variant={currentPaymentProvider === "asaas" ? "default" : "outline"}>
+                      {currentPaymentProvider === "asaas" ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </div>
+                </Label>
+              </div>
+            </RadioGroup>
+            {localSettings["payment_provider"] !== undefined && (
+              <Button onClick={() => handleSave("payment_provider")} className="w-full">
+                <Save className="h-4 w-4 mr-2" />
+                Salvar Plataforma de Pagamento
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* General Settings */}
       <Card>
