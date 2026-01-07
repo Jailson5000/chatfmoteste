@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,8 +24,14 @@ import {
   HelpCircle,
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
+import { CheckoutModal } from "@/components/landing/CheckoutModal";
 
 export function LandingPage() {
+  const [selectedPlan, setSelectedPlan] = useState<{
+    name: string;
+    price: string;
+  } | null>(null);
+
   const plans = [
     {
       name: "STARTER",
@@ -42,7 +49,6 @@ export function LandingPage() {
         "Mensagens agendadas",
       ],
       cta: "Começar agora",
-      ctaLink: "/register",
     },
     {
       name: "PROFESSIONAL",
@@ -60,7 +66,6 @@ export function LandingPage() {
         "Maior capacidade operacional",
       ],
       cta: "Quero escalar meu atendimento",
-      ctaLink: "/register",
       popular: true,
     },
     {
@@ -78,8 +83,7 @@ export function LandingPage() {
         "Suporte exclusivo",
         "Estrutura completa para escala",
       ],
-      cta: "Falar com vendas",
-      ctaLink: "/register",
+      cta: "Começar agora",
     },
   ];
 
@@ -107,7 +111,7 @@ export function LandingPage() {
     {
       question: "Qual a diferença entre os planos?",
       answer:
-        "O plano Starter é ideal para começar com 250 conversas IA, 40 min de áudio, 4 membros e 1 agente. O Professional oferece 500 conversas, 80 min de áudio e 4 agentes. O Enterprise é para operações robustas com 1000 conversas, 140 min de áudio, membros e agentes ilimitados, 4 WhatsApps e suporte exclusivo.",
+        "O plano Starter é ideal para começar com 250 conversas IA, 30 min de áudio, 4 membros e 1 agente. O Professional oferece 500 conversas, 40 min de áudio e 4 agentes. O Enterprise é para operações robustas com 1000 conversas, 60 min de áudio, 20 membros e 20 agentes.",
     },
     {
       question: "Existe período de teste ou contrato mínimo?",
@@ -131,6 +135,10 @@ export function LandingPage() {
     { icon: TrendingUp, text: "Escalável sem aumentar custos fixos" },
     { icon: Zap, text: "Zero filas, zero atrasos" },
   ];
+
+  const handlePlanClick = (plan: { name: string; price: string }) => {
+    setSelectedPlan(plan);
+  };
 
   return (
     <div className="min-h-screen bg-[#030303] text-white selection:bg-red-500/30">
@@ -175,13 +183,11 @@ export function LandingPage() {
               Entrar
             </Link>
             <Button
-              asChild
               className="bg-red-600 hover:bg-red-500 text-white h-10 px-6 rounded-xl"
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
             >
-              <Link to="/register">
-                Começar
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              Começar
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -237,14 +243,12 @@ export function LandingPage() {
           {/* CTAs */}
           <div className="mt-10 flex flex-col sm:flex-row justify-center gap-3">
             <Button
-              asChild
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
             >
-              <Link to="/register">
-                Quero conhecer o MIAUCHAT
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              Quero conhecer o MIAUCHAT
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
             <Button
               asChild
@@ -454,14 +458,14 @@ export function LandingPage() {
                   ))}
                 </ul>
                 <Button
-                  asChild
+                  onClick={() => handlePlanClick({ name: plan.name, price: plan.price })}
                   className={`w-full h-10 rounded-lg text-sm font-medium ${
                     plan.popular
                       ? "bg-red-600 hover:bg-red-500 text-white"
                       : "bg-white/5 hover:bg-white/10 text-white"
                   }`}
                 >
-                  <Link to={plan.ctaLink}>{plan.cta}</Link>
+                  {plan.cta}
                 </Button>
               </div>
             ))}
@@ -482,79 +486,56 @@ export function LandingPage() {
             <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
               Dúvidas Frequentes
             </p>
-            <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold">
-              Perguntas e Respostas
+            <h2 className="text-2xl md:text-3xl font-bold">
+              Perguntas e respostas
             </h2>
-            <p className="mt-3 text-white/40 text-base">
-              Tudo o que você precisa saber sobre o MiauChat
-            </p>
           </div>
 
-          <Accordion type="single" collapsible className="space-y-3">
-            {faqs.map((faq, index) => (
+          <Accordion type="single" collapsible className="space-y-2">
+            {faqs.map((faq, i) => (
               <AccordionItem
-                key={index}
-                value={`item-${index}`}
-                className="border border-white/[0.06] bg-white/[0.02] rounded-xl px-5 data-[state=open]:border-red-500/20 data-[state=open]:bg-red-500/[0.02] transition-all"
+                key={i}
+                value={`item-${i}`}
+                className="border border-white/[0.06] rounded-xl bg-white/[0.02] px-5 data-[state=open]:bg-white/[0.04]"
               >
-                <AccordionTrigger className="text-left text-sm md:text-base font-medium py-4 hover:no-underline hover:text-red-400 transition-colors [&[data-state=open]]:text-red-400">
+                <AccordionTrigger className="text-left text-sm font-medium hover:no-underline py-4">
                   {faq.question}
                 </AccordionTrigger>
-                <AccordionContent className="text-white/50 text-sm leading-relaxed pb-4">
+                <AccordionContent className="text-sm text-white/60 leading-relaxed pb-4">
                   {faq.answer}
                 </AccordionContent>
               </AccordionItem>
             ))}
           </Accordion>
-
-          <div className="mt-10 text-center">
-            <p className="text-white/40 text-sm mb-3">Ainda tem dúvidas?</p>
-            <Button
-              asChild
-              variant="outline"
-              className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-10 px-6 rounded-lg text-sm"
-            >
-              <a href="#contato">
-                <MessageCircle className="mr-2 h-4 w-4" />
-                Fale com nossa equipe
-              </a>
-            </Button>
-          </div>
         </div>
       </section>
 
-      {/* Seção 6 - CTA Final */}
+      {/* Final CTA */}
       <section
         id="contato"
-        className="relative z-10 py-16 md:py-24 border-t border-white/[0.06]"
+        className="relative z-10 py-20 md:py-28 border-t border-white/[0.06]"
       >
-        <div className="max-w-3xl mx-auto px-6 text-center">
-          <div className="relative inline-block mb-8">
-            <div className="absolute inset-0 bg-red-500/20 rounded-2xl blur-2xl" />
-            <img src={miauchatLogo} alt="" className="relative h-16 w-16" />
-          </div>
-          <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4 leading-tight">
-            Transforme seu atendimento com
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
+            Pronto para começar?
+          </p>
+          <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight">
+            Transforme seu atendimento
             <br />
-            <span className="text-red-500">Inteligência Artificial</span>
+            com <span className="text-red-500">Inteligência Artificial</span>
           </h2>
-          <p className="text-base md:text-lg text-white/50 mb-3">
-            Chega de perder leads e sobrecarregar sua equipe.
+          <p className="mt-5 text-white/50 text-base max-w-2xl mx-auto">
+            Fale com um especialista ou comece agora mesmo. Nosso time está
+            pronto para ajudar sua empresa a escalar.
           </p>
-          <p className="text-sm text-white/40 mb-8 max-w-xl mx-auto">
-            Com o MIAUCHAT, você escala seu atendimento e suas vendas sem
-            escalar seus custos.
-          </p>
-          <div className="flex flex-col sm:flex-row justify-center gap-3">
+          <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
             <Button
-              asChild
               size="lg"
-              className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-xl shadow-red-600/20"
+              className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
             >
-              <Link to="/register">
-                Começar agora
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              Começar agora
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
             <Button
               asChild
@@ -562,24 +543,43 @@ export function LandingPage() {
               variant="outline"
               className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-12 px-8 rounded-xl text-sm"
             >
-              <Link to="/register">Solicitar demonstração</Link>
+              <a
+                href="https://wa.me/5511999999999?text=Olá! Quero saber mais sobre o MiauChat"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Phone className="mr-2 h-4 w-4" />
+                Falar no WhatsApp
+              </a>
             </Button>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-white/[0.06] py-8">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <img src={miauchatLogo} alt="" className="h-6 w-6 opacity-60" />
-            <span className="text-sm text-white/40">MIAUCHAT</span>
+      <footer className="relative z-10 border-t border-white/[0.06] py-10">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
+              <span className="text-sm font-medium text-white/60">
+                <span className="text-red-500">MIAU</span>CHAT
+              </span>
+            </div>
+            <p className="text-xs text-white/30">
+              © {new Date().getFullYear()} MiauChat. Todos os direitos
+              reservados.
+            </p>
           </div>
-          <p className="text-xs text-white/30">
-            © {new Date().getFullYear()} MiauChat. Todos os direitos reservados.
-          </p>
         </div>
       </footer>
+
+      {/* Checkout Modal */}
+      <CheckoutModal
+        open={!!selectedPlan}
+        onOpenChange={(open) => !open && setSelectedPlan(null)}
+        plan={selectedPlan || { name: "", price: "" }}
+      />
     </div>
   );
 }
