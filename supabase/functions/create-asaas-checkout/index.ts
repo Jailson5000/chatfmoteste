@@ -137,23 +137,26 @@ serve(async (req) => {
       customerId = customerData.id;
     }
 
-    // 2. Create subscription
+    // 2. Create subscription with identifiable external reference
+    const externalRefData = {
+      source: "miauchat",
+      plan: planKey,
+      billing_period: billingPeriod,
+      company_name: companyName,
+      admin_name: adminName,
+      admin_email: adminEmail,
+      admin_phone: adminPhone || "",
+      document: document || "",
+    };
+
     const subscriptionPayload = {
       customer: customerId,
-      billingType: "CREDIT_CARD", // Will be selected in checkout
+      billingType: "CREDIT_CARD",
       value: priceInReais,
-      nextDueDate: new Date().toISOString().split("T")[0], // Today
-      description: `${PLAN_NAMES[planKey]} - ${billingPeriod === "yearly" ? "Anual" : "Mensal"}`,
+      nextDueDate: new Date().toISOString().split("T")[0],
+      description: `MiauChat ${PLAN_NAMES[planKey]} - ${billingPeriod === "yearly" ? "Anual" : "Mensal"}`,
       cycle: billingPeriod === "yearly" ? "YEARLY" : "MONTHLY",
-      externalReference: JSON.stringify({
-        plan: planKey,
-        billing_period: billingPeriod,
-        company_name: companyName,
-        admin_name: adminName,
-        admin_email: adminEmail,
-        admin_phone: adminPhone || "",
-        document: document || "",
-      }),
+      externalReference: JSON.stringify(externalRefData),
     };
 
     console.log("[ASAAS-CHECKOUT] Creating subscription:", subscriptionPayload);
