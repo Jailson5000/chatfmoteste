@@ -10,6 +10,7 @@ interface Appointment {
   id: string;
   law_firm_id: string;
   start_time: string;
+  end_time: string;
   client_name: string | null;
   client_phone: string | null;
   status: string;
@@ -49,7 +50,7 @@ serve(async (req) => {
 
     const { data: pendingReminders, error: reminderError } = await supabase
       .from("appointments")
-      .select("*, service:services(id, name, duration_minutes)")
+      .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
       .in("status", ["scheduled", "confirmed"])
       .is("reminder_sent_at", null)
       .gte("start_time", in23Hours.toISOString())
@@ -69,7 +70,7 @@ serve(async (req) => {
 
     const { data: pendingConfirmations, error: confirmError } = await supabase
       .from("appointments")
-      .select("*, service:services(id, name, duration_minutes)")
+      .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
       .eq("status", "scheduled")
       .is("confirmation_sent_at", null)
       .gte("start_time", in1Hour.toISOString())
@@ -90,7 +91,7 @@ serve(async (req) => {
     };
 
     // Process reminders (24h before)
-    for (const appointment of (pendingReminders || []) as Appointment[]) {
+    for (const appointment of (pendingReminders || []) as unknown as Appointment[]) {
       try {
         const sent = await sendWhatsAppMessage(
           supabase,
@@ -112,7 +113,7 @@ serve(async (req) => {
     }
 
     // Process confirmations (2h before)
-    for (const appointment of (pendingConfirmations || []) as Appointment[]) {
+    for (const appointment of (pendingConfirmations || []) as unknown as Appointment[]) {
       try {
         const sent = await sendWhatsAppMessage(
           supabase,
@@ -181,15 +182,21 @@ async function sendWhatsAppMessage(
   }
 
   const startDate = new Date(appointment.start_time);
+  const endDate = new Date(appointment.end_time);
   const dateStr = startDate.toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",
     month: "long",
   });
-  const timeStr = startDate.toLocaleTimeString("pt-BR", {
+  const startTimeStr = startDate.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
   });
+  const endTimeStr = endDate.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const timeRangeStr = `${startTimeStr} às ${endTimeStr}`;
 
   const serviceName = appointment.service?.name || "Agendamento";
   const companyName = lawFirm?.name || "Empresa";
@@ -201,7 +208,7 @@ async function sendWhatsAppMessage(
     message = `Olá ${clientName}! 👋\n\n` +
       `Lembramos que você tem um agendamento amanhã:\n\n` +
       `📅 *${dateStr}*\n` +
-      `🕐 *${timeStr}*\n` +
+      `🕐 *${timeRangeStr}*\n` +
       `📋 *${serviceName}*\n\n` +
       `Local: ${companyName}\n\n` +
       `Aguardamos você! Caso precise reagendar, entre em contato.`;
@@ -209,7 +216,7 @@ async function sendWhatsAppMessage(
     message = `Olá ${clientName}! 👋\n\n` +
       `Seu agendamento é em breve:\n\n` +
       `📅 *${dateStr}*\n` +
-      `🕐 *${timeStr}*\n` +
+      `🕐 *${timeRangeStr}*\n` +
       `📋 *${serviceName}*\n\n` +
       `Por favor, *confirme sua presença* respondendo:\n` +
       `✅ *SIM* - Confirmo\n` +
