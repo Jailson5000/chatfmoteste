@@ -989,6 +989,7 @@ export type Database = {
           document: string | null
           email: string | null
           id: string
+          is_agenda_client: boolean | null
           law_firm_id: string
           lgpd_consent: boolean
           lgpd_consent_date: string | null
@@ -1010,6 +1011,7 @@ export type Database = {
           document?: string | null
           email?: string | null
           id?: string
+          is_agenda_client?: boolean | null
           law_firm_id: string
           lgpd_consent?: boolean
           lgpd_consent_date?: string | null
@@ -1031,6 +1033,7 @@ export type Database = {
           document?: string | null
           email?: string | null
           id?: string
+          is_agenda_client?: boolean | null
           law_firm_id?: string
           lgpd_consent?: boolean
           lgpd_consent_date?: string | null

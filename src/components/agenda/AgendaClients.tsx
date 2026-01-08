@@ -54,7 +54,7 @@ const defaultFormData: ClientFormData = {
 };
 
 export function AgendaClients() {
-  const { clients, isLoading, createClient, updateClient, deleteClient, getUpcomingBirthdays } = useAgendaClients();
+  const { clients, isLoading, createClient, updateClient, removeFromAgenda, getUpcomingBirthdays } = useAgendaClients();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<AgendaClient | null>(null);
@@ -100,7 +100,7 @@ export function AgendaClients() {
 
   const handleConfirmDelete = async () => {
     if (deletingClient) {
-      await deleteClient.mutateAsync(deletingClient.id);
+      await removeFromAgenda.mutateAsync(deletingClient.id);
       setDeleteDialogOpen(false);
       setDeletingClient(null);
     }
@@ -414,10 +414,10 @@ export function AgendaClients() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir cliente?</AlertDialogTitle>
+            <AlertDialogTitle>Remover cliente da agenda?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O cliente "{deletingClient?.name}" será removido
-              permanentemente.
+              O cliente "{deletingClient?.name}" será removido da agenda, mas continuará
+              disponível em Contatos.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -426,7 +426,7 @@ export function AgendaClients() {
               onClick={handleConfirmDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Excluir
+              Remover
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
