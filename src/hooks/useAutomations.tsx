@@ -30,6 +30,7 @@ export interface Automation {
   last_prompt: string | null;
   version: number;
   notify_on_transfer: boolean;
+  scheduling_enabled?: boolean;
 }
 
 export interface CreateAutomationParams {

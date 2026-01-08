@@ -631,6 +631,7 @@ export type Database = {
           name: string
           notify_on_transfer: boolean
           position: number
+          scheduling_enabled: boolean | null
           trigger_config: Json | null
           trigger_type: string
           updated_at: string
@@ -650,6 +651,7 @@ export type Database = {
           name: string
           notify_on_transfer?: boolean
           position?: number
+          scheduling_enabled?: boolean | null
           trigger_config?: Json | null
           trigger_type: string
           updated_at?: string
@@ -669,6 +671,7 @@ export type Database = {
           name?: string
           notify_on_transfer?: boolean
           position?: number
+          scheduling_enabled?: boolean | null
           trigger_config?: Json | null
           trigger_type?: string
           updated_at?: string
