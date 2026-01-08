@@ -33,8 +33,11 @@ export function AgendaCalendar() {
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
+  // Filter out cancelled appointments for calendar view
+  const activeAppointments = appointments.filter((apt) => apt.status !== "cancelled");
+
   const getAppointmentsForDay = (date: Date) => {
-    return appointments.filter((apt) => isSameDay(new Date(apt.start_time), date));
+    return activeAppointments.filter((apt) => isSameDay(new Date(apt.start_time), date));
   };
 
   const handlePrevWeek = () => setWeekStart(subWeeks(weekStart, 1));
@@ -165,9 +168,9 @@ export function AgendaCalendar() {
             <div className="flex justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
             </div>
-          ) : appointments.length > 0 ? (
+          ) : activeAppointments.length > 0 ? (
             <div className="space-y-3">
-              {appointments.map((apt) => (
+              {activeAppointments.map((apt) => (
                 <div
                   key={apt.id}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
