@@ -116,12 +116,13 @@ export function AppSidebar() {
   const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
 
   // Build bottom menu items based on user role (profileItem is in Footer already)
+  // Order: Agenda, Conexões, Configurações
   const bottomMenuItems = isAttendant
     ? showAgenda
       ? [agendaItem, settingsItem]
       : [settingsItem]
     : showAgenda
-      ? [...adminOnlyItems, agendaItem, settingsItem]
+      ? [agendaItem, ...adminOnlyItems, settingsItem]
       : [...adminOnlyItems, settingsItem];
 
   // Open sections if on one of their pages
