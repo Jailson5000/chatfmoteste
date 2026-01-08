@@ -46,44 +46,46 @@ export default function Agenda() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex flex-wrap h-auto gap-1 w-full max-w-5xl">
-          <TabsTrigger value="calendar" className="flex items-center gap-2">
-            <CalendarDays className="h-4 w-4" />
-            <span className="hidden sm:inline">Calendário</span>
-          </TabsTrigger>
-          <TabsTrigger value="appointments" className="flex items-center gap-2">
-            <List className="h-4 w-4" />
-            <span className="hidden sm:inline">Agendamentos</span>
-          </TabsTrigger>
-          <TabsTrigger value="services" className="flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            <span className="hidden sm:inline">Serviços</span>
-          </TabsTrigger>
-          <TabsTrigger value="professionals" className="flex items-center gap-2">
-            <UserCheck className="h-4 w-4" />
-            <span className="hidden sm:inline">Profissionais</span>
-          </TabsTrigger>
-          <TabsTrigger value="clients" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">Clientes</span>
-          </TabsTrigger>
-          <TabsTrigger value="returns" className="flex items-center gap-2">
-            <RotateCcw className="h-4 w-4" />
-            <span className="hidden sm:inline">Retornos</span>
-          </TabsTrigger>
-          <TabsTrigger value="birthday" className="flex items-center gap-2">
-            <Cake className="h-4 w-4" />
-            <span className="hidden sm:inline">Aniversários</span>
-          </TabsTrigger>
-          <TabsTrigger value="ai-agent" className="flex items-center gap-2">
-            <Bot className="h-4 w-4" />
-            <span className="hidden sm:inline">Agente IA</span>
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="flex items-center gap-2">
-            <Settings2 className="h-4 w-4" />
-            <span className="hidden sm:inline">Configurar</span>
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto pb-2">
+          <TabsList className="inline-flex h-auto gap-1 min-w-max">
+            <TabsTrigger value="calendar" className="flex items-center gap-1.5 px-3 py-2">
+              <CalendarDays className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Calendário</span>
+            </TabsTrigger>
+            <TabsTrigger value="appointments" className="flex items-center gap-1.5 px-3 py-2">
+              <List className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Agendamentos</span>
+            </TabsTrigger>
+            <TabsTrigger value="services" className="flex items-center gap-1.5 px-3 py-2">
+              <Clock className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Serviços</span>
+            </TabsTrigger>
+            <TabsTrigger value="professionals" className="flex items-center gap-1.5 px-3 py-2">
+              <UserCheck className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Profissionais</span>
+            </TabsTrigger>
+            <TabsTrigger value="clients" className="flex items-center gap-1.5 px-3 py-2">
+              <Users className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Clientes</span>
+            </TabsTrigger>
+            <TabsTrigger value="returns" className="flex items-center gap-1.5 px-3 py-2">
+              <RotateCcw className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Retornos</span>
+            </TabsTrigger>
+            <TabsTrigger value="birthday" className="flex items-center gap-1.5 px-3 py-2">
+              <Cake className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Aniversários</span>
+            </TabsTrigger>
+            <TabsTrigger value="ai-agent" className="flex items-center gap-1.5 px-3 py-2">
+              <Bot className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Agente IA</span>
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-1.5 px-3 py-2">
+              <Settings2 className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Configurar</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="calendar" className="mt-6">
           <AgendaCalendar />
