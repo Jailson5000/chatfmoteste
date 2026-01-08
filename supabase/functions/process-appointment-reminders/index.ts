@@ -16,11 +16,15 @@ interface Appointment {
   status: string;
   reminder_sent_at: string | null;
   confirmation_sent_at: string | null;
+  pre_message_sent_at: string | null;
   conversation_id: string | null;
   service: {
     id: string;
     name: string;
     duration_minutes: number;
+    pre_message_enabled: boolean | null;
+    pre_message_text: string | null;
+    pre_message_hours_before: number | null;
   } | null;
 }
 
@@ -67,6 +71,7 @@ serve(async (req) => {
     const results = {
       reminders_sent: 0,
       confirmations_sent: 0,
+      pre_messages_sent: 0,
       errors: [] as string[],
     };
 
@@ -77,7 +82,7 @@ serve(async (req) => {
 
       const { data: pendingReminders, error: reminderError } = await supabase
         .from("appointments")
-        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, conversation_id, service:services(id, name, duration_minutes)")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, pre_message_sent_at, conversation_id, service:services(id, name, duration_minutes, pre_message_enabled, pre_message_text, pre_message_hours_before)")
         .eq("law_firm_id", lawFirmId)
         .in("status", ["scheduled", "confirmed"])
         .is("reminder_sent_at", null)
@@ -113,7 +118,7 @@ serve(async (req) => {
 
       const { data: pendingConfirmations, error: confirmError } = await supabase
         .from("appointments")
-        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, conversation_id, service:services(id, name, duration_minutes)")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, pre_message_sent_at, conversation_id, service:services(id, name, duration_minutes, pre_message_enabled, pre_message_text, pre_message_hours_before)")
         .eq("law_firm_id", lawFirmId)
         .eq("status", "scheduled")
         .is("confirmation_sent_at", null)
@@ -142,6 +147,53 @@ serve(async (req) => {
           results.errors.push(`Confirmation ${appointment.id}: ${msg}`);
         }
       }
+
+      // Process service-specific pre-messages
+      // Get all services with pre_message_enabled for this law firm
+      const { data: servicesWithPreMsg } = await supabase
+        .from("services")
+        .select("id, pre_message_hours_before")
+        .eq("law_firm_id", lawFirmId)
+        .eq("pre_message_enabled", true)
+        .eq("is_active", true);
+
+      for (const service of (servicesWithPreMsg || [])) {
+        const preHours = service.pre_message_hours_before || 48;
+        const preWindowEnd = new Date(now.getTime() + preHours * 60 * 60 * 1000);
+        const preWindowStart = new Date(now.getTime() + (preHours - 1) * 60 * 60 * 1000);
+
+        const { data: pendingPreMessages, error: preError } = await supabase
+          .from("appointments")
+          .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, pre_message_sent_at, conversation_id, service:services(id, name, duration_minutes, pre_message_enabled, pre_message_text, pre_message_hours_before)")
+          .eq("law_firm_id", lawFirmId)
+          .eq("service_id", service.id)
+          .in("status", ["scheduled", "confirmed"])
+          .is("pre_message_sent_at", null)
+          .gte("start_time", preWindowStart.toISOString())
+          .lte("start_time", preWindowEnd.toISOString())
+          .not("client_phone", "is", null);
+
+        if (preError) {
+          console.error(`[appointment-reminders] Error fetching pre-messages for service ${service.id}:`, preError);
+          continue;
+        }
+
+        for (const appointment of (pendingPreMessages || []) as unknown as Appointment[]) {
+          try {
+            const sent = await sendWhatsAppMessage(supabase, appointment, "pre_message");
+            if (sent) {
+              await supabase
+                .from("appointments")
+                .update({ pre_message_sent_at: new Date().toISOString() })
+                .eq("id", appointment.id);
+              results.pre_messages_sent++;
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Unknown error";
+            results.errors.push(`PreMessage ${appointment.id}: ${msg}`);
+          }
+        }
+      }
     }
 
     console.log("[appointment-reminders] Processing complete:", results);
@@ -164,7 +216,7 @@ async function sendWhatsAppMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
   appointment: Appointment,
-  type: "reminder" | "confirmation"
+  type: "reminder" | "confirmation" | "pre_message"
 ): Promise<boolean> {
   if (!appointment.client_phone) {
     console.log(`[appointment-reminders] No phone for appointment ${appointment.id}`);
@@ -241,8 +293,17 @@ async function sendWhatsAppMessage(
   let messageTemplate: string;
   if (type === "reminder") {
     messageTemplate = lawFirm?.reminder_message_template || defaultReminderMessage;
-  } else {
+  } else if (type === "confirmation") {
     messageTemplate = lawFirm?.confirmation_message_template || defaultConfirmationMessage;
+  } else if (type === "pre_message") {
+    // For pre_message, use the service-specific message
+    if (!appointment.service?.pre_message_enabled || !appointment.service?.pre_message_text) {
+      console.log(`[appointment-reminders] No pre-message configured for service ${appointment.service?.id}`);
+      return false;
+    }
+    messageTemplate = appointment.service.pre_message_text;
+  } else {
+    return false;
   }
 
   // Replace variables in the template
