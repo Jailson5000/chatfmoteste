@@ -28,6 +28,7 @@ export interface LawFirm {
   business_hours: BusinessHours | null;
   reminder_hours_before: number | null;
   confirmation_hours_before: number | null;
+  timezone: string | null;
   created_at: string;
   updated_at: string;
 }

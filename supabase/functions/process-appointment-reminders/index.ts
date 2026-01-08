@@ -170,10 +170,10 @@ async function sendWhatsAppMessage(
     return false;
   }
 
-  // Get law firm settings
+  // Get law firm settings including timezone
   const { data: lawFirm } = await supabase
     .from("law_firms")
-    .select("name")
+    .select("name, timezone")
     .eq("id", appointment.law_firm_id)
     .single();
 
@@ -193,7 +193,7 @@ async function sendWhatsAppMessage(
 
   const startDate = new Date(appointment.start_time);
   const endDate = new Date(appointment.end_time);
-  const timeZone = "America/Sao_Paulo";
+  const timeZone = lawFirm?.timezone || "America/Sao_Paulo";
   
   const dateStr = startDate.toLocaleDateString("pt-BR", {
     weekday: "long",

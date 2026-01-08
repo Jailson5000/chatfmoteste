@@ -43,17 +43,17 @@ serve(async (req) => {
       );
     }
 
-    // Get law firm info
+    // Get law firm info including timezone
     const { data: lawFirm } = await supabase
       .from("law_firms")
-      .select("name")
+      .select("name, timezone")
       .eq("id", appointment.law_firm_id)
       .single();
 
-    // Format date/time with São Paulo timezone
+    // Format date/time with company timezone (default: São Paulo)
     const startDate = new Date(appointment.start_time);
     const endDate = new Date(appointment.end_time);
-    const timeZone = "America/Sao_Paulo";
+    const timeZone = lawFirm?.timezone || "America/Sao_Paulo";
     
     const dateStr = startDate.toLocaleDateString("pt-BR", {
       weekday: "long",
