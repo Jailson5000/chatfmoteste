@@ -294,15 +294,21 @@ export default function Dashboard() {
     return result;
   }, [departments, filteredClients]);
 
-  // Team members activity
+  // Team members activity - Feature flag: disabled until real metrics are implemented
+  // TODO: Implement real conversation metrics from conversations table
+  const TEAM_METRICS_ENABLED = false;
+  
   const teamActivity = useMemo(() => {
-    return teamMembers.slice(0, 5).map((member, index) => ({
+    if (!TEAM_METRICS_ENABLED) {
+      return []; // Return empty to show placeholder
+    }
+    return teamMembers.slice(0, 5).map((member) => ({
       name: member.full_name,
       avatar: member.avatar_url,
-      conversations: Math.floor(Math.random() * 100) + 10,
-      resolved: Math.floor(Math.random() * 50),
-      pending: Math.floor(Math.random() * 20),
-      lastActivity: `Há ${Math.floor(Math.random() * 12) + 1} horas`,
+      conversations: 0, // Placeholder for real data
+      resolved: 0,
+      pending: 0,
+      lastActivity: '-',
     }));
   }, [teamMembers]);
 
@@ -695,35 +701,45 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 text-xs text-muted-foreground border-b pb-2">
-                <span>Responsável</span>
-                <span className="text-center">Conversas</span>
-                <span className="text-right">Última Atividade</span>
-              </div>
-              {teamActivity.map((member) => (
-                <div key={member.name} className="grid grid-cols-3 items-center">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium">
-                      {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                    </div>
-                    <span className="text-sm truncate">{member.name}</span>
-                  </div>
-                  <div className="flex items-center justify-center gap-2">
-                    <Badge variant="default" className="text-xs">
-                      {member.conversations}
-                    </Badge>
-                    <Badge variant="secondary" className="text-xs">
-                      {member.resolved}
-                    </Badge>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground flex items-center justify-end gap-1">
-                    <Clock className="h-3 w-3" />
-                    {member.lastActivity}
-                  </div>
+            {teamActivity.length > 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 text-xs text-muted-foreground border-b pb-2">
+                  <span>Responsável</span>
+                  <span className="text-center">Conversas</span>
+                  <span className="text-right">Última Atividade</span>
                 </div>
-              ))}
-            </div>
+                {teamActivity.map((member) => (
+                  <div key={member.name} className="grid grid-cols-3 items-center">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium">
+                        {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </div>
+                      <span className="text-sm truncate">{member.name}</span>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <Badge variant="default" className="text-xs">
+                        {member.conversations}
+                      </Badge>
+                      <Badge variant="secondary" className="text-xs">
+                        {member.resolved}
+                      </Badge>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground flex items-center justify-end gap-1">
+                      <Clock className="h-3 w-3" />
+                      {member.lastActivity}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-48 flex flex-col items-center justify-center text-muted-foreground">
+                <BarChart3 className="h-12 w-12 text-muted-foreground/30 mb-4" />
+                <p className="text-sm font-medium">Métricas reais em breve</p>
+                <p className="text-xs text-center mt-2 max-w-48">
+                  Estatísticas detalhadas de cada membro da equipe serão exibidas aqui.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
