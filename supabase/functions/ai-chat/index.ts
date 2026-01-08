@@ -2307,6 +2307,61 @@ REGRAS PARA USO DAS AÇÕES:
       console.log(`[AI Chat] Added CRM instructions with ${departments.length} depts, ${statuses.length} statuses, ${otherAgents.length} agents, ${teamMembers.length} members`);
     }
 
+    // Add SCHEDULING instructions if agent has scheduling enabled
+    if (isSchedulingAgent && effectiveLawFirmIdForCalendar) {
+      // Fetch services for context
+      const { data: services } = await supabase
+        .from("services")
+        .select("id, name, duration_minutes, price")
+        .eq("law_firm_id", effectiveLawFirmIdForCalendar)
+        .eq("is_active", true);
+      
+      const servicesList = services?.map((s: any) => 
+        `  - ${s.name} (${s.duration_minutes}min${s.price ? `, R$${s.price}` : ''})`
+      ).join("\n") || "  Nenhum serviço cadastrado";
+      
+      // Get current date for context
+      const now = new Date();
+      const currentDate = now.toISOString().split('T')[0];
+      const brazilTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      
+      const schedulingInstructions = `\n\n📅 SISTEMA DE AGENDAMENTO INTELIGENTE - VOCÊ TEM ACESSO PARA:
+
+🎯 SUAS PRINCIPAIS FUNÇÕES DE AGENDAMENTO:
+1. **list_services** - Listar serviços disponíveis (USE PRIMEIRO para mostrar opções)
+2. **get_available_slots** - Verificar horários livres para uma data e serviço
+3. **book_appointment** - Criar novo agendamento
+4. **list_client_appointments** - Ver agendamentos existentes do cliente
+5. **reschedule_appointment** - Remarcar um agendamento
+6. **cancel_appointment** - Cancelar um agendamento
+7. **confirm_appointment** - Confirmar presença do cliente
+
+📋 SERVIÇOS DISPONÍVEIS:
+${servicesList}
+
+⏰ DATA/HORA ATUAL: ${brazilTime} (Fuso: America/Sao_Paulo)
+📆 HOJE: ${currentDate}
+
+🔄 FLUXO DE ATENDIMENTO PARA AGENDAMENTO:
+1. Quando cliente mencionar agendamento/marcar/reservar → Use list_services para mostrar opções
+2. Após cliente escolher serviço → Pergunte a data desejada
+3. Com a data → Use get_available_slots para mostrar horários
+4. Após escolher horário → Confirme nome e telefone do cliente
+5. Com todos os dados → Use book_appointment para finalizar
+6. Confirme o agendamento e envie os detalhes
+
+⚠️ REGRAS CRÍTICAS:
+- SEMPRE use as funções de agendamento quando cliente mencionar: agendar, marcar, reservar, horário, consulta, serviço
+- NÃO invente horários - sempre consulte get_available_slots
+- NÃO assuma serviços - sempre mostre a lista com list_services
+- CONFIRME os dados antes de book_appointment
+- Use o telefone do contexto se disponível (${context?.clientPhone || 'não informado'})
+- Use o nome do contexto se disponível (${context?.clientName || 'não informado'})`;
+      
+      messages.push({ role: "system", content: schedulingInstructions });
+      console.log(`[AI Chat] Added scheduling instructions with ${services?.length || 0} services`);
+    }
+
     let clientMemoriesText = "";
     if (context?.clientId) {
       clientMemoriesText = await getClientMemories(supabase, context.clientId);
