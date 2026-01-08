@@ -30,7 +30,7 @@ import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
-import Calendar from "./pages/Calendar";
+// Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
@@ -187,16 +187,8 @@ const App = () => (
             <Route index element={<AIVoice />} />
           </Route>
           
-          <Route
-            path="/calendar"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Calendar />} />
-          </Route>
+          {/* Legacy route: /calendar → redirect to /agenda (backwards compatibility) */}
+          <Route path="/calendar" element={<Navigate to="/agenda" replace />} />
           
           <Route
             path="/agenda"
