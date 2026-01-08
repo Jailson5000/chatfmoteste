@@ -2131,6 +2131,7 @@ export type Database = {
           phone2: string | null
           reminder_hours_before: number | null
           subdomain: string | null
+          timezone: string | null
           updated_at: string
           website: string | null
         }
@@ -2151,6 +2152,7 @@ export type Database = {
           phone2?: string | null
           reminder_hours_before?: number | null
           subdomain?: string | null
+          timezone?: string | null
           updated_at?: string
           website?: string | null
         }
@@ -2171,6 +2173,7 @@ export type Database = {
           phone2?: string | null
           reminder_hours_before?: number | null
           subdomain?: string | null
+          timezone?: string | null
           updated_at?: string
           website?: string | null
         }

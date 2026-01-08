@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Save, 
   Upload, 
@@ -34,6 +35,7 @@ interface LawFirmData {
   website?: string;
   logo_url?: string;
   business_hours?: BusinessHours;
+  timezone?: string;
 }
 
 interface GeneralInfoSettingsProps {
@@ -65,6 +67,19 @@ export function GeneralInfoSettings({
   const [instagram, setInstagram] = useState("");
   const [facebook, setFacebook] = useState("");
   const [website, setWebsite] = useState("");
+  const [timezone, setTimezone] = useState("America/Sao_Paulo");
+
+  // Available timezones for Brazil
+  const TIMEZONES = [
+    { value: "America/Sao_Paulo", label: "Brasília (São Paulo, Rio, BH)" },
+    { value: "America/Manaus", label: "Manaus (Amazonas)" },
+    { value: "America/Belem", label: "Belém (Pará)" },
+    { value: "America/Fortaleza", label: "Fortaleza (Fernando de Noronha)" },
+    { value: "America/Cuiaba", label: "Cuiabá (Mato Grosso)" },
+    { value: "America/Rio_Branco", label: "Rio Branco (Acre)" },
+    { value: "America/Porto_Velho", label: "Porto Velho (Rondônia)" },
+    { value: "America/Boa_Vista", label: "Boa Vista (Roraima)" },
+  ];
 
   useEffect(() => {
     if (lawFirm) {
@@ -77,6 +92,7 @@ export function GeneralInfoSettings({
       setInstagram(lawFirm.instagram || "");
       setFacebook(lawFirm.facebook || "");
       setWebsite(lawFirm.website || "");
+      setTimezone(lawFirm.timezone || "America/Sao_Paulo");
     }
   }, [lawFirm]);
 
@@ -98,6 +114,7 @@ export function GeneralInfoSettings({
       instagram,
       facebook,
       website,
+      timezone,
     });
   };
 
@@ -306,6 +323,32 @@ export function GeneralInfoSettings({
                       onChange={(e) => setWebsite(e.target.value)}
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Timezone */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-foreground">Fuso Horário</h4>
+                <div className="space-y-2">
+                  <Label htmlFor="timezone" className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    Fuso Horário da Empresa
+                  </Label>
+                  <Select value={timezone} onValueChange={setTimezone}>
+                    <SelectTrigger className="w-full md:w-80">
+                      <SelectValue placeholder="Selecione o fuso horário" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEZONES.map((tz) => (
+                        <SelectItem key={tz.value} value={tz.value}>
+                          {tz.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    Este fuso horário será usado para todas as notificações de agendamento.
+                  </p>
                 </div>
               </div>
               
