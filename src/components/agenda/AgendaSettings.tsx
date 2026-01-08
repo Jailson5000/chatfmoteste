@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Clock } from "lucide-react";
+import { Save, Clock, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -32,23 +32,35 @@ export function AgendaSettings() {
   const { lawFirm, updateLawFirm } = useLawFirm();
   const { toast } = useToast();
   const [hours, setHours] = useState<BusinessHours>(DEFAULT_HOURS);
+  const [reminderHours, setReminderHours] = useState<number>(24);
+  const [confirmationHours, setConfirmationHours] = useState<number>(2);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (lawFirm?.business_hours) {
       setHours(lawFirm.business_hours);
     }
+    if (lawFirm?.reminder_hours_before !== null && lawFirm?.reminder_hours_before !== undefined) {
+      setReminderHours(lawFirm.reminder_hours_before);
+    }
+    if (lawFirm?.confirmation_hours_before !== null && lawFirm?.confirmation_hours_before !== undefined) {
+      setConfirmationHours(lawFirm.confirmation_hours_before);
+    }
   }, [lawFirm]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await updateLawFirm.mutateAsync({ business_hours: hours });
-      toast({ title: "Horários salvos com sucesso" });
+      await updateLawFirm.mutateAsync({ 
+        business_hours: hours,
+        reminder_hours_before: reminderHours,
+        confirmation_hours_before: confirmationHours,
+      });
+      toast({ title: "Configurações salvas com sucesso" });
     } catch (error) {
       toast({
         title: "Erro ao salvar",
-        description: "Não foi possível salvar os horários",
+        description: "Não foi possível salvar as configurações",
         variant: "destructive",
       });
     } finally {
@@ -76,7 +88,7 @@ export function AgendaSettings() {
         <div>
           <h2 className="text-xl font-semibold">Configurações</h2>
           <p className="text-sm text-muted-foreground">
-            Configure os horários de funcionamento para agendamentos
+            Configure horários de funcionamento e lembretes
           </p>
         </div>
         <Button onClick={handleSave} disabled={isSaving}>
@@ -135,6 +147,59 @@ export function AgendaSettings() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Configurações de Lembretes
+          </CardTitle>
+          <CardDescription>
+            Configure quando os lembretes automáticos serão enviados
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label htmlFor="reminderHours">Lembrete (horas antes)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="reminderHours"
+                  type="number"
+                  min={1}
+                  max={72}
+                  value={reminderHours}
+                  onChange={(e) => setReminderHours(Math.max(1, parseInt(e.target.value) || 24))}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">horas antes do agendamento</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Padrão: 24 horas. O cliente receberá um lembrete automático.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmationHours">Confirmação (horas antes)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="confirmationHours"
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={confirmationHours}
+                  onChange={(e) => setConfirmationHours(Math.max(1, parseInt(e.target.value) || 2))}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">horas antes do agendamento</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Padrão: 2 horas. Pedido de confirmação de presença.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Dicas de Configuração</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
@@ -145,7 +210,10 @@ export function AgendaSettings() {
             • A <strong>duração do serviço</strong> determina automaticamente os slots disponíveis
           </p>
           <p>
-            • Use o <strong>buffer</strong> para adicionar tempo de preparo entre atendimentos
+            • O <strong>lembrete</strong> é enviado automaticamente no horário configurado
+          </p>
+          <p>
+            • A <strong>confirmação</strong> pede que o cliente confirme sua presença
           </p>
           <p>
             • Os agendamentos são sincronizados automaticamente com o Google Calendar

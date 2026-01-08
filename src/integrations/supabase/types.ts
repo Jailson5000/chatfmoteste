@@ -2117,6 +2117,7 @@ export type Database = {
         Row: {
           address: string | null
           business_hours: Json | null
+          confirmation_hours_before: number | null
           created_at: string
           document: string | null
           email: string | null
@@ -2128,6 +2129,7 @@ export type Database = {
           oab_number: string | null
           phone: string | null
           phone2: string | null
+          reminder_hours_before: number | null
           subdomain: string | null
           updated_at: string
           website: string | null
@@ -2135,6 +2137,7 @@ export type Database = {
         Insert: {
           address?: string | null
           business_hours?: Json | null
+          confirmation_hours_before?: number | null
           created_at?: string
           document?: string | null
           email?: string | null
@@ -2146,6 +2149,7 @@ export type Database = {
           oab_number?: string | null
           phone?: string | null
           phone2?: string | null
+          reminder_hours_before?: number | null
           subdomain?: string | null
           updated_at?: string
           website?: string | null
@@ -2153,6 +2157,7 @@ export type Database = {
         Update: {
           address?: string | null
           business_hours?: Json | null
+          confirmation_hours_before?: number | null
           created_at?: string
           document?: string | null
           email?: string | null
@@ -2164,6 +2169,7 @@ export type Database = {
           oab_number?: string | null
           phone?: string | null
           phone2?: string | null
+          reminder_hours_before?: number | null
           subdomain?: string | null
           updated_at?: string
           website?: string | null
