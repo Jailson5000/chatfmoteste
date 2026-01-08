@@ -61,7 +61,7 @@ export function LandingPage() {
         "30 minutos de áudio IA por mês",
         "4 usuários",
         "1 WhatsApp conectado",
-        "1 agente de IA",
+        "2 agentes de IA",
         "Tudo do plano Basic",
         "Transcrição de áudio e imagens",
         "Mídias e mensagens rápidas",
@@ -71,15 +71,15 @@ export function LandingPage() {
     },
     {
       name: "PROFESSIONAL",
-      price: "697",
-      installment: "12x de R$ 697",
+      price: "897",
+      installment: "12x de R$ 897",
       description: "Para empresas em crescimento que precisam de mais volume e flexibilidade.",
       items: [
         "500 conversas com IA por mês",
         "40 minutos de áudio IA por mês",
-        "6 usuários",
+        "5 usuários",
         "2 WhatsApps conectados",
-        "4 agentes de IA",
+        "3 agentes de IA",
         "Tudo do plano Starter",
         "IA avançada para conversação",
         "Maior capacidade operacional",
@@ -89,15 +89,15 @@ export function LandingPage() {
     },
     {
       name: "ENTERPRISE",
-      price: "1.497",
-      installment: "12x de R$ 1.497",
+      price: "1.697",
+      installment: "12x de R$ 1.697",
       description: "Para operações maiores, empresas estruturadas e alto volume de atendimento.",
       items: [
         "1000 conversas com IA por mês",
-        "60 minutos de áudio IA por mês",
-        "20 usuários",
+        "80 minutos de áudio IA por mês",
+        "10 usuários",
         "4 WhatsApps conectados",
-        "20 agentes de IA",
+        "10 agentes de IA",
         "Tudo do plano Professional",
         "Suporte exclusivo",
         "Estrutura completa para escala",
@@ -576,7 +576,7 @@ export function LandingPage() {
             <Button
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
             >
               Começar agora
               <ArrowRight className="ml-2 h-4 w-4" />
