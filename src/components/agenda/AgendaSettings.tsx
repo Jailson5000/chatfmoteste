@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Save, Clock, Bell } from "lucide-react";
+import { Save, Clock, Bell, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useLawFirm, BusinessHours } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
 
@@ -28,12 +29,40 @@ const DEFAULT_HOURS: BusinessHours = {
   sunday: { enabled: false, start: "08:00", end: "12:00" },
 };
 
+const DEFAULT_REMINDER_MESSAGE = `Olá {nome}! 👋
+
+Lembramos que você tem um agendamento amanhã:
+
+📅 *{data}*
+🕐 *{horario}*
+📋 *{servico}*
+
+Local: {empresa}
+
+Aguardamos você! Caso precise reagendar, entre em contato.`;
+
+const DEFAULT_CONFIRMATION_MESSAGE = `Olá {nome}! 👋
+
+Seu agendamento é em breve:
+
+📅 *{data}*
+🕐 *{horario}*
+📋 *{servico}*
+
+Por favor, *confirme sua presença* respondendo:
+✅ *SIM* - Confirmo
+❌ *NÃO* - Não poderei comparecer
+
+Aguardamos sua confirmação!`;
+
 export function AgendaSettings() {
   const { lawFirm, updateLawFirm } = useLawFirm();
   const { toast } = useToast();
   const [hours, setHours] = useState<BusinessHours>(DEFAULT_HOURS);
   const [reminderHours, setReminderHours] = useState<number>(24);
   const [confirmationHours, setConfirmationHours] = useState<number>(2);
+  const [reminderMessage, setReminderMessage] = useState<string>(DEFAULT_REMINDER_MESSAGE);
+  const [confirmationMessage, setConfirmationMessage] = useState<string>(DEFAULT_CONFIRMATION_MESSAGE);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -46,6 +75,12 @@ export function AgendaSettings() {
     if (lawFirm?.confirmation_hours_before !== null && lawFirm?.confirmation_hours_before !== undefined) {
       setConfirmationHours(lawFirm.confirmation_hours_before);
     }
+    if (lawFirm?.reminder_message_template) {
+      setReminderMessage(lawFirm.reminder_message_template);
+    }
+    if (lawFirm?.confirmation_message_template) {
+      setConfirmationMessage(lawFirm.confirmation_message_template);
+    }
   }, [lawFirm]);
 
   const handleSave = async () => {
@@ -55,7 +90,9 @@ export function AgendaSettings() {
         business_hours: hours,
         reminder_hours_before: reminderHours,
         confirmation_hours_before: confirmationHours,
-      });
+        reminder_message_template: reminderMessage,
+        confirmation_message_template: confirmationMessage,
+      } as any);
       toast({ title: "Configurações salvas com sucesso" });
     } catch (error) {
       toast({
@@ -193,6 +230,60 @@ export function AgendaSettings() {
               <p className="text-xs text-muted-foreground">
                 Padrão: 2 horas. Pedido de confirmação de presença.
               </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Personalizar Mensagens
+          </CardTitle>
+          <CardDescription>
+            Personalize as mensagens de lembrete e confirmação. Use as variáveis: {"{nome}"}, {"{data}"}, {"{horario}"}, {"{servico}"}, {"{empresa}"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-3">
+            <Label htmlFor="reminderMessage">Mensagem de Lembrete (24h antes)</Label>
+            <Textarea
+              id="reminderMessage"
+              value={reminderMessage}
+              onChange={(e) => setReminderMessage(e.target.value)}
+              rows={8}
+              placeholder="Digite a mensagem de lembrete..."
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Enviada automaticamente {reminderHours} horas antes do agendamento
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <Label htmlFor="confirmationMessage">Mensagem de Confirmação (2h antes)</Label>
+            <Textarea
+              id="confirmationMessage"
+              value={confirmationMessage}
+              onChange={(e) => setConfirmationMessage(e.target.value)}
+              rows={10}
+              placeholder="Digite a mensagem de confirmação..."
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Enviada automaticamente {confirmationHours} horas antes do agendamento
+            </p>
+          </div>
+
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <p className="text-sm font-medium mb-2">Variáveis disponíveis:</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-muted-foreground">
+              <span><code className="bg-muted px-1 rounded">{"{nome}"}</code> - Nome do cliente</span>
+              <span><code className="bg-muted px-1 rounded">{"{data}"}</code> - Data do agendamento</span>
+              <span><code className="bg-muted px-1 rounded">{"{horario}"}</code> - Horário (início às fim)</span>
+              <span><code className="bg-muted px-1 rounded">{"{servico}"}</code> - Nome do serviço</span>
+              <span><code className="bg-muted px-1 rounded">{"{empresa}"}</code> - Nome da empresa</span>
             </div>
           </div>
         </CardContent>

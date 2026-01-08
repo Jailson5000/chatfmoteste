@@ -2184,6 +2184,7 @@ export type Database = {
           address: string | null
           business_hours: Json | null
           confirmation_hours_before: number | null
+          confirmation_message_template: string | null
           created_at: string
           document: string | null
           email: string | null
@@ -2196,6 +2197,7 @@ export type Database = {
           phone: string | null
           phone2: string | null
           reminder_hours_before: number | null
+          reminder_message_template: string | null
           subdomain: string | null
           timezone: string | null
           updated_at: string
@@ -2205,6 +2207,7 @@ export type Database = {
           address?: string | null
           business_hours?: Json | null
           confirmation_hours_before?: number | null
+          confirmation_message_template?: string | null
           created_at?: string
           document?: string | null
           email?: string | null
@@ -2217,6 +2220,7 @@ export type Database = {
           phone?: string | null
           phone2?: string | null
           reminder_hours_before?: number | null
+          reminder_message_template?: string | null
           subdomain?: string | null
           timezone?: string | null
           updated_at?: string
@@ -2226,6 +2230,7 @@ export type Database = {
           address?: string | null
           business_hours?: Json | null
           confirmation_hours_before?: number | null
+          confirmation_message_template?: string | null
           created_at?: string
           document?: string | null
           email?: string | null
@@ -2238,6 +2243,7 @@ export type Database = {
           phone?: string | null
           phone2?: string | null
           reminder_hours_before?: number | null
+          reminder_message_template?: string | null
           subdomain?: string | null
           timezone?: string | null
           updated_at?: string

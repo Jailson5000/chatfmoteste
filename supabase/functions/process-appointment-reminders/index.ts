@@ -171,10 +171,10 @@ async function sendWhatsAppMessage(
     return false;
   }
 
-  // Get law firm settings including timezone
+  // Get law firm settings including timezone and custom templates
   const { data: lawFirm } = await supabase
     .from("law_firms")
-    .select("name, timezone")
+    .select("name, timezone, reminder_message_template, confirmation_message_template")
     .eq("id", appointment.law_firm_id)
     .single();
 
@@ -218,27 +218,40 @@ async function sendWhatsAppMessage(
   const companyName = lawFirm?.name || "Empresa";
   const clientName = appointment.client_name?.split(" ")[0] || "Cliente";
 
-  let message: string;
+  // Default messages
+  const defaultReminderMessage = `Olá {nome}! 👋\n\n` +
+    `Lembramos que você tem um agendamento amanhã:\n\n` +
+    `📅 *{data}*\n` +
+    `🕐 *{horario}*\n` +
+    `📋 *{servico}*\n\n` +
+    `Local: {empresa}\n\n` +
+    `Aguardamos você! Caso precise reagendar, entre em contato.`;
 
+  const defaultConfirmationMessage = `Olá {nome}! 👋\n\n` +
+    `Seu agendamento é em breve:\n\n` +
+    `📅 *{data}*\n` +
+    `🕐 *{horario}*\n` +
+    `📋 *{servico}*\n\n` +
+    `Por favor, *confirme sua presença* respondendo:\n` +
+    `✅ *SIM* - Confirmo\n` +
+    `❌ *NÃO* - Não poderei comparecer\n\n` +
+    `Aguardamos sua confirmação!`;
+
+  // Use custom template if available, otherwise use default
+  let messageTemplate: string;
   if (type === "reminder") {
-    message = `Olá ${clientName}! 👋\n\n` +
-      `Lembramos que você tem um agendamento amanhã:\n\n` +
-      `📅 *${dateStr}*\n` +
-      `🕐 *${timeRangeStr}*\n` +
-      `📋 *${serviceName}*\n\n` +
-      `Local: ${companyName}\n\n` +
-      `Aguardamos você! Caso precise reagendar, entre em contato.`;
+    messageTemplate = lawFirm?.reminder_message_template || defaultReminderMessage;
   } else {
-    message = `Olá ${clientName}! 👋\n\n` +
-      `Seu agendamento é em breve:\n\n` +
-      `📅 *${dateStr}*\n` +
-      `🕐 *${timeRangeStr}*\n` +
-      `📋 *${serviceName}*\n\n` +
-      `Por favor, *confirme sua presença* respondendo:\n` +
-      `✅ *SIM* - Confirmo\n` +
-      `❌ *NÃO* - Não poderei comparecer\n\n` +
-      `Aguardamos sua confirmação!`;
+    messageTemplate = lawFirm?.confirmation_message_template || defaultConfirmationMessage;
   }
+
+  // Replace variables in the template
+  const message = messageTemplate
+    .replace(/{nome}/g, clientName)
+    .replace(/{data}/g, dateStr)
+    .replace(/{horario}/g, timeRangeStr)
+    .replace(/{servico}/g, serviceName)
+    .replace(/{empresa}/g, companyName);
 
   // Send via Evolution API
   const phone = appointment.client_phone.replace(/\D/g, "");
