@@ -31,7 +31,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useServices, Service } from "@/hooks/useServices";
 import { useAppointments, TimeSlot } from "@/hooks/useAppointments";
+import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { cn } from "@/lib/utils";
+import { MessageSquare } from "lucide-react";
 
 interface NewAppointmentDialogProps {
   open: boolean;
@@ -46,6 +48,10 @@ export function NewAppointmentDialog({
 }: NewAppointmentDialogProps) {
   const { activeServices, isLoading: loadingServices } = useServices();
   const { createAppointment, getAvailableSlots } = useAppointments();
+  const { instances } = useWhatsAppInstances();
+
+  // Filter only connected instances
+  const connectedInstances = instances.filter(i => i.status === "connected");
 
   const [step, setStep] = useState<"service" | "datetime" | "client">("service");
   const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -56,9 +62,28 @@ export function NewAppointmentDialog({
   const [clientPhone, setClientPhone] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [notes, setNotes] = useState("");
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset form when dialog opens
+  useEffect(() => {
+    if (open) {
+      setStep("service");
+      setSelectedService(null);
+      setSelectedDate(defaultDate);
+      setSelectedSlot(null);
+      setClientName("");
+      setClientPhone("");
+      setClientEmail("");
+      setNotes("");
+      // Auto-select first connected instance if only one exists
+      if (connectedInstances.length === 1) {
+        setSelectedInstanceId(connectedInstances[0].id);
+      } else {
+        setSelectedInstanceId("");
+      }
+    }
+  }, [open, defaultDate, connectedInstances.length]);
   useEffect(() => {
     if (open) {
       setStep("service");
@@ -116,7 +141,8 @@ export function NewAppointmentDialog({
         notes: notes || null,
         status: "scheduled",
         created_by: "admin",
-      });
+        whatsapp_instance_id: selectedInstanceId || null,
+      } as any);
 
       onOpenChange(false);
     } finally {
@@ -293,6 +319,38 @@ export function NewAppointmentDialog({
             />
           </div>
         </div>
+
+        {/* WhatsApp Instance Selection - only show if there are multiple instances */}
+        {connectedInstances.length > 1 && (
+          <div className="space-y-2">
+            <Label htmlFor="whatsapp_instance">Instância WhatsApp</Label>
+            <Select value={selectedInstanceId} onValueChange={setSelectedInstanceId}>
+              <SelectTrigger>
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                  <SelectValue placeholder="Selecione a instância" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                {connectedInstances.map((instance) => (
+                  <SelectItem key={instance.id} value={instance.id}>
+                    <div className="flex items-center gap-2">
+                      <span>{instance.display_name || instance.instance_name}</span>
+                      {instance.phone_number && (
+                        <span className="text-xs text-muted-foreground">
+                          ({instance.phone_number})
+                        </span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Mensagens serão enviadas por esta instância
+            </p>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="client_email">E-mail (opcional)</Label>
