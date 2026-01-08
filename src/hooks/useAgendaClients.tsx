@@ -49,11 +49,45 @@ export function useAgendaClients() {
 
       if (!profile?.law_firm_id) throw new Error("Empresa não encontrada");
 
+      // Normalize phone for comparison (remove non-digits)
+      const normalizedPhone = (client.phone || "").replace(/\D/g, "");
+      
+      // Check if client with this phone already exists in contacts
+      const { data: existingClient } = await supabase
+        .from("clients")
+        .select("*")
+        .eq("law_firm_id", profile.law_firm_id)
+        .eq("phone", normalizedPhone)
+        .maybeSingle();
+
+      if (existingClient) {
+        // Client exists - update with agenda data and mark as agenda client
+        const { data, error } = await supabase
+          .from("clients")
+          .update({
+            name: client.name || existingClient.name,
+            email: client.email || existingClient.email,
+            document: client.document || existingClient.document,
+            address: client.address || existingClient.address,
+            notes: client.notes || existingClient.notes,
+            birth_date: client.birth_date || existingClient.birth_date,
+            birthday_message_enabled: client.birthday_message_enabled ?? existingClient.birthday_message_enabled ?? false,
+            is_agenda_client: true,
+          })
+          .eq("id", existingClient.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
+      }
+
+      // Client doesn't exist - create new one
       const { data, error } = await supabase
         .from("clients")
         .insert({
           name: client.name || "",
-          phone: client.phone || "",
+          phone: normalizedPhone,
           email: client.email,
           document: client.document,
           address: client.address,
@@ -71,6 +105,7 @@ export function useAgendaClients() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast({ title: "Cliente cadastrado com sucesso" });
     },
     onError: (error: Error) => {
