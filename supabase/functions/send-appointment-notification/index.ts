@@ -52,16 +52,23 @@ serve(async (req) => {
 
     // Format date/time
     const startDate = new Date(appointment.start_time);
+    const endDate = new Date(appointment.end_time);
     const dateStr = startDate.toLocaleDateString("pt-BR", {
       weekday: "long",
       day: "2-digit",
       month: "long",
       year: "numeric",
     });
-    const timeStr = startDate.toLocaleTimeString("pt-BR", {
+    const startTimeStr = startDate.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
     });
+    const endTimeStr = endDate.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    // Full time range: "08:05 às 10:35"
+    const timeRangeStr = `${startTimeStr} às ${endTimeStr}`;
 
     const serviceName = appointment.service?.name || "Agendamento";
     const companyName = lawFirm?.name || "Empresa";
@@ -75,7 +82,7 @@ serve(async (req) => {
       whatsappMessage = `Olá ${clientName}! 👋\n\n` +
         `Seu agendamento foi confirmado com sucesso! ✅\n\n` +
         `📅 *${dateStr}*\n` +
-        `🕐 *${timeStr}*\n` +
+        `🕐 *${timeRangeStr}*\n` +
         `📋 *${serviceName}*\n` +
         `📍 *${companyName}*\n\n` +
         `Você receberá um lembrete 24h antes.\n\n` +
@@ -90,7 +97,7 @@ serve(async (req) => {
           <p>Seu agendamento foi confirmado com sucesso!</p>
           <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
-            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>
             <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
             <p style="margin: 8px 0;"><strong>📍 Local:</strong> ${companyName}</p>
           </div>
@@ -105,7 +112,7 @@ serve(async (req) => {
       whatsappMessage = `Olá ${clientName}!\n\n` +
         `Seu agendamento foi cancelado:\n\n` +
         `📅 ${dateStr}\n` +
-        `🕐 ${timeStr}\n` +
+        `🕐 ${timeRangeStr}\n` +
         `📋 ${serviceName}\n\n` +
         `Se desejar reagendar, entre em contato conosco.\n\n` +
         `${companyName}`;
@@ -118,7 +125,7 @@ serve(async (req) => {
           <p>Seu agendamento foi cancelado:</p>
           <div style="background-color: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
-            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>
             <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
           </div>
           <p>Se desejar reagendar, entre em contato conosco.</p>
@@ -130,7 +137,7 @@ serve(async (req) => {
       whatsappMessage = `Olá ${clientName}!\n\n` +
         `Seu agendamento foi reagendado! 📅\n\n` +
         `📅 *Nova data:* ${dateStr}\n` +
-        `🕐 *Novo horário:* ${timeStr}\n` +
+        `🕐 *Novo horário:* ${timeRangeStr}\n` +
         `📋 *${serviceName}*\n` +
         `📍 *${companyName}*\n\n` +
         `Caso tenha dúvidas, entre em contato.\n\n` +
@@ -144,7 +151,7 @@ serve(async (req) => {
           <p>Seu agendamento foi reagendado para uma nova data!</p>
           <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p style="margin: 8px 0;"><strong>📅 Nova Data:</strong> ${dateStr}</p>
-            <p style="margin: 8px 0;"><strong>🕐 Novo Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Novo Horário:</strong> ${timeRangeStr}</p>
             <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
             <p style="margin: 8px 0;"><strong>📍 Local:</strong> ${companyName}</p>
           </div>
