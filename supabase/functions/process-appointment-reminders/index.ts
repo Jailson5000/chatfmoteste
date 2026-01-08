@@ -43,98 +43,108 @@ serve(async (req) => {
 
     console.log("[appointment-reminders] Starting reminder processing...");
 
-    // Get appointments that need reminders (24h before, reminder not sent yet)
+    // Get all law firms with their reminder settings
+    const { data: lawFirms, error: lawFirmsError } = await supabase
+      .from("law_firms")
+      .select("id, reminder_hours_before, confirmation_hours_before");
+
+    if (lawFirmsError) {
+      console.error("[appointment-reminders] Error fetching law firms:", lawFirmsError);
+      throw lawFirmsError;
+    }
+
+    // Create a map of law firm settings
+    const lawFirmSettings = new Map<string, { reminderHours: number; confirmationHours: number }>();
+    for (const lf of lawFirms || []) {
+      lawFirmSettings.set(lf.id, {
+        reminderHours: lf.reminder_hours_before ?? 24,
+        confirmationHours: lf.confirmation_hours_before ?? 2,
+      });
+    }
+
     const now = new Date();
-    const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const in23Hours = new Date(now.getTime() + 23 * 60 * 60 * 1000);
-
-    const { data: pendingReminders, error: reminderError } = await supabase
-      .from("appointments")
-      .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
-      .in("status", ["scheduled", "confirmed"])
-      .is("reminder_sent_at", null)
-      .gte("start_time", in23Hours.toISOString())
-      .lte("start_time", in24Hours.toISOString())
-      .not("client_phone", "is", null);
-
-    if (reminderError) {
-      console.error("[appointment-reminders] Error fetching reminders:", reminderError);
-      throw reminderError;
-    }
-
-    console.log(`[appointment-reminders] Found ${pendingReminders?.length || 0} appointments needing reminders`);
-
-    // Get appointments needing confirmation (2h before, confirmation not sent)
-    const in2Hours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-    const in1Hour = new Date(now.getTime() + 1 * 60 * 60 * 1000);
-
-    const { data: pendingConfirmations, error: confirmError } = await supabase
-      .from("appointments")
-      .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
-      .eq("status", "scheduled")
-      .is("confirmation_sent_at", null)
-      .gte("start_time", in1Hour.toISOString())
-      .lte("start_time", in2Hours.toISOString())
-      .not("client_phone", "is", null);
-
-    if (confirmError) {
-      console.error("[appointment-reminders] Error fetching confirmations:", confirmError);
-      throw confirmError;
-    }
-
-    console.log(`[appointment-reminders] Found ${pendingConfirmations?.length || 0} appointments needing confirmation`);
-
     const results = {
       reminders_sent: 0,
       confirmations_sent: 0,
       errors: [] as string[],
     };
 
-    // Process reminders (24h before)
-    for (const appointment of (pendingReminders || []) as unknown as Appointment[]) {
-      try {
-        const sent = await sendWhatsAppMessage(
-          supabase,
-          appointment,
-          "reminder"
-        );
+    // Process reminders for each law firm with their custom settings
+    for (const [lawFirmId, settings] of lawFirmSettings) {
+      const reminderWindowEnd = new Date(now.getTime() + settings.reminderHours * 60 * 60 * 1000);
+      const reminderWindowStart = new Date(now.getTime() + (settings.reminderHours - 1) * 60 * 60 * 1000);
 
-        if (sent) {
-          await supabase
-            .from("appointments")
-            .update({ reminder_sent_at: new Date().toISOString() })
-            .eq("id", appointment.id);
-          results.reminders_sent++;
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        results.errors.push(`Reminder ${appointment.id}: ${msg}`);
+      const { data: pendingReminders, error: reminderError } = await supabase
+        .from("appointments")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
+        .eq("law_firm_id", lawFirmId)
+        .in("status", ["scheduled", "confirmed"])
+        .is("reminder_sent_at", null)
+        .gte("start_time", reminderWindowStart.toISOString())
+        .lte("start_time", reminderWindowEnd.toISOString())
+        .not("client_phone", "is", null);
+
+      if (reminderError) {
+        console.error(`[appointment-reminders] Error fetching reminders for ${lawFirmId}:`, reminderError);
+        continue;
       }
-    }
 
-    // Process confirmations (2h before)
-    for (const appointment of (pendingConfirmations || []) as unknown as Appointment[]) {
-      try {
-        const sent = await sendWhatsAppMessage(
-          supabase,
-          appointment,
-          "confirmation"
-        );
-
-        if (sent) {
-          await supabase
-            .from("appointments")
-            .update({ confirmation_sent_at: new Date().toISOString() })
-            .eq("id", appointment.id);
-          results.confirmations_sent++;
+      // Process reminders
+      for (const appointment of (pendingReminders || []) as unknown as Appointment[]) {
+        try {
+          const sent = await sendWhatsAppMessage(supabase, appointment, "reminder");
+          if (sent) {
+            await supabase
+              .from("appointments")
+              .update({ reminder_sent_at: new Date().toISOString() })
+              .eq("id", appointment.id);
+            results.reminders_sent++;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          results.errors.push(`Reminder ${appointment.id}: ${msg}`);
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        results.errors.push(`Confirmation ${appointment.id}: ${msg}`);
+      }
+
+      // Process confirmations with custom settings
+      const confirmationWindowEnd = new Date(now.getTime() + settings.confirmationHours * 60 * 60 * 1000);
+      const confirmationWindowStart = new Date(now.getTime() + (settings.confirmationHours - 1) * 60 * 60 * 1000);
+
+      const { data: pendingConfirmations, error: confirmError } = await supabase
+        .from("appointments")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
+        .eq("law_firm_id", lawFirmId)
+        .eq("status", "scheduled")
+        .is("confirmation_sent_at", null)
+        .gte("start_time", confirmationWindowStart.toISOString())
+        .lte("start_time", confirmationWindowEnd.toISOString())
+        .not("client_phone", "is", null);
+
+      if (confirmError) {
+        console.error(`[appointment-reminders] Error fetching confirmations for ${lawFirmId}:`, confirmError);
+        continue;
+      }
+
+      // Process confirmations
+      for (const appointment of (pendingConfirmations || []) as unknown as Appointment[]) {
+        try {
+          const sent = await sendWhatsAppMessage(supabase, appointment, "confirmation");
+          if (sent) {
+            await supabase
+              .from("appointments")
+              .update({ confirmation_sent_at: new Date().toISOString() })
+              .eq("id", appointment.id);
+            results.confirmations_sent++;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          results.errors.push(`Confirmation ${appointment.id}: ${msg}`);
+        }
       }
     }
 
     console.log("[appointment-reminders] Processing complete:", results);
+
 
     return new Response(JSON.stringify(results), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

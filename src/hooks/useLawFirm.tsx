@@ -26,6 +26,8 @@ export interface LawFirm {
   facebook: string | null;
   website: string | null;
   business_hours: BusinessHours | null;
+  reminder_hours_before: number | null;
+  confirmation_hours_before: number | null;
   created_at: string;
   updated_at: string;
 }
