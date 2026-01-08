@@ -175,6 +175,57 @@ serve(async (req) => {
       }
     }
 
+    // Sync appointments to Google Calendar (create events for appointments without google_event_id)
+    let appointmentsSynced = 0;
+    const { data: unlinkedAppointments } = await supabase
+      .from("appointments")
+      .select("*, service:services(name, duration_minutes)")
+      .eq("law_firm_id", law_firm_id)
+      .is("google_event_id", null)
+      .in("status", ["scheduled", "confirmed"])
+      .gte("start_time", new Date().toISOString());
+
+    for (const apt of (unlinkedAppointments || [])) {
+      try {
+        const serviceName = apt.service?.name || "Agendamento";
+        const clientInfo = apt.client_name ? ` - ${apt.client_name}` : "";
+
+        const eventBody = {
+          summary: `${serviceName}${clientInfo}`,
+          description: [
+            apt.client_name && `Cliente: ${apt.client_name}`,
+            apt.client_phone && `Telefone: ${apt.client_phone}`,
+            apt.notes && `Observações: ${apt.notes}`,
+          ].filter(Boolean).join("\n"),
+          start: { dateTime: apt.start_time, timeZone: "America/Sao_Paulo" },
+          end: { dateTime: apt.end_time, timeZone: "America/Sao_Paulo" },
+        };
+
+        const createResponse = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(eventBody),
+          }
+        );
+
+        if (createResponse.ok) {
+          const createdEvent = await createResponse.json();
+          await supabase
+            .from("appointments")
+            .update({ google_event_id: createdEvent.id })
+            .eq("id", apt.id);
+          appointmentsSynced++;
+        }
+      } catch (err) {
+        console.error(`[google-calendar-sync] Failed to sync appointment ${apt.id}:`, err);
+      }
+    }
+
     // Update last sync time
     await supabase
       .from("google_calendar_integrations")
@@ -190,16 +241,17 @@ serve(async (req) => {
       integration_id: integration.id,
       action_type: "sync",
       performed_by: "system",
-      response_summary: `Sincronizados ${syncedCount} eventos, removidos ${deletedCount} cancelados`,
+      response_summary: `Sincronizados ${syncedCount} eventos, removidos ${deletedCount} cancelados, ${appointmentsSynced} agendamentos vinculados`,
     });
 
-    console.log(`[google-calendar-sync] Sync complete. Synced ${syncedCount}, deleted ${deletedCount} events.`);
+    console.log(`[google-calendar-sync] Sync complete. Events: ${syncedCount}, Deleted: ${deletedCount}, Appointments: ${appointmentsSynced}`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         synced_events: syncedCount,
         deleted_events: deletedCount,
+        appointments_synced: appointmentsSynced,
         total_events: events.length
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
