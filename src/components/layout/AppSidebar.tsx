@@ -18,7 +18,6 @@ import {
   Bot,
   BookOpen,
   Volume2,
-  Calendar,
   CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,37 +66,6 @@ const aiItems = [
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
 const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
 const agendaItem = { icon: CalendarDays, label: "Agenda", path: "/agenda" };
-
-// Calendar button component - only renders when Google Calendar is connected
-function CalendarButton({ collapsed }: { collapsed: boolean }) {
-  const { integration, isConnected } = useGoogleCalendar();
-
-  // Only render if Google Calendar is connected and active
-  if (!isConnected || !integration?.is_active) {
-    return null;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <NavLink
-          to="/calendar"
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
-            collapsed && "justify-center"
-          )}
-        >
-          <Calendar className="h-5 w-5 flex-shrink-0" />
-          {!collapsed && <span>Calendário</span>}
-        </NavLink>
-      </TooltipTrigger>
-      {collapsed && (
-        <TooltipContent side="right">Calendário</TooltipContent>
-      )}
-    </Tooltip>
-  );
-}
-
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -326,9 +294,6 @@ export function AppSidebar() {
               <TooltipContent side="right">Perfil</TooltipContent>
             )}
           </Tooltip>
-
-          {/* Calendar button - only visible when Google Calendar is connected */}
-          <CalendarButton collapsed={collapsed} />
 
           <Tooltip>
             <TooltipTrigger asChild>
