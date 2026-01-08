@@ -45,6 +45,7 @@ export default function Calendar() {
         .from("google_calendar_events")
         .select("*")
         .eq("law_firm_id", lawFirm.id)
+        .neq("status", "cancelled")
         .gte("start_time", monthStart.toISOString())
         .lte("start_time", monthEnd.toISOString())
         .order("start_time", { ascending: true });
