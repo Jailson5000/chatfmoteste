@@ -8,7 +8,12 @@ const corsHeaders = {
 };
 
 // Map plan names to Stripe price IDs
+// TODO: Create BASIC products in Stripe dashboard and add price IDs here
 const PLAN_PRICES = {
+  basic: {
+    monthly: "price_basic_monthly", // TODO: Replace with actual Stripe price ID
+    yearly: "price_basic_yearly"    // TODO: Replace with actual Stripe price ID
+  },
   starter: {
     monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw",
     yearly: "price_1Sn4K7PuIhszhOCItPywPXua"

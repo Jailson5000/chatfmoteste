@@ -8,9 +8,13 @@ const corsHeaders = {
 
 // Plan prices in cents (BRL)
 const PLAN_PRICES = {
+  basic: {
+    monthly: 19900, // R$ 199,00
+    yearly: 218900, // R$ 2.189,00 (11 meses)
+  },
   starter: {
-    monthly: 29700, // R$ 297,00
-    yearly: 326700, // R$ 3.267,00 (11 meses)
+    monthly: 49700, // R$ 497,00
+    yearly: 546700, // R$ 5.467,00 (11 meses)
   },
   professional: {
     monthly: 69700, // R$ 697,00
@@ -23,6 +27,7 @@ const PLAN_PRICES = {
 };
 
 const PLAN_NAMES = {
+  basic: "MiauChat Basic",
   starter: "MiauChat Starter",
   professional: "MiauChat Professional",
   enterprise: "MiauChat Enterprise",

@@ -34,16 +34,35 @@ export function LandingPage() {
 
   const plans = [
     {
+      name: "BASIC",
+      price: "199",
+      installment: "12x de R$ 199",
+      description: "Ideal para pequenos negócios ou profissionais que querem iniciar a automação de atendimentos com IA.",
+      items: [
+        "200 conversas com IA por mês",
+        "10 minutos de áudio IA por mês",
+        "2 usuários",
+        "1 WhatsApp conectado",
+        "1 agente de IA",
+        "IA BASIC para atendimento",
+        "Transcrição de áudio",
+        "Respostas automáticas essenciais",
+        "Mensagens rápidas",
+      ],
+      cta: "Começar agora",
+    },
+    {
       name: "STARTER",
       price: "497",
       installment: "12x de R$ 497",
-      description: "Ideal para quem está começando e quer automatizar atendimentos com IA.",
+      description: "Para quem busca mais capacidade e recursos avançados de automação.",
       items: [
         "250 conversas com IA por mês",
         "30 minutos de áudio IA por mês",
-        "4 membros",
+        "4 usuários",
         "1 WhatsApp conectado",
         "1 agente de IA",
+        "Tudo do plano Basic",
         "Transcrição de áudio e imagens",
         "Mídias e mensagens rápidas",
         "Mensagens agendadas",
@@ -58,7 +77,7 @@ export function LandingPage() {
       items: [
         "500 conversas com IA por mês",
         "40 minutos de áudio IA por mês",
-        "6 membros",
+        "6 usuários",
         "2 WhatsApps conectados",
         "4 agentes de IA",
         "Tudo do plano Starter",
@@ -76,7 +95,7 @@ export function LandingPage() {
       items: [
         "1000 conversas com IA por mês",
         "60 minutos de áudio IA por mês",
-        "20 membros",
+        "20 usuários",
         "4 WhatsApps conectados",
         "20 agentes de IA",
         "Tudo do plano Professional",
@@ -417,7 +436,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-5">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map((plan) => (
               <div
                 key={plan.name}

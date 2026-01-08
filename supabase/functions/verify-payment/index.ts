@@ -9,6 +9,14 @@ const corsHeaders = {
 
 // Plan limits configuration
 const PLAN_LIMITS = {
+  basic: {
+    max_users: 2,
+    max_instances: 1,
+    max_agents: 1,
+    max_ai_conversations: 200,
+    max_tts_minutes: 10,
+    max_workspaces: 1,
+  },
   starter: {
     max_users: 4,
     max_instances: 1,
