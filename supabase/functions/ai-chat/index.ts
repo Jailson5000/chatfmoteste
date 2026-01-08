@@ -1129,10 +1129,10 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Serviço não encontrado" });
         }
 
-        // Get law firm business hours
+        // Get law firm business hours and timezone
         const { data: lawFirm, error: lawFirmError } = await supabase
           .from("law_firms")
-          .select("business_hours")
+          .select("business_hours, timezone")
           .eq("id", lawFirmId)
           .single();
 
@@ -1140,8 +1140,11 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Horário de funcionamento não configurado" });
         }
 
+        const timezone = lawFirm.timezone || "America/Sao_Paulo";
         const businessHours = lawFirm.business_hours as Record<string, { enabled: boolean; start: string; end: string }>;
-        const targetDate = new Date(date + "T00:00:00");
+        
+        // Parse the date correctly considering timezone
+        const targetDate = new Date(date + "T12:00:00"); // use noon to avoid date shift issues
         const dayOfWeek = targetDate.getDay();
         const dayMap: Record<number, string> = {
           0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday",
@@ -1158,7 +1161,7 @@ async function executeSchedulingTool(
           });
         }
 
-        // Get existing appointments for this date
+        // Get existing appointments for this date (using proper timezone range)
         const startOfDay = date + "T00:00:00";
         const endOfDay = date + "T23:59:59";
 
@@ -1170,7 +1173,7 @@ async function executeSchedulingTool(
           .gte("start_time", startOfDay)
           .lte("start_time", endOfDay);
 
-        // Generate available slots
+        // Parse business hours properly (these are local times like "08:00")
         const [startHour, startMin] = dayHours.start.split(":").map(Number);
         const [endHour, endMin] = dayHours.end.split(":").map(Number);
 
@@ -1178,51 +1181,99 @@ async function executeSchedulingTool(
           (service.buffer_before_minutes || 0) + 
           (service.buffer_after_minutes || 0);
 
+        // Generate slots using simple hour/minute arithmetic (local time logic)
         const slots: string[] = [];
-        let currentTime = new Date(date + `T${dayHours.start}:00`);
-        const businessEnd = new Date(date + `T${dayHours.end}:00`);
-        const now = new Date();
+        let currentHour = startHour;
+        let currentMin = startMin;
+        
+        // Get current time in Brazil timezone for comparison
+        const nowBrazil = new Date().toLocaleString("en-US", { timeZone: timezone });
+        const nowDate = new Date(nowBrazil);
+        const todayStr = nowDate.toISOString().split("T")[0];
+        const isToday = date === todayStr;
+        const currentTimeMinutes = isToday ? nowDate.getHours() * 60 + nowDate.getMinutes() : 0;
 
-        while (new Date(currentTime.getTime() + totalDuration * 60000) <= businessEnd) {
-          const slotStart = new Date(currentTime);
-          const slotEnd = new Date(currentTime.getTime() + totalDuration * 60000);
-
-          // Check if slot is in the past
-          if (slotStart > now) {
+        while (true) {
+          const slotStartMinutes = currentHour * 60 + currentMin;
+          const slotEndMinutes = slotStartMinutes + totalDuration;
+          const businessEndMinutes = endHour * 60 + endMin;
+          
+          // Stop if slot would end after business hours
+          if (slotEndMinutes > businessEndMinutes) break;
+          
+          // Skip past slots if today
+          if (!isToday || slotStartMinutes > currentTimeMinutes) {
+            // Format times properly
+            const slotStartStr = `${String(currentHour).padStart(2, "0")}:${String(currentMin).padStart(2, "0")}`;
+            
             // Check for conflicts with existing appointments
+            const slotStartDate = new Date(`${date}T${slotStartStr}:00`);
+            const slotEndDate = new Date(slotStartDate.getTime() + totalDuration * 60000);
+            
             const hasConflict = (existingAppointments || []).some((apt: any) => {
               const aptStart = new Date(apt.start_time);
               const aptEnd = new Date(apt.end_time);
-              return (slotStart < aptEnd && slotEnd > aptStart);
+              return (slotStartDate < aptEnd && slotEndDate > aptStart);
             });
 
             if (!hasConflict) {
-              slots.push(slotStart.toLocaleTimeString("pt-BR", { 
-                hour: "2-digit", 
-                minute: "2-digit",
-                timeZone: "America/Sao_Paulo"
-              }));
+              slots.push(slotStartStr);
             }
           }
 
-          // Move to next slot
-          currentTime = new Date(currentTime.getTime() + service.duration_minutes * 60000);
+          // Move to next slot (increment by service duration)
+          currentMin += service.duration_minutes;
+          while (currentMin >= 60) {
+            currentMin -= 60;
+            currentHour += 1;
+          }
         }
 
         if (slots.length === 0) {
           return JSON.stringify({
             success: true,
             message: `Não há horários disponíveis para ${service.name} no dia ${date}. Sugira outra data.`,
-            available_slots: []
+            available_slots: [],
+            business_hours: `${dayHours.start} às ${dayHours.end}`
           });
+        }
+
+        // Group slots for better presentation (morning, afternoon, evening)
+        const morning = slots.filter(s => parseInt(s.split(":")[0]) < 12);
+        const afternoon = slots.filter(s => {
+          const h = parseInt(s.split(":")[0]);
+          return h >= 12 && h < 18;
+        });
+        const evening = slots.filter(s => parseInt(s.split(":")[0]) >= 18);
+
+        // Create summary for AI to present nicely
+        let summary = `Horários disponíveis para ${service.name} em ${date} (expediente: ${dayHours.start} às ${dayHours.end}):\n`;
+        if (morning.length > 0) {
+          summary += `• Manhã: ${morning[0]} até ${morning[morning.length - 1]} (${morning.length} horários)\n`;
+        }
+        if (afternoon.length > 0) {
+          summary += `• Tarde: ${afternoon[0]} até ${afternoon[afternoon.length - 1]} (${afternoon.length} horários)\n`;
+        }
+        if (evening.length > 0) {
+          summary += `• Noite: ${evening[0]} até ${evening[evening.length - 1]} (${evening.length} horários)`;
         }
 
         return JSON.stringify({
           success: true,
-          message: `Horários disponíveis para ${service.name} em ${date}`,
+          message: summary,
           service_name: service.name,
           duration_minutes: service.duration_minutes,
-          available_slots: slots
+          business_hours: `${dayHours.start} às ${dayHours.end}`,
+          available_slots_summary: {
+            morning: morning.length > 0 ? `${morning[0]} - ${morning[morning.length - 1]}` : null,
+            afternoon: afternoon.length > 0 ? `${afternoon[0]} - ${afternoon[afternoon.length - 1]}` : null,
+            evening: evening.length > 0 ? `${evening[0]} - ${evening[evening.length - 1]}` : null,
+            total: slots.length
+          },
+          available_slots: slots.length <= 8 ? slots : undefined,
+          hint: slots.length > 8 
+            ? "Há muitos horários. Pergunte em qual período o cliente prefere (manhã/tarde) para sugerir opções específicas."
+            : "Apresente os horários disponíveis."
         });
       }
 
@@ -2392,13 +2443,19 @@ ${servicesList}
 🔄 FLUXO COMPLETO PARA AGENDAR:
 1) Cliente pede para agendar/marcar/reservar → mostre serviços (list_services) ou use o serviço único
 2) Cliente escolhe serviço → pergunte a data
-3) Data definida → get_available_slots (mostre horários)
+3) Data definida → get_available_slots (apresente os horários de forma resumida)
 4) Horário escolhido → confirme nome e telefone
 5) book_appointment → confirme detalhes finais
 
+📊 COMO APRESENTAR HORÁRIOS (IMPORTANTE):
+- Se houver POUCOS horários (≤8): liste todos
+- Se houver MUITOS horários (>8): apresente por PERÍODO (ex: "Manhã: 08:00 a 11:30 | Tarde: 14:00 a 17:30") e pergunte qual período o cliente prefere
+- NUNCA liste mais de 10 horários de uma vez, é confuso para o cliente
+- Use o campo "hint" e "available_slots_summary" da resposta para montar uma apresentação limpa
+
 ⚠️ REGRAS CRÍTICAS:
 - Use funções de agendamento quando o cliente pedir: agendar, marcar, reservar, reagendar, remarcar, cancelar, **horários livres**, **horários disponíveis**, disponibilidade
-- NÃO responda \"vou verificar\" sem chamar a ferramenta necessária
+- NÃO responda "vou verificar" sem chamar a ferramenta necessária
 - NÃO invente horários — sempre consulte get_available_slots
 - Use telefone do contexto se disponível (${context?.clientPhone || "não informado"})
 - Use nome do contexto se disponível (${context?.clientName || "não informado"})`;
