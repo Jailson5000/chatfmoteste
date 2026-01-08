@@ -50,22 +50,27 @@ serve(async (req) => {
       .eq("id", appointment.law_firm_id)
       .single();
 
-    // Format date/time
+    // Format date/time with São Paulo timezone
     const startDate = new Date(appointment.start_time);
     const endDate = new Date(appointment.end_time);
+    const timeZone = "America/Sao_Paulo";
+    
     const dateStr = startDate.toLocaleDateString("pt-BR", {
       weekday: "long",
       day: "2-digit",
       month: "long",
       year: "numeric",
+      timeZone,
     });
     const startTimeStr = startDate.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone,
     });
     const endTimeStr = endDate.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone,
     });
     // Full time range: "08:05 às 10:35"
     const timeRangeStr = `${startTimeStr} às ${endTimeStr}`;
