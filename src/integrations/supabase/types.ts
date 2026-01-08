@@ -451,6 +451,107 @@ export type Database = {
           },
         ]
       }
+      appointments: {
+        Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          client_email: string | null
+          client_id: string | null
+          client_name: string | null
+          client_phone: string | null
+          confirmation_sent_at: string | null
+          confirmed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          created_by: string
+          end_time: string
+          google_event_id: string | null
+          id: string
+          law_firm_id: string
+          notes: string | null
+          reminder_sent_at: string | null
+          service_id: string
+          start_time: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          client_email?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_phone?: string | null
+          confirmation_sent_at?: string | null
+          confirmed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string
+          end_time: string
+          google_event_id?: string | null
+          id?: string
+          law_firm_id: string
+          notes?: string | null
+          reminder_sent_at?: string | null
+          service_id: string
+          start_time: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          client_email?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_phone?: string | null
+          confirmation_sent_at?: string | null
+          confirmed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string
+          end_time?: string
+          google_event_id?: string | null
+          id?: string
+          law_firm_id?: string
+          notes?: string | null
+          reminder_sent_at?: string | null
+          service_id?: string
+          start_time?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointments_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
@@ -2329,6 +2430,62 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      services: {
+        Row: {
+          buffer_after_minutes: number
+          buffer_before_minutes: number
+          color: string
+          created_at: string
+          description: string | null
+          duration_minutes: number
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          position: number
+          price: number | null
+          updated_at: string
+        }
+        Insert: {
+          buffer_after_minutes?: number
+          buffer_before_minutes?: number
+          color?: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          position?: number
+          price?: number | null
+          updated_at?: string
+        }
+        Update: {
+          buffer_after_minutes?: number
+          buffer_before_minutes?: number
+          color?: string
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          position?: number
+          price?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "services_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
         ]
