@@ -29,8 +29,49 @@ function getCorsHeaders(origin: string | null): Record<string, string> {
 // Legacy corsHeaders for backwards compatibility (webhook receives from Evolution API, not browser)
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-token',
 };
+
+// Webhook token for security validation
+const WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
+
+/**
+ * Validate webhook request using token header.
+ * Returns error response if invalid, null if valid.
+ */
+function validateWebhookToken(req: Request): Response | null {
+  // If no token is configured, skip validation (backwards compatibility during migration)
+  if (!WEBHOOK_TOKEN) {
+    console.warn("[WEBHOOK_SECURITY] ⚠️ EVOLUTION_WEBHOOK_TOKEN not configured - webhook validation disabled");
+    return null;
+  }
+  
+  const providedToken = req.headers.get("x-webhook-token");
+  
+  if (!providedToken) {
+    console.warn("[WEBHOOK_SECURITY] ❌ Request rejected - missing x-webhook-token header", {
+      timestamp: new Date().toISOString(),
+      user_agent: req.headers.get("user-agent"),
+    });
+    return new Response(
+      JSON.stringify({ error: "Unauthorized - missing webhook token" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+  
+  if (providedToken !== WEBHOOK_TOKEN) {
+    console.warn("[WEBHOOK_SECURITY] ❌ Request rejected - invalid webhook token", {
+      timestamp: new Date().toISOString(),
+      token_prefix: providedToken.substring(0, 4) + "...",
+    });
+    return new Response(
+      JSON.stringify({ error: "Unauthorized - invalid webhook token" }),
+      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+  
+  return null; // Valid
+}
 
 // Helper to get current billing period in YYYY-MM format
 function getCurrentBillingPeriod(): string {
@@ -2400,6 +2441,12 @@ serve(async (req) => {
       JSON.stringify({ error: 'Method not allowed' }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+  }
+
+  // Validate webhook token for security
+  const tokenError = validateWebhookToken(req);
+  if (tokenError) {
+    return tokenError;
   }
 
   try {
