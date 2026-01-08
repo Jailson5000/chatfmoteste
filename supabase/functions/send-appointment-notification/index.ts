@@ -169,13 +169,13 @@ serve(async (req) => {
     // Send WhatsApp notification
     if (appointment.client_phone) {
       try {
-        // Get default WhatsApp instance
+        // Get WhatsApp instance for this law firm (prioritize connected ones)
         const { data: instance } = await supabase
           .from("whatsapp_instances")
           .select("id, instance_name, api_url, api_key")
           .eq("law_firm_id", appointment.law_firm_id)
-          .eq("is_default", true)
           .eq("status", "connected")
+          .limit(1)
           .single();
 
         if (instance) {
