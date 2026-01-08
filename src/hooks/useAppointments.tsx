@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, startOfDay, endOfDay, addMinutes, isBefore, isAfter, isEqual } from "date-fns";
@@ -134,6 +135,31 @@ export function useAppointments(date?: Date) {
       return data as Appointment[];
     },
   });
+
+  // Realtime subscription for appointments changes
+  useEffect(() => {
+    const channel = supabase
+      .channel("appointments-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "appointments",
+        },
+        () => {
+          // Invalidate queries to refresh data
+          queryClient.invalidateQueries({ queryKey: ["appointments"] });
+          queryClient.invalidateQueries({ queryKey: ["google-calendar-events"] });
+          queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const createAppointment = useMutation({
     mutationFn: async (appointment: Partial<Appointment>) => {

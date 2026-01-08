@@ -1348,6 +1348,57 @@ async function executeSchedulingTool(
           });
         }
 
+        // Normalize phone for lookup
+        const normalizedPhone = client_phone.replace(/\D/g, '');
+
+        // Try to find existing client by phone, or create/update one
+        let agendaClientId = clientId;
+        
+        // First, try to find existing client with this phone
+        const { data: existingClient } = await supabase
+          .from("clients")
+          .select("id")
+          .eq("law_firm_id", lawFirmId)
+          .or(`phone.ilike.%${normalizedPhone}%,phone.ilike.%${normalizedPhone.slice(-9)}%`)
+          .maybeSingle();
+
+        if (existingClient) {
+          // Update existing client to be an agenda client
+          agendaClientId = existingClient.id;
+          await supabase
+            .from("clients")
+            .update({
+              is_agenda_client: true,
+              name: client_name, // Update name if provided
+              email: client_email || undefined,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", existingClient.id);
+          console.log(`[book_appointment] Updated existing client ${existingClient.id} as agenda client`);
+        } else {
+          // Create new client as agenda client
+          const { data: newClient, error: clientError } = await supabase
+            .from("clients")
+            .insert({
+              law_firm_id: lawFirmId,
+              name: client_name,
+              phone: client_phone,
+              email: client_email || null,
+              is_agenda_client: true,
+              lgpd_consent: true,
+              lgpd_consent_date: new Date().toISOString()
+            })
+            .select("id")
+            .single();
+
+          if (!clientError && newClient) {
+            agendaClientId = newClient.id;
+            console.log(`[book_appointment] Created new agenda client ${newClient.id}`);
+          } else {
+            console.error("[book_appointment] Failed to create client:", clientError);
+          }
+        }
+
         // Create appointment
         const { data: appointment, error: createError } = await supabase
           .from("appointments")
@@ -1356,7 +1407,7 @@ async function executeSchedulingTool(
             service_id,
             start_time: startTime.toISOString(),
             end_time: endTime.toISOString(),
-            client_id: clientId,
+            client_id: agendaClientId,
             client_name,
             client_phone,
             client_email: client_email || null,
