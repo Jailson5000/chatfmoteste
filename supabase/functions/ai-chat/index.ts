@@ -1465,7 +1465,7 @@ async function executeSchedulingTool(
         // Build a more flexible query to find appointments
         let query = supabase
           .from("appointments")
-          .select("id, start_time, end_time, status, client_name, client_phone, service:services(name, duration_minutes)")
+          .select("id, start_time, end_time, status, client_name, client_phone, client_id, conversation_id, service:services(name, duration_minutes)")
           .eq("law_firm_id", lawFirmId)
           .order("start_time", { ascending: true });
 
