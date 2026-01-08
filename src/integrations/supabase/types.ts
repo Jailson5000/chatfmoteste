@@ -477,6 +477,7 @@ export type Database = {
           start_time: string
           status: string
           updated_at: string
+          whatsapp_instance_id: string | null
         }
         Insert: {
           cancel_reason?: string | null
@@ -503,6 +504,7 @@ export type Database = {
           start_time: string
           status?: string
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Update: {
           cancel_reason?: string | null
@@ -529,6 +531,7 @@ export type Database = {
           start_time?: string
           status?: string
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Relationships: [
           {
@@ -571,6 +574,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
             referencedColumns: ["id"]
           },
         ]
@@ -987,6 +997,7 @@ export type Database = {
           phone: string
           state: string | null
           updated_at: string
+          whatsapp_instance_id: string | null
         }
         Insert: {
           address?: string | null
@@ -1007,6 +1018,7 @@ export type Database = {
           phone: string
           state?: string | null
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Update: {
           address?: string | null
@@ -1027,6 +1039,7 @@ export type Database = {
           phone?: string
           state?: string | null
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Relationships: [
           {
@@ -1048,6 +1061,13 @@ export type Database = {
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clients_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
             referencedColumns: ["id"]
           },
         ]
