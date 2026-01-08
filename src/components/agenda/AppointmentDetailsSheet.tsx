@@ -480,8 +480,8 @@ export function AppointmentDetailsSheet({
                   Nenhuma mensagem agendada pendente
                 </p>
               ) : (
-                <ScrollArea className="max-h-[200px]">
-                  <div className="space-y-3">
+                <ScrollArea className="max-h-[300px] pr-2">
+                  <div className="space-y-3 pb-1">
                     {scheduledMessages.map((msg) => (
                       <div
                         key={msg.id}
