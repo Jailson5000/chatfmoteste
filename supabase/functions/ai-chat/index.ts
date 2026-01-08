@@ -387,7 +387,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "list_client_appointments",
-      description: "Lista os agendamentos existentes do cliente atual para verificar se há algo a reagendar ou cancelar. Se não encontrar pelo ID, tenta buscar pelo telefone.",
+      description: "Lista agendamentos existentes do cliente (para reagendar/cancelar/confirmar). NÃO use para consultar horários livres; para disponibilidade use get_available_slots.",
       parameters: {
         type: "object",
         properties: {
@@ -2353,51 +2353,56 @@ REGRAS PARA USO DAS AÇÕES:
         .select("id, name, duration_minutes, price")
         .eq("law_firm_id", effectiveLawFirmIdForCalendar)
         .eq("is_active", true);
-      
-      const servicesList = services?.map((s: any) => 
-        `  - ${s.name} (${s.duration_minutes}min${s.price ? `, R$${s.price}` : ''})`
+
+      const servicesList = services?.map((s: any) =>
+        `  - ${s.name} (id: ${s.id}, ${s.duration_minutes}min${s.price ? `, R$${s.price}` : ""})`
       ).join("\n") || "  Nenhum serviço cadastrado";
-      
+
+      const onlyService = services && services.length === 1 ? services[0] : null;
+
       // Get current date for context
       const now = new Date();
-      const currentDate = now.toISOString().split('T')[0];
-      const brazilTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-      
+      const currentDate = now.toISOString().split("T")[0];
+      const brazilTime = now.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
       const schedulingInstructions = `\n\n📅 SISTEMA DE AGENDAMENTO INTELIGENTE - VOCÊ TEM ACESSO PARA:
 
-🎯 SUAS PRINCIPAIS FUNÇÕES DE AGENDAMENTO:
-1. **list_services** - Listar serviços disponíveis (USE PRIMEIRO para mostrar opções)
-2. **get_available_slots** - Verificar horários livres para uma data e serviço
-3. **book_appointment** - Criar novo agendamento
-4. **list_client_appointments** - Ver agendamentos existentes do cliente
-5. **reschedule_appointment** - Remarcar um agendamento
-6. **cancel_appointment** - Cancelar um agendamento
-7. **confirm_appointment** - Confirmar presença do cliente
+🎯 FUNÇÕES DISPONÍVEIS:
+1. **list_services** - Listar serviços (retorna IDs)
+2. **get_available_slots** - Verificar horários livres (exige date + service_id)
+3. **book_appointment** - Criar agendamento
+4. **list_client_appointments** - Ver agendamentos do cliente (reagendar/cancelar/confirmar)
+5. **reschedule_appointment** - Remarcar
+6. **cancel_appointment** - Cancelar
+7. **confirm_appointment** - Confirmar presença
 
-📋 SERVIÇOS DISPONÍVEIS:
+📋 SERVIÇOS DISPONÍVEIS (com ID):
 ${servicesList}
 
 ⏰ DATA/HORA ATUAL: ${brazilTime} (Fuso: America/Sao_Paulo)
 📆 HOJE: ${currentDate}
 
-🔄 FLUXO DE ATENDIMENTO PARA AGENDAMENTO:
-1. Quando cliente mencionar agendamento/marcar/reservar → Use list_services para mostrar opções
-2. Após cliente escolher serviço → Pergunte a data desejada
-3. Com a data → Use get_available_slots para mostrar horários
-4. Após escolher horário → Confirme nome e telefone do cliente
-5. Com todos os dados → Use book_appointment para finalizar
-6. Confirme o agendamento e envie os detalhes
+✅ COMO RESPONDER QUANDO O CLIENTE PEDIR HORÁRIOS LIVRES/DISPONÍVEIS:
+- Se o cliente informar a DATA (ex: \"amanhã\", \"dia 15\") e o SERVIÇO (ex: \"massagem\") → use **get_available_slots** e devolva a lista de horários.
+- Se o cliente NÃO informar o serviço:
+  - Se existir apenas 1 serviço cadastrado (${onlyService ? `"${onlyService.name}"` : "nenhum/mais de um"}) → você PODE usar esse serviço e chamar **get_available_slots** direto.
+  - Se houver mais de 1 serviço → use **list_services** e pergunte qual serviço.
+- Se o cliente NÃO informar a data → pergunte a data desejada (e só depois chame get_available_slots).
+
+🔄 FLUXO COMPLETO PARA AGENDAR:
+1) Cliente pede para agendar/marcar/reservar → mostre serviços (list_services) ou use o serviço único
+2) Cliente escolhe serviço → pergunte a data
+3) Data definida → get_available_slots (mostre horários)
+4) Horário escolhido → confirme nome e telefone
+5) book_appointment → confirme detalhes finais
 
 ⚠️ REGRAS CRÍTICAS:
-- SÓ use as funções de agendamento quando o cliente EXPLICITAMENTE pedir/solicitar: agendar, marcar, reservar, horário, consulta
-- Se o cliente NÃO mencionar agendamento, continue com seu atendimento normal (seguindo seu prompt principal)
-- NÃO ofereça agendamento se o cliente não pedir - muitos clientes querem apenas informações
-- NÃO invente horários - sempre consulte get_available_slots
-- NÃO assuma serviços - sempre mostre a lista com list_services
-- CONFIRME os dados antes de book_appointment
-- Use o telefone do contexto se disponível (${context?.clientPhone || 'não informado'})
-- Use o nome do contexto se disponível (${context?.clientName || 'não informado'})`;
-      
+- Use funções de agendamento quando o cliente pedir: agendar, marcar, reservar, reagendar, remarcar, cancelar, **horários livres**, **horários disponíveis**, disponibilidade
+- NÃO responda \"vou verificar\" sem chamar a ferramenta necessária
+- NÃO invente horários — sempre consulte get_available_slots
+- Use telefone do contexto se disponível (${context?.clientPhone || "não informado"})
+- Use nome do contexto se disponível (${context?.clientName || "não informado"})`;
+
       messages.push({ role: "system", content: schedulingInstructions });
       console.log(`[AI Chat] Added scheduling instructions with ${services?.length || 0} services`);
     }
