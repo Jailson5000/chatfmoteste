@@ -382,6 +382,86 @@ const SCHEDULING_TOOLS = [
         required: ["service_id", "date", "time", "client_name", "client_phone"]
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_client_appointments",
+      description: "Lista os agendamentos existentes do cliente atual para verificar se há algo a reagendar ou cancelar",
+      parameters: {
+        type: "object",
+        properties: {
+          status: {
+            type: "string",
+            description: "Filtrar por status: scheduled, confirmed, all (padrão: all)"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "reschedule_appointment",
+      description: "Reagenda um agendamento existente para nova data/horário. Use quando cliente não pode comparecer e quer remarcar.",
+      parameters: {
+        type: "object",
+        properties: {
+          appointment_id: {
+            type: "string",
+            description: "ID do agendamento a ser reagendado"
+          },
+          new_date: {
+            type: "string",
+            description: "Nova data no formato YYYY-MM-DD"
+          },
+          new_time: {
+            type: "string",
+            description: "Novo horário no formato HH:MM (ex: 14:00)"
+          }
+        },
+        required: ["appointment_id", "new_date", "new_time"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_appointment",
+      description: "Cancela um agendamento existente quando cliente não pode comparecer e não quer reagendar",
+      parameters: {
+        type: "object",
+        properties: {
+          appointment_id: {
+            type: "string",
+            description: "ID do agendamento a ser cancelado"
+          },
+          reason: {
+            type: "string",
+            description: "Motivo do cancelamento"
+          }
+        },
+        required: ["appointment_id"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "confirm_appointment",
+      description: "Confirma presença do cliente em um agendamento quando ele responde 'sim' ou confirma que irá comparecer",
+      parameters: {
+        type: "object",
+        properties: {
+          appointment_id: {
+            type: "string",
+            description: "ID do agendamento a ser confirmado"
+          }
+        },
+        required: ["appointment_id"]
+      }
+    }
   }
 ];
 
@@ -1263,6 +1343,269 @@ async function executeSchedulingTool(
             client_name,
             client_phone
           }
+        });
+      }
+
+      case "list_client_appointments": {
+        const { status } = args;
+        
+        // Find appointments for this client (by phone or client_id)
+        let query = supabase
+          .from("appointments")
+          .select("id, start_time, end_time, status, service:services(name, duration_minutes), client_name")
+          .eq("law_firm_id", lawFirmId)
+          .order("start_time", { ascending: true });
+
+        // Filter by status
+        if (status === "scheduled") {
+          query = query.eq("status", "scheduled");
+        } else if (status === "confirmed") {
+          query = query.eq("status", "confirmed");
+        } else {
+          query = query.in("status", ["scheduled", "confirmed"]);
+        }
+
+        // Filter by client
+        if (clientId) {
+          query = query.eq("client_id", clientId);
+        }
+
+        // Only future appointments
+        query = query.gte("start_time", new Date().toISOString());
+
+        const { data: appointments, error } = await query;
+
+        if (error) {
+          console.error("[Scheduling] Error listing appointments:", error);
+          return JSON.stringify({ success: false, error: "Erro ao buscar agendamentos" });
+        }
+
+        if (!appointments || appointments.length === 0) {
+          return JSON.stringify({
+            success: true,
+            message: "Nenhum agendamento encontrado.",
+            appointments: []
+          });
+        }
+
+        const formattedAppointments = appointments.map((apt: any) => ({
+          id: apt.id,
+          service: apt.service?.name || "Serviço",
+          date: new Date(apt.start_time).toLocaleDateString("pt-BR"),
+          time: new Date(apt.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+          status: apt.status === "scheduled" ? "Agendado" : "Confirmado"
+        }));
+
+        return JSON.stringify({
+          success: true,
+          appointments: formattedAppointments
+        });
+      }
+
+      case "reschedule_appointment": {
+        const { appointment_id, new_date, new_time } = args;
+
+        if (!appointment_id || !new_date || !new_time) {
+          return JSON.stringify({
+            success: false,
+            error: "Dados incompletos. Necessário: ID do agendamento, nova data e horário."
+          });
+        }
+
+        // Get existing appointment
+        const { data: existingApt, error: aptError } = await supabase
+          .from("appointments")
+          .select("*, service:services(id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes)")
+          .eq("id", appointment_id)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (aptError || !existingApt) {
+          return JSON.stringify({ success: false, error: "Agendamento não encontrado" });
+        }
+
+        if (existingApt.status === "cancelled") {
+          return JSON.stringify({ success: false, error: "Este agendamento já foi cancelado" });
+        }
+
+        const service = existingApt.service;
+        const newStartTime = new Date(`${new_date}T${new_time}:00`);
+        const totalDuration = service.duration_minutes + 
+          (service.buffer_before_minutes || 0) + 
+          (service.buffer_after_minutes || 0);
+        const newEndTime = new Date(newStartTime.getTime() + totalDuration * 60000);
+
+        // Check for conflicts (excluding the current appointment)
+        const { data: conflicts } = await supabase
+          .from("appointments")
+          .select("id")
+          .eq("law_firm_id", lawFirmId)
+          .neq("id", appointment_id)
+          .neq("status", "cancelled")
+          .lt("start_time", newEndTime.toISOString())
+          .gt("end_time", newStartTime.toISOString());
+
+        if (conflicts && conflicts.length > 0) {
+          return JSON.stringify({
+            success: false,
+            error: "Este horário não está disponível. Por favor, escolha outro."
+          });
+        }
+
+        // Update appointment
+        const { error: updateError } = await supabase
+          .from("appointments")
+          .update({
+            start_time: newStartTime.toISOString(),
+            end_time: newEndTime.toISOString(),
+            status: "scheduled",
+            confirmed_at: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", appointment_id);
+
+        if (updateError) {
+          console.error("[Scheduling] Error rescheduling:", updateError);
+          return JSON.stringify({ success: false, error: "Erro ao reagendar" });
+        }
+
+        // Send notification
+        if (existingApt.client_phone) {
+          try {
+            await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseKey}`,
+              },
+              body: JSON.stringify({
+                appointment_id,
+                type: "updated"
+              }),
+            });
+          } catch (e) {
+            console.error("[Scheduling] Failed to send reschedule notification:", e);
+          }
+        }
+
+        const formattedDate = new Date(new_date).toLocaleDateString("pt-BR");
+        return JSON.stringify({
+          success: true,
+          message: `Agendamento reagendado com sucesso! Novo horário: ${formattedDate} às ${new_time}.`
+        });
+      }
+
+      case "cancel_appointment": {
+        const { appointment_id, reason } = args;
+
+        if (!appointment_id) {
+          return JSON.stringify({ success: false, error: "ID do agendamento é obrigatório" });
+        }
+
+        // Get appointment
+        const { data: existingApt } = await supabase
+          .from("appointments")
+          .select("id, client_phone, status")
+          .eq("id", appointment_id)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (!existingApt) {
+          return JSON.stringify({ success: false, error: "Agendamento não encontrado" });
+        }
+
+        if (existingApt.status === "cancelled") {
+          return JSON.stringify({ success: false, error: "Este agendamento já está cancelado" });
+        }
+
+        // Cancel appointment
+        const { error: cancelError } = await supabase
+          .from("appointments")
+          .update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: reason || "Cancelado pelo cliente via chat"
+          })
+          .eq("id", appointment_id);
+
+        if (cancelError) {
+          console.error("[Scheduling] Error cancelling:", cancelError);
+          return JSON.stringify({ success: false, error: "Erro ao cancelar agendamento" });
+        }
+
+        // Send notification
+        if (existingApt.client_phone) {
+          try {
+            await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseKey}`,
+              },
+              body: JSON.stringify({
+                appointment_id,
+                type: "cancelled"
+              }),
+            });
+          } catch (e) {
+            console.error("[Scheduling] Failed to send cancel notification:", e);
+          }
+        }
+
+        return JSON.stringify({
+          success: true,
+          message: "Agendamento cancelado com sucesso. O horário foi liberado."
+        });
+      }
+
+      case "confirm_appointment": {
+        const { appointment_id } = args;
+
+        if (!appointment_id) {
+          return JSON.stringify({ success: false, error: "ID do agendamento é obrigatório" });
+        }
+
+        // Get appointment
+        const { data: existingApt } = await supabase
+          .from("appointments")
+          .select("id, status, start_time, service:services(name)")
+          .eq("id", appointment_id)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (!existingApt) {
+          return JSON.stringify({ success: false, error: "Agendamento não encontrado" });
+        }
+
+        if (existingApt.status === "cancelled") {
+          return JSON.stringify({ success: false, error: "Este agendamento foi cancelado" });
+        }
+
+        if (existingApt.status === "confirmed") {
+          return JSON.stringify({
+            success: true,
+            message: "Este agendamento já está confirmado!"
+          });
+        }
+
+        // Confirm appointment
+        const { error: confirmError } = await supabase
+          .from("appointments")
+          .update({
+            status: "confirmed",
+            confirmed_at: new Date().toISOString()
+          })
+          .eq("id", appointment_id);
+
+        if (confirmError) {
+          console.error("[Scheduling] Error confirming:", confirmError);
+          return JSON.stringify({ success: false, error: "Erro ao confirmar agendamento" });
+        }
+
+        const aptDate = new Date(existingApt.start_time);
+        return JSON.stringify({
+          success: true,
+          message: `Presença confirmada! Aguardamos você no dia ${aptDate.toLocaleDateString("pt-BR")} às ${aptDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.`
         });
       }
 
