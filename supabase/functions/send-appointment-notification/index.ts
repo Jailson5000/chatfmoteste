@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,37 +43,12 @@ serve(async (req) => {
       );
     }
 
-    if (!appointment.client_phone) {
-      console.log("[send-appointment-notification] No client phone, skipping");
-      return new Response(
-        JSON.stringify({ success: false, reason: "No client phone" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     // Get law firm info
     const { data: lawFirm } = await supabase
       .from("law_firms")
       .select("name")
       .eq("id", appointment.law_firm_id)
       .single();
-
-    // Get default WhatsApp instance
-    const { data: instance } = await supabase
-      .from("whatsapp_instances")
-      .select("id, instance_name, api_url, api_key")
-      .eq("law_firm_id", appointment.law_firm_id)
-      .eq("is_default", true)
-      .eq("status", "connected")
-      .single();
-
-    if (!instance) {
-      console.log("[send-appointment-notification] No connected WhatsApp instance");
-      return new Response(
-        JSON.stringify({ success: false, reason: "No WhatsApp instance connected" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     // Format date/time
     const startDate = new Date(appointment.start_time);
@@ -91,10 +67,12 @@ serve(async (req) => {
     const companyName = lawFirm?.name || "Empresa";
     const clientName = appointment.client_name?.split(" ")[0] || "Cliente";
 
-    let message: string;
+    let whatsappMessage: string;
+    let emailSubject: string;
+    let emailHtml: string;
 
     if (type === "created") {
-      message = `Olá ${clientName}! 👋\n\n` +
+      whatsappMessage = `Olá ${clientName}! 👋\n\n` +
         `Seu agendamento foi confirmado com sucesso! ✅\n\n` +
         `📅 *${dateStr}*\n` +
         `🕐 *${timeStr}*\n` +
@@ -103,23 +81,79 @@ serve(async (req) => {
         `Você receberá um lembrete 24h antes.\n\n` +
         `Caso precise reagendar ou cancelar, entre em contato conosco.\n\n` +
         `Aguardamos você! 😊`;
+
+      emailSubject = `✅ Agendamento Confirmado - ${companyName}`;
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #10b981;">Agendamento Confirmado! ✅</h1>
+          <p>Olá <strong>${clientName}</strong>,</p>
+          <p>Seu agendamento foi confirmado com sucesso!</p>
+          <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+            <p style="margin: 8px 0;"><strong>📍 Local:</strong> ${companyName}</p>
+          </div>
+          <p>Você receberá um lembrete 24h antes do seu agendamento.</p>
+          <p>Caso precise reagendar ou cancelar, entre em contato conosco.</p>
+          <p style="margin-top: 30px;">Aguardamos você! 😊</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+        </div>
+      `;
     } else if (type === "cancelled") {
-      message = `Olá ${clientName}!\n\n` +
+      whatsappMessage = `Olá ${clientName}!\n\n` +
         `Seu agendamento foi cancelado:\n\n` +
         `📅 ${dateStr}\n` +
         `🕐 ${timeStr}\n` +
         `📋 ${serviceName}\n\n` +
         `Se desejar reagendar, entre em contato conosco.\n\n` +
         `${companyName}`;
+
+      emailSubject = `❌ Agendamento Cancelado - ${companyName}`;
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #ef4444;">Agendamento Cancelado</h1>
+          <p>Olá <strong>${clientName}</strong>,</p>
+          <p>Seu agendamento foi cancelado:</p>
+          <div style="background-color: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+          </div>
+          <p>Se desejar reagendar, entre em contato conosco.</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+        </div>
+      `;
     } else if (type === "updated") {
-      message = `Olá ${clientName}!\n\n` +
-        `Seu agendamento foi atualizado:\n\n` +
-        `📅 *${dateStr}*\n` +
-        `🕐 *${timeStr}*\n` +
+      whatsappMessage = `Olá ${clientName}!\n\n` +
+        `Seu agendamento foi reagendado! 📅\n\n` +
+        `📅 *Nova data:* ${dateStr}\n` +
+        `🕐 *Novo horário:* ${timeStr}\n` +
         `📋 *${serviceName}*\n` +
         `📍 *${companyName}*\n\n` +
         `Caso tenha dúvidas, entre em contato.\n\n` +
         `Aguardamos você! 😊`;
+
+      emailSubject = `📅 Agendamento Reagendado - ${companyName}`;
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #3b82f6;">Agendamento Reagendado 📅</h1>
+          <p>Olá <strong>${clientName}</strong>,</p>
+          <p>Seu agendamento foi reagendado para uma nova data!</p>
+          <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 8px 0;"><strong>📅 Nova Data:</strong> ${dateStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Novo Horário:</strong> ${timeStr}</p>
+            <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+            <p style="margin: 8px 0;"><strong>📍 Local:</strong> ${companyName}</p>
+          </div>
+          <p>Caso tenha dúvidas, entre em contato conosco.</p>
+          <p style="margin-top: 30px;">Aguardamos você! 😊</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+        </div>
+      `;
     } else {
       return new Response(
         JSON.stringify({ error: "Invalid notification type" }),
@@ -127,39 +161,99 @@ serve(async (req) => {
       );
     }
 
-    // Send via Evolution API
-    const phone = appointment.client_phone.replace(/\D/g, "");
-    const remoteJid = phone.startsWith("55") ? `${phone}@s.whatsapp.net` : `55${phone}@s.whatsapp.net`;
+    const results = {
+      whatsapp: { sent: false, error: null as string | null },
+      email: { sent: false, error: null as string | null },
+    };
 
-    const apiUrl = (instance.api_url as string).replace(/\/$/, "");
-    const response = await fetch(
-      `${apiUrl}/message/sendText/${instance.instance_name}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: instance.api_key as string,
-        },
-        body: JSON.stringify({
-          number: remoteJid,
-          text: message,
-        }),
+    // Send WhatsApp notification
+    if (appointment.client_phone) {
+      try {
+        // Get default WhatsApp instance
+        const { data: instance } = await supabase
+          .from("whatsapp_instances")
+          .select("id, instance_name, api_url, api_key")
+          .eq("law_firm_id", appointment.law_firm_id)
+          .eq("is_default", true)
+          .eq("status", "connected")
+          .single();
+
+        if (instance) {
+          const phone = appointment.client_phone.replace(/\D/g, "");
+          const remoteJid = phone.startsWith("55") ? `${phone}@s.whatsapp.net` : `55${phone}@s.whatsapp.net`;
+
+          const apiUrl = (instance.api_url as string).replace(/\/$/, "");
+          const response = await fetch(
+            `${apiUrl}/message/sendText/${instance.instance_name}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: instance.api_key as string,
+              },
+              body: JSON.stringify({
+                number: remoteJid,
+                text: whatsappMessage,
+              }),
+            }
+          );
+
+          if (response.ok) {
+            results.whatsapp.sent = true;
+            console.log(`[send-appointment-notification] WhatsApp sent for ${appointment_id}`);
+          } else {
+            const errorData = await response.text();
+            results.whatsapp.error = errorData;
+            console.error("[send-appointment-notification] WhatsApp failed:", errorData);
+          }
+        } else {
+          results.whatsapp.error = "No connected WhatsApp instance";
+          console.log("[send-appointment-notification] No connected WhatsApp instance");
+        }
+      } catch (err) {
+        results.whatsapp.error = err instanceof Error ? err.message : "Unknown error";
+        console.error("[send-appointment-notification] WhatsApp error:", err);
       }
-    );
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("[send-appointment-notification] Failed to send:", errorData);
-      return new Response(
-        JSON.stringify({ success: false, error: errorData }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    } else {
+      console.log("[send-appointment-notification] No client phone, skipping WhatsApp");
     }
 
-    console.log(`[send-appointment-notification] Sent ${type} notification for appointment ${appointment_id}`);
+    // Send Email notification
+    if (appointment.client_email) {
+      try {
+        const resendApiKey = Deno.env.get("RESEND_API_KEY");
+        if (resendApiKey) {
+          const resend = new Resend(resendApiKey);
+          const { error: emailError } = await resend.emails.send({
+            from: "Suporte <suporte@miauchat.com.br>",
+            to: [appointment.client_email],
+            subject: emailSubject,
+            html: emailHtml,
+          });
+
+          if (emailError) {
+            results.email.error = emailError.message;
+            console.error("[send-appointment-notification] Email failed:", emailError);
+          } else {
+            results.email.sent = true;
+            console.log(`[send-appointment-notification] Email sent to ${appointment.client_email}`);
+          }
+        } else {
+          results.email.error = "RESEND_API_KEY not configured";
+          console.log("[send-appointment-notification] RESEND_API_KEY not configured");
+        }
+      } catch (err) {
+        results.email.error = err instanceof Error ? err.message : "Unknown error";
+        console.error("[send-appointment-notification] Email error:", err);
+      }
+    } else {
+      console.log("[send-appointment-notification] No client email, skipping email");
+    }
+
+    console.log(`[send-appointment-notification] Completed ${type} notification for ${appointment_id}:`, results);
 
     return new Response(
-      JSON.stringify({ success: true, type }),
+      JSON.stringify({ success: true, type, results }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
