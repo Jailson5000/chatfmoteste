@@ -13,6 +13,7 @@ export interface AgendaClient {
   notes: string | null;
   birth_date: string | null;
   birthday_message_enabled: boolean;
+  is_agenda_client: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +28,7 @@ export function useAgendaClients() {
       const { data, error } = await supabase
         .from("clients")
         .select("*")
+        .eq("is_agenda_client", true)
         .order("name", { ascending: true });
 
       if (error) throw error;
@@ -58,6 +60,7 @@ export function useAgendaClients() {
           notes: client.notes,
           birth_date: client.birth_date,
           birthday_message_enabled: client.birthday_message_enabled ?? false,
+          is_agenda_client: true,
           law_firm_id: profile.law_firm_id,
         })
         .select()
@@ -96,14 +99,18 @@ export function useAgendaClients() {
     },
   });
 
-  const deleteClient = useMutation({
+  const removeFromAgenda = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("clients").delete().eq("id", id);
+      // Only remove from agenda (set is_agenda_client to false), don't delete the contact
+      const { error } = await supabase
+        .from("clients")
+        .update({ is_agenda_client: false })
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-clients"] });
-      toast({ title: "Cliente removido" });
+      toast({ title: "Cliente removido da agenda" });
     },
     onError: (error: Error) => {
       toast({ title: "Erro ao remover", description: error.message, variant: "destructive" });
@@ -145,7 +152,7 @@ export function useAgendaClients() {
     isLoading,
     createClient,
     updateClient,
-    deleteClient,
+    removeFromAgenda,
     searchClients,
     getUpcomingBirthdays,
   };
