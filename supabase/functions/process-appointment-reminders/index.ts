@@ -16,6 +16,7 @@ interface Appointment {
   status: string;
   reminder_sent_at: string | null;
   confirmation_sent_at: string | null;
+  conversation_id: string | null;
   service: {
     id: string;
     name: string;
@@ -76,7 +77,7 @@ serve(async (req) => {
 
       const { data: pendingReminders, error: reminderError } = await supabase
         .from("appointments")
-        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, conversation_id, service:services(id, name, duration_minutes)")
         .eq("law_firm_id", lawFirmId)
         .in("status", ["scheduled", "confirmed"])
         .is("reminder_sent_at", null)
@@ -112,7 +113,7 @@ serve(async (req) => {
 
       const { data: pendingConfirmations, error: confirmError } = await supabase
         .from("appointments")
-        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, service:services(id, name, duration_minutes)")
+        .select("id, law_firm_id, start_time, end_time, client_name, client_phone, status, reminder_sent_at, confirmation_sent_at, conversation_id, service:services(id, name, duration_minutes)")
         .eq("law_firm_id", lawFirmId)
         .eq("status", "scheduled")
         .is("confirmation_sent_at", null)
@@ -266,5 +267,44 @@ async function sendWhatsAppMessage(
   }
 
   console.log(`[appointment-reminders] Sent ${type} for appointment ${appointment.id}`);
+
+  // Save message to conversation for system sync
+  let conversationId = appointment.conversation_id;
+  
+  if (!conversationId) {
+    // Try to find conversation by phone
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("law_firm_id", appointment.law_firm_id)
+      .ilike("remote_jid", `%${phone}%`)
+      .limit(1)
+      .maybeSingle();
+    
+    if (conv) {
+      conversationId = conv.id;
+    }
+  }
+
+  if (conversationId) {
+    try {
+      await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          law_firm_id: appointment.law_firm_id,
+          content: message,
+          direction: "outgoing",
+          sender_type: "ai",
+          sender_name: "Sistema",
+          status: "sent",
+          remote_jid: remoteJid,
+        });
+      console.log(`[appointment-reminders] Message saved to conversation ${conversationId}`);
+    } catch (saveErr) {
+      console.error("[appointment-reminders] Failed to save message:", saveErr);
+    }
+  }
+
   return true;
 }
