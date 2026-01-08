@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEffect } from "react";
 import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CalendarDays, Settings2, Clock, List } from "lucide-react";
+import { CalendarDays, Settings2, Clock, List, Bot } from "lucide-react";
 import { AgendaCalendar } from "@/components/agenda/AgendaCalendar";
 import { AgendaServices } from "@/components/agenda/AgendaServices";
 import { AgendaSettings } from "@/components/agenda/AgendaSettings";
 import { AgendaAppointmentsList } from "@/components/agenda/AgendaAppointmentsList";
+import { AgendaAIAgent } from "@/components/agenda/AgendaAIAgent";
 
 export default function Agenda() {
   const navigate = useNavigate();
@@ -43,7 +43,7 @@ export default function Agenda() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 max-w-lg">
+        <TabsList className="grid w-full grid-cols-5 max-w-2xl">
           <TabsTrigger value="calendar" className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4" />
             <span className="hidden sm:inline">Calendário</span>
@@ -55,6 +55,10 @@ export default function Agenda() {
           <TabsTrigger value="services" className="flex items-center gap-2">
             <Clock className="h-4 w-4" />
             <span className="hidden sm:inline">Serviços</span>
+          </TabsTrigger>
+          <TabsTrigger value="ai-agent" className="flex items-center gap-2">
+            <Bot className="h-4 w-4" />
+            <span className="hidden sm:inline">Agente IA</span>
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-2">
             <Settings2 className="h-4 w-4" />
@@ -72,6 +76,10 @@ export default function Agenda() {
 
         <TabsContent value="services" className="mt-6">
           <AgendaServices />
+        </TabsContent>
+
+        <TabsContent value="ai-agent" className="mt-6">
+          <AgendaAIAgent />
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6">
