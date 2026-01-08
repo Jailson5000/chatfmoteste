@@ -1,10 +1,18 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CalendarDays, Settings2, Clock, List } from "lucide-react";
+import { AgendaCalendar } from "@/components/agenda/AgendaCalendar";
+import { AgendaServices } from "@/components/agenda/AgendaServices";
+import { AgendaSettings } from "@/components/agenda/AgendaSettings";
+import { AgendaAppointmentsList } from "@/components/agenda/AgendaAppointmentsList";
 
 export default function Agenda() {
   const navigate = useNavigate();
   const { isConnected, integration, isLoading } = useGoogleCalendar();
+  const [activeTab, setActiveTab] = useState("calendar");
 
   // Redirect if Google Calendar is not connected
   useEffect(() => {
@@ -26,9 +34,50 @@ export default function Agenda() {
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Agenda</h1>
-      <p className="text-muted-foreground">Conteúdo da agenda será adicionado em breve.</p>
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold">Agenda Inteligente</h1>
+        <p className="text-muted-foreground">
+          Gerencie serviços, horários e agendamentos de forma inteligente
+        </p>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4 max-w-lg">
+          <TabsTrigger value="calendar" className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4" />
+            <span className="hidden sm:inline">Calendário</span>
+          </TabsTrigger>
+          <TabsTrigger value="appointments" className="flex items-center gap-2">
+            <List className="h-4 w-4" />
+            <span className="hidden sm:inline">Agendamentos</span>
+          </TabsTrigger>
+          <TabsTrigger value="services" className="flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            <span className="hidden sm:inline">Serviços</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex items-center gap-2">
+            <Settings2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Configurar</span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="calendar" className="mt-6">
+          <AgendaCalendar />
+        </TabsContent>
+
+        <TabsContent value="appointments" className="mt-6">
+          <AgendaAppointmentsList />
+        </TabsContent>
+
+        <TabsContent value="services" className="mt-6">
+          <AgendaServices />
+        </TabsContent>
+
+        <TabsContent value="settings" className="mt-6">
+          <AgendaSettings />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
