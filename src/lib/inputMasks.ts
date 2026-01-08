@@ -4,13 +4,20 @@
 
 /**
  * Format phone number as (00) 00000-0000 or (00) 0000-0000
+ * Input: digits without country code
+ * Display: formatted without country code
  */
 export function formatPhone(value: string): string {
   // Remove all non-digits
   const digits = value.replace(/\D/g, '');
   
-  // Limit to 11 digits
-  const limited = digits.slice(0, 11);
+  // Remove 55 prefix if user typed it
+  const withoutCountry = digits.startsWith('55') && digits.length > 11 
+    ? digits.slice(2) 
+    : digits;
+  
+  // Limit to 11 digits (DDD + 9 digit number)
+  const limited = withoutCountry.slice(0, 11);
   
   if (limited.length === 0) return '';
   if (limited.length <= 2) return `(${limited}`;
@@ -20,6 +27,22 @@ export function formatPhone(value: string): string {
   }
   // 11 digits - mobile format
   return `(${limited.slice(0, 2)}) ${limited.slice(2, 7)}-${limited.slice(7)}`;
+}
+
+/**
+ * Format phone for storage with country code 55
+ * Ensures phone is saved with Brazil country code for WhatsApp
+ */
+export function formatPhoneForStorage(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  
+  // If already has 55 prefix and correct length, return as is
+  if (digits.startsWith('55') && digits.length >= 12) {
+    return digits;
+  }
+  
+  // Add 55 prefix if not present
+  return `55${digits}`;
 }
 
 /**

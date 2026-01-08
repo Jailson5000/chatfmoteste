@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { format, addMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Calendar as CalendarIcon, Clock, User, Phone, Mail } from "lucide-react";
+import { formatPhone, formatPhoneForStorage } from "@/lib/inputMasks";
 import {
   Dialog,
   DialogContent,
@@ -102,12 +103,15 @@ export function NewAppointmentDialog({
         selectedService.buffer_before_minutes +
         selectedService.buffer_after_minutes;
 
+      // Format phone with country code for storage
+      const phoneForStorage = clientPhone ? formatPhoneForStorage(clientPhone) : null;
+
       await createAppointment.mutateAsync({
         service_id: selectedService.id,
         start_time: selectedSlot.start.toISOString(),
         end_time: addMinutes(selectedSlot.start, totalDuration).toISOString(),
         client_name: clientName || null,
-        client_phone: clientPhone || null,
+        client_phone: phoneForStorage,
         client_email: clientEmail || null,
         notes: notes || null,
         status: "scheduled",
@@ -277,13 +281,13 @@ export function NewAppointmentDialog({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="client_phone">Telefone</Label>
+          <Label htmlFor="client_phone">Telefone (com DDD)</Label>
           <div className="relative">
             <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               id="client_phone"
               value={clientPhone}
-              onChange={(e) => setClientPhone(e.target.value)}
+              onChange={(e) => setClientPhone(formatPhone(e.target.value))}
               placeholder="(00) 00000-0000"
               className="pl-9"
             />
