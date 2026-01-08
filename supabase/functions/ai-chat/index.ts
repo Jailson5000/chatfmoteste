@@ -2351,7 +2351,9 @@ ${servicesList}
 6. Confirme o agendamento e envie os detalhes
 
 ⚠️ REGRAS CRÍTICAS:
-- SEMPRE use as funções de agendamento quando cliente mencionar: agendar, marcar, reservar, horário, consulta, serviço
+- SÓ use as funções de agendamento quando o cliente EXPLICITAMENTE pedir/solicitar: agendar, marcar, reservar, horário, consulta
+- Se o cliente NÃO mencionar agendamento, continue com seu atendimento normal (seguindo seu prompt principal)
+- NÃO ofereça agendamento se o cliente não pedir - muitos clientes querem apenas informações
 - NÃO invente horários - sempre consulte get_available_slots
 - NÃO assuma serviços - sempre mostre a lista com list_services
 - CONFIRME os dados antes de book_appointment
