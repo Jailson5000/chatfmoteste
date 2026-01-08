@@ -2954,7 +2954,7 @@ serve(async (req) => {
           if (shouldTriggerAutomation) {
             // Use debounce queue to batch multiple messages before AI processing
             // This prevents duplicate responses when client sends multiple messages rapidly
-            const DEBOUNCE_SECONDS = 3; // Wait 3 seconds after last message before processing
+            const DEBOUNCE_SECONDS = 10; // Wait 10 seconds after last message before processing
             
             await queueMessageForAIProcessing(supabaseClient, {
               lawFirmId,
