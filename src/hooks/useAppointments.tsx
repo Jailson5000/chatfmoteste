@@ -266,6 +266,10 @@ export function useAppointments(date?: Date) {
           status: "cancelled",
           cancelled_at: new Date().toISOString(),
           cancel_reason: reason,
+          // Clear scheduled messages - they won't be sent for cancelled appointments
+          reminder_sent_at: null,
+          confirmation_sent_at: null,
+          pre_message_sent_at: null,
         })
         .eq("id", id);
 
