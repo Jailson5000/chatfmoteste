@@ -17,6 +17,10 @@ export interface Service {
   // Return configuration
   return_enabled?: boolean;
   return_interval_days?: number | null;
+  // Pre-appointment message configuration
+  pre_message_enabled?: boolean;
+  pre_message_text?: string | null;
+  pre_message_hours_before?: number | null;
   created_at: string;
   updated_at: string;
 }

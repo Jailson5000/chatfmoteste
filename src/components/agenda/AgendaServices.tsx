@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Clock, DollarSign, GripVertical } from "lucide-react";
+import { Plus, Pencil, Trash2, Clock, DollarSign, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +25,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useServices, Service } from "@/hooks/useServices";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
 
 const COLORS = [
   "#6366f1", "#8b5cf6", "#a855f7", "#d946ef",
@@ -44,6 +46,9 @@ interface ServiceFormData {
   buffer_after_minutes: number;
   price: string;
   color: string;
+  pre_message_enabled: boolean;
+  pre_message_text: string;
+  pre_message_hours_before: number;
 }
 
 const defaultFormData: ServiceFormData = {
@@ -54,6 +59,9 @@ const defaultFormData: ServiceFormData = {
   buffer_after_minutes: 0,
   price: "",
   color: "#6366f1",
+  pre_message_enabled: false,
+  pre_message_text: "",
+  pre_message_hours_before: 48,
 };
 
 export function AgendaServices() {
@@ -80,6 +88,9 @@ export function AgendaServices() {
       buffer_after_minutes: service.buffer_after_minutes,
       price: service.price?.toString() || "",
       color: service.color,
+      pre_message_enabled: service.pre_message_enabled || false,
+      pre_message_text: service.pre_message_text || "",
+      pre_message_hours_before: service.pre_message_hours_before || 48,
     });
     setDialogOpen(true);
   };
@@ -106,6 +117,9 @@ export function AgendaServices() {
       buffer_after_minutes: formData.buffer_after_minutes,
       price: formData.price ? parseFloat(formData.price) : null,
       color: formData.color,
+      pre_message_enabled: formData.pre_message_enabled,
+      pre_message_text: formData.pre_message_text || null,
+      pre_message_hours_before: formData.pre_message_hours_before,
     };
 
     if (editingService) {
@@ -231,6 +245,13 @@ export function AgendaServices() {
                       </Badge>
                     )}
                   </div>
+                )}
+
+                {service.pre_message_enabled && (
+                  <Badge variant="secondary" className="text-xs mb-4">
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    Msg {service.pre_message_hours_before}h antes
+                  </Badge>
                 )}
 
                 <div className="flex gap-2">
@@ -366,6 +387,62 @@ export function AgendaServices() {
                 ))}
               </div>
             </div>
+
+            {/* Pre-appointment message section */}
+            <Collapsible className="border rounded-lg p-4">
+              <CollapsibleTrigger className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="font-medium text-sm">Mensagem Pré-Agendamento</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={formData.pre_message_enabled}
+                    onCheckedChange={(checked) => {
+                      setFormData({ ...formData, pre_message_enabled: checked });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <ChevronDown className="h-4 w-4" />
+                </div>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-4 space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Envie uma mensagem personalizada antes do agendamento. Ideal para instruções específicas do serviço.
+                </p>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="pre_message_hours">Enviar com antecedência de</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="pre_message_hours"
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={formData.pre_message_hours_before}
+                      onChange={(e) => setFormData({ ...formData, pre_message_hours_before: parseInt(e.target.value) || 48 })}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">horas</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="pre_message_text">Mensagem</Label>
+                  <Textarea
+                    id="pre_message_text"
+                    value={formData.pre_message_text}
+                    onChange={(e) => setFormData({ ...formData, pre_message_text: e.target.value })}
+                    placeholder="Ex: Olá {nome}! Lembre-se de se preparar para o seu {servico}..."
+                    rows={4}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Variáveis: {"{nome}"}, {"{data}"}, {"{horario}"}, {"{servico}"}, {"{empresa}"}
+                  </p>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
           <DialogFooter>

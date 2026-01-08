@@ -537,6 +537,7 @@ export type Database = {
           law_firm_id: string
           notes: string | null
           original_appointment_id: string | null
+          pre_message_sent_at: string | null
           professional_id: string | null
           reminder_sent_at: string | null
           service_id: string
@@ -564,6 +565,7 @@ export type Database = {
           law_firm_id: string
           notes?: string | null
           original_appointment_id?: string | null
+          pre_message_sent_at?: string | null
           professional_id?: string | null
           reminder_sent_at?: string | null
           service_id: string
@@ -591,6 +593,7 @@ export type Database = {
           law_firm_id?: string
           notes?: string | null
           original_appointment_id?: string | null
+          pre_message_sent_at?: string | null
           professional_id?: string | null
           reminder_sent_at?: string | null
           service_id?: string
@@ -2716,6 +2719,9 @@ export type Database = {
           law_firm_id: string
           name: string
           position: number
+          pre_message_enabled: boolean | null
+          pre_message_hours_before: number | null
+          pre_message_text: string | null
           price: number | null
           return_enabled: boolean | null
           return_interval_days: number | null
@@ -2733,6 +2739,9 @@ export type Database = {
           law_firm_id: string
           name: string
           position?: number
+          pre_message_enabled?: boolean | null
+          pre_message_hours_before?: number | null
+          pre_message_text?: string | null
           price?: number | null
           return_enabled?: boolean | null
           return_interval_days?: number | null
@@ -2750,6 +2759,9 @@ export type Database = {
           law_firm_id?: string
           name?: string
           position?: number
+          pre_message_enabled?: boolean | null
+          pre_message_hours_before?: number | null
+          pre_message_text?: string | null
           price?: number | null
           return_enabled?: boolean | null
           return_interval_days?: number | null
