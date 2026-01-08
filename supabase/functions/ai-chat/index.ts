@@ -2093,7 +2093,7 @@ serve(async (req) => {
     // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
-      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer, trigger_type")
+      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer, trigger_type, scheduling_enabled")
       .eq("id", automationId)
       .eq("is_active", true)
       .single();
@@ -2132,9 +2132,10 @@ serve(async (req) => {
     // Get notify_on_transfer setting (default false)
     const notifyOnTransfer = (automation as any).notify_on_transfer ?? false;
 
-    // Check if this is a scheduling agent
+    // Check if this agent has scheduling capabilities enabled
     const triggerType = (automation as any).trigger_type;
-    const isSchedulingAgent = triggerType === "scheduling";
+    const schedulingEnabled = (automation as any).scheduling_enabled === true;
+    const isSchedulingAgent = triggerType === "scheduling" || schedulingEnabled;
 
     // Extract AI role from trigger_config for audit purposes
     const triggerConfig = (automation as any).trigger_config as Record<string, unknown> | null;

@@ -3,133 +3,62 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Calendar, Clock, CheckCircle2, Loader2, Save, Info, Sparkles } from "lucide-react";
+import { Bot, Calendar, Clock, CheckCircle2, Loader2, Save, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useServices } from "@/hooks/useServices";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-
-interface SchedulingAgentConfig {
-  enabled: boolean;
-  automationId: string | null;
-  prompt: string;
-}
-
-const DEFAULT_SCHEDULING_PROMPT = `Você é um assistente especializado em agendamentos. Seu papel é ajudar clientes a marcar compromissos de forma eficiente e amigável.
-
-**Suas capacidades:**
-1. Listar os serviços disponíveis com nome, duração e preço
-2. Verificar horários disponíveis para uma data específica
-3. Criar agendamentos quando o cliente confirmar
-
-**Fluxo de atendimento:**
-1. Cumprimente o cliente e pergunte qual serviço ele deseja
-2. Quando souber o serviço, pergunte a data preferida
-3. Mostre os horários disponíveis
-4. Confirme os dados antes de agendar (nome, telefone, serviço, data/hora)
-5. Crie o agendamento e confirme ao cliente
-
-**Regras importantes:**
-- Sempre confirme os dados antes de finalizar
-- Seja simpático e objetivo
-- Se não houver horários, sugira outras datas
-- Colete nome e telefone do cliente antes de agendar`;
+import { useAutomations } from "@/hooks/useAutomations";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export function AgendaAIAgent() {
   const { toast } = useToast();
   const { lawFirm } = useLawFirm();
   const { services } = useServices();
+  const { automations, isLoading: isLoadingAutomations } = useAutomations();
   
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [config, setConfig] = useState<SchedulingAgentConfig>({
-    enabled: false,
-    automationId: null,
-    prompt: DEFAULT_SCHEDULING_PROMPT,
-  });
-  const [existingAgent, setExistingAgent] = useState<any>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [schedulingEnabled, setSchedulingEnabled] = useState(false);
 
-  // Load existing scheduling agent
+  // Find which agent has scheduling enabled
   useEffect(() => {
-    async function loadAgent() {
-      if (!lawFirm?.id) return;
-      
-      try {
-        // Look for an existing scheduling agent by name pattern
-        const { data: agents } = await supabase
-          .from("automations")
-          .select("*")
-          .eq("law_firm_id", lawFirm.id)
-          .or("name.ilike.%agendamento%,name.ilike.%scheduling%,name.ilike.%agenda%")
-          .limit(1);
-        
-        if (agents && agents.length > 0) {
-          const agent = agents[0];
-          setExistingAgent(agent);
-          setConfig({
-            enabled: agent.is_active,
-            automationId: agent.id,
-            prompt: agent.ai_prompt || DEFAULT_SCHEDULING_PROMPT,
-          });
-        }
-      } catch (error) {
-        console.error("Error loading scheduling agent:", error);
-      } finally {
-        setIsLoading(false);
+    if (automations && automations.length > 0) {
+      const schedulingAgent = automations.find((a: any) => a.scheduling_enabled);
+      if (schedulingAgent) {
+        setSelectedAgentId(schedulingAgent.id);
+        setSchedulingEnabled(true);
       }
     }
-    
-    loadAgent();
-  }, [lawFirm?.id]);
+  }, [automations]);
 
   const handleSave = async () => {
     if (!lawFirm?.id) return;
     
     setIsSaving(true);
     try {
-      if (existingAgent) {
-        // Update existing agent
+      // First, disable scheduling for all agents of this law firm
+      await supabase
+        .from("automations")
+        .update({ scheduling_enabled: false })
+        .eq("law_firm_id", lawFirm.id);
+
+      // If enabled and agent selected, enable for that agent
+      if (schedulingEnabled && selectedAgentId) {
         const { error } = await supabase
           .from("automations")
-          .update({
-            ai_prompt: config.prompt,
-            is_active: config.enabled,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingAgent.id);
+          .update({ scheduling_enabled: true })
+          .eq("id", selectedAgentId);
         
         if (error) throw error;
-        
-        setExistingAgent({ ...existingAgent, ai_prompt: config.prompt, is_active: config.enabled });
-      } else {
-        // Create new scheduling agent
-        const { data, error } = await supabase
-          .from("automations")
-          .insert({
-            law_firm_id: lawFirm.id,
-            name: "Agente de Agendamento",
-            description: "IA especializada em realizar agendamentos automaticamente",
-            trigger_type: "scheduling",
-            webhook_url: "",
-            ai_prompt: config.prompt,
-            is_active: config.enabled,
-            position: 0,
-          })
-          .select()
-          .single();
-        
-        if (error) throw error;
-        
-        setExistingAgent(data);
-        setConfig(prev => ({ ...prev, automationId: data.id }));
       }
       
       toast({
         title: "Configurações salvas",
-        description: "O agente de agendamento foi atualizado com sucesso.",
+        description: schedulingEnabled && selectedAgentId 
+          ? "O agente selecionado agora tem acesso às ferramentas de agendamento."
+          : "Agendamento por IA desativado.",
       });
     } catch (error: any) {
       toast({
@@ -142,7 +71,7 @@ export function AgendaAIAgent() {
     }
   };
 
-  if (isLoading) {
+  if (isLoadingAutomations) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -151,35 +80,111 @@ export function AgendaAIAgent() {
   }
 
   const activeServicesCount = services.filter(s => s.is_active).length;
+  const activeAgents = automations?.filter((a: any) => a.is_active) || [];
+  const selectedAgent = automations?.find((a: any) => a.id === selectedAgentId);
 
   return (
     <div className="space-y-6">
-      {/* Status Card */}
+      {/* Main Configuration Card */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <Bot className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <CardTitle>Agente de Agendamento IA</CardTitle>
-                <CardDescription>
-                  IA especializada que realiza agendamentos automaticamente via WhatsApp
-                </CardDescription>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Bot className="h-6 w-6 text-primary" />
             </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="agent-enabled">
-                {config.enabled ? "Ativo" : "Inativo"}
-              </Label>
-              <Switch
-                id="agent-enabled"
-                checked={config.enabled}
-                onCheckedChange={(checked) => setConfig(prev => ({ ...prev, enabled: checked }))}
-              />
+            <div>
+              <CardTitle>Agente de Agendamento</CardTitle>
+              <CardDescription>
+                Selecione qual IA terá acesso às ferramentas de agendamento automático
+              </CardDescription>
             </div>
           </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Enable/Disable Toggle */}
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div className="space-y-1">
+              <Label className="text-base font-medium">Ativar Agendamento por IA</Label>
+              <p className="text-sm text-muted-foreground">
+                Quando ativo, o agente selecionado poderá agendar automaticamente
+              </p>
+            </div>
+            <Switch
+              checked={schedulingEnabled}
+              onCheckedChange={setSchedulingEnabled}
+            />
+          </div>
+
+          {/* Agent Selection */}
+          {schedulingEnabled && (
+            <div className="space-y-3">
+              <Label>Selecionar Agente</Label>
+              {activeAgents.length === 0 ? (
+                <div className="p-4 border border-dashed rounded-lg text-center text-muted-foreground">
+                  <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>Nenhum agente ativo encontrado.</p>
+                  <p className="text-sm">Crie um agente em "Agentes de IA" primeiro.</p>
+                </div>
+              ) : (
+                <Select
+                  value={selectedAgentId || ""}
+                  onValueChange={setSelectedAgentId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Escolha um agente..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeAgents.map((agent: any) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4" />
+                          {agent.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {selectedAgent && (
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm">
+                    <strong>{selectedAgent.name}</strong> receberá automaticamente as ferramentas de agendamento e poderá:
+                  </p>
+                  <ul className="text-sm text-muted-foreground mt-2 space-y-1">
+                    <li>• Listar serviços disponíveis</li>
+                    <li>• Verificar horários livres</li>
+                    <li>• Criar, reagendar e cancelar agendamentos</li>
+                    <li>• Confirmar presença de clientes</li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Save Button */}
+          <div className="flex justify-end">
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Salvar
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Status Summary */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Resumo</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -203,8 +208,8 @@ export function AgendaAIAgent() {
               <CheckCircle2 className="h-5 w-5 text-primary" />
               <div>
                 <p className="text-sm font-medium">Status</p>
-                <Badge variant={config.enabled ? "default" : "secondary"}>
-                  {config.enabled ? "Pronto para usar" : "Desativado"}
+                <Badge variant={schedulingEnabled && selectedAgentId ? "default" : "secondary"}>
+                  {schedulingEnabled && selectedAgentId ? "Ativo" : "Desativado"}
                 </Badge>
               </div>
             </div>
@@ -217,10 +222,10 @@ export function AgendaAIAgent() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" />
-            Capacidades do Agente
+            Ferramentas Disponíveis
           </CardTitle>
           <CardDescription>
-            O que o agente de agendamento pode fazer automaticamente
+            Quando ativo, o agente terá acesso automático a estas funcionalidades
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -248,85 +253,20 @@ export function AgendaAIAgent() {
               <div>
                 <p className="font-medium">Criar Agendamentos</p>
                 <p className="text-sm text-muted-foreground">
-                  Registra o agendamento e sincroniza com Google Calendar
+                  Registra o agendamento com todos os dados do cliente
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3 p-4 border rounded-lg">
               <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5" />
               <div>
-                <p className="font-medium">Lembretes Automáticos</p>
+                <p className="font-medium">Reagendar e Cancelar</p>
                 <p className="text-sm text-muted-foreground">
-                  Envia lembrete 24h e confirmação 2h antes
+                  Permite remarcar ou cancelar agendamentos existentes
                 </p>
               </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Prompt Configuration */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Prompt do Agente</CardTitle>
-          <CardDescription>
-            Configure o comportamento e personalidade do agente de agendamento
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription>
-              O agente tem acesso automático às ferramentas de agendamento. 
-              O prompt define como ele interage com os clientes.
-            </AlertDescription>
-          </Alert>
-          
-          <Textarea
-            value={config.prompt}
-            onChange={(e) => setConfig(prev => ({ ...prev, prompt: e.target.value }))}
-            placeholder="Digite as instruções para o agente..."
-            className="min-h-[300px] font-mono text-sm"
-          />
-          
-          <div className="flex justify-between items-center">
-            <Button
-              variant="outline"
-              onClick={() => setConfig(prev => ({ ...prev, prompt: DEFAULT_SCHEDULING_PROMPT }))}
-            >
-              Restaurar Padrão
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Salvar Configurações
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Usage Instructions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Como Funciona</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
-            <li>Configure seus <strong>serviços</strong> na aba "Serviços" com nome, duração e preço</li>
-            <li>Defina os <strong>horários de funcionamento</strong> na aba "Configurar"</li>
-            <li>Ative o agente de agendamento acima</li>
-            <li>Quando um cliente pedir para agendar via WhatsApp, a IA assumirá o atendimento</li>
-            <li>O agente coleta os dados, verifica disponibilidade e cria o agendamento</li>
-            <li>O compromisso aparece automaticamente no calendário e no Google Calendar</li>
-          </ol>
         </CardContent>
       </Card>
     </div>
