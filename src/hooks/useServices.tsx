@@ -14,6 +14,9 @@ export interface Service {
   color: string;
   is_active: boolean;
   position: number;
+  // Return configuration
+  return_enabled?: boolean;
+  return_interval_days?: number | null;
   created_at: string;
   updated_at: string;
 }
