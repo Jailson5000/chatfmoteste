@@ -31,6 +31,7 @@ import Register from "./pages/Register";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
 import Calendar from "./pages/Calendar";
+import Agenda from "./pages/Agenda";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
 import {
@@ -195,6 +196,17 @@ const App = () => (
             }
           >
             <Route index element={<Calendar />} />
+          </Route>
+          
+          <Route
+            path="/agenda"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Agenda />} />
           </Route>
           
           <Route
