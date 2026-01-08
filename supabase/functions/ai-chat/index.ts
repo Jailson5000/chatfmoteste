@@ -1412,15 +1412,45 @@ async function executeSchedulingTool(
           console.error("[Scheduling] Failed to create Google Calendar event:", e);
         }
 
-        const formattedDate = new Date(date).toLocaleDateString("pt-BR");
+        // Get company name for the message
+        const { data: lawFirmData } = await supabase
+          .from("law_firms")
+          .select("name")
+          .eq("id", lawFirmId)
+          .single();
+        const companyName = lawFirmData?.name || "";
+
+        // Format date and time nicely
+        const dateObj = new Date(`${date}T${time}:00.000-03:00`);
+        const endTimeObj = new Date(dateObj.getTime() + service.duration_minutes * 60000);
+        
+        const formattedDate = dateObj.toLocaleDateString("pt-BR", { 
+          weekday: "long", 
+          day: "numeric", 
+          month: "long", 
+          year: "numeric",
+          timeZone: "America/Sao_Paulo"
+        });
+        const formattedStartTime = dateObj.toLocaleTimeString("pt-BR", { 
+          hour: "2-digit", 
+          minute: "2-digit",
+          timeZone: "America/Sao_Paulo"
+        });
+        const formattedEndTime = endTimeObj.toLocaleTimeString("pt-BR", { 
+          hour: "2-digit", 
+          minute: "2-digit",
+          timeZone: "America/Sao_Paulo"
+        });
+
         return JSON.stringify({
           success: true,
-          message: `Agendamento confirmado! ${service.name} para ${client_name} no dia ${formattedDate} às ${time}.`,
+          message: `Olá ${client_name}!\n\nSeu agendamento foi confirmado! ✅\n\n📅 *Data:* ${formattedDate}\n⏰ *Horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nCaso tenha dúvidas, entre em contato.\n\nAguardamos você! 😊`,
           appointment: {
             id: appointment.id,
             service: service.name,
             date: formattedDate,
-            time,
+            time: formattedStartTime,
+            end_time: formattedEndTime,
             client_name,
             client_phone
           }
@@ -1544,11 +1574,14 @@ async function executeSchedulingTool(
         }
 
         const service = existingApt.service;
-        const newStartTime = new Date(`${new_date}T${new_time}:00`);
+        // IMPORTANT: time is in Brazil local time (UTC-3), convert to UTC for storage
+        const newStartTime = new Date(`${new_date}T${new_time}:00.000-03:00`);
         const totalDuration = service.duration_minutes + 
           (service.buffer_before_minutes || 0) + 
           (service.buffer_after_minutes || 0);
         const newEndTime = new Date(newStartTime.getTime() + totalDuration * 60000);
+        
+        console.log(`[reschedule_appointment] Rescheduling to ${new_time} Brazil time = ${newStartTime.toISOString()} UTC`);
 
         // Check for conflicts (excluding the current appointment)
         const { data: conflicts } = await supabase
@@ -1603,10 +1636,39 @@ async function executeSchedulingTool(
           }
         }
 
-        const formattedDate = new Date(new_date).toLocaleDateString("pt-BR");
+        // Get company name for the message
+        const { data: lawFirmData } = await supabase
+          .from("law_firms")
+          .select("name")
+          .eq("id", lawFirmId)
+          .single();
+        const companyName = lawFirmData?.name || "";
+
+        // Format date and time nicely
+        const dateObj = new Date(`${new_date}T${new_time}:00.000-03:00`);
+        const rescheduleEndTime = new Date(dateObj.getTime() + service.duration_minutes * 60000);
+        
+        const formattedDate = dateObj.toLocaleDateString("pt-BR", { 
+          weekday: "long", 
+          day: "numeric", 
+          month: "long", 
+          year: "numeric",
+          timeZone: "America/Sao_Paulo"
+        });
+        const formattedStartTime = dateObj.toLocaleTimeString("pt-BR", { 
+          hour: "2-digit", 
+          minute: "2-digit",
+          timeZone: "America/Sao_Paulo"
+        });
+        const formattedEndTimeStr = rescheduleEndTime.toLocaleTimeString("pt-BR", { 
+          hour: "2-digit", 
+          minute: "2-digit",
+          timeZone: "America/Sao_Paulo"
+        });
+
         return JSON.stringify({
           success: true,
-          message: `Agendamento reagendado com sucesso! Novo horário: ${formattedDate} às ${new_time}.`
+          message: `Olá ${existingApt.client_name}!\n\nSeu agendamento foi reagendado! 🗓️\n\n📅 *Nova data:* ${formattedDate}\n⏰ *Novo horário:* ${formattedStartTime} às ${formattedEndTimeStr}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nCaso tenha dúvidas, entre em contato.\n\nAguardamos você! 😊`
         });
       }
 
