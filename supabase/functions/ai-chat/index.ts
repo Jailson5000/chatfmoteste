@@ -1161,17 +1161,31 @@ async function executeSchedulingTool(
           });
         }
 
-        // Get existing appointments for this date (using proper timezone range)
-        const startOfDay = date + "T00:00:00";
-        const endOfDay = date + "T23:59:59";
+        // Get existing appointments for this date
+        // IMPORTANT: Appointments are stored in UTC, so we need to search using UTC range
+        // Brazil is UTC-3, so 00:00 local = 03:00 UTC and 23:59 local = 02:59 UTC next day
+        const startOfDayUTC = date + "T03:00:00Z"; // 00:00 Brazil = 03:00 UTC
+        const endOfDayUTC = new Date(new Date(date + "T00:00:00Z").getTime() + 27 * 60 * 60 * 1000).toISOString(); // next day 03:00 UTC
 
-        const { data: existingAppointments } = await supabase
+        console.log(`[get_available_slots] Searching appointments for date ${date}`);
+        console.log(`[get_available_slots] UTC range: ${startOfDayUTC} to ${endOfDayUTC}`);
+        console.log(`[get_available_slots] Business hours: ${dayHours.start} to ${dayHours.end}`);
+
+        const { data: existingAppointments, error: apptError } = await supabase
           .from("appointments")
-          .select("start_time, end_time")
+          .select("start_time, end_time, status")
           .eq("law_firm_id", lawFirmId)
           .neq("status", "cancelled")
-          .gte("start_time", startOfDay)
-          .lte("start_time", endOfDay);
+          .gte("start_time", startOfDayUTC)
+          .lt("start_time", endOfDayUTC);
+
+        console.log(`[get_available_slots] Found ${existingAppointments?.length || 0} existing appointments:`, 
+          existingAppointments?.map((a: { start_time: string; end_time: string; status: string }) => ({
+            start: a.start_time,
+            end: a.end_time,
+            status: a.status
+          }))
+        );
 
         // Parse business hours properly (these are local times like "08:00")
         const [startHour, startMin] = dayHours.start.split(":").map(Number);
@@ -1206,14 +1220,20 @@ async function executeSchedulingTool(
             // Format times properly
             const slotStartStr = `${String(currentHour).padStart(2, "0")}:${String(currentMin).padStart(2, "0")}`;
             
-            // Check for conflicts with existing appointments
-            const slotStartDate = new Date(`${date}T${slotStartStr}:00`);
-            const slotEndDate = new Date(slotStartDate.getTime() + totalDuration * 60000);
+            // Create slot times in LOCAL timezone, then compare with UTC appointments
+            // Convert slot local time to UTC for comparison
+            const slotStartUTC = new Date(`${date}T${slotStartStr}:00.000-03:00`); // Brazil time = UTC-3
+            const slotEndUTC = new Date(slotStartUTC.getTime() + totalDuration * 60000);
             
             const hasConflict = (existingAppointments || []).some((apt: any) => {
               const aptStart = new Date(apt.start_time);
               const aptEnd = new Date(apt.end_time);
-              return (slotStartDate < aptEnd && slotEndDate > aptStart);
+              // Check overlap: slot overlaps appointment if slot starts before apt ends AND slot ends after apt starts
+              const overlaps = slotStartUTC < aptEnd && slotEndUTC > aptStart;
+              if (overlaps) {
+                console.log(`[get_available_slots] Conflict at ${slotStartStr}: slot ${slotStartUTC.toISOString()} - ${slotEndUTC.toISOString()} overlaps with apt ${aptStart.toISOString()} - ${aptEnd.toISOString()}`);
+              }
+              return overlaps;
             });
 
             if (!hasConflict) {
@@ -1228,6 +1248,9 @@ async function executeSchedulingTool(
             currentHour += 1;
           }
         }
+        
+        console.log(`[get_available_slots] Generated ${slots.length} available slots: ${slots.join(", ")}`);
+        
 
         if (slots.length === 0) {
           return JSON.stringify({
