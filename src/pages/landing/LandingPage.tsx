@@ -424,7 +424,7 @@ export function LandingPage() {
         className="relative z-10 py-16 md:py-24 border-t border-white/[0.06]"
       >
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
+          <div className="text-center mb-8">
             <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
               Planos e Preços
             </p>
@@ -434,6 +434,31 @@ export function LandingPage() {
             <p className="mt-3 text-white/40 text-base">
               Soluções para empresas de todos os tamanhos
             </p>
+          </div>
+
+          {/* Banner Plano Anual */}
+          <div className="mb-10 p-5 md:p-6 rounded-2xl border border-red-500/30 bg-gradient-to-r from-red-500/10 via-red-600/5 to-transparent relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-3xl" />
+            <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center shrink-0">
+                  <span className="text-2xl">🎁</span>
+                </div>
+                <div>
+                  <h3 className="text-lg md:text-xl font-bold text-white">
+                    Assine o plano anual e ganhe <span className="text-red-400">1 mês grátis!</span>
+                  </h3>
+                  <p className="text-sm text-white/50 mt-1">
+                    Economize o equivalente a 1 mensalidade por ano + receba <span className="text-red-400 font-medium">suporte dedicado para implementação</span> do sistema na sua empresa.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 rounded-lg text-xs font-semibold text-red-400 uppercase tracking-wide">
+                  Economia de até 8%
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
