@@ -1,4 +1,5 @@
-import { format } from "date-fns";
+import { useState } from "react";
+import { format, addDays, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Clock,
@@ -10,6 +11,7 @@ import {
   XCircle,
   AlertTriangle,
   Calendar,
+  RefreshCw,
 } from "lucide-react";
 import {
   Sheet,
@@ -18,9 +20,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,9 +43,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Appointment, useAppointments } from "@/hooks/useAppointments";
+import { Appointment, useAppointments, TimeSlot } from "@/hooks/useAppointments";
+import { useServices } from "@/hooks/useServices";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 interface AppointmentDetailsSheetProps {
   appointment: Appointment | null;
@@ -53,8 +66,14 @@ export function AppointmentDetailsSheet({
   appointment,
   onClose,
 }: AppointmentDetailsSheetProps) {
-  const { updateAppointment, cancelAppointment } = useAppointments();
+  const { updateAppointment, cancelAppointment, getAvailableSlots } = useAppointments();
+  const { services } = useServices();
+  const { toast } = useToast();
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState<Date>(new Date());
+  const [rescheduleSlot, setRescheduleSlot] = useState<TimeSlot | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
 
   if (!appointment) return null;
 
@@ -108,6 +127,81 @@ export function AppointmentDetailsSheet({
         reason: "Cancelado pelo administrador",
       });
       onClose();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleOpenReschedule = () => {
+    const service = appointment.service || services?.find((s) => s.id === appointment.service_id);
+    if (service) {
+      const tomorrow = addDays(startOfDay(new Date()), 1);
+      setRescheduleDate(tomorrow);
+      const slots = getAvailableSlots(tomorrow, service);
+      setAvailableSlots(slots);
+    }
+    setRescheduleSlot(null);
+    setShowReschedule(true);
+  };
+
+  const handleDateChange = (date: Date | undefined) => {
+    if (!date) return;
+    setRescheduleDate(date);
+    setRescheduleSlot(null);
+    const service = appointment.service || services?.find((s) => s.id === appointment.service_id);
+    if (service) {
+      const slots = getAvailableSlots(date, service);
+      setAvailableSlots(slots);
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleSlot) return;
+
+    setIsUpdating(true);
+    try {
+      const service = appointment.service || services?.find((s) => s.id === appointment.service_id);
+      const duration = service?.duration_minutes || 30;
+      const bufferBefore = service?.buffer_before_minutes || 0;
+      const bufferAfter = service?.buffer_after_minutes || 0;
+
+      // Calculate actual start/end (slot includes buffers)
+      const newStart = new Date(rescheduleSlot.start);
+      newStart.setMinutes(newStart.getMinutes() + bufferBefore);
+      const newEnd = new Date(newStart);
+      newEnd.setMinutes(newEnd.getMinutes() + duration);
+
+      await updateAppointment.mutateAsync({
+        id: appointment.id,
+        start_time: newStart.toISOString(),
+        end_time: newEnd.toISOString(),
+        status: "scheduled", // Reset to scheduled after reschedule
+        confirmed_at: null,
+      });
+
+      // Send notification about reschedule
+      if (appointment.client_phone) {
+        supabase.functions.invoke("send-appointment-notification", {
+          body: {
+            appointment_id: appointment.id,
+            type: "updated",
+          },
+        }).catch((err) => console.error("Failed to send reschedule notification:", err));
+      }
+
+      toast({
+        title: "Agendamento reagendado",
+        description: `Novo horário: ${format(newStart, "dd/MM/yyyy 'às' HH:mm")}`,
+      });
+
+      setShowReschedule(false);
+      onClose();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao reagendar",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
       setIsUpdating(false);
     }
@@ -234,6 +328,16 @@ export function AppointmentDetailsSheet({
 
                     <Button
                       variant="outline"
+                      className="text-blue-600 hover:text-blue-700"
+                      onClick={handleOpenReschedule}
+                      disabled={isUpdating}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reagendar
+                    </Button>
+
+                    <Button
+                      variant="outline"
                       className="text-orange-600 hover:text-orange-700"
                       onClick={handleNoShow}
                       disabled={isUpdating}
@@ -289,6 +393,87 @@ export function AppointmentDetailsSheet({
           </div>
         </div>
       </SheetContent>
+
+      {/* Reschedule Dialog */}
+      <Dialog open={showReschedule} onOpenChange={setShowReschedule}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Reagendar Agendamento
+            </DialogTitle>
+            <DialogDescription>
+              Selecione uma nova data e horário para {appointment.client_name || "o cliente"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="flex flex-col sm:flex-row gap-4">
+              {/* Date picker */}
+              <div className="flex-1">
+                <p className="text-sm font-medium mb-2">Selecione a data</p>
+                <CalendarPicker
+                  mode="single"
+                  selected={rescheduleDate}
+                  onSelect={handleDateChange}
+                  disabled={(date) => date < startOfDay(new Date())}
+                  className="rounded-md border"
+                />
+              </div>
+
+              {/* Time slots */}
+              <div className="flex-1">
+                <p className="text-sm font-medium mb-2">Horários disponíveis</p>
+                <ScrollArea className="h-[280px] border rounded-md p-2">
+                  {availableSlots.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {availableSlots
+                        .filter((slot) => slot.available)
+                        .map((slot, idx) => (
+                          <Button
+                            key={idx}
+                            variant={rescheduleSlot?.start.getTime() === slot.start.getTime() ? "default" : "outline"}
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => setRescheduleSlot(slot)}
+                          >
+                            {format(slot.start, "HH:mm")}
+                          </Button>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      Nenhum horário disponível nesta data
+                    </p>
+                  )}
+                </ScrollArea>
+              </div>
+            </div>
+
+            {rescheduleSlot && (
+              <div className="bg-muted/50 p-3 rounded-lg">
+                <p className="text-sm font-medium">Novo horário selecionado:</p>
+                <p className="text-sm text-muted-foreground">
+                  {format(rescheduleDate, "EEEE, d 'de' MMMM", { locale: ptBR })} às{" "}
+                  {format(rescheduleSlot.start, "HH:mm")}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowReschedule(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleReschedule}
+              disabled={!rescheduleSlot || isUpdating}
+            >
+              {isUpdating ? "Salvando..." : "Confirmar Reagendamento"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }
