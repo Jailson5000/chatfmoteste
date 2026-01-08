@@ -67,9 +67,9 @@ export function TrayChatIntegration() {
 
   return (
     <>
-      <Card className="relative overflow-hidden">
-        <CardContent className="p-4">
-          <div className="flex items-start gap-4">
+      <Card className="relative overflow-hidden h-full flex flex-col">
+        <CardContent className="p-4 flex flex-col flex-1">
+          <div className="flex items-start gap-4 flex-1">
             <TrayIcon />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
@@ -83,37 +83,37 @@ export function TrayChatIntegration() {
               <p className="text-xs text-muted-foreground line-clamp-2">
                 Adicione o chat do sistema ao seu site Tray Commerce para atender visitantes em tempo real.
               </p>
-              
-              <div className="flex items-center justify-between mt-3 pt-3 border-t">
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="tray-toggle"
-                    checked={isEnabled}
-                    onCheckedChange={handleToggle}
-                    disabled={isToggling}
-                  />
-                  <Label htmlFor="tray-toggle" className="text-xs">
-                    {isToggling ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      isEnabled ? "Ativado" : "Desativado"
-                    )}
-                  </Label>
-                </div>
-                
-                {isEnabled && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() => setShowSnippetDialog(true)}
-                  >
-                    <ExternalLink className="h-3 w-3 mr-1" />
-                    Ver código
-                  </Button>
-                )}
-              </div>
             </div>
+          </div>
+          
+          <div className="flex items-center justify-between mt-auto pt-3 border-t">
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="tray-toggle"
+                checked={isEnabled}
+                onCheckedChange={handleToggle}
+                disabled={isToggling}
+              />
+              <Label htmlFor="tray-toggle" className="text-xs">
+                {isToggling ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  isEnabled ? "Ativado" : "Desativado"
+                )}
+              </Label>
+            </div>
+            
+            {isEnabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-7"
+                onClick={() => setShowSnippetDialog(true)}
+              >
+                <ExternalLink className="h-3 w-3 mr-1" />
+                Ver código
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
