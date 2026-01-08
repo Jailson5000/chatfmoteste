@@ -1651,7 +1651,7 @@ async function executeSchedulingTool(
           });
         }
 
-        // Update appointment
+        // Update appointment - reset message timestamps so they're re-sent at new times
         const { error: updateError } = await supabase
           .from("appointments")
           .update({
@@ -1659,6 +1659,10 @@ async function executeSchedulingTool(
             end_time: newEndTime.toISOString(),
             status: "scheduled",
             confirmed_at: null,
+            // Reset all scheduled message timestamps
+            reminder_sent_at: null,
+            confirmation_sent_at: null,
+            pre_message_sent_at: null,
             updated_at: new Date().toISOString()
           })
           .eq("id", appointment_id);
@@ -1746,13 +1750,17 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Este agendamento já está cancelado" });
         }
 
-        // Cancel appointment
+        // Cancel appointment and clear scheduled messages
         const { error: cancelError } = await supabase
           .from("appointments")
           .update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
-            cancel_reason: reason || "Cancelado pelo cliente via chat"
+            cancel_reason: reason || "Cancelado pelo cliente via chat",
+            // Clear scheduled messages - they won't be sent for cancelled appointments
+            reminder_sent_at: null,
+            confirmation_sent_at: null,
+            pre_message_sent_at: null
           })
           .eq("id", appointment_id);
 

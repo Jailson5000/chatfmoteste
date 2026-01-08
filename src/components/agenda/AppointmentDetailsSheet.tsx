@@ -177,7 +177,11 @@ export function AppointmentDetailsSheet({
         end_time: newEnd.toISOString(),
         status: "scheduled", // Reset to scheduled after reschedule
         confirmed_at: null,
-      });
+        // Reset message timestamps so they're re-sent at new times
+        reminder_sent_at: null,
+        confirmation_sent_at: null,
+        pre_message_sent_at: null,
+      } as any);
 
       // Send notification about reschedule
       if (appointment.client_phone) {
