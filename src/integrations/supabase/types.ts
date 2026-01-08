@@ -467,8 +467,10 @@ export type Database = {
           end_time: string
           google_event_id: string | null
           id: string
+          is_return: boolean | null
           law_firm_id: string
           notes: string | null
+          original_appointment_id: string | null
           reminder_sent_at: string | null
           service_id: string
           start_time: string
@@ -490,8 +492,10 @@ export type Database = {
           end_time: string
           google_event_id?: string | null
           id?: string
+          is_return?: boolean | null
           law_firm_id: string
           notes?: string | null
+          original_appointment_id?: string | null
           reminder_sent_at?: string | null
           service_id: string
           start_time: string
@@ -513,8 +517,10 @@ export type Database = {
           end_time?: string
           google_event_id?: string | null
           id?: string
+          is_return?: boolean | null
           law_firm_id?: string
           notes?: string | null
+          original_appointment_id?: string | null
           reminder_sent_at?: string | null
           service_id?: string
           start_time?: string
@@ -541,6 +547,13 @@ export type Database = {
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_original_appointment_id_fkey"
+            columns: ["original_appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
             referencedColumns: ["id"]
           },
           {
@@ -2448,6 +2461,8 @@ export type Database = {
           name: string
           position: number
           price: number | null
+          return_enabled: boolean | null
+          return_interval_days: number | null
           updated_at: string
         }
         Insert: {
@@ -2463,6 +2478,8 @@ export type Database = {
           name: string
           position?: number
           price?: number | null
+          return_enabled?: boolean | null
+          return_interval_days?: number | null
           updated_at?: string
         }
         Update: {
@@ -2478,6 +2495,8 @@ export type Database = {
           name?: string
           position?: number
           price?: number | null
+          return_enabled?: boolean | null
+          return_interval_days?: number | null
           updated_at?: string
         }
         Relationships: [

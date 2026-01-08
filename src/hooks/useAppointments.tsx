@@ -27,6 +27,9 @@ export interface Appointment {
   created_by: "system" | "admin" | "client" | "ai";
   created_at: string;
   updated_at: string;
+  // Return/follow-up fields
+  is_return?: boolean;
+  original_appointment_id?: string | null;
   // Joined
   service?: Service;
   client?: { id: string; name: string; phone: string };
