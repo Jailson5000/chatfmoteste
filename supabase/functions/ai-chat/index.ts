@@ -387,13 +387,17 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "list_client_appointments",
-      description: "Lista os agendamentos existentes do cliente atual para verificar se há algo a reagendar ou cancelar",
+      description: "Lista os agendamentos existentes do cliente atual para verificar se há algo a reagendar ou cancelar. Se não encontrar pelo ID, tenta buscar pelo telefone.",
       parameters: {
         type: "object",
         properties: {
           status: {
             type: "string",
             description: "Filtrar por status: scheduled, confirmed, all (padrão: all)"
+          },
+          client_phone: {
+            type: "string",
+            description: "Telefone do cliente para buscar agendamentos (se não conseguir pelo ID)"
           }
         },
         required: []
@@ -1347,12 +1351,14 @@ async function executeSchedulingTool(
       }
 
       case "list_client_appointments": {
-        const { status } = args;
+        const { status, client_phone } = args;
         
-        // Find appointments for this client (by phone or client_id)
+        console.log(`[Scheduling] list_client_appointments - clientId: ${clientId}, conversationId: ${conversationId}, client_phone arg: ${client_phone}`);
+        
+        // Build a more flexible query to find appointments
         let query = supabase
           .from("appointments")
-          .select("id, start_time, end_time, status, service:services(name, duration_minutes), client_name")
+          .select("id, start_time, end_time, status, client_name, client_phone, service:services(name, duration_minutes)")
           .eq("law_firm_id", lawFirmId)
           .order("start_time", { ascending: true });
 
@@ -1365,39 +1371,71 @@ async function executeSchedulingTool(
           query = query.in("status", ["scheduled", "confirmed"]);
         }
 
-        // Filter by client
-        if (clientId) {
-          query = query.eq("client_id", clientId);
-        }
-
         // Only future appointments
         query = query.gte("start_time", new Date().toISOString());
 
-        const { data: appointments, error } = await query;
+        const { data: allAppointments, error } = await query;
 
         if (error) {
           console.error("[Scheduling] Error listing appointments:", error);
           return JSON.stringify({ success: false, error: "Erro ao buscar agendamentos" });
         }
 
-        if (!appointments || appointments.length === 0) {
+        // Filter appointments by client - use multiple methods
+        let filteredAppointments = allAppointments || [];
+        
+        // If we have a clientId, filter by it
+        if (clientId) {
+          const byClientId = filteredAppointments.filter((apt: any) => apt.client_id === clientId);
+          if (byClientId.length > 0) {
+            filteredAppointments = byClientId;
+          }
+        }
+        
+        // If no results and we have a conversation_id, try to find by it
+        if (filteredAppointments.length === 0 || !clientId) {
+          const byConversation = (allAppointments || []).filter((apt: any) => apt.conversation_id === conversationId);
+          if (byConversation.length > 0) {
+            filteredAppointments = byConversation;
+          }
+        }
+        
+        // If the AI provided a phone number, try to find by phone
+        if (client_phone && filteredAppointments.length === 0) {
+          const normalizedPhone = client_phone.replace(/\D/g, '');
+          const byPhone = (allAppointments || []).filter((apt: any) => {
+            const aptPhone = apt.client_phone?.replace(/\D/g, '') || '';
+            return aptPhone.includes(normalizedPhone) || normalizedPhone.includes(aptPhone);
+          });
+          if (byPhone.length > 0) {
+            filteredAppointments = byPhone;
+          }
+        }
+
+        console.log(`[Scheduling] Found ${filteredAppointments.length} appointments for client`);
+
+        if (filteredAppointments.length === 0) {
           return JSON.stringify({
             success: true,
-            message: "Nenhum agendamento encontrado.",
+            message: "Nenhum agendamento encontrado para este cliente. Para ver os agendamentos, informe o telefone do cliente.",
             appointments: []
           });
         }
 
-        const formattedAppointments = appointments.map((apt: any) => ({
+        const formattedAppointments = filteredAppointments.map((apt: any) => ({
           id: apt.id,
           service: apt.service?.name || "Serviço",
-          date: new Date(apt.start_time).toLocaleDateString("pt-BR"),
-          time: new Date(apt.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-          status: apt.status === "scheduled" ? "Agendado" : "Confirmado"
+          date: new Date(apt.start_time).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+          time: new Date(apt.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+          end_time: new Date(apt.end_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+          status: apt.status === "scheduled" ? "Agendado" : "Confirmado",
+          client_name: apt.client_name,
+          client_phone: apt.client_phone
         }));
 
         return JSON.stringify({
           success: true,
+          message: `${filteredAppointments.length} agendamento(s) encontrado(s)`,
           appointments: formattedAppointments
         });
       }
