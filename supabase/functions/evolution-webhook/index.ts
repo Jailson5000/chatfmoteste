@@ -728,6 +728,274 @@ interface AutomationContext {
 }
 
 // =============================================================================
+// MESSAGE DEBOUNCE QUEUE - Batches messages before AI processing
+// =============================================================================
+// When a client sends multiple messages rapidly, we queue them and wait for
+// a debounce period before processing. This ensures the AI sees all messages
+// as a single context instead of responding to each one individually.
+
+/**
+ * Queue a message for AI processing with debounce.
+ * If there's already a pending queue item for this conversation, extend the debounce time.
+ * Otherwise, create a new queue item.
+ */
+async function queueMessageForAIProcessing(
+  supabaseClient: any,
+  context: Omit<AutomationContext, 'automationId' | 'automationName'>,
+  debounceSeconds: number,
+  requestId: string
+): Promise<void> {
+  const processAfter = new Date(Date.now() + debounceSeconds * 1000).toISOString();
+  const messageData = {
+    content: context.messageContent,
+    type: context.messageType,
+    timestamp: new Date().toISOString(),
+  };
+
+  logDebug('DEBOUNCE', `Queueing message for debounced processing`, {
+    requestId,
+    conversationId: context.conversationId,
+    debounceSeconds,
+    processAfter,
+    messagePreview: context.messageContent.substring(0, 50),
+  });
+
+  // Try to update existing pending queue item (extend debounce, add message)
+  const { data: existingQueue, error: fetchError } = await supabaseClient
+    .from('ai_processing_queue')
+    .select('id, messages, message_count')
+    .eq('conversation_id', context.conversationId)
+    .eq('status', 'pending')
+    .maybeSingle();
+
+  if (fetchError) {
+    logDebug('DEBOUNCE', 'Error fetching existing queue', { requestId, error: fetchError });
+  }
+
+  if (existingQueue) {
+    // Extend debounce and add message to existing queue
+    const existingMessages = existingQueue.messages || [];
+    const updatedMessages = [...existingMessages, messageData];
+    
+    const { error: updateError } = await supabaseClient
+      .from('ai_processing_queue')
+      .update({
+        messages: updatedMessages,
+        message_count: existingQueue.message_count + 1,
+        last_message_at: new Date().toISOString(),
+        process_after: processAfter, // Reset debounce timer
+        metadata: {
+          contact_name: context.contactName,
+          contact_phone: context.contactPhone,
+          remote_jid: context.remoteJid,
+          instance_id: context.instanceId,
+          instance_name: context.instanceName,
+          client_id: context.clientId,
+        },
+      })
+      .eq('id', existingQueue.id);
+
+    if (updateError) {
+      logDebug('DEBOUNCE', 'Failed to update queue', { requestId, error: updateError });
+      // Fallback: process immediately
+      await processAutomations(supabaseClient, context as AutomationContext);
+    } else {
+      logDebug('DEBOUNCE', `Added to existing queue (${updatedMessages.length} messages total)`, {
+        requestId,
+        queueId: existingQueue.id,
+        messageCount: updatedMessages.length,
+      });
+    }
+  } else {
+    // Create new queue item
+    const { data: newQueue, error: insertError } = await supabaseClient
+      .from('ai_processing_queue')
+      .insert({
+        conversation_id: context.conversationId,
+        law_firm_id: context.lawFirmId,
+        messages: [messageData],
+        message_count: 1,
+        process_after: processAfter,
+        metadata: {
+          contact_name: context.contactName,
+          contact_phone: context.contactPhone,
+          remote_jid: context.remoteJid,
+          instance_id: context.instanceId,
+          instance_name: context.instanceName,
+          client_id: context.clientId,
+        },
+      })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      // Could be a race condition - another request created the queue
+      if (insertError.code === '23505') { // unique constraint violation
+        logDebug('DEBOUNCE', 'Race condition: queue already exists, retrying update', { requestId });
+        // Retry as update
+        await queueMessageForAIProcessing(supabaseClient, context, debounceSeconds, requestId);
+      } else {
+        logDebug('DEBOUNCE', 'Failed to create queue', { requestId, error: insertError });
+        // Fallback: process immediately
+        await processAutomations(supabaseClient, context as AutomationContext);
+      }
+    } else {
+      logDebug('DEBOUNCE', `Created new queue item`, {
+        requestId,
+        queueId: newQueue?.id,
+        processAfter,
+      });
+    }
+  }
+
+  // Trigger async processing check
+  // This ensures queued messages get processed even if no more messages arrive
+  await scheduleQueueProcessing(supabaseClient, context.conversationId, debounceSeconds, requestId);
+}
+
+/**
+ * Schedule processing of the queue after the debounce period.
+ * Uses a non-blocking approach to avoid holding the webhook connection.
+ */
+async function scheduleQueueProcessing(
+  supabaseClient: any,
+  conversationId: string,
+  debounceSeconds: number,
+  requestId: string
+): Promise<void> {
+  // Use EdgeRuntime.waitUntil for background processing if available
+  // Otherwise, we'll rely on a cron or the next message to trigger processing
+  try {
+    // Check if there's already a setTimeout-style mechanism
+    // For Deno edge functions, we can use a short delay then check
+    setTimeout(async () => {
+      await processQueuedMessages(supabaseClient, conversationId, requestId);
+    }, (debounceSeconds + 0.5) * 1000); // Add 0.5s buffer
+  } catch (error) {
+    logDebug('DEBOUNCE', 'setTimeout not available, queue will be processed by next trigger', { requestId });
+  }
+}
+
+/**
+ * Process queued messages for a conversation if the debounce period has passed.
+ */
+async function processQueuedMessages(
+  supabaseClient: any,
+  conversationId: string,
+  requestId: string
+): Promise<void> {
+  const now = new Date().toISOString();
+
+  // Get pending queue item that's ready to process
+  const { data: queueItem, error: fetchError } = await supabaseClient
+    .from('ai_processing_queue')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .eq('status', 'pending')
+    .lte('process_after', now)
+    .maybeSingle();
+
+  if (fetchError) {
+    logDebug('DEBOUNCE', 'Error fetching queue for processing', { requestId, error: fetchError });
+    return;
+  }
+
+  if (!queueItem) {
+    logDebug('DEBOUNCE', 'No ready queue item found (still in debounce or already processed)', { 
+      requestId, 
+      conversationId 
+    });
+    return;
+  }
+
+  // Mark as processing to prevent duplicate processing
+  const { error: updateError } = await supabaseClient
+    .from('ai_processing_queue')
+    .update({
+      status: 'processing',
+      processing_started_at: now,
+    })
+    .eq('id', queueItem.id)
+    .eq('status', 'pending'); // Ensure we don't override if already processing
+
+  if (updateError) {
+    logDebug('DEBOUNCE', 'Failed to mark queue as processing (likely race condition)', { 
+      requestId, 
+      error: updateError 
+    });
+    return;
+  }
+
+  logDebug('DEBOUNCE', `Processing ${queueItem.message_count} batched messages`, {
+    requestId,
+    queueId: queueItem.id,
+    conversationId,
+    firstMessageAt: queueItem.first_message_at,
+    lastMessageAt: queueItem.last_message_at,
+  });
+
+  try {
+    // Combine all messages into a single context
+    const messages = queueItem.messages as Array<{ content: string; type: string; timestamp: string }>;
+    const combinedContent = messages.length > 1
+      ? messages.map((m, i) => m.content).join('\n\n')
+      : messages[0]?.content || '';
+    
+    // Get the primary message type (prioritize text if any text exists)
+    const primaryType = messages.some(m => m.type === 'text') ? 'text' : messages[0]?.type || 'text';
+
+    const metadata = queueItem.metadata as Record<string, any>;
+    const context: AutomationContext = {
+      lawFirmId: queueItem.law_firm_id,
+      conversationId: queueItem.conversation_id,
+      messageContent: combinedContent,
+      messageType: primaryType,
+      contactName: metadata.contact_name || '',
+      contactPhone: metadata.contact_phone || '',
+      remoteJid: metadata.remote_jid || '',
+      instanceId: metadata.instance_id || '',
+      instanceName: metadata.instance_name || '',
+      clientId: metadata.client_id,
+    };
+
+    // Process the combined messages
+    await processAutomations(supabaseClient, context);
+
+    // Mark as completed
+    await supabaseClient
+      .from('ai_processing_queue')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', queueItem.id);
+
+    logDebug('DEBOUNCE', `Successfully processed batched messages`, {
+      requestId,
+      queueId: queueItem.id,
+      messageCount: queueItem.message_count,
+    });
+
+  } catch (error) {
+    logDebug('DEBOUNCE', 'Error processing queued messages', {
+      requestId,
+      queueId: queueItem.id,
+      error: error instanceof Error ? error.message : error,
+    });
+
+    // Mark as failed
+    await supabaseClient
+      .from('ai_processing_queue')
+      .update({
+        status: 'failed',
+        completed_at: new Date().toISOString(),
+        error_message: error instanceof Error ? error.message : String(error),
+      })
+      .eq('id', queueItem.id);
+  }
+}
+
+// =============================================================================
 // MATRIZ DE IAs POR PLANO E FUNCIONALIDADE
 // =============================================================================
 // | Funcionalidade      | IA          | Plano                    |
@@ -2684,8 +2952,11 @@ serve(async (req) => {
           const shouldTriggerAutomation = currentHandler === 'ai';
           
           if (shouldTriggerAutomation) {
-            logDebug('AUTOMATION', `Triggering automation - handler is AI`, { requestId, handler: currentHandler });
-            await processAutomations(supabaseClient, {
+            // Use debounce queue to batch multiple messages before AI processing
+            // This prevents duplicate responses when client sends multiple messages rapidly
+            const DEBOUNCE_SECONDS = 3; // Wait 3 seconds after last message before processing
+            
+            await queueMessageForAIProcessing(supabaseClient, {
               lawFirmId,
               conversationId: conversation.id,
               messageContent,
@@ -2695,8 +2966,8 @@ serve(async (req) => {
               remoteJid,
               instanceId: instance.id,
               instanceName: instance.instance_name,
-              clientId: conversation.client_id || undefined, // Pass clientId for memory support
-            });
+              clientId: conversation.client_id || undefined,
+            }, DEBOUNCE_SECONDS, requestId);
           } else {
             logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
           }
