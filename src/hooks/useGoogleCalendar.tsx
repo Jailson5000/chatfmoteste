@@ -73,20 +73,20 @@ export function useGoogleCalendar() {
 
   // Fetch current integration status
   const { data: integration, isLoading, refetch } = useQuery({
-    queryKey: ["google-calendar-integration", lawFirm?.id],
+    queryKey: ["google-calendar-integration"],
     queryFn: async () => {
-      if (!lawFirm?.id) return null;
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) return null;
 
+      // Rely on RLS to return only the current tenant integration
       const { data, error } = await supabase
         .from("google_calendar_integrations")
         .select("*")
-        .eq("law_firm_id", lawFirm.id)
         .maybeSingle();
 
       if (error) throw error;
       return data as GoogleCalendarIntegration | null;
     },
-    enabled: !!lawFirm?.id,
   });
 
   // Update settings mutation
@@ -175,17 +175,24 @@ export function useGoogleCalendar() {
     },
   });
 
+  const resolveLawFirmId = async () => {
+    if (lawFirm?.id) return lawFirm.id;
+
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) return null;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("law_firm_id")
+      .eq("id", auth.user.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data?.law_firm_id ?? null;
+  };
+
   // Connect with Google - uses popup to avoid iframe restrictions (Lovable preview runs in an iframe)
   const connect = async () => {
-    if (!lawFirm?.id) {
-      toast({
-        title: "Erro",
-        description: "Empresa não identificada",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsConnecting(true);
 
     // Open popup synchronously (prevents popup blockers and avoids loading Google inside an iframe)
@@ -202,11 +209,16 @@ export function useGoogleCalendar() {
       // Store return URL so we can redirect back after OAuth (non-popup flows)
       sessionStorage.setItem("google_calendar_return_url", window.location.href);
 
+      const lawFirmId = await resolveLawFirmId();
+      if (!lawFirmId) {
+        throw new Error("Empresa não identificada");
+      }
+
       // Call backend function to initiate OAuth
       const { data, error } = await supabase.functions.invoke("google-calendar-auth", {
         body: {
           action: "get_auth_url",
-          law_firm_id: lawFirm.id,
+          law_firm_id: lawFirmId,
           redirect_url: redirectUrl,
         },
       });
@@ -249,11 +261,12 @@ export function useGoogleCalendar() {
   // Sync now
   const syncNow = useMutation({
     mutationFn: async () => {
-      if (!lawFirm?.id) throw new Error("Empresa não identificada");
+      const lawFirmId = await resolveLawFirmId();
+      if (!lawFirmId) throw new Error("Empresa não identificada");
 
       const { data, error } = await supabase.functions.invoke("google-calendar-sync", {
         body: {
-          law_firm_id: lawFirm.id,
+          law_firm_id: lawFirmId,
         },
       });
 
