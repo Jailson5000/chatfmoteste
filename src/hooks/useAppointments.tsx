@@ -118,7 +118,6 @@ export function useAppointments(date?: Date) {
       let query = supabase
         .from("appointments")
         .select("*, service:services(*), client:clients(id, name, phone)")
-        .neq("status", "cancelled")
         .order("start_time", { ascending: true });
 
       if (date) {
@@ -185,6 +184,16 @@ export function useAppointments(date?: Date) {
           .from("appointments")
           .update({ google_event_id: googleEventId })
           .eq("id", data.id);
+      }
+
+      // Send immediate WhatsApp notification (async, non-blocking)
+      if (data.client_phone) {
+        supabase.functions.invoke("send-appointment-notification", {
+          body: {
+            appointment_id: data.id,
+            type: "created",
+          },
+        }).catch((err) => console.error("Failed to send appointment notification:", err));
       }
 
       return data;
