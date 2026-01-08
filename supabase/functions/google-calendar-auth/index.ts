@@ -151,7 +151,7 @@ serve(async (req) => {
             allow_read_events: true,
             allow_create_events: true,
             allow_edit_events: true,
-            allow_delete_events: false,
+            allow_delete_events: true,
           }, {
             onConflict: "law_firm_id",
           })
