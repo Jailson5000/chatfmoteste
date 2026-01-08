@@ -36,7 +36,6 @@ export function LandingPage() {
     {
       name: "BASIC",
       price: "199",
-      installment: "12x de R$ 199",
       description: "Ideal para pequenos negócios ou profissionais que querem iniciar a automação de atendimentos com IA.",
       items: [
         "200 conversas com IA por mês",
@@ -54,7 +53,6 @@ export function LandingPage() {
     {
       name: "STARTER",
       price: "497",
-      installment: "12x de R$ 497",
       description: "Para quem busca mais capacidade e recursos avançados de automação.",
       items: [
         "250 conversas com IA por mês",
@@ -72,7 +70,6 @@ export function LandingPage() {
     {
       name: "PROFESSIONAL",
       price: "897",
-      installment: "12x de R$ 897",
       description: "Para empresas em crescimento que precisam de mais volume e flexibilidade.",
       items: [
         "500 conversas com IA por mês",
@@ -90,7 +87,6 @@ export function LandingPage() {
     {
       name: "ENTERPRISE",
       price: "1.697",
-      installment: "12x de R$ 1.697",
       description: "Para operações maiores, empresas estruturadas e alto volume de atendimento.",
       items: [
         "1000 conversas com IA por mês",
@@ -483,10 +479,7 @@ export function LandingPage() {
                   </p>
                 </div>
                 <div className="mt-4 mb-4">
-                  <div className="mb-1">
-                    <span className="text-red-400 text-sm font-semibold">💰 {plan.installment}</span>
-                  </div>
-                  <span className="text-white/40 text-xs">ou R$</span>
+                  <span className="text-white/40 text-xs">R$</span>
                   <span className="text-3xl font-bold">{plan.price}</span>
                   <span className="text-white/40 text-sm"> / mês</span>
                 </div>
