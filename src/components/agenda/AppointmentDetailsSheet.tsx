@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { format, addDays, startOfDay } from "date-fns";
+import { useState, useEffect } from "react";
+import { format, addDays, startOfDay, addHours, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Clock,
@@ -12,6 +12,11 @@ import {
   AlertTriangle,
   Calendar,
   RefreshCw,
+  Bell,
+  Send,
+  Edit2,
+  X,
+  Save,
 } from "lucide-react";
 import {
   Sheet,
@@ -32,6 +37,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +55,19 @@ import { useServices } from "@/hooks/useServices";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useTenant } from "@/hooks/useTenant";
+import { useLawFirm } from "@/hooks/useLawFirm";
+
+interface ScheduledMessage {
+  id: string;
+  appointment_id: string;
+  type: "reminder" | "confirmation" | "pre_message";
+  scheduled_for: Date;
+  message_preview: string;
+  service_name: string;
+  appointment_date: string;
+  sent: boolean;
+}
 
 interface AppointmentDetailsSheetProps {
   appointment: Appointment | null;
@@ -69,11 +89,144 @@ export function AppointmentDetailsSheet({
   const { updateAppointment, cancelAppointment, getAvailableSlots } = useAppointments();
   const { services } = useServices();
   const { toast } = useToast();
+  const { tenant } = useTenant();
+  const { lawFirm } = useLawFirm();
+  const lawFirmId = tenant?.id;
   const [isUpdating, setIsUpdating] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState<Date>(new Date());
   const [rescheduleSlot, setRescheduleSlot] = useState<TimeSlot | null>(null);
   const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
+  
+  // Scheduled messages state
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messagesOpen, setMessagesOpen] = useState(true);
+  const [editingMessage, setEditingMessage] = useState<string | null>(null);
+  const [editedText, setEditedText] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Fetch scheduled messages for this client (by phone)
+  useEffect(() => {
+    const fetchScheduledMessages = async () => {
+      if (!appointment?.client_phone || !lawFirmId) return;
+      
+      setLoadingMessages(true);
+      try {
+        // Fetch all pending appointments for this client by phone
+        const { data: clientAppointments, error } = await supabase
+          .from("appointments")
+          .select(`
+            id,
+            start_time,
+            end_time,
+            status,
+            reminder_sent_at,
+            confirmation_sent_at,
+            pre_message_sent_at,
+            service:services(
+              id,
+              name,
+              pre_message_enabled,
+              pre_message_text,
+              pre_message_hours_before
+            )
+          `)
+          .eq("law_firm_id", lawFirmId)
+          .eq("client_phone", appointment.client_phone)
+          .in("status", ["scheduled", "confirmed"])
+          .gte("start_time", new Date().toISOString())
+          .order("start_time", { ascending: true });
+
+        if (error) throw error;
+
+        const messages: ScheduledMessage[] = [];
+        
+        for (const apt of clientAppointments || []) {
+          const aptDate = new Date(apt.start_time);
+          const service = apt.service as any;
+          
+          // Default templates
+          const defaultReminder = lawFirm?.reminder_message_template || 
+            "Olá {nome}! Lembrando do seu agendamento amanhã às {horario} para {servico}.";
+          const defaultConfirmation = lawFirm?.confirmation_message_template ||
+            "Olá {nome}! Seu agendamento para {servico} está confirmado para hoje às {horario}.";
+          
+          // Check reminder (24h before)
+          const reminderTime = addHours(aptDate, -24);
+          if (!apt.reminder_sent_at && isBefore(new Date(), reminderTime)) {
+            messages.push({
+              id: `${apt.id}-reminder`,
+              appointment_id: apt.id,
+              type: "reminder",
+              scheduled_for: reminderTime,
+              message_preview: defaultReminder
+                .replace("{nome}", appointment.client_name || "Cliente")
+                .replace("{data}", format(aptDate, "dd/MM/yyyy"))
+                .replace("{horario}", format(aptDate, "HH:mm"))
+                .replace("{servico}", service?.name || "serviço")
+                .replace("{empresa}", lawFirm?.name || ""),
+              service_name: service?.name || "Serviço",
+              appointment_date: format(aptDate, "dd/MM/yyyy HH:mm"),
+              sent: false,
+            });
+          }
+          
+          // Check confirmation (2h before)
+          const confirmationTime = addHours(aptDate, -2);
+          if (!apt.confirmation_sent_at && isBefore(new Date(), confirmationTime)) {
+            messages.push({
+              id: `${apt.id}-confirmation`,
+              appointment_id: apt.id,
+              type: "confirmation",
+              scheduled_for: confirmationTime,
+              message_preview: defaultConfirmation
+                .replace("{nome}", appointment.client_name || "Cliente")
+                .replace("{data}", format(aptDate, "dd/MM/yyyy"))
+                .replace("{horario}", format(aptDate, "HH:mm"))
+                .replace("{servico}", service?.name || "serviço")
+                .replace("{empresa}", lawFirm?.name || ""),
+              service_name: service?.name || "Serviço",
+              appointment_date: format(aptDate, "dd/MM/yyyy HH:mm"),
+              sent: false,
+            });
+          }
+          
+          // Check pre-message (custom hours before)
+          if (service?.pre_message_enabled && service?.pre_message_text) {
+            const preMessageTime = addHours(aptDate, -(service.pre_message_hours_before || 48));
+            if (!apt.pre_message_sent_at && isBefore(new Date(), preMessageTime)) {
+              messages.push({
+                id: `${apt.id}-pre_message`,
+                appointment_id: apt.id,
+                type: "pre_message",
+                scheduled_for: preMessageTime,
+                message_preview: service.pre_message_text
+                  .replace("{nome}", appointment.client_name || "Cliente")
+                  .replace("{data}", format(aptDate, "dd/MM/yyyy"))
+                  .replace("{horario}", format(aptDate, "HH:mm"))
+                  .replace("{servico}", service?.name || "serviço")
+                  .replace("{empresa}", lawFirm?.name || ""),
+                service_name: service?.name || "Serviço",
+                appointment_date: format(aptDate, "dd/MM/yyyy HH:mm"),
+                sent: false,
+              });
+            }
+          }
+        }
+        
+        // Sort by scheduled time
+        messages.sort((a, b) => a.scheduled_for.getTime() - b.scheduled_for.getTime());
+        setScheduledMessages(messages);
+      } catch (err) {
+        console.error("Error fetching scheduled messages:", err);
+      } finally {
+        setLoadingMessages(false);
+      }
+    };
+
+    fetchScheduledMessages();
+  }, [appointment?.client_phone, appointment?.client_name, lawFirmId, lawFirm]);
 
   if (!appointment) return null;
 
@@ -298,6 +451,181 @@ export function AppointmentDetailsSheet({
               </div>
             )}
           </div>
+
+          <Separator />
+
+          {/* Scheduled Messages Section */}
+          <Collapsible open={messagesOpen} onOpenChange={setMessagesOpen}>
+            <CollapsibleTrigger className="flex items-center justify-between w-full py-2 hover:bg-muted/50 rounded-lg px-2 -mx-2">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Mensagens Agendadas</span>
+                {scheduledMessages.length > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {scheduledMessages.length}
+                  </Badge>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {messagesOpen ? "▲" : "▼"}
+              </span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              {loadingMessages ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+                </div>
+              ) : scheduledMessages.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Nenhuma mensagem agendada pendente
+                </p>
+              ) : (
+                <ScrollArea className="max-h-[200px]">
+                  <div className="space-y-3">
+                    {scheduledMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className="p-3 bg-muted/30 rounded-lg border space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-xs",
+                                msg.type === "reminder" && "border-blue-500 text-blue-600",
+                                msg.type === "confirmation" && "border-green-500 text-green-600",
+                                msg.type === "pre_message" && "border-orange-500 text-orange-600"
+                              )}
+                            >
+                              {msg.type === "reminder" && "Lembrete 24h"}
+                              {msg.type === "confirmation" && "Confirmação 2h"}
+                              {msg.type === "pre_message" && "Pré-mensagem"}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {msg.service_name}
+                            </span>
+                          </div>
+                          {editingMessage !== msg.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => {
+                                setEditingMessage(msg.id);
+                                setEditedText(msg.message_preview);
+                              }}
+                            >
+                              <Edit2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Send className="h-3 w-3" />
+                          <span>
+                            Envio: {format(msg.scheduled_for, "dd/MM/yyyy 'às' HH:mm")}
+                          </span>
+                        </div>
+
+                        {editingMessage === msg.id ? (
+                          <div className="space-y-2">
+                            <Textarea
+                              value={editedText}
+                              onChange={(e) => setEditedText(e.target.value)}
+                              className="text-xs min-h-[80px]"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="flex-1 h-7 text-xs"
+                                onClick={() => setEditingMessage(null)}
+                              >
+                                <X className="h-3 w-3 mr-1" />
+                                Cancelar
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="flex-1 h-7 text-xs"
+                                disabled={savingEdit}
+                                onClick={async () => {
+                                  setSavingEdit(true);
+                                  try {
+                                    // Update the template based on message type
+                                    if (msg.type === "reminder") {
+                                      await supabase
+                                        .from("law_firms")
+                                        .update({ reminder_message_template: editedText })
+                                        .eq("id", lawFirmId);
+                                    } else if (msg.type === "confirmation") {
+                                      await supabase
+                                        .from("law_firms")
+                                        .update({ confirmation_message_template: editedText })
+                                        .eq("id", lawFirmId);
+                                    } else if (msg.type === "pre_message") {
+                                      // Get service ID from appointment
+                                      const aptId = msg.appointment_id;
+                                      const { data: aptData } = await supabase
+                                        .from("appointments")
+                                        .select("service_id")
+                                        .eq("id", aptId)
+                                        .single();
+                                      
+                                      if (aptData?.service_id) {
+                                        await supabase
+                                          .from("services")
+                                          .update({ pre_message_text: editedText })
+                                          .eq("id", aptData.service_id);
+                                      }
+                                    }
+                                    
+                                    // Update local state
+                                    setScheduledMessages(prev => 
+                                      prev.map(m => 
+                                        m.id === msg.id 
+                                          ? { ...m, message_preview: editedText }
+                                          : m
+                                      )
+                                    );
+                                    
+                                    toast({
+                                      title: "Mensagem atualizada",
+                                      description: "O template foi salvo com sucesso.",
+                                    });
+                                    setEditingMessage(null);
+                                  } catch (err) {
+                                    toast({
+                                      title: "Erro ao salvar",
+                                      description: "Não foi possível atualizar a mensagem.",
+                                      variant: "destructive",
+                                    });
+                                  } finally {
+                                    setSavingEdit(false);
+                                  }
+                                }}
+                              >
+                                <Save className="h-3 w-3 mr-1" />
+                                {savingEdit ? "Salvando..." : "Salvar"}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground line-clamp-3">
+                            {msg.message_preview}
+                          </p>
+                        )}
+
+                        <p className="text-xs text-muted-foreground">
+                          Agendamento: {msg.appointment_date}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
 
           <Separator />
 
