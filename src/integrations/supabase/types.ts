@@ -272,6 +272,72 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_processing_queue: {
+        Row: {
+          completed_at: string | null
+          conversation_id: string
+          created_at: string
+          error_message: string | null
+          first_message_at: string
+          id: string
+          last_message_at: string
+          law_firm_id: string
+          message_count: number
+          messages: Json
+          metadata: Json | null
+          process_after: string
+          processing_started_at: string | null
+          status: string
+        }
+        Insert: {
+          completed_at?: string | null
+          conversation_id: string
+          created_at?: string
+          error_message?: string | null
+          first_message_at?: string
+          id?: string
+          last_message_at?: string
+          law_firm_id: string
+          message_count?: number
+          messages?: Json
+          metadata?: Json | null
+          process_after: string
+          processing_started_at?: string | null
+          status?: string
+        }
+        Update: {
+          completed_at?: string | null
+          conversation_id?: string
+          created_at?: string
+          error_message?: string | null
+          first_message_at?: string
+          id?: string
+          last_message_at?: string
+          law_firm_id?: string
+          message_count?: number
+          messages?: Json
+          metadata?: Json | null
+          process_after?: string
+          processing_started_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_processing_queue_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_processing_queue_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_template_base: {
         Row: {
           ai_capabilities: Json | null
