@@ -36,7 +36,8 @@ const corsHeaders = {
 const WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
 
 /**
- * Validate webhook request using token header.
+ * Validate webhook request using token from header OR query string.
+ * Supports: x-webhook-token header, x-evolution-token header, or ?token= query param.
  * Returns error response if invalid, null if valid.
  */
 function validateWebhookToken(req: Request): Response | null {
@@ -46,10 +47,14 @@ function validateWebhookToken(req: Request): Response | null {
     return null;
   }
   
-  const providedToken = req.headers.get("x-webhook-token");
+  // Extract token from multiple sources (header or query string)
+  const url = new URL(req.url);
+  const headerToken = req.headers.get("x-webhook-token") || req.headers.get("x-evolution-token");
+  const queryToken = url.searchParams.get("token");
+  const providedToken = headerToken ?? queryToken;
   
   if (!providedToken) {
-    console.warn("[WEBHOOK_SECURITY] ❌ Request rejected - missing x-webhook-token header", {
+    console.warn("[WEBHOOK_SECURITY] ❌ Request rejected - no token provided (header or query)", {
       timestamp: new Date().toISOString(),
       user_agent: req.headers.get("user-agent"),
     });
@@ -62,6 +67,7 @@ function validateWebhookToken(req: Request): Response | null {
   if (providedToken !== WEBHOOK_TOKEN) {
     console.warn("[WEBHOOK_SECURITY] ❌ Request rejected - invalid webhook token", {
       timestamp: new Date().toISOString(),
+      token_source: headerToken ? "header" : "query",
       token_prefix: providedToken.substring(0, 4) + "...",
     });
     return new Response(
@@ -70,6 +76,7 @@ function validateWebhookToken(req: Request): Response | null {
     );
   }
   
+  console.log("[WEBHOOK_SECURITY] ✅ Token validated", { source: headerToken ? "header" : "query" });
   return null; // Valid
 }
 
