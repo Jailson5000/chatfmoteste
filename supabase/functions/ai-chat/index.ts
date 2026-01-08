@@ -1322,12 +1322,15 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Serviço não encontrado" });
         }
 
-        // Parse date and time
-        const startTime = new Date(`${date}T${time}:00`);
+        // Parse date and time - IMPORTANT: time is in Brazil local time (UTC-3)
+        // We need to convert to UTC for storage
+        const startTime = new Date(`${date}T${time}:00.000-03:00`); // Brazil time = UTC-3
         const totalDuration = service.duration_minutes + 
           (service.buffer_before_minutes || 0) + 
           (service.buffer_after_minutes || 0);
         const endTime = new Date(startTime.getTime() + totalDuration * 60000);
+        
+        console.log(`[book_appointment] Booking at ${time} Brazil time = ${startTime.toISOString()} UTC`);
 
         // Check if slot is still available
         const { data: conflicts } = await supabase
