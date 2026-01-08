@@ -471,6 +471,7 @@ export type Database = {
           law_firm_id: string
           notes: string | null
           original_appointment_id: string | null
+          professional_id: string | null
           reminder_sent_at: string | null
           service_id: string
           start_time: string
@@ -496,6 +497,7 @@ export type Database = {
           law_firm_id: string
           notes?: string | null
           original_appointment_id?: string | null
+          professional_id?: string | null
           reminder_sent_at?: string | null
           service_id: string
           start_time: string
@@ -521,6 +523,7 @@ export type Database = {
           law_firm_id?: string
           notes?: string | null
           original_appointment_id?: string | null
+          professional_id?: string | null
           reminder_sent_at?: string | null
           service_id?: string
           start_time?: string
@@ -554,6 +557,13 @@ export type Database = {
             columns: ["original_appointment_id"]
             isOneToOne: false
             referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointments_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
             referencedColumns: ["id"]
           },
           {
@@ -677,6 +687,50 @@ export type Database = {
             foreignKeyName: "automations_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      birthday_settings: {
+        Row: {
+          coupon_discount_percent: number | null
+          created_at: string
+          enabled: boolean | null
+          id: string
+          include_coupon: boolean | null
+          law_firm_id: string
+          message_template: string | null
+          send_time: string | null
+          updated_at: string
+        }
+        Insert: {
+          coupon_discount_percent?: number | null
+          created_at?: string
+          enabled?: boolean | null
+          id?: string
+          include_coupon?: boolean | null
+          law_firm_id: string
+          message_template?: string | null
+          send_time?: string | null
+          updated_at?: string
+        }
+        Update: {
+          coupon_discount_percent?: number | null
+          created_at?: string
+          enabled?: boolean | null
+          id?: string
+          include_coupon?: boolean | null
+          law_firm_id?: string
+          message_template?: string | null
+          send_time?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "birthday_settings_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
             referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
@@ -914,6 +968,8 @@ export type Database = {
         Row: {
           address: string | null
           avatar_url: string | null
+          birth_date: string | null
+          birthday_message_enabled: boolean | null
           created_at: string
           custom_status_id: string | null
           department_id: string | null
@@ -932,6 +988,8 @@ export type Database = {
         Insert: {
           address?: string | null
           avatar_url?: string | null
+          birth_date?: string | null
+          birthday_message_enabled?: boolean | null
           created_at?: string
           custom_status_id?: string | null
           department_id?: string | null
@@ -950,6 +1008,8 @@ export type Database = {
         Update: {
           address?: string | null
           avatar_url?: string | null
+          birth_date?: string | null
+          birthday_message_enabled?: boolean | null
           created_at?: string
           custom_status_id?: string | null
           department_id?: string | null
@@ -2300,6 +2360,95 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      professional_services: {
+        Row: {
+          created_at: string
+          id: string
+          professional_id: string
+          service_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          professional_id: string
+          service_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          professional_id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professional_services_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "professional_services_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      professionals: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          document: string | null
+          email: string | null
+          id: string
+          is_active: boolean | null
+          law_firm_id: string
+          name: string
+          notes: string | null
+          phone: string | null
+          specialty: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean | null
+          law_firm_id: string
+          name: string
+          notes?: string | null
+          phone?: string | null
+          specialty?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean | null
+          law_firm_id?: string
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          specialty?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "professionals_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
