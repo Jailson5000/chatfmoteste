@@ -244,6 +244,56 @@ serve(async (req) => {
           if (response.ok) {
             results.whatsapp.sent = true;
             console.log(`[send-appointment-notification] WhatsApp sent for ${appointment_id}`);
+            
+            // Save the message to the conversation for system sync
+            if (appointment.conversation_id) {
+              try {
+                await supabase
+                  .from("messages")
+                  .insert({
+                    conversation_id: appointment.conversation_id,
+                    law_firm_id: appointment.law_firm_id,
+                    content: whatsappMessage,
+                    direction: "outgoing",
+                    sender_type: "ai",
+                    sender_name: "Sistema",
+                    status: "sent",
+                    remote_jid: remoteJid,
+                  });
+                console.log(`[send-appointment-notification] Message saved to conversation ${appointment.conversation_id}`);
+              } catch (saveErr) {
+                console.error("[send-appointment-notification] Failed to save message to conversation:", saveErr);
+              }
+            } else {
+              // Try to find conversation by phone
+              const { data: conv } = await supabase
+                .from("conversations")
+                .select("id")
+                .eq("law_firm_id", appointment.law_firm_id)
+                .ilike("remote_jid", `%${phone}%`)
+                .limit(1)
+                .maybeSingle();
+              
+              if (conv) {
+                try {
+                  await supabase
+                    .from("messages")
+                    .insert({
+                      conversation_id: conv.id,
+                      law_firm_id: appointment.law_firm_id,
+                      content: whatsappMessage,
+                      direction: "outgoing",
+                      sender_type: "ai",
+                      sender_name: "Sistema",
+                      status: "sent",
+                      remote_jid: remoteJid,
+                    });
+                  console.log(`[send-appointment-notification] Message saved to found conversation ${conv.id}`);
+                } catch (saveErr) {
+                  console.error("[send-appointment-notification] Failed to save message:", saveErr);
+                }
+              }
+            }
           } else {
             const errorData = await response.text();
             results.whatsapp.error = errorData;
