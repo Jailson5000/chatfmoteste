@@ -66,6 +66,7 @@ const aiItems = [
 
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
 const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
+const agendaItem = { icon: CalendarDays, label: "Agenda", path: "/agenda" };
 
 // Calendar button component - only renders when Google Calendar is connected
 function CalendarButton({ collapsed }: { collapsed: boolean }) {
@@ -97,35 +98,6 @@ function CalendarButton({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-// Agenda button component - only renders when Google Calendar is connected
-function AgendaButton({ collapsed }: { collapsed: boolean }) {
-  const { integration, isConnected } = useGoogleCalendar();
-
-  // Only render if Google Calendar is connected and active
-  if (!isConnected || !integration?.is_active) {
-    return null;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <NavLink
-          to="/agenda"
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
-            collapsed && "justify-center"
-          )}
-        >
-          <CalendarDays className="h-5 w-5 flex-shrink-0" />
-          {!collapsed && <span>Agenda</span>}
-        </NavLink>
-      </TooltipTrigger>
-      {collapsed && (
-        <TooltipContent side="right">Agenda</TooltipContent>
-      )}
-    </Tooltip>
-  );
-}
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -136,11 +108,21 @@ export function AppSidebar() {
   const { toast } = useToast();
   const { lawFirm } = useLawFirm();
   const { isAttendant } = useUserRole();
+  const {
+    integration: googleCalendarIntegration,
+    isConnected: isGoogleCalendarConnected,
+  } = useGoogleCalendar();
+
+  const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
 
   // Build bottom menu items based on user role
-  const bottomMenuItems = isAttendant 
-    ? [profileItem, settingsItem] 
-    : [...adminOnlyItems, profileItem, settingsItem];
+  const bottomMenuItems = isAttendant
+    ? showAgenda
+      ? [profileItem, agendaItem, settingsItem]
+      : [profileItem, settingsItem]
+    : showAgenda
+      ? [...adminOnlyItems, profileItem, agendaItem, settingsItem]
+      : [...adminOnlyItems, profileItem, settingsItem];
 
   // Open sections if on one of their pages
   useEffect(() => {
@@ -346,9 +328,6 @@ export function AppSidebar() {
 
           {/* Calendar button - only visible when Google Calendar is connected */}
           <CalendarButton collapsed={collapsed} />
-
-          {/* Agenda button - only visible when Google Calendar is connected */}
-          <AgendaButton collapsed={collapsed} />
 
           <Tooltip>
             <TooltipTrigger asChild>
