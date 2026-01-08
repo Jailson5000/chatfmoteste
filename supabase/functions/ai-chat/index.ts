@@ -307,6 +307,84 @@ const CRM_TOOLS = [
   }
 ];
 
+// Scheduling/Appointment tools for intelligent booking
+const SCHEDULING_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "list_services",
+      description: "Lista todos os serviços disponíveis para agendamento com nome, duração e preço",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_available_slots",
+      description: "Obtém os horários disponíveis para agendamento em uma data específica, considerando o serviço escolhido e a duração real",
+      parameters: {
+        type: "object",
+        properties: {
+          date: {
+            type: "string",
+            description: "Data para verificar disponibilidade no formato YYYY-MM-DD (ex: 2025-01-15)"
+          },
+          service_id: {
+            type: "string",
+            description: "ID do serviço escolhido pelo cliente"
+          }
+        },
+        required: ["date", "service_id"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "book_appointment",
+      description: "Cria um novo agendamento no sistema com todos os dados necessários",
+      parameters: {
+        type: "object",
+        properties: {
+          service_id: {
+            type: "string",
+            description: "ID do serviço a ser agendado"
+          },
+          date: {
+            type: "string",
+            description: "Data do agendamento no formato YYYY-MM-DD"
+          },
+          time: {
+            type: "string",
+            description: "Horário do agendamento no formato HH:MM (ex: 14:00)"
+          },
+          client_name: {
+            type: "string",
+            description: "Nome completo do cliente"
+          },
+          client_phone: {
+            type: "string",
+            description: "Telefone do cliente"
+          },
+          client_email: {
+            type: "string",
+            description: "E-mail do cliente (opcional)"
+          },
+          notes: {
+            type: "string",
+            description: "Observações sobre o agendamento (opcional)"
+          }
+        },
+        required: ["service_id", "date", "time", "client_name", "client_phone"]
+      }
+    }
+  }
+];
+
 // Check if Google Calendar integration is active for law firm
 async function checkCalendarIntegration(supabase: any, lawFirmId: string): Promise<{
   active: boolean;
@@ -360,16 +438,22 @@ function getCalendarTools(permissions: { read: boolean; create: boolean; edit: b
   return tools.filter(Boolean);
 }
 
-// Get all available tools (calendar + CRM)
+// Get all available tools (calendar + CRM + scheduling)
 function getAllAvailableTools(
   calendarPermissions: { read: boolean; create: boolean; edit: boolean; delete: boolean } | null,
-  includeCrmTools: boolean = true
+  includeCrmTools: boolean = true,
+  includeSchedulingTools: boolean = false
 ) {
   const tools: any[] = [];
   
   // Add calendar tools if integration is active
   if (calendarPermissions) {
     tools.push(...getCalendarTools(calendarPermissions));
+  }
+  
+  // Add scheduling tools if enabled (for scheduling agents)
+  if (includeSchedulingTools) {
+    tools.push(...SCHEDULING_TOOLS);
   }
   
   // Always include CRM tools (they're tenant-scoped by design)
@@ -892,6 +976,305 @@ async function executeCrmTool(
   }
 }
 
+// Execute scheduling tool call (for intelligent appointment system)
+async function executeSchedulingTool(
+  supabase: any,
+  supabaseUrl: string,
+  supabaseKey: string,
+  lawFirmId: string,
+  conversationId: string,
+  clientId: string | undefined,
+  toolCall: { name: string; arguments: string }
+): Promise<string> {
+  try {
+    const args = JSON.parse(toolCall.arguments);
+    console.log(`[AI Chat] Executing scheduling tool: ${toolCall.name}`, args);
+
+    switch (toolCall.name) {
+      case "list_services": {
+        const { data: services, error } = await supabase
+          .from("services")
+          .select("id, name, description, duration_minutes, price, is_active")
+          .eq("law_firm_id", lawFirmId)
+          .eq("is_active", true)
+          .order("name");
+
+        if (error) {
+          return JSON.stringify({ success: false, error: "Erro ao buscar serviços" });
+        }
+
+        if (!services || services.length === 0) {
+          return JSON.stringify({
+            success: true,
+            message: "Nenhum serviço cadastrado ainda.",
+            services: []
+          });
+        }
+
+        const serviceList = services.map((s: any) => ({
+          id: s.id,
+          nome: s.name,
+          descricao: s.description,
+          duracao_minutos: s.duration_minutes,
+          preco: s.price ? `R$ ${s.price.toFixed(2)}` : "Gratuito"
+        }));
+
+        return JSON.stringify({
+          success: true,
+          message: `${services.length} serviço(s) disponível(is)`,
+          services: serviceList
+        });
+      }
+
+      case "get_available_slots": {
+        const { date, service_id } = args;
+        
+        if (!date || !service_id) {
+          return JSON.stringify({ success: false, error: "Data e serviço são obrigatórios" });
+        }
+
+        // Get service details
+        const { data: service, error: serviceError } = await supabase
+          .from("services")
+          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes")
+          .eq("id", service_id)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (serviceError || !service) {
+          return JSON.stringify({ success: false, error: "Serviço não encontrado" });
+        }
+
+        // Get law firm business hours
+        const { data: lawFirm, error: lawFirmError } = await supabase
+          .from("law_firms")
+          .select("business_hours")
+          .eq("id", lawFirmId)
+          .single();
+
+        if (lawFirmError || !lawFirm?.business_hours) {
+          return JSON.stringify({ success: false, error: "Horário de funcionamento não configurado" });
+        }
+
+        const businessHours = lawFirm.business_hours as Record<string, { enabled: boolean; start: string; end: string }>;
+        const targetDate = new Date(date + "T00:00:00");
+        const dayOfWeek = targetDate.getDay();
+        const dayMap: Record<number, string> = {
+          0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday",
+          4: "thursday", 5: "friday", 6: "saturday"
+        };
+        const dayKey = dayMap[dayOfWeek];
+        const dayHours = businessHours[dayKey];
+
+        if (!dayHours?.enabled) {
+          return JSON.stringify({
+            success: true,
+            message: `Não há atendimento neste dia da semana.`,
+            available_slots: []
+          });
+        }
+
+        // Get existing appointments for this date
+        const startOfDay = date + "T00:00:00";
+        const endOfDay = date + "T23:59:59";
+
+        const { data: existingAppointments } = await supabase
+          .from("appointments")
+          .select("start_time, end_time")
+          .eq("law_firm_id", lawFirmId)
+          .neq("status", "cancelled")
+          .gte("start_time", startOfDay)
+          .lte("start_time", endOfDay);
+
+        // Generate available slots
+        const [startHour, startMin] = dayHours.start.split(":").map(Number);
+        const [endHour, endMin] = dayHours.end.split(":").map(Number);
+
+        const totalDuration = service.duration_minutes + 
+          (service.buffer_before_minutes || 0) + 
+          (service.buffer_after_minutes || 0);
+
+        const slots: string[] = [];
+        let currentTime = new Date(date + `T${dayHours.start}:00`);
+        const businessEnd = new Date(date + `T${dayHours.end}:00`);
+        const now = new Date();
+
+        while (new Date(currentTime.getTime() + totalDuration * 60000) <= businessEnd) {
+          const slotStart = new Date(currentTime);
+          const slotEnd = new Date(currentTime.getTime() + totalDuration * 60000);
+
+          // Check if slot is in the past
+          if (slotStart > now) {
+            // Check for conflicts with existing appointments
+            const hasConflict = (existingAppointments || []).some((apt: any) => {
+              const aptStart = new Date(apt.start_time);
+              const aptEnd = new Date(apt.end_time);
+              return (slotStart < aptEnd && slotEnd > aptStart);
+            });
+
+            if (!hasConflict) {
+              slots.push(slotStart.toLocaleTimeString("pt-BR", { 
+                hour: "2-digit", 
+                minute: "2-digit",
+                timeZone: "America/Sao_Paulo"
+              }));
+            }
+          }
+
+          // Move to next slot
+          currentTime = new Date(currentTime.getTime() + service.duration_minutes * 60000);
+        }
+
+        if (slots.length === 0) {
+          return JSON.stringify({
+            success: true,
+            message: `Não há horários disponíveis para ${service.name} no dia ${date}. Sugira outra data.`,
+            available_slots: []
+          });
+        }
+
+        return JSON.stringify({
+          success: true,
+          message: `Horários disponíveis para ${service.name} em ${date}`,
+          service_name: service.name,
+          duration_minutes: service.duration_minutes,
+          available_slots: slots
+        });
+      }
+
+      case "book_appointment": {
+        const { service_id, date, time, client_name, client_phone, client_email, notes } = args;
+
+        if (!service_id || !date || !time || !client_name || !client_phone) {
+          return JSON.stringify({ 
+            success: false, 
+            error: "Dados incompletos. Necessário: serviço, data, horário, nome e telefone do cliente." 
+          });
+        }
+
+        // Get service details
+        const { data: service, error: serviceError } = await supabase
+          .from("services")
+          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes")
+          .eq("id", service_id)
+          .eq("law_firm_id", lawFirmId)
+          .single();
+
+        if (serviceError || !service) {
+          return JSON.stringify({ success: false, error: "Serviço não encontrado" });
+        }
+
+        // Parse date and time
+        const startTime = new Date(`${date}T${time}:00`);
+        const totalDuration = service.duration_minutes + 
+          (service.buffer_before_minutes || 0) + 
+          (service.buffer_after_minutes || 0);
+        const endTime = new Date(startTime.getTime() + totalDuration * 60000);
+
+        // Check if slot is still available
+        const { data: conflicts } = await supabase
+          .from("appointments")
+          .select("id")
+          .eq("law_firm_id", lawFirmId)
+          .neq("status", "cancelled")
+          .lt("start_time", endTime.toISOString())
+          .gt("end_time", startTime.toISOString());
+
+        if (conflicts && conflicts.length > 0) {
+          return JSON.stringify({
+            success: false,
+            error: "Este horário não está mais disponível. Por favor, escolha outro horário."
+          });
+        }
+
+        // Create appointment
+        const { data: appointment, error: createError } = await supabase
+          .from("appointments")
+          .insert({
+            law_firm_id: lawFirmId,
+            service_id,
+            start_time: startTime.toISOString(),
+            end_time: endTime.toISOString(),
+            client_id: clientId,
+            client_name,
+            client_phone,
+            client_email: client_email || null,
+            notes: notes || null,
+            conversation_id: conversationId,
+            status: "scheduled",
+            created_by: "ai"
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error("[Scheduling] Error creating appointment:", createError);
+          return JSON.stringify({ success: false, error: "Erro ao criar agendamento" });
+        }
+
+        // Try to create Google Calendar event
+        try {
+          const calendarResponse = await fetch(`${supabaseUrl}/functions/v1/google-calendar-actions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseKey}`,
+            },
+            body: JSON.stringify({
+              action: "create_event",
+              law_firm_id: lawFirmId,
+              conversation_id: conversationId,
+              client_id: clientId,
+              event_data: {
+                title: `${service.name} - ${client_name}`,
+                description: [
+                  `Cliente: ${client_name}`,
+                  `Telefone: ${client_phone}`,
+                  client_email && `E-mail: ${client_email}`,
+                  notes && `Obs: ${notes}`
+                ].filter(Boolean).join("\n"),
+                start_time: startTime.toISOString(),
+                end_time: endTime.toISOString(),
+                duration_minutes: service.duration_minutes
+              }
+            }),
+          });
+
+          const calendarResult = await calendarResponse.json();
+          if (calendarResult.success && calendarResult.event?.id) {
+            await supabase
+              .from("appointments")
+              .update({ google_event_id: calendarResult.event.id })
+              .eq("id", appointment.id);
+          }
+        } catch (e) {
+          console.error("[Scheduling] Failed to create Google Calendar event:", e);
+        }
+
+        const formattedDate = new Date(date).toLocaleDateString("pt-BR");
+        return JSON.stringify({
+          success: true,
+          message: `Agendamento confirmado! ${service.name} para ${client_name} no dia ${formattedDate} às ${time}.`,
+          appointment: {
+            id: appointment.id,
+            service: service.name,
+            date: formattedDate,
+            time,
+            client_name,
+            client_phone
+          }
+        });
+      }
+
+      default:
+        return JSON.stringify({ error: `Ferramenta desconhecida: ${toolCall.name}` });
+    }
+  } catch (error) {
+    console.error(`[AI Chat] Scheduling tool error:`, error);
+    return JSON.stringify({ error: "Erro ao executar ação de agendamento" });
+  }
+}
+
 // Get all available tools (calendar + CRM)
 function getCurrentBillingPeriod(): string {
   const now = new Date();
@@ -1367,7 +1750,7 @@ serve(async (req) => {
     // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
-      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer")
+      .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer, trigger_type")
       .eq("id", automationId)
       .eq("is_active", true)
       .single();
@@ -1406,9 +1789,13 @@ serve(async (req) => {
     // Get notify_on_transfer setting (default false)
     const notifyOnTransfer = (automation as any).notify_on_transfer ?? false;
 
+    // Check if this is a scheduling agent
+    const triggerType = (automation as any).trigger_type;
+    const isSchedulingAgent = triggerType === "scheduling";
+
     // Extract AI role from trigger_config for audit purposes
     const triggerConfig = (automation as any).trigger_config as Record<string, unknown> | null;
-    const aiRole = (triggerConfig?.role as string) || 'default';
+    const aiRole = (triggerConfig?.role as string) || (isSchedulingAgent ? 'scheduling' : 'default');
 
     if (!systemPrompt) {
       console.error(`[${errorRef}] Agent has no prompt configured:`, automationId);
@@ -1653,12 +2040,13 @@ REGRAS PARA USO DAS AÇÕES:
     
     if (effectiveLawFirmId) {
       calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmId);
-      // Get all tools (calendar if active + CRM always)
+      // Get all tools (calendar if active + CRM always + scheduling if agent is scheduling type)
       allTools = getAllAvailableTools(
         calendarIntegration.active ? calendarIntegration.permissions : null,
-        true // Always include CRM tools
+        true, // Always include CRM tools
+        isSchedulingAgent // Include scheduling tools for scheduling agents
       );
-      console.log(`[AI Chat] Tools available: ${allTools.length} (Calendar: ${calendarIntegration.active ? 'yes' : 'no'}, CRM: yes)`);
+      console.log(`[AI Chat] Tools available: ${allTools.length} (Calendar: ${calendarIntegration.active ? 'yes' : 'no'}, CRM: yes, Scheduling: ${isSchedulingAgent ? 'yes' : 'no'})`);
     }
 
     console.log(`[AI Chat] Processing message for conversation ${conversationId}, useOpenAI: ${useOpenAI}`);
@@ -1753,6 +2141,7 @@ REGRAS PARA USO DAS AÇÕES:
         // Determine which executor to use based on tool name
         const calendarToolNames = ["check_availability", "list_events", "create_event", "update_event", "delete_event"];
         const crmToolNames = ["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"];
+        const schedulingToolNames = ["list_services", "get_available_slots", "book_appointment"];
         
         let result: string;
         
@@ -1777,6 +2166,16 @@ REGRAS PARA USO DAS AÇÕES:
             automationName,
             { name: toolName, arguments: toolArgs },
             notifyOnTransfer
+          );
+        } else if (schedulingToolNames.includes(toolName)) {
+          result = await executeSchedulingTool(
+            supabase,
+            supabaseUrl,
+            supabaseKey,
+            effectiveLawFirmId!,
+            conversationId,
+            context?.clientId,
+            { name: toolName, arguments: toolArgs }
           );
         } else {
           result = JSON.stringify({ error: `Unknown tool: ${toolName}` });
