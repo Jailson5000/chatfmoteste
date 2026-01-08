@@ -173,25 +173,40 @@ serve(async (req) => {
         let instance = null;
         
         if (appointment.whatsapp_instance_id) {
+          // Try to get specific instance regardless of status (user chose it)
           const { data: specificInstance } = await supabase
             .from("whatsapp_instances")
-            .select("id, instance_name, api_url, api_key")
+            .select("id, instance_name, api_url, api_key, status")
             .eq("id", appointment.whatsapp_instance_id)
-            .eq("status", "connected")
             .single();
           instance = specificInstance;
+          console.log(`[send-appointment-notification] Specific instance: ${specificInstance?.instance_name}, status: ${specificInstance?.status}`);
         }
         
-        // Fallback to any connected instance for this law firm
+        // Fallback to any instance for this law firm (prefer connected, but try others)
         if (!instance) {
-          const { data: fallbackInstance } = await supabase
+          // First try connected
+          const { data: connectedInstance } = await supabase
             .from("whatsapp_instances")
-            .select("id, instance_name, api_url, api_key")
+            .select("id, instance_name, api_url, api_key, status")
             .eq("law_firm_id", appointment.law_firm_id)
             .eq("status", "connected")
             .limit(1)
-            .single();
-          instance = fallbackInstance;
+            .maybeSingle();
+          
+          if (connectedInstance) {
+            instance = connectedInstance;
+          } else {
+            // Fallback to any instance (connecting, awaiting_qr, etc.)
+            const { data: anyInstance } = await supabase
+              .from("whatsapp_instances")
+              .select("id, instance_name, api_url, api_key, status")
+              .eq("law_firm_id", appointment.law_firm_id)
+              .limit(1)
+              .maybeSingle();
+            instance = anyInstance;
+          }
+          console.log(`[send-appointment-notification] Fallback instance: ${instance?.instance_name}, status: ${instance?.status}`);
         }
 
         if (instance) {
