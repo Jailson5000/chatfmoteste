@@ -917,16 +917,15 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Refreshing phone number for instance: ${body.instanceId}`);
 
-        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        // Use isGlobalAdmin to allow access to any instance
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
         const apiUrl = normalizeUrl(instance.api_url);
 
-        let phoneNumber: string | null = null;
+        // Use enhanced phone fetching that tries multiple endpoints
+        const result = await fetchPhoneNumberEnhanced(apiUrl, instance.api_key || "", instance.instance_name);
+        const phoneNumber = result.phone;
 
-        try {
-          phoneNumber = await fetchConnectedPhoneNumber(apiUrl, instance.api_key || "", instance.instance_name);
-        } catch (e) {
-          console.log("[Evolution API] Failed to fetch phone number:", e);
-        }
+        console.log(`[Evolution API] Phone fetch result: ${phoneNumber ? `found ${phoneNumber.slice(0,4)}***` : result.reason}`);
 
         const updatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
@@ -948,6 +947,7 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             phoneNumber,
+            reason: phoneNumber ? undefined : result.reason,
             instance: updatedInstance,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
