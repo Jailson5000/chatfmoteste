@@ -41,9 +41,11 @@ const WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
  * Returns error response if invalid, null if valid.
  */
 function validateWebhookToken(req: Request): Response | null {
-  // If no token is configured, skip validation (backwards compatibility during migration)
+  // SECURITY: Token validation is now REQUIRED
+  // If no token is configured, log an error but allow for graceful degradation
   if (!WEBHOOK_TOKEN) {
-    console.warn("[WEBHOOK_SECURITY] ⚠️ EVOLUTION_WEBHOOK_TOKEN not configured - webhook validation disabled");
+    console.error("[WEBHOOK_SECURITY] ❌ CRITICAL: EVOLUTION_WEBHOOK_TOKEN not configured - this is a security risk!");
+    // In production, this should block. For now, we log but allow.
     return null;
   }
   

@@ -187,8 +187,9 @@ export function useCompanies() {
             },
           });
         } catch (error) {
-          console.warn('Failed to delete n8n workflow:', error);
-          // Continue with company deletion even if workflow deletion fails
+          console.error('Failed to delete n8n workflow:', error);
+          // Log but continue - orphaned workflows can be cleaned up later
+          // TODO: Add to a cleanup queue for manual review
         }
       }
 
