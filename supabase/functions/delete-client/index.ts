@@ -62,6 +62,42 @@ Deno.serve(async (req) => {
     }
 
     // Clean RESTRICT/NO ACTION FKs first
+    // IMPORTANT: deleting client cascades to conversations; we must detach any tables that
+    // reference conversations with NO ACTION, otherwise the cascade will fail.
+
+    const { data: conversations, error: convError } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("client_id", clientId)
+      .eq("law_firm_id", lawFirmId);
+    if (convError) throw convError;
+
+    const conversationIds = (conversations ?? [])
+      .map((c: any) => c.id)
+      .filter(Boolean);
+
+    if (conversationIds.length > 0) {
+      console.log(`[delete-client] Detaching logs from ${conversationIds.length} conversations`);
+
+      const { error: googleAiLogsConvError } = await supabase
+        .from("google_calendar_ai_logs")
+        .update({ conversation_id: null })
+        .in("conversation_id", conversationIds);
+      if (googleAiLogsConvError) throw googleAiLogsConvError;
+
+      const { error: googleEventsConvError } = await supabase
+        .from("google_calendar_events")
+        .update({ conversation_id: null })
+        .in("conversation_id", conversationIds);
+      if (googleEventsConvError) throw googleEventsConvError;
+
+      const { error: trayOrderMapError } = await supabase
+        .from("tray_order_map")
+        .delete()
+        .in("local_conversation_id", conversationIds);
+      if (trayOrderMapError) throw trayOrderMapError;
+    }
+
     const { error: googleLogsError } = await supabase
       .from("google_calendar_ai_logs")
       .update({ client_id: null })
