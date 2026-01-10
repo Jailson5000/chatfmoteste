@@ -417,9 +417,13 @@ export default function Contacts() {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
                 
-                // Get WhatsApp instance display (prefer phone last 4; fallback to instance name)
+                // Get WhatsApp instance display:
+                // 1) client.whatsapp_instance_id if set
+                // 2) fallback to last conversation instance
                 const getInstanceDisplay = () => {
-                  const inst = client.whatsapp_instance;
+                  const inst =
+                    client.whatsapp_instance || client.conversations?.[0]?.whatsapp_instance || null;
+
                   if (!inst) return null;
 
                   const phoneNumber = inst.phone_number;
