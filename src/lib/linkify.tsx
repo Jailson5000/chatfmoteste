@@ -25,7 +25,7 @@ export function renderWithLinks(text: string, className?: string): ReactNode {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className={className || "text-primary underline hover:text-primary/80 break-all"}
+        className={className || "text-primary underline hover:text-primary/80 break-all [word-break:break-all]"}
         onClick={(e) => e.stopPropagation()}
       >
         {url}
