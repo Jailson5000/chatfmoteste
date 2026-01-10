@@ -1199,15 +1199,15 @@ export function MessageBubble({
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            "flex items-center gap-2 p-2 rounded-lg transition-colors",
+            "flex items-center gap-2 p-2 rounded-lg transition-colors max-w-full overflow-hidden",
             isFromMe 
               ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" 
               : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
           )}
         >
           <FileText className="h-8 w-8 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{fileName}</p>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <p className="text-sm font-medium truncate max-w-full">{fileName}</p>
             <p className="text-xs opacity-70">Clique para abrir</p>
           </div>
           <Download className="h-4 w-4 flex-shrink-0" />
@@ -1266,7 +1266,8 @@ export function MessageBubble({
       
       <div
         className={cn(
-          "max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 transition-all break-words [overflow-wrap:anywhere] [word-break:break-word]",
+          "max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 transition-all overflow-hidden",
+          "break-words [overflow-wrap:break-word] [word-break:break-word] [hyphens:auto]",
           isInternal
             ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
             : isFromMe
@@ -1318,7 +1319,7 @@ export function MessageBubble({
         
         {/* Render text content with linkified URLs */}
         {displayContent && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word]">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:break-word] [word-break:break-word] max-w-full">
             {highlightText ? highlightText(displayContent) : renderWithLinks(displayContent)}
           </p>
         )}
