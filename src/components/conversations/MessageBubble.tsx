@@ -1192,13 +1192,37 @@ export function MessageBubble({
     }
 
     if (isDocument) {
-      // Extract just the readable file name, not the full URL with encryption params
-      const urlParts = mediaUrl.split("/").pop() || "Documento";
-      // Try to get a cleaner name - if it has query params or encryption, use content or a fallback
-      const cleanFileName = urlParts.includes("?") || urlParts.includes("enc") 
-        ? (content?.trim() || "Documento") 
-        : urlParts;
-      
+      // Prefer a human-readable file name. Evolution/WhatsApp often uses encrypted URLs here.
+      const rawLastSegment = mediaUrl.split("/").pop() || "Documento";
+      const withoutQuery = rawLastSegment.split("?")[0] || rawLastSegment;
+
+      let urlFileName = withoutQuery;
+      try {
+        urlFileName = decodeURIComponent(withoutQuery);
+      } catch {
+        // ignore
+      }
+
+      const contentCandidate = content?.trim();
+      const looksLikeFileName = (v?: string | null) =>
+        !!v &&
+        v.length <= 160 &&
+        !v.includes("\n") &&
+        /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|mp4)$/i.test(v);
+
+      const urlLooksEncrypted =
+        urlFileName.length > 80 ||
+        /\.enc$/i.test(urlFileName) ||
+        /_n\.enc/i.test(urlFileName) ||
+        /[A-Za-z0-9_-]{40,}/.test(urlFileName);
+
+      const displayName =
+        looksLikeFileName(contentCandidate)
+          ? (contentCandidate as string)
+          : urlLooksEncrypted
+            ? "Documento"
+            : urlFileName;
+
       return (
         <a
           href={mediaUrl}
@@ -1206,14 +1230,14 @@ export function MessageBubble({
           rel="noopener noreferrer"
           className={cn(
             "flex items-center gap-2 p-2 rounded-lg transition-colors w-full",
-            isFromMe 
-              ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" 
+            isFromMe
+              ? "bg-primary-foreground/10 hover:bg-primary-foreground/20"
               : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
           )}
         >
           <FileText className="h-8 w-8 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium break-all line-clamp-2">{cleanFileName}</p>
+            <p className="text-sm font-medium break-all line-clamp-2">{displayName}</p>
             <p className="text-xs opacity-70">Clique para abrir</p>
           </div>
           <Download className="h-4 w-4 flex-shrink-0" />
@@ -1244,9 +1268,21 @@ export function MessageBubble({
       .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
       .replace(/\r\n/g, "\n");
 
-    return withoutPlaceholder
+    const normalized = withoutPlaceholder
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+
+    // For document messages, WhatsApp often sets the content as just the filename.
+    // We already render the filename in the document card, so avoid duplicating it.
+    if (messageType === "document") {
+      const singleLine = !normalized.includes("\n");
+      const looksLikeFileName =
+        singleLine && /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|mp4)$/i.test(normalized);
+
+      if (looksLikeFileName) return "";
+    }
+
+    return normalized;
   })();
 
   return (
@@ -1325,7 +1361,7 @@ export function MessageBubble({
         
         {/* Render text content with linkified URLs */}
         {displayContent && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap break-all [overflow-wrap:anywhere] [word-break:break-all]">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word]">
             {highlightText ? highlightText(displayContent) : renderWithLinks(displayContent)}
           </p>
         )}
