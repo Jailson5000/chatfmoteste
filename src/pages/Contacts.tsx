@@ -407,7 +407,6 @@ export default function Contacts() {
                 <TableHead>Status</TableHead>
                 <TableHead>Departamento</TableHead>
                 <TableHead>Tags</TableHead>
-                <TableHead>Origem</TableHead>
                 <TableHead>Conexão</TableHead>
                 <TableHead>Criado Em</TableHead>
                 <TableHead className="w-12"></TableHead>
@@ -418,10 +417,18 @@ export default function Contacts() {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
                 
-                // Get WhatsApp instance display name
-                const instanceDisplay = client.whatsapp_instance 
-                  ? (client.whatsapp_instance.display_name || client.whatsapp_instance.phone_number || client.whatsapp_instance.instance_name)
-                  : null;
+                // Get WhatsApp instance phone number (last 4 digits like Conversations/Kanban)
+                const getInstanceDisplay = () => {
+                  const phoneNumber = client.whatsapp_instance?.phone_number;
+                  if (phoneNumber) {
+                    const digits = phoneNumber.replace(/\D/g, "");
+                    if (digits.length >= 4) {
+                      return `•••${digits.slice(-4)}`;
+                    }
+                  }
+                  return null;
+                };
+                const instanceDisplay = getInstanceDisplay();
 
                 return (
                   <TableRow key={client.id} className="hover:bg-muted/20">
@@ -513,9 +520,6 @@ export default function Contacts() {
                       <div className="flex items-center gap-1">
                         <span className="text-muted-foreground">—</span>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-muted-foreground">—</span>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {instanceDisplay || "—"}
