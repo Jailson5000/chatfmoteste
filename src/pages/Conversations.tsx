@@ -85,6 +85,7 @@ import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useClients } from "@/hooks/useClients";
 import { AIProviderBadge } from "@/components/ai/AIProviderBadge";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useAutomations } from "@/hooks/useAutomations";
@@ -158,6 +159,7 @@ export default function Conversations() {
   const { departments } = useDepartments();
   const { tags } = useTags();
   const { statuses } = useCustomStatuses();
+  const { updateClient } = useClients();
   const { templates } = useTemplates();
   const { instances: whatsappInstances } = useWhatsAppInstances();
   const { automations } = useAutomations();
@@ -1417,10 +1419,20 @@ export default function Conversations() {
 
   const handleUpdateName = async () => {
     if (selectedConversation && editingName.trim()) {
+      // Update conversation contact_name
       updateConversation.mutate({
         id: selectedConversation.id,
         contact_name: editingName,
       });
+      
+      // Also update linked client name if exists
+      if (selectedConversation.client_id) {
+        updateClient.mutate({
+          id: selectedConversation.client_id,
+          name: editingName.trim(),
+        });
+      }
+      
       setEditNameDialogOpen(false);
     }
   };

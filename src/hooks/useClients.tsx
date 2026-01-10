@@ -16,8 +16,16 @@ export interface Client {
   lgpd_consent_date: string | null;
   custom_status_id: string | null;
   department_id: string | null;
+  whatsapp_instance_id: string | null;
   created_at: string;
   updated_at: string;
+  // Joined data
+  whatsapp_instance?: {
+    id: string;
+    instance_name: string;
+    display_name: string | null;
+    phone_number: string | null;
+  } | null;
 }
 
 export function useClients() {
@@ -32,7 +40,10 @@ export function useClients() {
 
       const { data, error } = await supabase
         .from("clients")
-        .select("*")
+        .select(`
+          *,
+          whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number)
+        `)
         .eq("law_firm_id", lawFirm.id)
         .order("created_at", { ascending: false });
 
