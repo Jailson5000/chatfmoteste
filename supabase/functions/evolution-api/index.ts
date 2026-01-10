@@ -226,24 +226,28 @@ function extractPhoneFromPayload(payload: any): string | null {
   }
 
   const directCandidates = [
-    // Common direct fields
+    // Common direct fields (Evolution v2.3.7 uses "ownerJid")
+    payload?.ownerJid,
     payload?.owner,
     payload?.wuid,
     payload?.wid,
     payload?.jid,
 
     // Common nested wrappers (Evolution v2 often nests under `instance`)
+    payload?.instance?.ownerJid,
     payload?.instance?.owner,
     payload?.instance?.wuid,
     payload?.instance?.wid,
     payload?.instance?.jid,
 
     // Sometimes there is a double nesting: { instance: { instance: {...} } }
+    payload?.instance?.instance?.ownerJid,
     payload?.instance?.instance?.owner,
     payload?.instance?.instance?.wuid,
     payload?.instance?.instance?.jid,
 
     // Other previously supported candidates
+    payload?.profile?.ownerJid,
     payload?.profile?.owner,
     payload?.profile?.id,
     payload?.me?.id,
@@ -703,11 +707,13 @@ serve(async (req) => {
           dbStatus = "connecting";
         }
 
-        // Fetch and store phone number when connected
+        // Fetch and store phone number when connected using enhanced method
         let phoneNumberToSave: string | null = null;
         if (dbStatus === "connected" && !instance.phone_number && instance.api_key) {
           try {
-            phoneNumberToSave = await fetchConnectedPhoneNumber(apiUrl, instance.api_key, instance.instance_name);
+            const result = await fetchPhoneNumberEnhanced(apiUrl, instance.api_key, instance.instance_name);
+            phoneNumberToSave = result.phone;
+            console.log(`[Evolution API] Phone fetch (get_status): ${phoneNumberToSave ? `found ${phoneNumberToSave.slice(0,4)}***` : result.reason}`);
           } catch (e) {
             console.log("[Evolution API] Failed to fetch phone number (non-fatal):", e);
           }
@@ -719,12 +725,18 @@ serve(async (req) => {
         };
         if (phoneNumberToSave) updatePayload.phone_number = phoneNumberToSave;
 
-        const { data: updatedInstance } = await supabaseClient
+        console.log(`[Evolution API] Updating instance ${body.instanceId} to status: ${dbStatus}`);
+
+        const { data: updatedInstance, error: updateError } = await supabaseClient
           .from("whatsapp_instances")
           .update(updatePayload)
           .eq("id", body.instanceId)
           .select()
           .single();
+
+        if (updateError) {
+          console.error(`[Evolution API] Failed to update instance status:`, updateError);
+        }
 
         return new Response(
           JSON.stringify({
