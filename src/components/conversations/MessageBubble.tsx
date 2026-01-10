@@ -1192,22 +1192,28 @@ export function MessageBubble({
     }
 
     if (isDocument) {
-      const fileName = mediaUrl.split("/").pop() || "Documento";
+      // Extract just the readable file name, not the full URL with encryption params
+      const urlParts = mediaUrl.split("/").pop() || "Documento";
+      // Try to get a cleaner name - if it has query params or encryption, use content or a fallback
+      const cleanFileName = urlParts.includes("?") || urlParts.includes("enc") 
+        ? (content?.trim() || "Documento") 
+        : urlParts;
+      
       return (
         <a
           href={mediaUrl}
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            "flex items-center gap-2 p-2 rounded-lg transition-colors max-w-full overflow-hidden",
+            "flex items-center gap-2 p-2 rounded-lg transition-colors w-full",
             isFromMe 
               ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" 
               : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
           )}
         >
           <FileText className="h-8 w-8 flex-shrink-0" />
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <p className="text-sm font-medium truncate max-w-full">{fileName}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium break-all line-clamp-2">{cleanFileName}</p>
             <p className="text-xs opacity-70">Clique para abrir</p>
           </div>
           <Download className="h-4 w-4 flex-shrink-0" />
@@ -1319,7 +1325,7 @@ export function MessageBubble({
         
         {/* Render text content with linkified URLs */}
         {displayContent && (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:break-word] [word-break:break-word] max-w-full">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-all [overflow-wrap:anywhere] [word-break:break-all]">
             {highlightText ? highlightText(displayContent) : renderWithLinks(displayContent)}
           </p>
         )}
