@@ -1419,21 +1419,25 @@ export default function Conversations() {
 
   const handleUpdateName = async () => {
     if (selectedConversation && editingName.trim()) {
-      // Update conversation contact_name
-      updateConversation.mutate({
-        id: selectedConversation.id,
-        contact_name: editingName,
-      });
-      
-      // Also update linked client name if exists
-      if (selectedConversation.client_id) {
-        updateClient.mutate({
-          id: selectedConversation.client_id,
-          name: editingName.trim(),
+      try {
+        // Update conversation contact_name
+        await updateConversation.mutateAsync({
+          id: selectedConversation.id,
+          contact_name: editingName.trim(),
         });
+        
+        // Also update linked client name if exists
+        if (selectedConversation.client_id) {
+          await updateClient.mutateAsync({
+            id: selectedConversation.client_id,
+            name: editingName.trim(),
+          });
+        }
+        
+        setEditNameDialogOpen(false);
+      } catch (error) {
+        console.error("Erro ao atualizar nome:", error);
       }
-      
-      setEditNameDialogOpen(false);
     }
   };
 
