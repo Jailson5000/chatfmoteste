@@ -174,6 +174,7 @@ export function ContactStatusTags({
           lgpd_consent_date: null,
           custom_status_id: null,
           department_id: null,
+          whatsapp_instance_id: null,
         });
 
         await supabase

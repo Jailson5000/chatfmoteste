@@ -128,6 +128,7 @@ export default function Contacts() {
       lgpd_consent_date: null,
       custom_status_id: null,
       department_id: null,
+      whatsapp_instance_id: null,
     });
     setDialogOpen(false);
     // Navigate to conversations to start chat
@@ -163,6 +164,7 @@ export default function Contacts() {
                 lgpd_consent_date: null,
                 custom_status_id: null,
                 department_id: null,
+                whatsapp_instance_id: null,
               });
               imported++;
             }
@@ -415,10 +417,11 @@ export default function Contacts() {
               {pagination.paginatedData.map((client) => {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
-                // Mock data for demonstration - would be fetched from conversations
-                const mockResponsible = teamMembers[0];
-                const mockOrigin = "—";
-                const mockConnection = client.phone.replace(/\D/g, '');
+                
+                // Get WhatsApp instance display name
+                const instanceDisplay = client.whatsapp_instance 
+                  ? (client.whatsapp_instance.display_name || client.whatsapp_instance.phone_number || client.whatsapp_instance.instance_name)
+                  : null;
 
                 return (
                   <TableRow key={client.id} className="hover:bg-muted/20">
@@ -446,19 +449,7 @@ export default function Contacts() {
                       {formatPhone(client.phone)}
                     </TableCell>
                     <TableCell>
-                      {mockResponsible ? (
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarImage src={mockResponsible.avatar_url || undefined} />
-                            <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
-                              {mockResponsible.full_name.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-sm">{mockResponsible.full_name.split(' ')[0]}</span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <span className="text-muted-foreground">—</span>
                     </TableCell>
                     <TableCell>
                       <Select
@@ -526,8 +517,8 @@ export default function Contacts() {
                     <TableCell>
                       <span className="text-muted-foreground">—</span>
                     </TableCell>
-                    <TableCell className="font-mono text-sm text-muted-foreground">
-                      {mockConnection || "—"}
+                    <TableCell className="text-sm text-muted-foreground">
+                      {instanceDisplay || "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDistanceToNow(new Date(client.created_at), { 

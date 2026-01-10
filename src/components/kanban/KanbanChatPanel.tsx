@@ -463,7 +463,7 @@ export function KanbanChatPanel({
   const { toast } = useToast();
   const navigate = useNavigate();
   const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
-  const { updateClientStatus } = useClients();
+  const { updateClientStatus, updateClient } = useClients();
   
   // Get inline activities for this conversation
   const { activities: inlineActivities } = useInlineActivities(conversationId, clientId || null);
@@ -931,10 +931,20 @@ export function KanbanChatPanel({
     if (!editingName.trim()) return;
     
     try {
+      // Update conversation contact_name
       await updateConversation.mutateAsync({
         id: conversationId,
         contact_name: editingName.trim(),
       });
+      
+      // Also update linked client name if exists
+      if (clientId) {
+        await updateClient.mutateAsync({
+          id: clientId,
+          name: editingName.trim(),
+        });
+      }
+      
       toast({ title: "Nome atualizado" });
       setEditNameOpen(false);
     } catch (error) {
