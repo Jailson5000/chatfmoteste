@@ -108,8 +108,21 @@ export function useClients() {
   const deleteClient = useMutation({
     mutationFn: async (id: string) => {
       if (!lawFirm?.id) throw new Error("Empresa não encontrada");
-      
-      // CASCADE delete will automatically remove related records
+
+      // Some related tables use RESTRICT/NO ACTION FKs; clean them first
+      // (best-effort: ignore if the table doesn't exist / user has no access)
+      try {
+        await supabase.from("tray_customer_map" as any).delete().eq("local_client_id", id);
+      } catch {
+        // ignore
+      }
+
+      const { error: googleLogsError } = await supabase
+        .from("google_calendar_ai_logs")
+        .update({ client_id: null })
+        .eq("client_id", id);
+      if (googleLogsError) throw googleLogsError;
+
       // SECURITY: Validate client belongs to user's law firm
       const { error } = await supabase
         .from("clients")
@@ -121,7 +134,7 @@ export function useClients() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      toast({ title: "Contato e todos os registros relacionados foram excluídos" });
+      toast({ title: "Contato excluído" });
     },
     onError: (error) => {
       toast({ title: "Erro ao excluir contato", description: error.message, variant: "destructive" });

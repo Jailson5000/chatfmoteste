@@ -417,16 +417,18 @@ export default function Contacts() {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
                 
-                // Get WhatsApp instance phone number (last 4 digits like Conversations/Kanban)
+                // Get WhatsApp instance display (prefer phone last 4; fallback to instance name)
                 const getInstanceDisplay = () => {
-                  const phoneNumber = client.whatsapp_instance?.phone_number;
+                  const inst = client.whatsapp_instance;
+                  if (!inst) return null;
+
+                  const phoneNumber = inst.phone_number;
                   if (phoneNumber) {
                     const digits = phoneNumber.replace(/\D/g, "");
-                    if (digits.length >= 4) {
-                      return `•••${digits.slice(-4)}`;
-                    }
+                    if (digits.length >= 4) return `•••${digits.slice(-4)}`;
                   }
-                  return null;
+
+                  return inst.display_name || inst.instance_name || null;
                 };
                 const instanceDisplay = getInstanceDisplay();
 

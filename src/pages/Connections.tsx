@@ -303,14 +303,10 @@ export default function Connections() {
     return null;
   };
 
-  // Get a random team member for display (in a real app, this would be stored per instance)
-  const getDefaultResponsible = () => {
-    if (teamMembers.length > 0) {
-      return teamMembers[0];
-    }
-    return null;
+  const getResponsibleForInstance = (instance: WhatsAppInstance) => {
+    if (!instance.default_assigned_to) return null;
+    return teamMembers.find((m) => m.id === instance.default_assigned_to) ?? null;
   };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -475,7 +471,7 @@ export default function Connections() {
               ) : (
                 filteredInstances.map((instance) => {
                   const dept = getDefaultDepartment();
-                  const responsible = getDefaultResponsible();
+                  const responsible = getResponsibleForInstance(instance);
 
                   return (
                     <tr
