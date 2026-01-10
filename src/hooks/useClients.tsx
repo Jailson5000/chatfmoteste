@@ -26,6 +26,17 @@ export interface Client {
     display_name: string | null;
     phone_number: string | null;
   } | null;
+  conversations?: {
+    whatsapp_instance_id: string | null;
+    created_at: string;
+    last_message_at: string | null;
+    whatsapp_instance?: {
+      id: string;
+      instance_name: string;
+      display_name: string | null;
+      phone_number: string | null;
+    } | null;
+  }[];
 }
 
 export function useClients() {
@@ -42,10 +53,18 @@ export function useClients() {
         .from("clients")
         .select(`
           *,
-          whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number)
+          whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number),
+          conversations(
+            whatsapp_instance_id,
+            created_at,
+            last_message_at,
+            whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number)
+          )
         `)
         .eq("law_firm_id", lawFirm.id)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("last_message_at", { foreignTable: "conversations", ascending: false })
+        .limit(1, { foreignTable: "conversations" });
 
       if (error) throw error;
       return data as Client[];
@@ -109,27 +128,15 @@ export function useClients() {
     mutationFn: async (id: string) => {
       if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
-      // Some related tables use RESTRICT/NO ACTION FKs; clean them first
-      // (best-effort: ignore if the table doesn't exist / user has no access)
-      try {
-        await supabase.from("tray_customer_map" as any).delete().eq("local_client_id", id);
-      } catch {
-        // ignore
-      }
+      const { data, error } = await supabase.functions.invoke<{ success: boolean; error?: string }>(
+        "delete-client",
+        {
+          body: { clientId: id },
+        }
+      );
 
-      const { error: googleLogsError } = await supabase
-        .from("google_calendar_ai_logs")
-        .update({ client_id: null })
-        .eq("client_id", id);
-      if (googleLogsError) throw googleLogsError;
-
-      // SECURITY: Validate client belongs to user's law firm
-      const { error } = await supabase
-        .from("clients")
-        .delete()
-        .eq("id", id)
-        .eq("law_firm_id", lawFirm.id); // Tenant isolation
-      if (error) throw error;
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Não foi possível excluir o contato");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
