@@ -357,17 +357,17 @@ export function ConnectionDetailPanel({
               
               <div className="space-y-2">
                 <Select
-                  value={instance.default_assigned_to || "ai"}
-                  onValueChange={(value) => onUpdateDefaultAssigned(value === "ai" ? null : value)}
+                  value={instance.default_assigned_to || "none"}
+                  onValueChange={(value) => onUpdateDefaultAssigned(value === "none" ? null : value)}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Selecionar responsável" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ai">
+                    <SelectItem value="none">
                       <div className="flex items-center gap-2">
-                        <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1.5">IA</Badge>
-                        <span>Inteligência Artificial</span>
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+                        <span>Nenhum</span>
                       </div>
                     </SelectItem>
                     {teamMembers.map((member) => (
