@@ -209,9 +209,41 @@ async function getInstanceById(supabaseClient: any, lawFirmId: string | null, in
 
 // Extract phone from any payload (deep scan)
 function extractPhoneFromPayload(payload: any): string | null {
+  if (!payload) return null;
+
+  // Evolution endpoints sometimes return arrays (e.g. fetchInstances)
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const phone = extractPhoneFromPayload(item);
+      if (phone) return phone;
+    }
+    return null;
+  }
+
+  // Some responses wrap instances in an `instances` array
+  if (Array.isArray(payload?.instances)) {
+    return extractPhoneFromPayload(payload.instances);
+  }
+
   const directCandidates = [
+    // Common direct fields
     payload?.owner,
+    payload?.wuid,
+    payload?.wid,
+    payload?.jid,
+
+    // Common nested wrappers (Evolution v2 often nests under `instance`)
     payload?.instance?.owner,
+    payload?.instance?.wuid,
+    payload?.instance?.wid,
+    payload?.instance?.jid,
+
+    // Sometimes there is a double nesting: { instance: { instance: {...} } }
+    payload?.instance?.instance?.owner,
+    payload?.instance?.instance?.wuid,
+    payload?.instance?.instance?.jid,
+
+    // Other previously supported candidates
     payload?.profile?.owner,
     payload?.profile?.id,
     payload?.me?.id,
