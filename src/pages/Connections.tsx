@@ -587,12 +587,9 @@ export default function Connections() {
                               </AvatarFallback>
                             </Avatar>
                             <span className="text-sm">{responsible.full_name}</span>
-                            <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">
-                              IA
-                            </Badge>
                           </div>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground text-sm">Nenhum</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">
