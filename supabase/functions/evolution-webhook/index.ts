@@ -2476,6 +2476,37 @@ serve(async (req) => {
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // =========================================================================
+    // PAYLOAD SIZE PROTECTION - Reject large sync payloads to prevent DB overload
+    // =========================================================================
+    // Evolution API sends massive "messages.set" payloads during history sync
+    // (often 10-15MB+). These are not real-time messages and should be ignored
+    // to prevent database connection timeouts and system crashes.
+    const MAX_PAYLOAD_SIZE_BYTES = 100 * 1024; // 100KB limit
+    const SYNC_EVENTS_TO_LIMIT = ['messages.set', 'chats.set', 'contacts.set'];
+    const normalizedEventForSizeCheck = body.event?.toLowerCase().replace(/_/g, '.');
+    
+    if (SYNC_EVENTS_TO_LIMIT.includes(normalizedEventForSizeCheck) && rawBody.length > MAX_PAYLOAD_SIZE_BYTES) {
+      logDebug('PROTECTION', `Rejecting large sync payload to prevent DB overload`, { 
+        requestId, 
+        event: body.event,
+        payloadSizeBytes: rawBody.length,
+        maxAllowed: MAX_PAYLOAD_SIZE_BYTES,
+        instance: body.instance,
+      });
+      
+      // Return 200 to prevent Evolution API from retrying
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: 'Large sync payload ignored (history sync not processed)',
+          payloadSize: rawBody.length,
+          limit: MAX_PAYLOAD_SIZE_BYTES,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
     const normalizedEvent = normalizeEventName(body.event);
     logDebug('EVENT', `Received event`, { 
