@@ -111,20 +111,29 @@ export function KanbanCard({
   const timeAgo = getTimeAgo(conversation.last_message_at);
   
   // Get handler name (backend-first):
-  // - AI: IA · <automation name>
-  // - Human: Atendente · <full name>
+  // - AI with automation: IA · <automation name>
+  // - AI without automation: just "IA"
+  // - Human with assignment: <full name>
+  // - No assignment: "Sem responsável"
+  const isAI = conversation.current_handler === 'ai';
+  const hasAssignment = !!conversation.assigned_profile?.full_name;
+  
   const automationName =
     conversation.current_automation?.name ||
     (conversation.current_automation_id
       ? automations.find((a) => a.id === conversation.current_automation_id)?.name
       : undefined);
 
-  const handlerName =
-    conversation.current_handler === "ai"
-      ? `IA · ${automationName || "Assistente"}`
-      : conversation.assigned_profile?.full_name || "Sem responsável";
-
-  const isAI = conversation.current_handler === 'ai';
+  let handlerName: string;
+  if (isAI && automationName) {
+    handlerName = `IA · ${automationName}`;
+  } else if (isAI) {
+    handlerName = "IA";
+  } else if (hasAssignment) {
+    handlerName = conversation.assigned_profile!.full_name;
+  } else {
+    handlerName = "Sem responsável";
+  }
 
   // Instance identifier: show last 4 digits of phone number (like Conversations page)
   const getInstanceDisplay = () => {
@@ -272,12 +281,14 @@ export function KanbanCard({
         <div className="flex items-center gap-1.5">
           {isAI ? (
             <Bot className="h-3.5 w-3.5 text-purple-500" />
-          ) : (
+          ) : hasAssignment ? (
             <User className="h-3.5 w-3.5 text-success" />
+          ) : (
+            <User className="h-3.5 w-3.5 text-amber-500" />
           )}
           <span className={cn(
             "text-xs truncate max-w-[100px]",
-            isAI ? "text-purple-500" : "text-success"
+            isAI ? "text-purple-500" : hasAssignment ? "text-success" : "text-amber-500"
           )}>
             {handlerName}
           </span>
