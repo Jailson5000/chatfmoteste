@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Phone, Smartphone, Tag, User } from "lucide-react";
+import { Bot, Folder, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -78,13 +78,21 @@ interface ConversationSidebarCardProps {
 
 function ConversationSidebarCardComponent({ conversation, selected, onClick }: ConversationSidebarCardProps) {
   const isAI = conversation.handler === "ai";
+  const hasAssigned = !!conversation.assignedTo;
+
   // Show "IA · AgentName" or just "AgentName" if the name already contains agent info
   const agentName = conversation.aiAgentName && conversation.aiAgentName !== "IA" 
     ? conversation.aiAgentName 
     : null;
-  const handlerLabel = isAI
-    ? agentName ? `IA · ${agentName}` : "IA"
-    : conversation.assignedTo || "Atendente";
+
+  let handlerLabel: string;
+  if (isAI) {
+    handlerLabel = agentName ? `IA · ${agentName}` : "IA";
+  } else if (hasAssigned) {
+    handlerLabel = conversation.assignedTo!;
+  } else {
+    handlerLabel = "Sem responsável";
+  }
 
   const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
 
@@ -251,13 +259,15 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
         <div className="flex items-center gap-1 min-w-0 overflow-hidden">
           {isAI ? (
             <Bot className="h-2.5 w-2.5 text-purple-500 flex-shrink-0" />
-          ) : (
+          ) : hasAssigned ? (
             <User className="h-2.5 w-2.5 text-success flex-shrink-0" />
+          ) : (
+            <UserX className="h-2.5 w-2.5 text-amber-500 flex-shrink-0" />
           )}
           <span
             className={cn(
               "text-[9px] truncate max-w-[80px]",
-              isAI ? "text-purple-500" : "text-success"
+              isAI ? "text-purple-500" : hasAssigned ? "text-success" : "text-amber-500"
             )}
             title={handlerLabel}
           >
