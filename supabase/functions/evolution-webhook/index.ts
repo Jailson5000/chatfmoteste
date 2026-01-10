@@ -2644,30 +2644,33 @@ serve(async (req) => {
         logDebug('MESSAGE', `Processing message`, { requestId, phoneNumber, isFromMe });
 
         // Get or create conversation
-        // Use flexible phone matching to handle variations (with/without country code, 9th digit)
+        // CRITICAL: Must filter by whatsapp_instance_id to keep conversations separated per instance
+        // This prevents messages from different WhatsApp numbers (instances) from being mixed
         const phoneEnding = phoneNumber.slice(-8); // Last 8 digits for matching
-        logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid} (ending: ${phoneEnding})`, { requestId });
+        logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid} (ending: ${phoneEnding}) on instance: ${instance.id}`, { requestId });
         
-        // First try exact match by remote_jid
+        // First try exact match by remote_jid AND instance
         let { data: conversation, error: convError } = await supabaseClient
           .from('conversations')
           .select('*')
           .eq('remote_jid', remoteJid)
           .eq('law_firm_id', lawFirmId)
+          .eq('whatsapp_instance_id', instance.id)
           .maybeSingle();
         
-        // If not found, try flexible matching by phone ending
+        // If not found, try flexible matching by phone ending BUT STILL filtered by instance
         if (!conversation && !convError) {
           const { data: flexConv } = await supabaseClient
             .from('conversations')
             .select('*')
             .eq('law_firm_id', lawFirmId)
+            .eq('whatsapp_instance_id', instance.id)
             .or(`contact_phone.ilike.%${phoneEnding},remote_jid.ilike.%${phoneEnding}@%`)
             .limit(1)
             .maybeSingle();
           
           if (flexConv) {
-            logDebug('DB', `Found conversation via flexible phone match`, { requestId, foundId: flexConv.id });
+            logDebug('DB', `Found conversation via flexible phone match (same instance)`, { requestId, foundId: flexConv.id, instanceId: instance.id });
             // Update the remote_jid to the correct format for future exact matches
             await supabaseClient
               .from('conversations')
