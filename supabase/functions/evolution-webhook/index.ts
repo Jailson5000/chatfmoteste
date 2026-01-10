@@ -2607,14 +2607,16 @@ serve(async (req) => {
       case 'qrcode.updated': {
         logDebug('QRCODE', `QR code updated for instance`, { requestId, instance: body.instance });
         
-        // Update status to connecting/awaiting_qr
+        // IMPORTANT: do not downgrade a connected instance back to "connecting".
+        // Evolution may emit qrcode.updated even after the session is open.
         await supabaseClient
           .from('whatsapp_instances')
           .update({ 
             status: 'connecting', 
             updated_at: new Date().toISOString() 
           })
-          .eq('id', instance.id);
+          .eq('id', instance.id)
+          .neq('status', 'connected');
         break;
       }
 
