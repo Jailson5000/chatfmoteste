@@ -2720,17 +2720,31 @@ serve(async (req) => {
           });
           
           // Also create/update the client with default department and status
-          // Use flexible phone matching to find existing client
-          const { data: existingClient } = await supabaseClient
+          // IMPORTANT: Search for client by phone AND whatsapp_instance_id
+          // This allows the same phone number to have separate clients per instance
+          const { data: existingClientSameInstance } = await supabaseClient
             .from('clients')
             .select('id')
             .eq('law_firm_id', lawFirmId)
+            .eq('whatsapp_instance_id', instance.id)
             .or(`phone.eq.${phoneNumber},phone.ilike.%${phoneEnding}`)
             .limit(1)
             .maybeSingle();
           
-          if (!existingClient) {
-            // Create new client with instance defaults
+          if (existingClientSameInstance) {
+            // Found client for same instance, link to conversation
+            await supabaseClient
+              .from('conversations')
+              .update({ client_id: existingClientSameInstance.id })
+              .eq('id', conversation.id);
+            logDebug('DB', `Linked existing client (same instance) to conversation`, { 
+              requestId, 
+              clientId: existingClientSameInstance.id,
+              instanceId: instance.id
+            });
+          } else {
+            // No client for this instance - create new one
+            // Each instance can have its own client record for the same phone number
             const { data: newClient, error: clientError } = await supabaseClient
               .from('clients')
               .insert({
@@ -2739,6 +2753,7 @@ serve(async (req) => {
                 phone: phoneNumber,
                 department_id: instance.default_department_id || null,
                 custom_status_id: instance.default_status_id || null,
+                whatsapp_instance_id: instance.id,
               })
               .select()
               .single();
@@ -2746,9 +2761,10 @@ serve(async (req) => {
             if (clientError) {
               logDebug('ERROR', `Failed to create client`, { requestId, error: clientError });
             } else {
-              logDebug('DB', `Created new client with defaults`, { 
+              logDebug('DB', `Created new client for instance`, { 
                 requestId, 
                 clientId: newClient.id,
+                instanceId: instance.id,
                 departmentId: instance.default_department_id,
                 statusId: instance.default_status_id
               });
@@ -2759,12 +2775,6 @@ serve(async (req) => {
                 .update({ client_id: newClient.id })
                 .eq('id', conversation.id);
             }
-          } else {
-            // Link existing client to conversation
-            await supabaseClient
-              .from('conversations')
-              .update({ client_id: existingClient.id })
-              .eq('id', conversation.id);
           }
         } else if (convError) {
           logDebug('ERROR', `Error fetching conversation`, { requestId, error: convError });
