@@ -126,15 +126,18 @@ export function KanbanCard({
 
   const isAI = conversation.current_handler === 'ai';
 
-  // Instance identifier: only display_name or instance_name
-  const getInstanceName = () => {
-    const displayName = conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name;
-    if (displayName) {
-      return displayName.length > 10 ? displayName.slice(0, 10) : displayName;
+  // Instance identifier: show last 4 digits of phone number (like Conversations page)
+  const getInstanceDisplay = () => {
+    const phoneNumber = conversation.whatsapp_instance?.phone_number;
+    if (phoneNumber) {
+      const digits = phoneNumber.replace(/\D/g, "");
+      if (digits.length >= 4) {
+        return `•••${digits.slice(-4)}`;
+      }
     }
     return "----";
   };
-  const instanceName = getInstanceName();
+  const instanceDisplay = getInstanceDisplay();
   
   // Get matched tags
   const conversationTags = (conversation.tags || [])
@@ -258,10 +261,10 @@ export function KanbanCard({
             </Tooltip>
           </TooltipProvider>
 
-          {/* Instance name with signal icon */}
+          {/* Instance phone (last 4 digits) with signal icon */}
           <div className="flex items-center gap-1">
             <Radio className="h-3 w-3" />
-            <span>{instanceName}</span>
+            <span>{instanceDisplay}</span>
           </div>
         </div>
 
