@@ -2781,6 +2781,68 @@ serve(async (req) => {
           break;
         } else {
           logDebug('DB', `Found existing conversation`, { requestId, conversationId: conversation.id });
+          
+          // IMPORTANT: If conversation exists but has no client_id, create/link client now
+          // This can happen if client creation failed previously due to unique constraint
+          if (!conversation.client_id) {
+            logDebug('DB', `Conversation missing client_id, attempting to create/link client`, { requestId, conversationId: conversation.id });
+            
+            const contactName = conversation.contact_name || phoneNumber;
+            
+            // Search for existing client for this phone AND instance
+            const { data: existingClientForInstance } = await supabaseClient
+              .from('clients')
+              .select('id')
+              .eq('law_firm_id', lawFirmId)
+              .eq('whatsapp_instance_id', instance.id)
+              .or(`phone.eq.${phoneNumber},phone.ilike.%${phoneEnding}`)
+              .limit(1)
+              .maybeSingle();
+            
+            if (existingClientForInstance) {
+              // Link existing client to conversation
+              await supabaseClient
+                .from('conversations')
+                .update({ client_id: existingClientForInstance.id })
+                .eq('id', conversation.id);
+              conversation.client_id = existingClientForInstance.id;
+              logDebug('DB', `Linked existing client to orphan conversation`, { 
+                requestId, 
+                clientId: existingClientForInstance.id,
+                conversationId: conversation.id
+              });
+            } else {
+              // Create new client for this instance
+              const { data: newClient, error: clientError } = await supabaseClient
+                .from('clients')
+                .insert({
+                  law_firm_id: lawFirmId,
+                  name: contactName,
+                  phone: phoneNumber,
+                  department_id: instance.default_department_id || null,
+                  custom_status_id: instance.default_status_id || null,
+                  whatsapp_instance_id: instance.id,
+                })
+                .select()
+                .single();
+              
+              if (clientError) {
+                logDebug('ERROR', `Failed to create client for orphan conversation`, { requestId, error: clientError });
+              } else {
+                await supabaseClient
+                  .from('conversations')
+                  .update({ client_id: newClient.id })
+                  .eq('id', conversation.id);
+                conversation.client_id = newClient.id;
+                logDebug('DB', `Created and linked new client to orphan conversation`, { 
+                  requestId, 
+                  clientId: newClient.id,
+                  conversationId: conversation.id,
+                  instanceId: instance.id
+                });
+              }
+            }
+          }
         }
 
         // Extract message content
