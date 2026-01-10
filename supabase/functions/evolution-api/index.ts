@@ -337,7 +337,9 @@ async function fetchPhoneNumberEnhanced(
       }
 
       const data = await res.json().catch(() => null);
-      console.log(`[Evolution API] ${endpoint.name} response keys:`, data ? Object.keys(data) : []);
+      
+      // Enhanced logging to debug Evolution API response structure
+      console.log(`[Evolution API] ${endpoint.name} response:`, JSON.stringify(data, null, 2).slice(0, 1000));
       
       const phone = extractPhoneFromPayload(data);
       
