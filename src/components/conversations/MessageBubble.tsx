@@ -1048,6 +1048,226 @@ function VideoPlayer({
   );
 }
 
+// Document viewer component with decryption support for .enc files
+function DocumentViewer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+  isFromMe,
+  content,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+  isFromMe?: boolean;
+  content?: string | null;
+}) {
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [error, setError] = useState(false);
+
+  // Check if needs decryption
+  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+
+  // Extract display name from content or URL
+  const getDisplayName = () => {
+    const rawLastSegment = src.split("/").pop() || "Documento";
+    const withoutQuery = rawLastSegment.split("?")[0] || rawLastSegment;
+
+    let urlFileName = withoutQuery;
+    try {
+      urlFileName = decodeURIComponent(withoutQuery);
+    } catch {
+      // ignore
+    }
+
+    const contentCandidate = content?.trim();
+    const looksLikeFileName = (v?: string | null) =>
+      !!v &&
+      v.length <= 160 &&
+      !v.includes("\n") &&
+      /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|mp4)$/i.test(v);
+
+    const urlLooksEncrypted =
+      urlFileName.length > 80 ||
+      /\.enc$/i.test(urlFileName) ||
+      /_n\.enc/i.test(urlFileName) ||
+      /[A-Za-z0-9_-]{40,}/.test(urlFileName);
+
+    if (looksLikeFileName(contentCandidate)) {
+      return contentCandidate as string;
+    }
+    return urlLooksEncrypted ? "Documento" : urlFileName;
+  };
+
+  const displayName = getDisplayName();
+
+  // Get file extension for download
+  const getFileExtension = () => {
+    // Try to get from content first
+    const contentCandidate = content?.trim();
+    if (contentCandidate) {
+      const match = contentCandidate.match(/\.(pdf|doc|docx|xls|xlsx)$/i);
+      if (match) return match[0].toLowerCase();
+    }
+    // Fallback to mimeType
+    if (mimeType?.includes("pdf")) return ".pdf";
+    if (mimeType?.includes("word") || mimeType?.includes("doc")) return ".docx";
+    if (mimeType?.includes("sheet") || mimeType?.includes("excel")) return ".xlsx";
+    return ".pdf"; // Default to PDF
+  };
+
+  const handleDownload = async () => {
+    if (!needsDecryption) {
+      // Direct download for non-encrypted files
+      window.open(src, "_blank");
+      return;
+    }
+
+    // Need to decrypt first
+    setIsDecrypting(true);
+    setError(false);
+
+    try {
+      // Check memory cache first
+      const memoryCached = memoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        downloadDataUrl(memoryCached);
+        return;
+      }
+
+      // Check IndexedDB cache
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        memoryCache.set(whatsappMessageId!, dbCached);
+        downloadDataUrl(dbCached);
+        return;
+      }
+
+      // Fetch from API
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "get_media",
+          conversationId,
+          whatsappMessageId,
+        },
+      });
+
+      if (response.error || !response.data?.success || !response.data?.base64) {
+        console.error("Failed to decrypt document:", response.error || response.data?.error);
+        setError(true);
+        return;
+      }
+
+      const actualMimeType = response.data.mimetype || mimeType || "application/pdf";
+      const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+      
+      // Cache in both memory and IndexedDB
+      memoryCache.set(whatsappMessageId!, dataUrl);
+      await setCachedAudio(whatsappMessageId!, dataUrl);
+      
+      downloadDataUrl(dataUrl);
+    } catch (err) {
+      console.error("Error decrypting document:", err);
+      setError(true);
+    } finally {
+      setIsDecrypting(false);
+    }
+  };
+
+  const downloadDataUrl = (dataUrl: string) => {
+    // Convert data URL to blob and download
+    const [header, base64] = dataUrl.split(',');
+    const mimeMatch = header.match(/data:([^;]+)/);
+    const docMimeType = mimeMatch ? mimeMatch[1] : "application/pdf";
+    
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([array], { type: docMimeType });
+    
+    // Create download link
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    
+    // Use display name or generate filename with proper extension
+    let fileName = displayName;
+    if (fileName === "Documento" || !fileName.includes(".")) {
+      fileName = `documento${getFileExtension()}`;
+    }
+    a.download = fileName;
+    
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (isDecrypting) {
+    return (
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-lg w-full",
+        isFromMe
+          ? "bg-primary-foreground/10"
+          : "bg-muted-foreground/10"
+      )}>
+        <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium break-all line-clamp-2">{displayName}</p>
+          <p className="text-xs opacity-70">Descriptografando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-lg w-full",
+        "bg-destructive/10"
+      )}>
+        <div className="h-8 w-8 rounded-lg bg-destructive/20 flex items-center justify-center flex-shrink-0">
+          <X className="h-4 w-4 text-destructive" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-destructive">Documento não disponível</p>
+          <button 
+            onClick={handleDownload} 
+            className="text-xs text-destructive/70 hover:underline"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleDownload}
+      className={cn(
+        "flex items-center gap-2 p-2 rounded-lg transition-colors w-full text-left",
+        isFromMe
+          ? "bg-primary-foreground/10 hover:bg-primary-foreground/20"
+          : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
+      )}
+    >
+      <FileText className="h-8 w-8 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium break-all line-clamp-2">{displayName}</p>
+        <p className="text-xs opacity-70">Clique para baixar</p>
+      </div>
+      <Download className="h-4 w-4 flex-shrink-0" />
+    </button>
+  );
+}
+
 export function MessageBubble({
   id,
   content,
@@ -1192,56 +1412,15 @@ export function MessageBubble({
     }
 
     if (isDocument) {
-      // Prefer a human-readable file name. Evolution/WhatsApp often uses encrypted URLs here.
-      const rawLastSegment = mediaUrl.split("/").pop() || "Documento";
-      const withoutQuery = rawLastSegment.split("?")[0] || rawLastSegment;
-
-      let urlFileName = withoutQuery;
-      try {
-        urlFileName = decodeURIComponent(withoutQuery);
-      } catch {
-        // ignore
-      }
-
-      const contentCandidate = content?.trim();
-      const looksLikeFileName = (v?: string | null) =>
-        !!v &&
-        v.length <= 160 &&
-        !v.includes("\n") &&
-        /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|mp4)$/i.test(v);
-
-      const urlLooksEncrypted =
-        urlFileName.length > 80 ||
-        /\.enc$/i.test(urlFileName) ||
-        /_n\.enc/i.test(urlFileName) ||
-        /[A-Za-z0-9_-]{40,}/.test(urlFileName);
-
-      const displayName =
-        looksLikeFileName(contentCandidate)
-          ? (contentCandidate as string)
-          : urlLooksEncrypted
-            ? "Documento"
-            : urlFileName;
-
       return (
-        <a
-          href={mediaUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            "flex items-center gap-2 p-2 rounded-lg transition-colors w-full",
-            isFromMe
-              ? "bg-primary-foreground/10 hover:bg-primary-foreground/20"
-              : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
-          )}
-        >
-          <FileText className="h-8 w-8 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium break-all line-clamp-2">{displayName}</p>
-            <p className="text-xs opacity-70">Clique para abrir</p>
-          </div>
-          <Download className="h-4 w-4 flex-shrink-0" />
-        </a>
+        <DocumentViewer
+          src={mediaUrl}
+          mimeType={mediaMimeType || undefined}
+          whatsappMessageId={whatsappMessageId || undefined}
+          conversationId={conversationId}
+          isFromMe={isFromMe}
+          content={content}
+        />
       );
     }
 
