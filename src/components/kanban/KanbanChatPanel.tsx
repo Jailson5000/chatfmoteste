@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useReducer, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useReducer, useCallback, useLayoutEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -1187,16 +1187,77 @@ export function KanbanChatPanel({
 
   const lastMessageIdRef = useRef<string | null>(null);
   const hasScrolledInitialRef = useRef<string | null>(null); // Track which conversation was scrolled
+  const scrollAttemptRef = useRef<number>(0); // Track scroll attempts
+  const pendingScrollRef = useRef<boolean>(false); // Track pending scroll
 
-  // Auto-scroll: Apenas na carga inicial (primeira abertura da conversa)
+  // Reset scroll tracking when conversation changes
+  useEffect(() => {
+    if (conversationId !== hasScrolledInitialRef.current) {
+      // New conversation - reset scroll tracking
+      scrollAttemptRef.current = 0;
+      pendingScrollRef.current = true; // Mark that we need to scroll
+    }
+  }, [conversationId]);
+
+  // useLayoutEffect: Scroll para o final ANTES do browser pintar (evita flash)
+  useLayoutEffect(() => {
+    // Só rola se tiver marcado como pendente e mensagens carregadas
+    if (!pendingScrollRef.current) return;
+    if (isLoading) return;
+    if (!conversationId) return;
+    if (messages.length === 0) return;
+
+    // Tentar encontrar o viewport diretamente (pode não estar no ref ainda)
+    let viewport = viewportRef.current;
+    if (!viewport) {
+      const root = scrollRef.current;
+      viewport = root?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
+      if (viewport) {
+        viewportRef.current = viewport;
+      }
+    }
+
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+  }, [isLoading, messages.length, conversationId]);
+
+  // Auto-scroll: Rolar para o final quando a conversa é carregada (backup com retry)
   useEffect(() => {
     // Não fazer nada se ainda está carregando
     if (isLoading) return;
-    if (messages.length === 0) return;
     if (!conversationId) return;
 
     // Se já fez o scroll para esta conversa, não fazer de novo
     if (hasScrolledInitialRef.current === conversationId) return;
+
+    // Aguardar ter mensagens antes de fazer scroll
+    if (messages.length === 0) return;
+
+    // Função para tentar fazer scroll até o final
+    const scrollToEnd = () => {
+      const viewport = viewportRef.current;
+      if (!viewport) {
+        // Se viewport ainda não existe, tentar novamente
+        scrollAttemptRef.current++;
+        if (scrollAttemptRef.current < 10) {
+          requestAnimationFrame(scrollToEnd);
+        }
+        return;
+      }
+
+      // Fazer scroll para o final
+      viewport.scrollTop = viewport.scrollHeight;
+      pendingScrollRef.current = false; // Marcar scroll como feito
+      
+      // Verificar se realmente foi para o final (pode precisar de retry)
+      requestAnimationFrame(() => {
+        if (viewport && viewport.scrollTop < viewport.scrollHeight - viewport.clientHeight - 50) {
+          // Ainda não está no final, tentar novamente
+          viewport.scrollTop = viewport.scrollHeight;
+        }
+      });
+    };
 
     // Marcar que já fez o scroll inicial para esta conversa
     hasScrolledInitialRef.current = conversationId;
@@ -1204,10 +1265,7 @@ export function KanbanChatPanel({
     // Aguardar múltiplos frames para garantir que o DOM está completamente renderizado
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const viewport = viewportRef.current;
-        if (viewport) {
-          viewport.scrollTop = viewport.scrollHeight;
-        }
+        requestAnimationFrame(scrollToEnd);
       });
     });
   }, [isLoading, messages.length, conversationId]);
