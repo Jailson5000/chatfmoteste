@@ -175,6 +175,7 @@ export function ContactStatusTags({
           custom_status_id: null,
           department_id: null,
           whatsapp_instance_id: null,
+          assigned_to: null,
         });
 
         await supabase

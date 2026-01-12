@@ -337,7 +337,7 @@ export function useConversations() {
       // First, get the current state of the conversation to log the transfer
       const { data: currentConversation, error: fetchError } = await supabase
         .from("conversations")
-        .select("current_automation_id, law_firm_id")
+        .select("current_automation_id, law_firm_id, client_id")
         .eq("id", conversationId)
         .single();
       
@@ -345,6 +345,7 @@ export function useConversations() {
 
       const fromAutomationId = currentConversation?.current_automation_id;
       const lawFirmId = currentConversation?.law_firm_id;
+      const clientId = currentConversation?.client_id;
 
       const updateData: Record<string, any> = { 
         current_handler: handlerType,
@@ -370,12 +371,23 @@ export function useConversations() {
         .update(updateData)
         .eq("id", conversationId)
         .eq("law_firm_id", lawFirmId)
-        .select("id, current_handler, assigned_to, current_automation_id, law_firm_id")
+        .select("id, current_handler, assigned_to, current_automation_id, law_firm_id, client_id")
         .maybeSingle();
 
       if (error) throw error;
       if (!updatedConversation) {
         throw new Error("Sem permissão para transferir esta conversa.");
+      }
+
+      // ========================================================================
+      // SYNC: Update client's assigned_to when transferring to human
+      // ========================================================================
+      if (assignedTo && clientId) {
+        await supabase
+          .from("clients")
+          .update({ assigned_to: assignedTo })
+          .eq("id", clientId)
+          .eq("law_firm_id", lawFirmId);
       }
 
       // ========================================================================
@@ -454,6 +466,8 @@ export function useConversations() {
       // Force immediate refetch to update UI with new automation name
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       await queryClient.refetchQueries({ queryKey: ["conversations"] });
+      // Also invalidate clients to update assigned_to column
+      await queryClient.invalidateQueries({ queryKey: ["clients"] });
       
       toast({
         title: "Transferência realizada",

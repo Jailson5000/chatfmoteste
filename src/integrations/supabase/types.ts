@@ -1049,6 +1049,7 @@ export type Database = {
       clients: {
         Row: {
           address: string | null
+          assigned_to: string | null
           avatar_url: string | null
           birth_date: string | null
           birthday_message_enabled: boolean | null
@@ -1071,6 +1072,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          assigned_to?: string | null
           avatar_url?: string | null
           birth_date?: string | null
           birthday_message_enabled?: boolean | null
@@ -1093,6 +1095,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          assigned_to?: string | null
           avatar_url?: string | null
           birth_date?: string | null
           birthday_message_enabled?: boolean | null
@@ -1114,6 +1117,13 @@ export type Database = {
           whatsapp_instance_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "clients_assigned_to_profile_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "clients_custom_status_id_fkey"
             columns: ["custom_status_id"]

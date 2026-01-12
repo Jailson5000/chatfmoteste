@@ -17,6 +17,7 @@ export interface Client {
   custom_status_id: string | null;
   department_id: string | null;
   whatsapp_instance_id: string | null;
+  assigned_to: string | null;
   created_at: string;
   updated_at: string;
   // Joined data
@@ -25,6 +26,9 @@ export interface Client {
     instance_name: string;
     display_name: string | null;
     phone_number: string | null;
+  } | null;
+  assigned_profile?: {
+    full_name: string;
   } | null;
   conversations?: {
     whatsapp_instance_id: string | null;
@@ -54,6 +58,7 @@ export function useClients() {
         .select(`
           *,
           whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number),
+          assigned_profile:profiles!clients_assigned_to_profile_fkey(full_name),
           conversations(
             whatsapp_instance_id,
             created_at,
