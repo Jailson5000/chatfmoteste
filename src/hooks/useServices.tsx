@@ -107,12 +107,43 @@ export function useServices() {
 
   const deleteService = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("services").delete().eq("id", id);
-      if (error) throw error;
+      // Check if there are appointments linked to this service
+      const { count, error: countError } = await supabase
+        .from("appointments")
+        .select("*", { count: "exact", head: true })
+        .eq("service_id", id);
+
+      if (countError) throw countError;
+
+      if (count && count > 0) {
+        // Soft delete: deactivate instead of deleting to preserve appointment history
+        const { error } = await supabase
+          .from("services")
+          .update({ is_active: false })
+          .eq("id", id);
+        
+        if (error) throw error;
+        
+        return { softDeleted: true, appointmentCount: count };
+      } else {
+        // Hard delete: no appointments linked
+        const { error } = await supabase.from("services").delete().eq("id", id);
+        if (error) throw error;
+        
+        return { softDeleted: false };
+      }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["services"] });
-      toast({ title: "Serviço removido" });
+      
+      if (result?.softDeleted) {
+        toast({ 
+          title: "Serviço desativado", 
+          description: `O serviço possui ${result.appointmentCount} agendamento(s) vinculado(s) e foi desativado ao invés de excluído.` 
+        });
+      } else {
+        toast({ title: "Serviço removido" });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Erro ao remover", description: error.message, variant: "destructive" });
