@@ -30,6 +30,8 @@ import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 // Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
@@ -75,6 +77,8 @@ const App = () => (
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/integrations/google-calendar/callback" element={<GoogleCalendarCallback />} />
+          <Route path="/privacidade" element={<PrivacyPolicy />} />
+          <Route path="/termos" element={<TermsOfService />} />
           
           {/* Protected routes with AppLayout */}
           <Route
