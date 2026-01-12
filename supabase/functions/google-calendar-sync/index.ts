@@ -62,8 +62,21 @@ serve(async (req) => {
 
       if (tokenData.error) {
         console.error("[google-calendar-sync] Token refresh failed:", tokenData);
+        
+        // If token is invalid/revoked, deactivate the integration to prevent repeated errors
+        if (tokenData.error === "invalid_grant") {
+          console.log("[google-calendar-sync] Token revoked, deactivating integration");
+          await supabase
+            .from("google_calendar_integrations")
+            .update({ is_active: false, updated_at: new Date().toISOString() })
+            .eq("id", integration.id);
+        }
+        
         return new Response(
-          JSON.stringify({ error: "Falha ao renovar token. Reconecte o Google Calendar." }),
+          JSON.stringify({ 
+            error: "Token expirado ou revogado. Reconecte o Google Calendar.",
+            requires_reconnect: true 
+          }),
           { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
