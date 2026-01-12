@@ -14,12 +14,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Filter, Bot, User, Tag, X, Search, ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { Filter, Bot, User, Tag, X, Search, ChevronDown, ChevronRight, Folder, UserX } from "lucide-react";
 import { useState } from "react";
 
 interface FilterState {
   statuses: string[];
-  handlers: Array<'ai' | 'human'>;
+  handlers: Array<'ai' | 'human' | 'unassigned'>;
   tags: string[];
   departments: string[];
   searchName: string;
@@ -64,7 +64,7 @@ export function ConversationFilters({
     onFiltersChange({ ...filters, statuses: newStatuses });
   };
 
-  const toggleHandler = (handler: 'ai' | 'human') => {
+  const toggleHandler = (handler: 'ai' | 'human' | 'unassigned') => {
     const newHandlers = filters.handlers.includes(handler)
       ? filters.handlers.filter(h => h !== handler)
       : [...filters.handlers, handler];
@@ -114,16 +114,14 @@ export function ConversationFilters({
         )}
       </div>
 
-      {/* Cascade Filters Popover */}
+      {/* Cascade Filters Popover - estilo Kanban */}
       <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="sm" className="h-9 gap-2">
             <Filter className="h-4 w-4" />
+            Mais filtros
             {activeFiltersCount > 0 && (
-              <Badge 
-                variant="secondary" 
-                className="absolute -top-1 -right-1 h-4 w-4 p-0 text-xs flex items-center justify-center"
-              >
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
                 {activeFiltersCount}
               </Badge>
             )}
@@ -226,7 +224,7 @@ export function ConversationFilters({
                       onCheckedChange={() => toggleHandler('ai')}
                     />
                     <Bot className="h-4 w-4 text-purple-500" />
-                    <span className="text-sm">IA</span>
+                    <span className="text-sm">Inteligência Artificial</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
                     <Checkbox 
@@ -235,6 +233,14 @@ export function ConversationFilters({
                     />
                     <User className="h-4 w-4 text-green-500" />
                     <span className="text-sm">Humano</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                    <Checkbox 
+                      checked={filters.handlers.includes('unassigned' as any)}
+                      onCheckedChange={() => toggleHandler('unassigned' as any)}
+                    />
+                    <UserX className="h-4 w-4 text-amber-500" />
+                    <span className="text-sm">Sem responsável</span>
                   </label>
                 </CollapsibleContent>
               </Collapsible>

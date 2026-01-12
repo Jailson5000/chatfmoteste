@@ -12,7 +12,8 @@ import {
   Tag, 
   Calendar as CalendarIcon,
   Bot,
-  X
+  X,
+  UserX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -286,6 +287,32 @@ export function FilterBar({
             </div>
             <ScrollArea className="max-h-[300px]">
               <div className="p-1">
+                {/* Option: Sem responsável */}
+                <button
+                  onClick={() => toggleResponsible("unassigned")}
+                  className="flex items-center gap-3 w-full p-2 rounded-md hover:bg-muted/50 transition-colors"
+                >
+                  <Checkbox 
+                    checked={selectedResponsibles.includes("unassigned")}
+                    className="pointer-events-none"
+                  />
+                  <div className="h-7 w-7 rounded-full bg-amber-500/20 flex items-center justify-center">
+                    <UserX className="h-4 w-4 text-amber-500" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <span className="text-sm truncate block">Sem responsável</span>
+                    <span className="text-xs text-amber-500">Não atribuído</span>
+                  </div>
+                  {selectedResponsibles.includes("unassigned") && (
+                    <Check className="h-4 w-4 text-primary" />
+                  )}
+                </button>
+                
+                {/* Separator */}
+                {filteredMembers.length > 0 && (
+                  <div className="my-1 h-px bg-border" />
+                )}
+                
                 {filteredMembers.map((member) => (
                   <button
                     key={member.id}
@@ -319,7 +346,7 @@ export function FilterBar({
                     )}
                   </button>
                 ))}
-                {filteredMembers.length === 0 && (
+                {filteredMembers.length === 0 && !responsibleSearch && (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     Nenhum responsável encontrado
                   </p>
@@ -537,12 +564,14 @@ export function FilterBar({
                             <div className="flex items-center gap-1.5 flex-wrap">
                               {selectedResponsibles.map(id => {
                                 const member = teamMembers.find(m => m.id === id);
+                                const isUnassigned = id === "unassigned";
                                 return (
                                   <Badge 
                                     key={id}
                                     variant="outline" 
                                     className={cn(
                                       "h-6 gap-1 text-xs px-2 cursor-pointer group",
+                                      isUnassigned && "bg-amber-500/20 text-amber-400 border-amber-500/30",
                                       member?.type === 'ai' && "bg-violet-500/20 text-violet-400 border-violet-500/30"
                                     )}
                                     onClick={(e) => {
@@ -550,8 +579,9 @@ export function FilterBar({
                                       toggleResponsible(id);
                                     }}
                                   >
+                                    {isUnassigned && <UserX className="h-3 w-3" />}
                                     {member?.type === 'ai' && <Bot className="h-3 w-3" />}
-                                    {getResponsibleName(id)}
+                                    {isUnassigned ? "Sem responsável" : getResponsibleName(id)}
                                     <X className="h-3 w-3 ml-0.5 opacity-60 group-hover:opacity-100" />
                                   </Badge>
                                 );
@@ -567,6 +597,25 @@ export function FilterBar({
                     </CollapsibleTrigger>
                     <CollapsibleContent className="pt-1">
                       <div className="border border-border rounded-lg bg-background/50 max-h-[200px] overflow-auto">
+                        {/* Option: Sem responsável */}
+                        <button
+                          onClick={() => toggleResponsible("unassigned")}
+                          className={cn(
+                            "flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50 transition-colors",
+                            selectedResponsibles.includes("unassigned") && "bg-primary/10"
+                          )}
+                        >
+                          <Checkbox checked={selectedResponsibles.includes("unassigned")} className="pointer-events-none" />
+                          <UserX className="h-4 w-4 text-amber-500" />
+                          <span className="text-sm">Sem responsável</span>
+                          <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 bg-amber-500/20 text-amber-500 border-0">Não atribuído</Badge>
+                          {selectedResponsibles.includes("unassigned") && <Check className="h-4 w-4 text-primary ml-auto" />}
+                        </button>
+                        
+                        {teamMembers.length > 0 && (
+                          <div className="h-px bg-border mx-3 my-1" />
+                        )}
+                        
                         {teamMembers.map(member => {
                           const isSelected = selectedResponsibles.includes(member.id);
                           return (

@@ -14,12 +14,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Filter, Bot, User, Wifi, Tag, X, Search, Folder, ChevronDown, ChevronRight } from "lucide-react";
+import { Filter, Bot, User, Wifi, Tag, X, Search, Folder, ChevronDown, ChevronRight, UserX } from "lucide-react";
 import { useState } from "react";
 
 interface FilterState {
   statuses: string[];
-  handlers: Array<'ai' | 'human'>;
+  handlers: Array<'ai' | 'human' | 'unassigned'>;
   connections: string[];
   departments: string[];
   tags: string[];
@@ -56,7 +56,7 @@ export function KanbanFilters({
     filters.departments.length +
     filters.tags.length;
 
-  const toggleHandler = (handler: 'ai' | 'human') => {
+  const toggleHandler = (handler: 'ai' | 'human' | 'unassigned') => {
     const newHandlers = filters.handlers.includes(handler)
       ? filters.handlers.filter(h => h !== handler)
       : [...filters.handlers, handler];
@@ -184,6 +184,14 @@ export function KanbanFilters({
                     />
                     <User className="h-4 w-4 text-green-500" />
                     <span className="text-sm">Humano</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                    <Checkbox 
+                      checked={filters.handlers.includes('unassigned')}
+                      onCheckedChange={() => toggleHandler('unassigned')}
+                    />
+                    <UserX className="h-4 w-4 text-amber-500" />
+                    <span className="text-sm">Sem responsável</span>
                   </label>
                 </CollapsibleContent>
               </Collapsible>
