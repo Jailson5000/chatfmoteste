@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -311,6 +312,9 @@ Deno.serve(async (req) => {
             caption: messageContent || undefined,
           };
         }
+
+        // Apply human-like jitter before sending (5-12s for follow-ups)
+        await humanDelay(DELAY_CONFIG.FOLLOW_UP.min, DELAY_CONFIG.FOLLOW_UP.max, '[FOLLOW_UP]');
 
         const sendResponse = await fetch(sendEndpoint, {
           method: "POST",

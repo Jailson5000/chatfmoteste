@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -319,6 +320,10 @@ async function sendWhatsAppMessage(
   const remoteJid = phone.startsWith("55") ? `${phone}@s.whatsapp.net` : `55${phone}@s.whatsapp.net`;
 
   const apiUrl = (instance.api_url as string).replace(/\/$/, "");
+
+  // Apply human-like jitter before sending (5-10s for reminders)
+  await humanDelay(DELAY_CONFIG.REMINDER.min, DELAY_CONFIG.REMINDER.max, '[REMINDER]');
+
   const response = await fetch(
     `${apiUrl}/message/sendText/${instance.instance_name}`,
     {
