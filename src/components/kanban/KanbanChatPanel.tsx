@@ -388,6 +388,436 @@ function KanbanAudioPlayer({
   );
 }
 
+// Image viewer component with decryption support
+function KanbanImageViewer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+  const [imageOpen, setImageOpen] = useState(false);
+
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
+
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadImage = async () => {
+      const memoryCached = audioMemoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        audioMemoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "image/jpeg";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        audioMemoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadImage();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  const imageSrc = needsDecryption ? decryptedSrc : src;
+
+  if (isDecrypting) {
+    return (
+      <div className="relative min-w-[180px] min-h-[120px] max-w-[220px] rounded-xl overflow-hidden bg-muted/50 border border-border/50">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3">
+          <div className="relative">
+            <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <ImageIcon className="h-5 w-5 text-primary/60" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center">
+              <Loader2 className="h-2.5 w-2.5 animate-spin text-primary" />
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground">Carregando...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || (!imageSrc && needsDecryption)) {
+    return (
+      <div className="flex items-center justify-center min-w-[180px] min-h-[100px] bg-destructive/10 rounded-lg">
+        <div className="flex flex-col items-center gap-1">
+          <X className="h-5 w-5 text-destructive" />
+          <span className="text-xs text-destructive">Imagem não disponível</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div 
+        className="max-w-[220px] max-h-[220px] rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity bg-muted/30"
+        onClick={() => setImageOpen(true)}
+      >
+        <img
+          src={imageSrc || src}
+          alt="Imagem"
+          className="max-w-full max-h-[220px] object-contain"
+          onError={() => setError(true)}
+        />
+      </div>
+      {imageOpen && (
+        <Dialog open={imageOpen} onOpenChange={setImageOpen}>
+          <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-black/90 border-none">
+            <img
+              src={imageSrc || src}
+              alt="Imagem"
+              className="w-auto h-auto max-w-full max-h-[85vh] object-contain mx-auto"
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
+// Video player component with decryption support
+function KanbanVideoPlayer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
+
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadVideo = async () => {
+      const memoryCached = audioMemoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        audioMemoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "video/mp4";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        audioMemoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadVideo();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  const videoSrc = needsDecryption ? decryptedSrc : src;
+
+  if (isDecrypting) {
+    return (
+      <div className="relative min-w-[180px] min-h-[100px] max-w-[220px] rounded-xl overflow-hidden bg-muted/50 border border-border/50">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3">
+          <div className="relative">
+            <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Video className="h-5 w-5 text-primary/60" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center">
+              <Loader2 className="h-2.5 w-2.5 animate-spin text-primary" />
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground">Carregando vídeo...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || (!videoSrc && needsDecryption)) {
+    return (
+      <div className="flex items-center justify-center min-w-[180px] min-h-[100px] bg-destructive/10 rounded-lg">
+        <div className="flex flex-col items-center gap-1">
+          <X className="h-5 w-5 text-destructive" />
+          <span className="text-xs text-destructive">Vídeo não disponível</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <video
+      controls
+      className="max-w-[220px] max-h-[180px] rounded-lg"
+      preload="metadata"
+    >
+      <source src={videoSrc || src} type={mimeType || "video/mp4"} />
+      Seu navegador não suporta vídeo.
+    </video>
+  );
+}
+
+// Document viewer component with decryption support
+function KanbanDocumentViewer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+  isFromMe,
+  content,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+  isFromMe?: boolean;
+  content?: string | null;
+}) {
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [error, setError] = useState(false);
+
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
+
+  const getDisplayName = () => {
+    const rawLastSegment = src.split("/").pop() || "Documento";
+    const withoutQuery = rawLastSegment.split("?")[0] || rawLastSegment;
+
+    let urlFileName = withoutQuery;
+    try {
+      urlFileName = decodeURIComponent(withoutQuery);
+    } catch {
+      // ignore
+    }
+
+    const contentCandidate = content?.trim();
+    const looksLikeFileName = (v?: string | null) =>
+      !!v &&
+      v.length <= 160 &&
+      !v.includes("\n") &&
+      /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|mp4)$/i.test(v);
+
+    const urlLooksEncrypted =
+      urlFileName.length > 80 ||
+      /\.enc$/i.test(urlFileName) ||
+      /_n\.enc/i.test(urlFileName) ||
+      /[A-Za-z0-9_-]{40,}/.test(urlFileName);
+
+    if (looksLikeFileName(contentCandidate)) {
+      return contentCandidate as string;
+    }
+    return urlLooksEncrypted ? "Documento" : urlFileName;
+  };
+
+  const displayName = getDisplayName();
+
+  const getFileExtension = () => {
+    const contentCandidate = content?.trim();
+    if (contentCandidate) {
+      const match = contentCandidate.match(/\.(pdf|doc|docx|xls|xlsx)$/i);
+      if (match) return match[0].toLowerCase();
+    }
+    if (mimeType?.includes("pdf")) return ".pdf";
+    if (mimeType?.includes("word") || mimeType?.includes("doc")) return ".docx";
+    if (mimeType?.includes("sheet") || mimeType?.includes("excel")) return ".xlsx";
+    return ".pdf";
+  };
+
+  const handleDownload = async () => {
+    if (!needsDecryption) {
+      window.open(src, "_blank");
+      return;
+    }
+
+    setIsDecrypting(true);
+    setError(false);
+
+    try {
+      const memoryCached = audioMemoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        downloadDataUrl(memoryCached);
+        return;
+      }
+
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        audioMemoryCache.set(whatsappMessageId!, dbCached);
+        downloadDataUrl(dbCached);
+        return;
+      }
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "get_media",
+          conversationId,
+          whatsappMessageId,
+        },
+      });
+
+      if (response.error || !response.data?.success || !response.data?.base64) {
+        setError(true);
+        return;
+      }
+
+      const actualMimeType = response.data.mimetype || mimeType || "application/pdf";
+      const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+      
+      audioMemoryCache.set(whatsappMessageId!, dataUrl);
+      await setCachedAudio(whatsappMessageId!, dataUrl);
+      
+      downloadDataUrl(dataUrl);
+    } catch (err) {
+      setError(true);
+    } finally {
+      setIsDecrypting(false);
+    }
+  };
+
+  const downloadDataUrl = (dataUrl: string) => {
+    const [header, base64] = dataUrl.split(',');
+    const mimeMatch = header.match(/data:([^;]+)/);
+    const docMimeType = mimeMatch ? mimeMatch[1] : "application/pdf";
+    
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      array[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([array], { type: docMimeType });
+    
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    
+    let fileName = displayName;
+    if (fileName === "Documento" || !fileName.includes(".")) {
+      fileName = `documento${getFileExtension()}`;
+    }
+    a.download = fileName;
+    
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (isDecrypting) {
+    return (
+      <div className={cn(
+        "flex items-center gap-2 p-2 rounded-lg w-full max-w-[220px]",
+        isFromMe ? "bg-primary-foreground/10" : "bg-muted-foreground/10"
+      )}>
+        <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium break-all line-clamp-1">{displayName}</p>
+          <p className="text-xs opacity-70">Baixando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-2 rounded-lg w-full max-w-[220px] bg-destructive/10">
+        <div className="h-8 w-8 rounded-lg bg-destructive/20 flex items-center justify-center flex-shrink-0">
+          <X className="h-4 w-4 text-destructive" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-destructive line-clamp-1">Documento não disponível</p>
+          <button onClick={handleDownload} className="text-xs text-destructive/70 hover:underline">
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleDownload}
+      className={cn(
+        "flex items-center gap-2 p-2 rounded-lg transition-colors w-full max-w-[220px] text-left",
+        isFromMe ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" : "bg-muted-foreground/10 hover:bg-muted-foreground/20"
+      )}
+    >
+      <FileText className="h-7 w-7 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium break-all line-clamp-1">{displayName}</p>
+        <p className="text-xs opacity-70">Clique para baixar</p>
+      </div>
+    </button>
+  );
+}
+
 interface CustomStatus {
   id: string;
   name: string;
@@ -1451,8 +1881,40 @@ export function KanbanChatPanel({
                       />
                     )}
 
-                    {/* Media icon for non-audio */}
-                    {msgIcon && msg.message_type !== 'audio' && (
+                    {/* Image viewer */}
+                    {msg.message_type === 'image' && msg.media_url && (
+                      <KanbanImageViewer
+                        src={msg.media_url}
+                        mimeType={msg.media_mime_type || undefined}
+                        whatsappMessageId={msg.whatsapp_message_id || undefined}
+                        conversationId={conversationId}
+                      />
+                    )}
+
+                    {/* Video player */}
+                    {msg.message_type === 'video' && msg.media_url && (
+                      <KanbanVideoPlayer
+                        src={msg.media_url}
+                        mimeType={msg.media_mime_type || undefined}
+                        whatsappMessageId={msg.whatsapp_message_id || undefined}
+                        conversationId={conversationId}
+                      />
+                    )}
+
+                    {/* Document viewer */}
+                    {msg.message_type === 'document' && msg.media_url && (
+                      <KanbanDocumentViewer
+                        src={msg.media_url}
+                        mimeType={msg.media_mime_type || undefined}
+                        whatsappMessageId={msg.whatsapp_message_id || undefined}
+                        conversationId={conversationId}
+                        isFromMe={isFromMe}
+                        content={msg.content}
+                      />
+                    )}
+
+                    {/* Media type indicator for other types (sticker, etc) */}
+                    {msgIcon && !['audio', 'image', 'video', 'document'].includes(msg.message_type || '') && (
                       <div className={cn(
                         "flex items-center gap-1 mb-1",
                         isFromMe && !isInternal ? "text-white/70" : "text-muted-foreground"
@@ -1462,10 +1924,17 @@ export function KanbanChatPanel({
                       </div>
                     )}
 
-                    {/* Content (hide for audio if no text) */}
-                    {(msg.message_type !== 'audio' || msg.content) && (
+                    {/* Content (hide for media types that already display content) */}
+                    {!['audio', 'image', 'video', 'document'].includes(msg.message_type || '') && msg.content && (
                       <p className="whitespace-pre-wrap">
-                        {msg.content ? renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all") : null}
+                        {renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all")}
+                      </p>
+                    )}
+                    
+                    {/* Caption for media with text */}
+                    {['image', 'video'].includes(msg.message_type || '') && msg.content && (
+                      <p className="whitespace-pre-wrap mt-2">
+                        {renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all")}
                       </p>
                     )}
 
