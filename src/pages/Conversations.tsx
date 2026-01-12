@@ -1241,9 +1241,12 @@ export default function Conversations() {
       // Create a local blob URL for immediate display
       const localMediaUrl = URL.createObjectURL(file);
       
+      const localWhatsappMessageId = response.data.messageId || null;
+
       const newMessage: Message = {
-        id: response.data.messageId || crypto.randomUUID(),
-        content: file.name,
+        id: crypto.randomUUID(),
+        whatsapp_message_id: localWhatsappMessageId,
+        content: friendlyFileName,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
@@ -1251,6 +1254,7 @@ export default function Conversations() {
         media_url: localMediaUrl,
         media_mime_type: file.type,
         message_type: mediaType,
+        status: "sent",
       };
       
       setMessages(prev => [...prev, newMessage]);
@@ -1343,15 +1347,18 @@ export default function Conversations() {
       }
 
       // Optimistically add message to local state
-      const previewUrlForMessage = mediaPreview.previewUrl;
+      const localMediaUrl = URL.createObjectURL(mediaPreview.file);
+      const localWhatsappMessageId = response.data.messageId || null;
+
       const newMessage: Message = {
-        id: response.data.messageId || crypto.randomUUID(),
-        content: caption || null,
+        id: crypto.randomUUID(),
+        whatsapp_message_id: localWhatsappMessageId,
+        content: caption || mediaPreview.file.name,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
         ai_generated: false,
-        media_url: previewUrlForMessage || undefined,
+        media_url: localMediaUrl,
         media_mime_type: mediaPreview.file.type,
         message_type: mediaPreview.mediaType,
         status: "sent",

@@ -360,10 +360,31 @@ export function useMessagesWithPagination({
           const newMsg = payload.new as PaginatedMessage;
 
           setMessages(prev => {
-            // Prevent duplicates
+            // Prevent duplicates by DB id
             if (prev.some(m => m.id === newMsg.id)) return prev;
 
-            // Check for optimistic message replacement
+            // Prefer replacing optimistic messages by WhatsApp message id (most reliable)
+            if (newMsg.whatsapp_message_id) {
+              const sameWhatsappIndex = prev.findIndex(
+                m => m.whatsapp_message_id && m.whatsapp_message_id === newMsg.whatsapp_message_id
+              );
+
+              if (sameWhatsappIndex !== -1) {
+                const updated = [...prev];
+                const prevMsg = updated[sameWhatsappIndex];
+                updated[sameWhatsappIndex] = {
+                  ...prevMsg,
+                  ...newMsg,
+                  status: "sent",
+                  // Keep local preview URL if backend hasn't stored a URL yet
+                  media_url: newMsg.media_url ?? prevMsg.media_url,
+                  media_mime_type: newMsg.media_mime_type ?? prevMsg.media_mime_type,
+                };
+                return updated;
+              }
+            }
+
+            // Fallback: Check for optimistic message replacement by content+timestamp
             const optimisticIndex = prev.findIndex(m =>
               m.is_from_me === newMsg.is_from_me &&
               m.content === newMsg.content &&
@@ -373,7 +394,14 @@ export function useMessagesWithPagination({
 
             if (optimisticIndex !== -1) {
               const updated = [...prev];
-              updated[optimisticIndex] = { ...newMsg, status: "sent" };
+              const prevMsg = updated[optimisticIndex];
+              updated[optimisticIndex] = {
+                ...prevMsg,
+                ...newMsg,
+                status: "sent",
+                media_url: newMsg.media_url ?? prevMsg.media_url,
+                media_mime_type: newMsg.media_mime_type ?? prevMsg.media_mime_type,
+              };
               return updated;
             }
 
