@@ -364,6 +364,9 @@ export function useMessagesWithPagination({
             // Prevent duplicates by DB id
             if (prev.some(m => m.id === newMsg.id)) return prev;
 
+            // Helper to check if URL is a temporary blob URL
+            const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
+
             // Prefer replacing optimistic messages by WhatsApp message id (most reliable)
             if (newMsg.whatsapp_message_id) {
               const sameWhatsappIndex = prev.findIndex(
@@ -380,6 +383,32 @@ export function useMessagesWithPagination({
                   // Keep local preview URL if backend hasn't stored a URL yet
                   media_url: newMsg.media_url ?? prevMsg.media_url,
                   media_mime_type: newMsg.media_mime_type ?? prevMsg.media_mime_type,
+                };
+                return updated;
+              }
+            }
+
+            // For media messages from me: find optimistic message with blob URL and same content
+            if (newMsg.is_from_me && newMsg.message_type && ['image', 'audio', 'document', 'video'].includes(newMsg.message_type)) {
+              const optimisticMediaIndex = prev.findIndex(m =>
+                m.is_from_me === true &&
+                m.content === newMsg.content &&
+                m.message_type === newMsg.message_type &&
+                isBlobUrl(m.media_url) &&
+                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 60000
+              );
+
+              if (optimisticMediaIndex !== -1) {
+                const updated = [...prev];
+                const prevMsg = updated[optimisticMediaIndex];
+                // Revoke the old blob URL to free memory
+                if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
+                  try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
+                }
+                updated[optimisticMediaIndex] = {
+                  ...prevMsg,
+                  ...newMsg,
+                  status: "sent",
                 };
                 return updated;
               }
@@ -406,12 +435,13 @@ export function useMessagesWithPagination({
               return updated;
             }
 
-            // Last-resort duplicate guard
+            // Last-resort duplicate guard for any message from me
             if (newMsg.is_from_me) {
               const isDuplicate = prev.some(m =>
                 m.content === newMsg.content &&
                 m.is_from_me === true &&
-                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
+                m.message_type === newMsg.message_type &&
+                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 60000
               );
               if (isDuplicate) return prev;
             }
