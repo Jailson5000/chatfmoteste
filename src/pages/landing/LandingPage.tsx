@@ -596,13 +596,29 @@ export function LandingPage() {
       {/* Footer */}
       <footer className="relative z-10 border-t border-white/[0.06] py-10">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
               <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
               <span className="text-sm font-medium text-white/60">
                 <span className="text-red-500">MIAU</span>CHAT
               </span>
             </div>
+            
+            <div className="flex items-center gap-6 text-sm">
+              <Link 
+                to="/privacidade" 
+                className="text-white/50 hover:text-white transition-colors"
+              >
+                Política de Privacidade
+              </Link>
+              <Link 
+                to="/termos" 
+                className="text-white/50 hover:text-white transition-colors"
+              >
+                Termos de Serviço
+              </Link>
+            </div>
+            
             <p className="text-xs text-white/30">
               © {new Date().getFullYear()} MiauChat. Todos os direitos
               reservados.
