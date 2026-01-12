@@ -53,6 +53,7 @@ import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { MediaGalleryItem } from "./MediaGalleryItem";
+import { DecryptedMediaListItem } from "./DecryptedMediaListItem";
 
 interface Automation {
   id: string;
@@ -802,26 +803,15 @@ export function ContactDetailsPanel({
                             content={item.content}
                           />
                         ) : (
-                          <a 
-                            href={item.media_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 p-2 rounded-md bg-muted/50 hover:bg-muted transition-colors"
-                          >
-                            {mediaTab === "audio" ? (
-                              <Music className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            ) : (
-                              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs truncate">
-                                {item.media_mime_type?.split("/")[1]?.toUpperCase() || mediaTab.toUpperCase()}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: ptBR })}
-                              </p>
-                            </div>
-                          </a>
+                          <DecryptedMediaListItem
+                            kind={mediaTab === "audio" ? "audio" : "document"}
+                            mediaUrl={item.media_url}
+                            mimeType={item.media_mime_type}
+                            whatsappMessageId={item.whatsapp_message_id}
+                            conversationId={item.conversation_id}
+                            content={item.content}
+                            createdAt={item.created_at}
+                          />
                         )}
                       </div>
                     ))}
