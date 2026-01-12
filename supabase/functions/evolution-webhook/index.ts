@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { humanDelay, messageSplitDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 
 // Production CORS configuration
 const ALLOWED_ORIGINS = [
@@ -1832,6 +1833,14 @@ async function sendAIResponseToWhatsApp(
 
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
+
+        // Apply human-like jitter before first audio, shorter delay between chunks
+        if (i === 0) {
+          await humanDelay(DELAY_CONFIG.AI_RESPONSE.min, DELAY_CONFIG.AI_RESPONSE.max, '[TTS_AUDIO]');
+        } else {
+          await humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[TTS_CHUNK]');
+        }
+
         logDebug('TTS_FLOW', 'Generating audio chunk', {
           index: i + 1,
           total: chunks.length,
@@ -1903,10 +1912,7 @@ async function sendAIResponseToWhatsApp(
           textLength: chunkText.length,
         });
 
-        // Small pacing between multiple audios
-        if (i < chunks.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-        }
+        // Note: Delay between chunks is now handled at the start of the loop
       }
 
       if (sentAnyAudio) {
@@ -1939,10 +1945,12 @@ async function sendAIResponseToWhatsApp(
         continue;
       }
 
-      // Add delay between messages (simulate typing)
+      // Add human-like jitter delay between messages
       if (i > 0) {
-        const typingDelay = Math.min(part.length * 15, 2000); // ~15ms per char, max 2s
-        await new Promise((resolve) => setTimeout(resolve, typingDelay));
+        await messageSplitDelay(i, messageParts.length, '[AI_RESPONSE]');
+      } else if (i === 0) {
+        // First message also gets a human-like delay (7-15s)
+        await humanDelay(DELAY_CONFIG.AI_RESPONSE.min, DELAY_CONFIG.AI_RESPONSE.max, '[AI_RESPONSE]');
       }
 
       logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {

@@ -5,6 +5,7 @@ import {
   validateTenantAccess, 
   logTenantSecurityEvent 
 } from "../_shared/tenant-validation.ts";
+import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 
 // Production CORS configuration
 const ALLOWED_ORIGINS = [
@@ -2092,6 +2093,9 @@ serve(async (req) => {
         if (!targetNumber) {
           throw new Error("Invalid remote_jid");
         }
+
+        // Apply human-like jitter before sending N8N/AI response (7-15s)
+        await humanDelay(DELAY_CONFIG.AI_RESPONSE.min, DELAY_CONFIG.AI_RESPONSE.max, '[N8N_REPLY]');
 
         // Send message via Evolution API
         const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
