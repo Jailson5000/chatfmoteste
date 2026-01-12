@@ -270,7 +270,18 @@ export function useGoogleCalendar() {
         },
       });
 
-      if (error) throw error;
+      // Handle edge function errors (returned in data when status != 2xx)
+      if (error) {
+        throw error;
+      }
+
+      // Check for error payload inside data (edge function returned non-2xx)
+      if (data?.error) {
+        const err = new Error(data.error) as Error & { requires_reconnect?: boolean };
+        err.requires_reconnect = data.requires_reconnect;
+        throw err;
+      }
+
       return data;
     },
     onSuccess: (data) => {
@@ -290,12 +301,22 @@ export function useGoogleCalendar() {
         description: syncedMsg + deletedMsg,
       });
     },
-    onError: (error: any) => {
-      toast({
-        title: "Erro na sincronização",
-        description: error.message,
-        variant: "destructive",
-      });
+    onError: (error: Error & { requires_reconnect?: boolean }) => {
+      // If token was revoked, invalidate integration query to reflect the disabled state
+      if (error.requires_reconnect) {
+        queryClient.invalidateQueries({ queryKey: ["google-calendar-integration"] });
+        toast({
+          title: "Reconexão necessária",
+          description: "O acesso ao Google Calendar expirou. Por favor, reconecte a integração em Configurações.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Erro na sincronização",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     },
   });
 
