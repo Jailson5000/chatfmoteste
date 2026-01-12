@@ -1225,16 +1225,23 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mídia");
       }
 
-      // Optimistically add message to local state
+      // Optimistically add message to local state with media URL for instant display
       // Use friendly display name for audio (remove .webm extension)
       const friendlyFileName = mediaType === "audio" ? "Mensagem de voz" : file.name;
+      
+      // Create a local blob URL for immediate display
+      const localMediaUrl = URL.createObjectURL(file);
+      
       const newMessage: Message = {
         id: response.data.messageId || crypto.randomUUID(),
-        content: `[${mediaType === "image" ? "Imagem" : mediaType === "audio" ? "Áudio" : mediaType === "video" ? "Vídeo" : "Documento"}: ${friendlyFileName}]`,
+        content: file.name,
         created_at: new Date().toISOString(),
         is_from_me: true,
         sender_type: "human",
         ai_generated: false,
+        media_url: localMediaUrl,
+        media_mime_type: file.type,
+        message_type: mediaType,
       };
       
       setMessages(prev => [...prev, newMessage]);
