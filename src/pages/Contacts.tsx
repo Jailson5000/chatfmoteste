@@ -129,6 +129,7 @@ export default function Contacts() {
       custom_status_id: null,
       department_id: null,
       whatsapp_instance_id: null,
+      assigned_to: null,
     });
     setDialogOpen(false);
     // Navigate to conversations to start chat
@@ -165,6 +166,7 @@ export default function Contacts() {
                 custom_status_id: null,
                 department_id: null,
                 whatsapp_instance_id: null,
+                assigned_to: null,
               });
               imported++;
             }
@@ -462,7 +464,11 @@ export default function Contacts() {
                       {formatPhone(client.phone)}
                     </TableCell>
                     <TableCell>
-                      <span className="text-muted-foreground">—</span>
+                      {client.assigned_profile?.full_name ? (
+                        <span className="text-sm">{client.assigned_profile.full_name}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Select
