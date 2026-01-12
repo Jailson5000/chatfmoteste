@@ -792,10 +792,16 @@ function ImageViewer({
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
 
-  // Check if needs decryption
-  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+  // Check if needs to fetch from API:
+  // 1. Encrypted WhatsApp media
+  // 2. No src provided but we have whatsappMessageId (sent images without stored URL)
+  const needsDecryption = whatsappMessageId && conversationId && (
+    !src || // No source URL - need to fetch from API
+    isEncryptedMedia(src) || // Encrypted media
+    src.startsWith("blob:") // Blob URLs expire - need to fetch real URL
+  );
 
-  // Decrypt image on mount if needed
+  // Decrypt/fetch image on mount if needed
   useEffect(() => {
     if (!needsDecryption) return;
     
@@ -827,7 +833,7 @@ function ImageViewer({
         });
 
         if (response.error || !response.data?.success || !response.data?.base64) {
-          console.error("Failed to decrypt image:", response.error || response.data?.error);
+          console.error("Failed to fetch image:", response.error || response.data?.error);
           setError(true);
           return;
         }
@@ -841,7 +847,7 @@ function ImageViewer({
         
         setDecryptedSrc(dataUrl);
       } catch (err) {
-        console.error("Error decrypting image:", err);
+        console.error("Error fetching image:", err);
         setError(true);
       } finally {
         setIsDecrypting(false);
@@ -873,7 +879,7 @@ function ImageViewer({
             </div>
           </div>
           <div className="text-center">
-            <span className="text-xs font-medium text-foreground/70">Descriptografando...</span>
+            <span className="text-xs font-medium text-foreground/70">Carregando...</span>
             <div className="flex items-center justify-center gap-1 mt-1">
               <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
               <div className="h-1 w-1 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
