@@ -52,6 +52,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { MediaGalleryItem } from "./MediaGalleryItem";
 
 interface Automation {
   id: string;
@@ -61,10 +62,13 @@ interface Automation {
 
 interface MediaItem {
   id: string;
-  media_url: string;
+  media_url: string | null;
   media_mime_type: string | null;
   message_type: string;
   created_at: string;
+  whatsapp_message_id: string | null;
+  content: string | null;
+  conversation_id: string;
 }
 
 interface ContactDetailsPanelProps {
@@ -147,12 +151,14 @@ export function ContactDetailsPanel({
     
     const fetchMedia = async () => {
       setMediaLoading(true);
+      // Query by message_type (not requiring media_url) to include images pending media fetch
       const { data, error } = await supabase
         .from("messages")
-        .select("id, media_url, media_mime_type, message_type, created_at")
+        .select("id, media_url, media_mime_type, message_type, created_at, whatsapp_message_id, content, conversation_id")
         .eq("conversation_id", conversation.id)
-        .not("media_url", "is", null)
-        .order("created_at", { ascending: false });
+        .in("message_type", ["image", "video", "audio", "ptt", "document"])
+        .order("created_at", { ascending: false })
+        .limit(50);
       
       if (!error && data) {
         setMediaItems(data as MediaItem[]);
@@ -789,18 +795,12 @@ export function ContactDetailsPanel({
                     {filteredMedia.map(item => (
                       <div key={item.id}>
                         {mediaTab === "images" ? (
-                          <a 
-                            href={item.media_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="block aspect-square rounded-md overflow-hidden bg-muted hover:opacity-80 transition-opacity"
-                          >
-                            <img 
-                              src={item.media_url} 
-                              alt="Media" 
-                              className="w-full h-full object-cover"
-                            />
-                          </a>
+                          <MediaGalleryItem
+                            mediaUrl={item.media_url}
+                            whatsappMessageId={item.whatsapp_message_id}
+                            conversationId={item.conversation_id}
+                            content={item.content}
+                          />
                         ) : (
                           <a 
                             href={item.media_url} 
