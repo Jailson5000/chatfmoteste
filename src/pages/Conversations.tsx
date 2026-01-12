@@ -779,11 +779,20 @@ export default function Conversations() {
 
     return conversations.map((conv) => {
       const hasActiveAutomation = !!conv.current_automation_id;
+      const hasHumanAssigned = !!conv.assigned_to;
 
-      // IMPORTANT: "IA" tab should only include chats that are truly being handled by an automation.
-      // If current_handler is 'ai' but there's no current_automation_id, treat it as unassigned (Fila), not IA.
-      const effectiveHandler: "ai" | "human" =
-        conv.current_handler === "ai" && hasActiveAutomation ? "ai" : "human";
+      // Determine effective handler type
+      // "unassigned" = no active automation AND no human assigned
+      // "ai" = has active automation
+      // "human" = has human assigned (but no active automation)
+      let effectiveHandler: "ai" | "human" | "unassigned";
+      if (conv.current_handler === "ai" && hasActiveAutomation) {
+        effectiveHandler = "ai";
+      } else if (!hasActiveAutomation && !hasHumanAssigned) {
+        effectiveHandler = "unassigned";
+      } else {
+        effectiveHandler = "human";
+      }
 
       // Prefer the joined automation name from the conversation (backend source-of-truth)
       const joinedAutomationName = (conv as any).current_automation?.name as string | undefined;
@@ -828,11 +837,10 @@ export default function Conversations() {
       
       if (!matchesSearch) return false;
 
-      // Handler filter
+      // Handler filter (including unassigned)
       if (conversationFilters.handlers.length > 0) {
-        if (!conversationFilters.handlers.includes(conv.handler)) {
-          return false;
-        }
+        const matchesHandler = conversationFilters.handlers.includes(conv.handler as any);
+        if (!matchesHandler) return false;
       }
 
       // Tags filter

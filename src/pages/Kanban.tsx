@@ -129,11 +129,28 @@ export default function Kanban() {
         if (!nameMatch && !phoneMatch) return false;
       }
       
-      // Responsible filter (multi-select) - includes both humans and AI agents
+      // Responsible filter (multi-select) - includes both humans, AI agents, and unassigned
       if (selectedResponsibles.length > 0) {
-        const matchesHuman = conv.assigned_to && selectedResponsibles.includes(conv.assigned_to);
-        const matchesAI = conv.current_automation_id && selectedResponsibles.includes(conv.current_automation_id);
-        if (!matchesHuman && !matchesAI) return false;
+        const hasUnassignedFilter = selectedResponsibles.includes("unassigned");
+        const otherResponsibleFilters = selectedResponsibles.filter(r => r !== "unassigned");
+        
+        // Check if conversation is unassigned (no human and no AI)
+        const isUnassigned = !conv.assigned_to && !conv.current_automation_id;
+        
+        if (hasUnassignedFilter && otherResponsibleFilters.length > 0) {
+          // Show both unassigned AND specific responsibles
+          const matchesHuman = conv.assigned_to && otherResponsibleFilters.includes(conv.assigned_to);
+          const matchesAI = conv.current_automation_id && otherResponsibleFilters.includes(conv.current_automation_id);
+          if (!isUnassigned && !matchesHuman && !matchesAI) return false;
+        } else if (hasUnassignedFilter) {
+          // Show only unassigned
+          if (!isUnassigned) return false;
+        } else {
+          // Show only specific responsibles
+          const matchesHuman = conv.assigned_to && otherResponsibleFilters.includes(conv.assigned_to);
+          const matchesAI = conv.current_automation_id && otherResponsibleFilters.includes(conv.current_automation_id);
+          if (!matchesHuman && !matchesAI) return false;
+        }
       }
 
       // Status filter (multi-select) - filter by client status

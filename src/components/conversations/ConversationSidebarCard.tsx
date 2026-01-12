@@ -12,7 +12,7 @@ export interface ConversationSidebarCardConversation {
   lastMessage: string;
   time: string;
   unread: number;
-  handler: "ai" | "human";
+  handler: "ai" | "human" | "unassigned";
   tags: Array<{ name: string; color: string }>;
   assignedTo: string | null;
   whatsappPhone: string | null;
@@ -78,6 +78,7 @@ interface ConversationSidebarCardProps {
 
 function ConversationSidebarCardComponent({ conversation, selected, onClick }: ConversationSidebarCardProps) {
   const isAI = conversation.handler === "ai";
+  const isUnassigned = conversation.handler === "unassigned";
   const hasAssigned = !!conversation.assignedTo;
 
   // Show "IA · AgentName" when available, otherwise just "IA"
@@ -88,10 +89,10 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
   let handlerLabel: string;
   if (isAI) {
     handlerLabel = agentName ? `IA · ${agentName}` : "IA";
-  } else if (hasAssigned) {
-    handlerLabel = conversation.assignedTo!;
-  } else {
+  } else if (isUnassigned || !hasAssigned) {
     handlerLabel = "Sem responsável";
+  } else {
+    handlerLabel = conversation.assignedTo!;
   }
 
   const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
@@ -259,15 +260,15 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
         <div className="flex items-center gap-1 min-w-0 overflow-hidden">
           {isAI ? (
             <Bot className="h-2.5 w-2.5 text-purple-500 flex-shrink-0" />
-          ) : hasAssigned ? (
-            <User className="h-2.5 w-2.5 text-success flex-shrink-0" />
-          ) : (
+          ) : isUnassigned || !hasAssigned ? (
             <UserX className="h-2.5 w-2.5 text-amber-500 flex-shrink-0" />
+          ) : (
+            <User className="h-2.5 w-2.5 text-success flex-shrink-0" />
           )}
           <span
             className={cn(
               "text-[9px] truncate max-w-[80px]",
-              isAI ? "text-purple-500" : hasAssigned ? "text-success" : "text-amber-500"
+              isAI ? "text-purple-500" : (isUnassigned || !hasAssigned) ? "text-amber-500" : "text-success"
             )}
             title={handlerLabel}
           >
