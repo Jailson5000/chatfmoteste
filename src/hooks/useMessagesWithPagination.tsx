@@ -100,12 +100,19 @@ export function useMessagesWithPagination({
 
   // Reset when conversation changes
   useEffect(() => {
+    // Always reset scroll/pagination guards when switching conversations.
+    // This prevents stale “restore scroll” state from the previous chat from affecting the next one.
+    pendingRestoreRef.current = null;
+    restoringScrollRef.current = false;
+    loadingMoreRef.current = false;
+    oldestTimestampRef.current = null;
+    lastLoadTimeRef.current = 0;
+    setIsLoadingMore(false);
+
     if (!conversationId) {
       setMessages([]);
       setHasMoreMessages(true);
       setTotalCount(0);
-      oldestTimestampRef.current = null;
-      loadingMoreRef.current = false;
       return;
     }
 

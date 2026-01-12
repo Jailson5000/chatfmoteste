@@ -1186,89 +1186,93 @@ export function KanbanChatPanel({
   }, [conversationId, handleScrollToTop]);
 
   const lastMessageIdRef = useRef<string | null>(null);
-  const hasScrolledInitialRef = useRef<string | null>(null); // Track which conversation was scrolled
-  const scrollAttemptRef = useRef<number>(0); // Track scroll attempts
-  const pendingScrollRef = useRef<boolean>(false); // Track pending scroll
 
-  // Reset scroll tracking when conversation changes
+  // Track initial scroll per conversation (switching cards while the panel is open must always land on the latest)
+  const hasScrolledInitialRef = useRef<string | null>(null);
+  const scrollAttemptRef = useRef<number>(0);
+  const pendingScrollRef = useRef<boolean>(false);
+
+  const resolveViewport = useCallback(() => {
+    const root = scrollRef.current;
+    if (!root) return null;
+
+    const current = viewportRef.current;
+    if (current && root.contains(current)) return current;
+
+    const next = root.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
+    if (next) viewportRef.current = next;
+    return next;
+  }, []);
+
+  // Reset scroll tracking whenever the conversation changes (even if the panel stays open)
   useEffect(() => {
-    if (conversationId !== hasScrolledInitialRef.current) {
-      // New conversation - reset scroll tracking
-      scrollAttemptRef.current = 0;
-      pendingScrollRef.current = true; // Mark that we need to scroll
+    scrollAttemptRef.current = 0;
+
+    if (!conversationId) {
+      pendingScrollRef.current = false;
+      hasScrolledInitialRef.current = null;
+      return;
     }
+
+    // Mark scroll as pending; only mark as “scrolled” after we confirm we reached the bottom.
+    pendingScrollRef.current = true;
+    hasScrolledInitialRef.current = null;
+
+    // Force a fresh lookup; Radix may recreate the viewport node between renders.
+    viewportRef.current = null;
   }, [conversationId]);
 
-  // useLayoutEffect: Scroll para o final ANTES do browser pintar (evita flash)
-  useLayoutEffect(() => {
-    // Só rola se tiver marcado como pendente e mensagens carregadas
-    if (!pendingScrollRef.current) return;
-    if (isLoading) return;
-    if (!conversationId) return;
-    if (messages.length === 0) return;
-
-    // Tentar encontrar o viewport diretamente (pode não estar no ref ainda)
-    let viewport = viewportRef.current;
-    if (!viewport) {
-      const root = scrollRef.current;
-      viewport = root?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null;
-      if (viewport) {
-        viewportRef.current = viewport;
-      }
-    }
+  const scrollToBottomOnce = useCallback(() => {
+    const viewport = resolveViewport();
 
     if (viewport) {
       viewport.scrollTop = viewport.scrollHeight;
+      return;
     }
-  }, [isLoading, messages.length, conversationId]);
 
-  // Auto-scroll: Rolar para o final quando a conversa é carregada (backup com retry)
-  useEffect(() => {
-    // Não fazer nada se ainda está carregando
-    if (isLoading) return;
+    // Fallback: end anchor (works when the Radix viewport ref isn’t ready yet)
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [resolveViewport]);
+
+  // Scroll to bottom after messages load for the current conversation (with retries)
+  useLayoutEffect(() => {
     if (!conversationId) return;
-
-    // Se já fez o scroll para esta conversa, não fazer de novo
-    if (hasScrolledInitialRef.current === conversationId) return;
-
-    // Aguardar ter mensagens antes de fazer scroll
+    if (isLoading) return;
     if (messages.length === 0) return;
 
-    // Função para tentar fazer scroll até o final
-    const scrollToEnd = () => {
-      const viewport = viewportRef.current;
-      if (!viewport) {
-        // Se viewport ainda não existe, tentar novamente
-        scrollAttemptRef.current++;
-        if (scrollAttemptRef.current < 10) {
-          requestAnimationFrame(scrollToEnd);
-        }
+    if (!pendingScrollRef.current) return;
+    if (hasScrolledInitialRef.current === conversationId) return;
+
+    let cancelled = false;
+
+    const attempt = () => {
+      if (cancelled) return;
+
+      scrollToBottomOnce();
+
+      const viewport = resolveViewport();
+      const atBottom = viewport
+        ? viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 8
+        : false;
+
+      if (atBottom) {
+        hasScrolledInitialRef.current = conversationId;
+        pendingScrollRef.current = false;
         return;
       }
 
-      // Fazer scroll para o final
-      viewport.scrollTop = viewport.scrollHeight;
-      pendingScrollRef.current = false; // Marcar scroll como feito
-      
-      // Verificar se realmente foi para o final (pode precisar de retry)
-      requestAnimationFrame(() => {
-        if (viewport && viewport.scrollTop < viewport.scrollHeight - viewport.clientHeight - 50) {
-          // Ainda não está no final, tentar novamente
-          viewport.scrollTop = viewport.scrollHeight;
-        }
-      });
+      scrollAttemptRef.current += 1;
+      if (scrollAttemptRef.current < 20) {
+        requestAnimationFrame(attempt);
+      }
     };
 
-    // Marcar que já fez o scroll inicial para esta conversa
-    hasScrolledInitialRef.current = conversationId;
+    requestAnimationFrame(attempt);
 
-    // Aguardar múltiplos frames para garantir que o DOM está completamente renderizado
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(scrollToEnd);
-      });
-    });
-  }, [isLoading, messages.length, conversationId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, isLoading, messages.length, resolveViewport, scrollToBottomOnce]);
 
   // Update editing name when contactName changes
   useEffect(() => {
