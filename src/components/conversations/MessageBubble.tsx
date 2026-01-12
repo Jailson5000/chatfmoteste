@@ -1073,8 +1073,11 @@ function DocumentViewer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [error, setError] = useState(false);
 
-  // Check if needs decryption
-  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+  // Check if needs decryption / fetching (when URL is missing, encrypted, or a temporary blob URL)
+  const needsDecryption =
+    !!whatsappMessageId &&
+    !!conversationId &&
+    (!src || isEncryptedMedia(src) || src.startsWith("blob:"));
 
   // Extract display name from content or URL
   const getDisplayName = () => {
@@ -1376,17 +1379,23 @@ export function MessageBubble({
   };
 
   const renderMedia = () => {
-    if (!mediaUrl) return null;
+    const canFetchWithoutUrl =
+      !mediaUrl &&
+      !!whatsappMessageId &&
+      !!conversationId &&
+      (messageType === "image" || messageType === "document");
+
+    const srcForMedia = mediaUrl || "";
 
     const isImage = mediaMimeType?.startsWith("image/") || messageType === "image";
     const isAudio = mediaMimeType?.startsWith("audio/") || messageType === "audio" || messageType === "ptt";
     const isVideo = mediaMimeType?.startsWith("video/") || messageType === "video";
-    const isDocument = messageType === "document" || (!isImage && !isAudio && !isVideo && mediaUrl);
+    const isDocument = messageType === "document" || (!isImage && !isAudio && !isVideo && !!mediaUrl);
 
-    if (isImage) {
+    if (isImage && (mediaUrl || canFetchWithoutUrl)) {
       return (
-        <ImageViewer 
-          src={mediaUrl} 
+        <ImageViewer
+          src={srcForMedia}
           mimeType={mediaMimeType || undefined}
           whatsappMessageId={whatsappMessageId || undefined}
           conversationId={conversationId}
@@ -1394,10 +1403,10 @@ export function MessageBubble({
       );
     }
 
-    if (isAudio) {
+    if (isAudio && mediaUrl) {
       return (
-        <AudioPlayer 
-          src={mediaUrl} 
+        <AudioPlayer
+          src={srcForMedia}
           mimeType={mediaMimeType || undefined}
           whatsappMessageId={whatsappMessageId || undefined}
           conversationId={conversationId}
@@ -1406,10 +1415,10 @@ export function MessageBubble({
       );
     }
 
-    if (isVideo) {
+    if (isVideo && mediaUrl) {
       return (
-        <VideoPlayer 
-          src={mediaUrl} 
+        <VideoPlayer
+          src={srcForMedia}
           mimeType={mediaMimeType || undefined}
           whatsappMessageId={whatsappMessageId || undefined}
           conversationId={conversationId}
@@ -1417,10 +1426,10 @@ export function MessageBubble({
       );
     }
 
-    if (isDocument) {
+    if (isDocument && (mediaUrl || canFetchWithoutUrl)) {
       return (
         <DocumentViewer
-          src={mediaUrl}
+          src={srcForMedia}
           mimeType={mediaMimeType || undefined}
           whatsappMessageId={whatsappMessageId || undefined}
           conversationId={conversationId}
@@ -1433,16 +1442,23 @@ export function MessageBubble({
     return null;
   };
 
-  const hasMedia = mediaUrl && (
-    mediaMimeType?.startsWith("image/") ||
-    mediaMimeType?.startsWith("audio/") ||
-    mediaMimeType?.startsWith("video/") ||
-    messageType === "image" ||
-    messageType === "audio" ||
-    messageType === "video" ||
-    messageType === "ptt" ||
-    messageType === "document"
-  );
+  const canFetchWithoutUrl =
+    !mediaUrl &&
+    !!whatsappMessageId &&
+    !!conversationId &&
+    (messageType === "image" || messageType === "document");
+
+  const hasMedia =
+    (!!mediaUrl &&
+      (mediaMimeType?.startsWith("image/") ||
+        mediaMimeType?.startsWith("audio/") ||
+        mediaMimeType?.startsWith("video/") ||
+        messageType === "image" ||
+        messageType === "audio" ||
+        messageType === "video" ||
+        messageType === "ptt" ||
+        messageType === "document")) ||
+    canFetchWithoutUrl;
 
   const displayContent = (() => {
     if (!content) return "";
