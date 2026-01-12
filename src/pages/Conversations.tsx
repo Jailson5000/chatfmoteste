@@ -2711,6 +2711,55 @@ export default function Conversations() {
                           setTemplateSearchTerm("");
                         }
                       }}
+                      onPaste={async (e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+
+                        for (let i = 0; i < items.length; i++) {
+                          const item = items[i];
+                          
+                          // Handle image paste
+                          if (item.type.startsWith("image/")) {
+                            e.preventDefault();
+                            const file = item.getAsFile();
+                            if (file && !isInternalMode) {
+                              // Open media preview dialog with the pasted image
+                              const previewUrl = URL.createObjectURL(file);
+                              setMediaPreview({
+                                open: true,
+                                file,
+                                mediaType: "image",
+                                previewUrl,
+                              });
+                            }
+                            return;
+                          }
+                          
+                          // Handle file paste (some browsers support this)
+                          if (item.kind === "file" && !item.type.startsWith("image/")) {
+                            e.preventDefault();
+                            const file = item.getAsFile();
+                            if (file && !isInternalMode) {
+                              const fileType = file.type;
+                              if (fileType.startsWith("video/")) {
+                                const previewUrl = URL.createObjectURL(file);
+                                setMediaPreview({
+                                  open: true,
+                                  file,
+                                  mediaType: "video",
+                                  previewUrl,
+                                });
+                              } else if (fileType.startsWith("audio/")) {
+                                handleSendMedia(file, "audio");
+                              } else {
+                                handleSendMedia(file, "document");
+                              }
+                            }
+                            return;
+                          }
+                        }
+                        // Text paste is handled by default browser behavior
+                      }}
                     />
                   </div>
                   <div className="flex gap-1">
