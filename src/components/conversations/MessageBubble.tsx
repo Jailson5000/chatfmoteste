@@ -92,8 +92,8 @@ function AudioPlayer({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
 
-  // Check if needs decryption
-  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+  // Para áudios do WhatsApp sempre forçar descriptografia para evitar problemas de URLs expiradas
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
 
   // Decrypt audio on mount if needed - check IndexedDB first, then memory cache, then fetch
   useEffect(() => {
@@ -793,14 +793,9 @@ function ImageViewer({
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
 
-  // Check if needs to fetch from API:
-  // 1. Encrypted WhatsApp media
-  // 2. No src provided but we have whatsappMessageId (sent images without stored URL)
-  const needsDecryption = whatsappMessageId && conversationId && (
-    !src || // No source URL - need to fetch from API
-    isEncryptedMedia(src) || // Encrypted media
-    src.startsWith("blob:") // Blob URLs expire - need to fetch real URL
-  );
+  // Para imagens do WhatsApp sempre forçar descriptografia via backend
+  // para evitar URLs expiradas e garantir exibição consistente.
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
 
   // Decrypt/fetch image on mount if needed
   useEffect(() => {
@@ -944,8 +939,8 @@ function VideoPlayer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
 
-  // Check if needs decryption
-  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+  // Para vídeos do WhatsApp sempre forçar descriptografia via backend
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
 
   // Decrypt video on mount if needed
   useEffect(() => {
@@ -1074,11 +1069,9 @@ function DocumentViewer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [error, setError] = useState(false);
 
-  // Check if needs decryption / fetching (when URL is missing, encrypted, or a temporary blob URL)
-  const needsDecryption =
-    !!whatsappMessageId &&
-    !!conversationId &&
-    (!src || isEncryptedMedia(src) || src.startsWith("blob:"));
+  // Para documentos do WhatsApp sempre forçar descriptografia via backend
+  // para garantir download correto com extensão (sem .enc) e evitar URLs expiradas.
+  const needsDecryption = !!whatsappMessageId && !!conversationId;
 
   // Extract display name from content or URL
   const getDisplayName = () => {
