@@ -43,7 +43,13 @@ import {
   Users,
   Play,
   Pause,
-  FileAudio
+  FileAudio,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  Download,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 import { format } from "date-fns";
@@ -388,7 +394,10 @@ function KanbanAudioPlayer({
   );
 }
 
-// Image viewer component with decryption support
+// ==========================================
+// KANBAN IMAGE VIEWER WITH FULL CONTROLS
+// (zoom, rotation, download, navigation)
+// ==========================================
 function KanbanImageViewer({
   src,
   mimeType,
@@ -404,6 +413,8 @@ function KanbanImageViewer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
 
   // Se não existir URL (caso comum no WhatsApp) OU se for URL criptografada, precisamos buscar o arquivo via backend.
   const needsDecryption =
@@ -460,6 +471,57 @@ function KanbanImageViewer({
 
   const imageSrc = needsDecryption ? decryptedSrc : (src ?? null);
 
+  // Reset zoom/rotation quando abre
+  useEffect(() => {
+    if (imageOpen) {
+      setZoom(1);
+      setRotation(0);
+    }
+  }, [imageOpen]);
+
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.25, 3));
+  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.25, 0.5));
+  const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
+
+  const handleDownload = () => {
+    if (!imageSrc) return;
+    const link = document.createElement("a");
+    link.href = imageSrc;
+    link.download = `imagem_${Date.now()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleClose = () => setImageOpen(false);
+
+  // Keyboard navigation
+  useEffect(() => {
+    if (!imageOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "Escape":
+          handleClose();
+          break;
+        case "+":
+        case "=":
+          handleZoomIn();
+          break;
+        case "-":
+          handleZoomOut();
+          break;
+        case "r":
+        case "R":
+          handleRotate();
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [imageOpen]);
+
   // Quando a imagem não tem media_url no banco, precisamos esperar a descriptografia.
   if (needsDecryption && !imageSrc && !error) {
     return (
@@ -507,12 +569,63 @@ function KanbanImageViewer({
       </div>
       {imageOpen && (
         <Dialog open={imageOpen} onOpenChange={setImageOpen}>
-          <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-black/90 border-none">
-            <img
-              src={imageSrc}
-              alt="Imagem"
-              className="w-auto h-auto max-w-full max-h-[85vh] object-contain mx-auto"
-            />
+          <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 bg-black/95 border-none overflow-hidden">
+            {/* Toolbar */}
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded-full px-3 py-1.5">
+              <button
+                onClick={handleZoomOut}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Zoom - (-)"
+              >
+                <ZoomOut className="h-5 w-5 text-white" />
+              </button>
+              <span className="text-white text-xs min-w-[40px] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={handleZoomIn}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Zoom + (+)"
+              >
+                <ZoomIn className="h-5 w-5 text-white" />
+              </button>
+              <div className="w-px h-5 bg-white/30 mx-1" />
+              <button
+                onClick={handleRotate}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Girar (R)"
+              >
+                <RotateCw className="h-5 w-5 text-white" />
+              </button>
+              <div className="w-px h-5 bg-white/30 mx-1" />
+              <button
+                onClick={handleDownload}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Baixar"
+              >
+                <Download className="h-5 w-5 text-white" />
+              </button>
+              <div className="w-px h-5 bg-white/30 mx-1" />
+              <button
+                onClick={handleClose}
+                className="p-1.5 rounded-full hover:bg-white/10 transition-colors"
+                title="Fechar (Esc)"
+              >
+                <X className="h-5 w-5 text-white" />
+              </button>
+            </div>
+
+            {/* Image */}
+            <div className="flex items-center justify-center w-full h-[85vh] overflow-auto">
+              <img
+                src={imageSrc}
+                alt="Imagem"
+                className="max-w-full max-h-full object-contain transition-transform duration-200"
+                style={{
+                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                }}
+              />
+            </div>
           </DialogContent>
         </Dialog>
       )}
