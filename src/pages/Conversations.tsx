@@ -30,6 +30,7 @@ import {
   MessageCircle,
   Lock,
   User,
+  UserX,
   PanelRightOpen,
   PanelRightClose,
   Plus,
@@ -776,6 +777,13 @@ export default function Conversations() {
     }, {} as Record<string, string>);
 
     return conversations.map((conv) => {
+      const hasActiveAutomation = !!conv.current_automation_id;
+
+      // IMPORTANT: "IA" tab should only include chats that are truly being handled by an automation.
+      // If current_handler is 'ai' but there's no current_automation_id, treat it as unassigned (Fila), not IA.
+      const effectiveHandler: "ai" | "human" =
+        conv.current_handler === "ai" && hasActiveAutomation ? "ai" : "human";
+
       // Prefer the joined automation name from the conversation (backend source-of-truth)
       const joinedAutomationName = (conv as any).current_automation?.name as string | undefined;
       const aiAgentName = joinedAutomationName?.trim()
@@ -791,7 +799,7 @@ export default function Conversations() {
         lastMessage: conv.last_message?.content || "Sem mensagens",
         time: formatTimeAgoShort(conv.last_message_at),
         unread: unreadCounts[conv.id] || 0,
-        handler: conv.current_handler as "ai" | "human",
+        handler: effectiveHandler,
         status: conv.status,
         archivedAt: (conv as any).archived_at || null,
         // Use client_tags from client_tags table instead of conversation.tags
@@ -802,7 +810,7 @@ export default function Conversations() {
         avatarUrl: conv.client?.avatar_url || null,
         clientStatus: conv.client?.custom_status || null,
         department: conv.department || null,
-        aiAgentName: aiAgentName,
+        aiAgentName,
         scheduledFollowUps: followUpsByConversation[conv.id] || 0,
       };
     });
@@ -1693,18 +1701,39 @@ export default function Conversations() {
                           )}
                         </div>
                         <div className="mt-1">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] h-5 px-1.5 gap-0.5 max-w-[120px]",
-                              conv.handler === "ai"
-                                ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
-                                : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
-                            )}
-                          >
-                            {conv.handler === "ai" ? <Zap className="h-2.5 w-2.5 flex-shrink-0" /> : <User className="h-2.5 w-2.5 flex-shrink-0" />}
-                            <span className="truncate">{conv.handler === "ai" ? `IA ${conv.aiAgentName}` : (conv.assignedTo?.split(" ")[0] || "Atendente")}</span>
-                          </Badge>
+                          {(() => {
+                            const isAI = conv.handler === "ai";
+                            const isUnassigned = !isAI && !conv.assignedTo;
+
+                            const label = isAI
+                              ? `IA · ${conv.aiAgentName}`
+                              : isUnassigned
+                                ? "Sem responsável"
+                                : (conv.assignedTo?.split(" ")[0] || "Atendente");
+
+                            return (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] h-5 px-1.5 gap-0.5 max-w-[140px]",
+                                  isAI
+                                    ? "border-purple-500/50 text-purple-600 bg-purple-50 dark:bg-purple-900/20"
+                                    : isUnassigned
+                                      ? "border-amber-500/50 text-amber-600 bg-amber-50 dark:bg-amber-900/20"
+                                      : "border-blue-500/50 text-blue-600 bg-blue-50 dark:bg-blue-900/20"
+                                )}
+                              >
+                                {isAI ? (
+                                  <Zap className="h-2.5 w-2.5 flex-shrink-0" />
+                                ) : isUnassigned ? (
+                                  <UserX className="h-2.5 w-2.5 flex-shrink-0" />
+                                ) : (
+                                  <User className="h-2.5 w-2.5 flex-shrink-0" />
+                                )}
+                                <span className="truncate">{label}</span>
+                              </Badge>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
