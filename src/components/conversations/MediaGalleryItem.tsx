@@ -20,17 +20,24 @@ export function MediaGalleryItem({
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    // If we have a valid URL that's not a blob, use it directly
-    if (mediaUrl && !mediaUrl.startsWith("blob:") && !mediaUrl.endsWith(".enc")) {
+    setError(false);
+
+    // If we have a valid URL (not blob and not encrypted), try it first.
+    if (mediaUrl && !mediaUrl.startsWith("blob:") && !isEncryptedMediaUrl(mediaUrl)) {
       setLoadedUrl(mediaUrl);
       return;
     }
 
-    // If no URL or it's encrypted/blob, try to fetch from Evolution API
+    // If no URL or it's encrypted/blob, fetch from backend.
     if (whatsappMessageId && conversationId) {
       fetchMediaFromApi();
     }
   }, [mediaUrl, whatsappMessageId, conversationId]);
+
+  const isEncryptedMediaUrl = (url: string) => {
+    const u = url.toLowerCase();
+    return u.includes(".enc") || u.includes("mmg.whatsapp.net");
+  };
 
   const fetchMediaFromApi = async () => {
     if (!whatsappMessageId || !conversationId) return;
@@ -39,47 +46,21 @@ export function MediaGalleryItem({
     setError(false);
 
     try {
-      // First get the whatsapp_instance_id from the conversation
-      const { data: convData } = await supabase
-        .from("conversations")
-        .select("whatsapp_instance_id")
-        .eq("id", conversationId)
-        .single();
-
-      if (!convData?.whatsapp_instance_id) {
-        setError(true);
-        return;
-      }
-
-      // Get instance details
-      const { data: instanceData } = await supabase
-        .from("whatsapp_instances")
-        .select("instance_name")
-        .eq("id", convData.whatsapp_instance_id)
-        .single();
-
-      if (!instanceData) {
-        setError(true);
-        return;
-      }
-
-      // Call evolution-api to get media
-      const { data: response, error: fnError } = await supabase.functions.invoke("evolution-api", {
+      const { data, error: fnError } = await supabase.functions.invoke("evolution-api", {
         body: {
           action: "get_media",
-          instanceName: instanceData.instance_name,
-          messageId: whatsappMessageId,
+          conversationId,
+          whatsappMessageId,
         },
       });
 
-      if (fnError || !response?.success || !response?.data?.base64) {
+      if (fnError || !data?.success || !data?.base64) {
         setError(true);
         return;
       }
 
-      // Convert base64 to data URL
-      const mimeType = response.data.mimetype || "image/jpeg";
-      const dataUrl = `data:${mimeType};base64,${response.data.base64}`;
+      const mimeType = data.mimetype || "image/jpeg";
+      const dataUrl = `data:${mimeType};base64,${data.base64}`;
       setLoadedUrl(dataUrl);
     } catch {
       setError(true);
@@ -118,7 +99,14 @@ export function MediaGalleryItem({
         src={loadedUrl} 
         alt={content || "Media"} 
         className="w-full h-full object-cover"
-        onError={() => setError(true)}
+        onError={() => {
+          // If the original URL expired, fallback to decrypt via backend.
+          if (!isLoading && whatsappMessageId && conversationId) {
+            fetchMediaFromApi();
+          } else {
+            setError(true);
+          }
+        }}
       />
     </a>
   );

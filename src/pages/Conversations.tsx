@@ -806,6 +806,7 @@ export default function Conversations() {
         // Use client_tags from client_tags table instead of conversation.tags
         tags: (conv as any).client_tags || [],
         assignedTo: conv.assigned_profile?.full_name || null,
+        assignedUserId: (conv as any).assigned_to || null,
         whatsappInstance: conv.whatsapp_instance?.display_name || conv.whatsapp_instance?.instance_name || null,
         whatsappPhone: conv.whatsapp_instance?.phone_number || null,
         avatarUrl: conv.client?.avatar_url || null,
@@ -852,7 +853,7 @@ export default function Conversations() {
       switch (activeTab) {
         case "chat":
           // "Chat": Only show conversations assigned to current user (as human handler), exclude archived
-          return !isArchived && conv.handler === "human" && conv.assignedTo === userProfile?.full_name;
+          return !isArchived && conv.handler === "human" && !!user?.id && conv.assignedUserId === user.id;
         case "ai":
           // Exclude archived from AI tab
           return !isArchived && conv.handler === "ai";
@@ -866,7 +867,7 @@ export default function Conversations() {
           return true;
       }
     });
-  }, [mappedConversations, conversationFilters, searchQuery, activeTab, userProfile?.full_name]);
+  }, [mappedConversations, conversationFilters, searchQuery, activeTab, user?.id]);
 
   // Infinite scroll for conversation list (30 initial, +20 on scroll)
   const conversationScroll = useInfiniteScroll(filteredConversations, {
@@ -1585,7 +1586,10 @@ export default function Conversations() {
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        return mappedConversations.filter((c) => c.handler === "human" && c.assignedTo && !c.archivedAt).length;
+        // Cada atendente vê o número correto de atendimentos dele
+        return user?.id
+          ? mappedConversations.filter((c) => c.handler === "human" && c.assignedUserId === user.id && !c.archivedAt).length
+          : 0;
       case "ai":
         return mappedConversations.filter((c) => c.handler === "ai" && !c.archivedAt).length;
       case "queue":
