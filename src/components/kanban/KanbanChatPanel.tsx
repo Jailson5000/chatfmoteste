@@ -389,13 +389,13 @@ function KanbanAudioPlayer({
 }
 
 // Image viewer component with decryption support
-function KanbanImageViewer({ 
-  src, 
+function KanbanImageViewer({
+  src,
   mimeType,
   whatsappMessageId,
   conversationId,
-}: { 
-  src: string; 
+}: {
+  src?: string | null;
   mimeType?: string;
   whatsappMessageId?: string;
   conversationId?: string;
@@ -405,11 +405,13 @@ function KanbanImageViewer({
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
 
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  // Se não existir URL (caso comum no WhatsApp) OU se for URL criptografada, precisamos buscar o arquivo via backend.
+  const needsDecryption =
+    !!whatsappMessageId && !!conversationId && (!src || isEncryptedMedia(src));
 
   useEffect(() => {
     if (!needsDecryption) return;
-    
+
     const loadImage = async () => {
       const memoryCached = audioMemoryCache.get(whatsappMessageId!);
       if (memoryCached) {
@@ -441,10 +443,10 @@ function KanbanImageViewer({
 
         const actualMimeType = response.data.mimetype || mimeType || "image/jpeg";
         const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
-        
+
         audioMemoryCache.set(whatsappMessageId!, dataUrl);
         await setCachedAudio(whatsappMessageId!, dataUrl);
-        
+
         setDecryptedSrc(dataUrl);
       } catch (err) {
         setError(true);
@@ -456,9 +458,10 @@ function KanbanImageViewer({
     loadImage();
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 
-  const imageSrc = needsDecryption ? decryptedSrc : src;
+  const imageSrc = needsDecryption ? decryptedSrc : (src ?? null);
 
-  if (isDecrypting) {
+  // Quando a imagem não tem media_url no banco, precisamos esperar a descriptografia.
+  if (needsDecryption && !imageSrc && !error) {
     return (
       <div className="relative min-w-[180px] min-h-[120px] max-w-[220px] rounded-xl overflow-hidden bg-muted/50 border border-border/50">
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3">
@@ -466,9 +469,11 @@ function KanbanImageViewer({
             <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
               <ImageIcon className="h-5 w-5 text-primary/60" />
             </div>
-            <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center">
-              <Loader2 className="h-2.5 w-2.5 animate-spin text-primary" />
-            </div>
+            {isDecrypting && (
+              <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-primary/20 flex items-center justify-center">
+                <Loader2 className="h-2.5 w-2.5 animate-spin text-primary" />
+              </div>
+            )}
           </div>
           <span className="text-xs text-muted-foreground">Carregando...</span>
         </div>
@@ -476,7 +481,7 @@ function KanbanImageViewer({
     );
   }
 
-  if (error || (!imageSrc && needsDecryption)) {
+  if (error || !imageSrc) {
     return (
       <div className="flex items-center justify-center min-w-[180px] min-h-[100px] bg-destructive/10 rounded-lg">
         <div className="flex flex-col items-center gap-1">
@@ -489,12 +494,12 @@ function KanbanImageViewer({
 
   return (
     <>
-      <div 
+      <div
         className="max-w-[220px] max-h-[220px] rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition-opacity bg-muted/30"
         onClick={() => setImageOpen(true)}
       >
         <img
-          src={imageSrc || src}
+          src={imageSrc}
           alt="Imagem"
           className="max-w-full max-h-[220px] object-contain"
           onError={() => setError(true)}
@@ -504,7 +509,7 @@ function KanbanImageViewer({
         <Dialog open={imageOpen} onOpenChange={setImageOpen}>
           <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-black/90 border-none">
             <img
-              src={imageSrc || src}
+              src={imageSrc}
               alt="Imagem"
               className="w-auto h-auto max-w-full max-h-[85vh] object-contain mx-auto"
             />
@@ -514,7 +519,6 @@ function KanbanImageViewer({
     </>
   );
 }
-
 // Video player component with decryption support
 function KanbanVideoPlayer({ 
   src, 
@@ -626,15 +630,15 @@ function KanbanVideoPlayer({
 }
 
 // Document viewer component with decryption support
-function KanbanDocumentViewer({ 
-  src, 
+function KanbanDocumentViewer({
+  src,
   mimeType,
   whatsappMessageId,
   conversationId,
   isFromMe,
   content,
-}: { 
-  src: string; 
+}: {
+  src?: string | null;
   mimeType?: string;
   whatsappMessageId?: string;
   conversationId?: string;
@@ -644,10 +648,14 @@ function KanbanDocumentViewer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [error, setError] = useState(false);
 
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  const safeSrc = src ?? "";
+
+  // Se não existir URL (caso comum no WhatsApp) OU se for URL criptografada, precisamos buscar o arquivo via backend.
+  const needsDecryption =
+    !!whatsappMessageId && !!conversationId && (!src || isEncryptedMedia(src));
 
   const getDisplayName = () => {
-    const rawLastSegment = src.split("/").pop() || "Documento";
+    const rawLastSegment = safeSrc.split("/").pop() || "Documento";
     const withoutQuery = rawLastSegment.split("?")[0] || rawLastSegment;
 
     let urlFileName = withoutQuery;
@@ -692,7 +700,7 @@ function KanbanDocumentViewer({
 
   const handleDownload = async () => {
     if (!needsDecryption) {
-      window.open(src, "_blank");
+      if (safeSrc) window.open(safeSrc, "_blank");
       return;
     }
 
@@ -1882,9 +1890,9 @@ export function KanbanChatPanel({
                     )}
 
                     {/* Image viewer */}
-                    {msg.message_type === 'image' && msg.media_url && (
+                    {msg.message_type === 'image' && (msg.media_url || msg.whatsapp_message_id) && (
                       <KanbanImageViewer
-                        src={msg.media_url}
+                        src={msg.media_url ?? null}
                         mimeType={msg.media_mime_type || undefined}
                         whatsappMessageId={msg.whatsapp_message_id || undefined}
                         conversationId={conversationId}
@@ -1902,9 +1910,9 @@ export function KanbanChatPanel({
                     )}
 
                     {/* Document viewer */}
-                    {msg.message_type === 'document' && msg.media_url && (
+                    {msg.message_type === 'document' && (msg.media_url || msg.whatsapp_message_id) && (
                       <KanbanDocumentViewer
-                        src={msg.media_url}
+                        src={msg.media_url ?? null}
                         mimeType={msg.media_mime_type || undefined}
                         whatsappMessageId={msg.whatsapp_message_id || undefined}
                         conversationId={conversationId}
