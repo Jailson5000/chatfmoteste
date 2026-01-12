@@ -37,6 +37,7 @@ interface MessageBubbleProps {
   isInternal?: boolean;
   isPontual?: boolean;
   aiAgentName?: string | null; // Name of the AI agent that sent this message
+  isRevoked?: boolean; // Indicates if the message was deleted by sender
   replyTo?: {
     id: string;
     content: string | null;
@@ -1294,6 +1295,7 @@ export function MessageBubble({
   isInternal = false,
   isPontual = false,
   aiAgentName,
+  isRevoked = false,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -1511,18 +1513,39 @@ export function MessageBubble({
         className={cn(
           "max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 transition-all",
           "break-words [overflow-wrap:anywhere] [word-break:break-word] [hyphens:auto]",
-          isInternal
-            ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
-            : isFromMe
-              ? aiGenerated
-                ? "bg-purple-100 text-purple-900 rounded-br-md dark:bg-purple-900/30 dark:text-purple-100"
-                : status === "error"
-                  ? "bg-red-100 text-red-900 rounded-br-md dark:bg-red-900/30 dark:text-red-100 border border-red-300 dark:border-red-700"
-                  : "bg-green-100 text-green-900 rounded-br-md dark:bg-green-900/30 dark:text-green-100"
-              : "bg-muted rounded-bl-md",
+          isRevoked
+            ? "bg-muted/50 rounded-br-md opacity-70"
+            : isInternal
+              ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
+              : isFromMe
+                ? aiGenerated
+                  ? "bg-purple-100 text-purple-900 rounded-br-md dark:bg-purple-900/30 dark:text-purple-100"
+                  : status === "error"
+                    ? "bg-red-100 text-red-900 rounded-br-md dark:bg-red-900/30 dark:text-red-100 border border-red-300 dark:border-red-700"
+                    : "bg-green-100 text-green-900 rounded-br-md dark:bg-green-900/30 dark:text-green-100"
+                : "bg-muted rounded-bl-md",
           isHighlighted && "ring-2 ring-yellow-400 ring-offset-2"
         )}
       >
+        {/* Revoked message indicator */}
+        {isRevoked && (
+          <div className="flex items-center gap-1.5 text-muted-foreground italic">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </svg>
+            <span className="text-sm">Mensagem apagada</span>
+          </div>
+        )}
         {/* Quoted message if replying */}
         {replyTo && (
           <QuotedMessage

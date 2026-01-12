@@ -3270,6 +3270,53 @@ serve(async (req) => {
 
       case 'messages.delete': {
         logDebug('MESSAGE', `Message delete event received`, { requestId, data: body.data });
+        
+        // Handle message revocation (when sender deletes message for everyone)
+        try {
+          const deleteData = body.data as Record<string, unknown>;
+          const messageObj = deleteData?.message as Record<string, unknown> | undefined;
+          const keyObj = deleteData?.key as Record<string, unknown> | undefined;
+          
+          const messageId = (messageObj?.id as string) || 
+                           (keyObj?.id as string) ||
+                           (deleteData?.messageId as string) ||
+                           (deleteData?.id as string);
+          
+          if (messageId) {
+            logDebug('MESSAGE', `Marking message as revoked`, { requestId, messageId });
+            
+            const { error: revokeError } = await supabaseClient
+              .from('messages')
+              .update({ 
+                is_revoked: true, 
+                revoked_at: new Date().toISOString() 
+              })
+              .eq('whatsapp_message_id', messageId);
+            
+            if (revokeError) {
+              logDebug('MESSAGE', `Failed to mark message as revoked`, { 
+                requestId, 
+                messageId, 
+                error: revokeError 
+              });
+            } else {
+              logDebug('MESSAGE', `Message marked as revoked successfully`, { 
+                requestId, 
+                messageId 
+              });
+            }
+          } else {
+            logDebug('MESSAGE', `Could not extract message ID from delete event`, { 
+              requestId, 
+              deleteData 
+            });
+          }
+        } catch (deleteErr) {
+          logDebug('MESSAGE', `Error processing message delete`, { 
+            requestId, 
+            error: String(deleteErr) 
+          });
+        }
         break;
       }
 

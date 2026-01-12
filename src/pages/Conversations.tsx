@@ -144,6 +144,7 @@ interface Message {
   whatsapp_message_id?: string | null;
   is_internal?: boolean;
   is_pontual?: boolean;
+  is_revoked?: boolean;
   ai_agent_id?: string | null;
   ai_agent_name?: string | null;
   reply_to?: {
@@ -1885,6 +1886,7 @@ export default function Conversations() {
                               isInternal={item.data.is_internal}
                               isPontual={item.data.is_pontual}
                               aiAgentName={item.data.ai_agent_name}
+                              isRevoked={item.data.is_revoked}
                               onReply={handleReply}
                               onScrollToMessage={scrollToMessage}
                               onRetry={handleRetryMessage}
@@ -2424,6 +2426,7 @@ export default function Conversations() {
                               isInternal={item.data.is_internal}
                               isPontual={item.data.is_pontual}
                               aiAgentName={item.data.ai_agent_name}
+                              isRevoked={item.data.is_revoked}
                               onReply={handleReply}
                               onScrollToMessage={scrollToMessage}
                               onRetry={handleRetryMessage}
