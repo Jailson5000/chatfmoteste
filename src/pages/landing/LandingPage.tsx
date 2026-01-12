@@ -605,18 +605,18 @@ export function LandingPage() {
             </div>
             
             <div className="flex items-center gap-6 text-sm">
-              <Link 
-                to="/privacidade" 
+              <a 
+                href="https://www.miauchat.com.br/privacidade" 
                 className="text-white/50 hover:text-white transition-colors"
               >
                 Política de Privacidade
-              </Link>
-              <Link 
-                to="/termos" 
+              </a>
+              <a 
+                href="https://www.miauchat.com.br/termos" 
                 className="text-white/50 hover:text-white transition-colors"
               >
                 Termos de Serviço
-              </Link>
+              </a>
             </div>
             
             <p className="text-xs text-white/30">
