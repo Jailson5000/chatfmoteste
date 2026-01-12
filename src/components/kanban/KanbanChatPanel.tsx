@@ -56,6 +56,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
+import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import {
   Popover,
   PopoverContent,
@@ -1052,6 +1053,14 @@ export function KanbanChatPanel({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
+  // Media preview state (for Ctrl+V paste)
+  const [mediaPreview, setMediaPreview] = useState<{
+    open: boolean;
+    file: File | null;
+    mediaType: "image" | "audio" | "video" | "document";
+    previewUrl: string | null;
+  }>({ open: false, file: null, mediaType: "image", previewUrl: null });
+
   const [, bumpDeliveryRender] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
@@ -1398,6 +1407,112 @@ export function KanbanChatPanel({
     } finally {
       setIsSending(false);
       if (event.target) event.target.value = "";
+    }
+  };
+
+  // ===== CTRL+V PASTE HANDLERS =====
+  const handleMediaPreviewClose = () => {
+    if (mediaPreview.previewUrl) {
+      URL.revokeObjectURL(mediaPreview.previewUrl);
+    }
+    setMediaPreview({ open: false, file: null, mediaType: "image", previewUrl: null });
+  };
+
+  const handleMediaPreviewSend = async (caption: string) => {
+    if (!mediaPreview.file) return;
+
+    setIsSending(true);
+    handleMediaPreviewClose();
+
+    try {
+      // Upload file to storage
+      const fileName = `${Date.now()}_${mediaPreview.file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("chat-media")
+        .upload(`${conversationId}/${fileName}`, mediaPreview.file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from("chat-media")
+        .getPublicUrl(`${conversationId}/${fileName}`);
+
+      // Transfer to human if AI is handling and not pontual mode
+      if (!isPontualMode && currentHandler === "ai") {
+        await transferHandler.mutateAsync({
+          conversationId,
+          handlerType: "human",
+        });
+      }
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_media",
+          conversationId,
+          mediaUrl: urlData.publicUrl,
+          mediaType: mediaPreview.mediaType,
+          fileName: mediaPreview.file.name,
+          caption: caption || undefined,
+        },
+      });
+
+      if (response.error) throw response.error;
+
+      toast({ title: "Mídia enviada" });
+    } catch (error) {
+      console.error("Erro ao enviar mídia:", error);
+      toast({
+        title: "Erro ao enviar mídia",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSendMedia = async (file: File, type: "audio" | "document") => {
+    setIsSending(true);
+    try {
+      const fileName = `${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("chat-media")
+        .upload(`${conversationId}/${fileName}`, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from("chat-media")
+        .getPublicUrl(`${conversationId}/${fileName}`);
+
+      // Transfer to human if AI is handling and not pontual mode
+      if (!isPontualMode && currentHandler === "ai") {
+        await transferHandler.mutateAsync({
+          conversationId,
+          handlerType: "human",
+        });
+      }
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_media",
+          conversationId,
+          mediaUrl: urlData.publicUrl,
+          mediaType: type,
+          fileName: file.name,
+        },
+      });
+
+      if (response.error) throw response.error;
+
+      toast({ title: type === "audio" ? "Áudio enviado" : "Documento enviado" });
+    } catch (error) {
+      console.error("Erro ao enviar arquivo:", error);
+      toast({
+        title: "Erro ao enviar arquivo",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -2277,6 +2392,54 @@ export function KanbanChatPanel({
                     handleSendMessage();
                   }
                 }}
+                onPaste={async (e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+
+                  for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+
+                    // Handle image paste
+                    if (item.type.startsWith("image/")) {
+                      e.preventDefault();
+                      const file = item.getAsFile();
+                      if (file && !isInternalMode) {
+                        const previewUrl = URL.createObjectURL(file);
+                        setMediaPreview({
+                          open: true,
+                          file,
+                          mediaType: "image",
+                          previewUrl,
+                        });
+                      }
+                      return;
+                    }
+
+                    // Handle file paste (video, audio, document)
+                    if (item.kind === "file" && !item.type.startsWith("image/")) {
+                      e.preventDefault();
+                      const file = item.getAsFile();
+                      if (file && !isInternalMode) {
+                        const fileType = file.type;
+                        if (fileType.startsWith("video/")) {
+                          const previewUrl = URL.createObjectURL(file);
+                          setMediaPreview({
+                            open: true,
+                            file,
+                            mediaType: "video",
+                            previewUrl,
+                          });
+                        } else if (fileType.startsWith("audio/")) {
+                          handleSendMedia(file, "audio");
+                        } else {
+                          handleSendMedia(file, "document");
+                        }
+                      }
+                      return;
+                    }
+                  }
+                  // Text paste is handled by default browser behavior
+                }}
                 className={cn(
                   "min-h-[60px] resize-none",
                   isInternalMode && "border-yellow-400"
@@ -2495,6 +2658,17 @@ export function KanbanChatPanel({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Media Preview Dialog (for Ctrl+V paste) */}
+      <MediaPreviewDialog
+        open={mediaPreview.open}
+        onClose={handleMediaPreviewClose}
+        onSend={handleMediaPreviewSend}
+        file={mediaPreview.file}
+        mediaType={mediaPreview.mediaType}
+        previewUrl={mediaPreview.previewUrl}
+        isSending={isSending}
+      />
     </div>
   );
 }
