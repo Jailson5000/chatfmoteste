@@ -26,6 +26,7 @@ import {
   MessageSquare,
   Search,
   ChevronDown,
+  ChevronRight,
   Zap,
   MessageCircle,
   Lock,
@@ -37,6 +38,7 @@ import {
   Smile,
   Sparkles,
   Volume2,
+  Filter,
 } from "lucide-react";
 import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -75,6 +77,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
@@ -221,12 +230,52 @@ export default function Conversations() {
   const [showAudioRecorder, setShowAudioRecorder] = useState(false);
   const [conversationFilters, setConversationFilters] = useState<{
     statuses: string[];
-    handlers: Array<'ai' | 'human'>;
+    handlers: Array<'ai' | 'human' | 'unassigned'>;
     tags: string[];
     departments: string[];
     searchName: string;
     searchPhone: string;
   }>({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
+  
+  // Filter toggle functions
+  const toggleStatusFilter = (statusId: string) => {
+    const newStatuses = conversationFilters.statuses.includes(statusId)
+      ? conversationFilters.statuses.filter(s => s !== statusId)
+      : [...conversationFilters.statuses, statusId];
+    setConversationFilters({ ...conversationFilters, statuses: newStatuses });
+  };
+
+  const toggleHandlerFilter = (handler: 'ai' | 'human' | 'unassigned') => {
+    const newHandlers = conversationFilters.handlers.includes(handler)
+      ? conversationFilters.handlers.filter(h => h !== handler)
+      : [...conversationFilters.handlers, handler];
+    setConversationFilters({ ...conversationFilters, handlers: newHandlers });
+  };
+
+  const toggleTagFilter = (tagId: string) => {
+    const newTags = conversationFilters.tags.includes(tagId)
+      ? conversationFilters.tags.filter(t => t !== tagId)
+      : [...conversationFilters.tags, tagId];
+    setConversationFilters({ ...conversationFilters, tags: newTags });
+  };
+
+  const toggleDepartmentFilter = (deptId: string) => {
+    const newDepartments = conversationFilters.departments.includes(deptId)
+      ? conversationFilters.departments.filter(d => d !== deptId)
+      : [...conversationFilters.departments, deptId];
+    setConversationFilters({ ...conversationFilters, departments: newDepartments });
+  };
+
+  const clearAllFilters = () => {
+    setConversationFilters({ statuses: [], handlers: [], tags: [], departments: [], searchName: '', searchPhone: '' });
+    setSearchQuery('');
+  };
+
+  const activeFiltersCount = 
+    conversationFilters.statuses.length + 
+    conversationFilters.handlers.length + 
+    conversationFilters.tags.length +
+    conversationFilters.departments.length;
   // Get inline activities for the selected conversation (after selectedConversationId is declared)
   const { activities: inlineActivities } = useInlineActivities(
     selectedConversationId,
@@ -268,6 +317,13 @@ export default function Conversations() {
 
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
+  
+  // More filters popover state
+  const [filtersPopoverOpen, setFiltersPopoverOpen] = useState(false);
+  const [statusFilterOpen, setStatusFilterOpen] = useState(false);
+  const [handlerFilterOpen, setHandlerFilterOpen] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const [departmentFilterOpen, setDepartmentFilterOpen] = useState(false);
   
   // Summary generation state
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
@@ -841,6 +897,13 @@ export default function Conversations() {
       if (conversationFilters.handlers.length > 0) {
         const matchesHandler = conversationFilters.handlers.includes(conv.handler as any);
         if (!matchesHandler) return false;
+      }
+
+      // Status filter
+      if (conversationFilters.statuses.length > 0) {
+        if (!conv.clientStatus?.id || !conversationFilters.statuses.includes(conv.clientStatus.id)) {
+          return false;
+        }
       }
 
       // Tags filter
@@ -1680,14 +1743,120 @@ export default function Conversations() {
               {getTabCount("archived")}
             </Badge>
           </Button>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar conversa..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar conversa..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-9"
+                />
+              </div>
+              {/* Mais filtros button (mobile) */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="icon" className="h-9 w-9">
+                    <Filter className="h-4 w-4" />
+                    {activeFiltersCount > 0 && (
+                      <Badge 
+                        variant="secondary" 
+                        className="absolute -top-1 -right-1 h-4 px-1 text-[10px] min-w-4"
+                      >
+                        {activeFiltersCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="end">
+                  <div className="p-3 border-b">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-sm">Filtros</h4>
+                      {activeFiltersCount > 0 && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 px-2 text-xs text-muted-foreground"
+                          onClick={clearAllFilters}
+                        >
+                          Limpar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <ScrollArea className="max-h-[50vh]">
+                    <div className="p-2 space-y-1">
+                      {/* Status Filter (mobile) */}
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" className="w-full justify-between h-9 px-2">
+                            <div className="flex items-center gap-2">
+                              <Tag className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm">Status</span>
+                              {conversationFilters.statuses.length > 0 && (
+                                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                  {conversationFilters.statuses.length}
+                                </Badge>
+                              )}
+                            </div>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                          {statuses.map(status => (
+                            <label key={status.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                              <Checkbox 
+                                checked={conversationFilters.statuses.includes(status.id)}
+                                onCheckedChange={() => toggleStatusFilter(status.id)}
+                              />
+                              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: status.color }} />
+                              <span className="text-sm">{status.name}</span>
+                            </label>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                      
+                      <Separator className="my-1" />
+                      
+                      {/* Handler Filter (mobile) */}
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" className="w-full justify-between h-9 px-2">
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm">Atendente</span>
+                              {conversationFilters.handlers.length > 0 && (
+                                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                  {conversationFilters.handlers.length}
+                                </Badge>
+                              )}
+                            </div>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                          <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                            <Checkbox checked={conversationFilters.handlers.includes('ai')} onCheckedChange={() => toggleHandlerFilter('ai')} />
+                            <Bot className="h-4 w-4 text-purple-500" />
+                            <span className="text-sm">IA</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                            <Checkbox checked={conversationFilters.handlers.includes('human')} onCheckedChange={() => toggleHandlerFilter('human')} />
+                            <User className="h-4 w-4 text-green-500" />
+                            <span className="text-sm">Humano</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                            <Checkbox checked={conversationFilters.handlers.includes('unassigned')} onCheckedChange={() => toggleHandlerFilter('unassigned')} />
+                            <UserX className="h-4 w-4 text-amber-500" />
+                            <span className="text-sm">Sem responsável</span>
+                          </label>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           <ScrollArea className="flex-1">
@@ -2010,14 +2179,248 @@ export default function Conversations() {
             </Badge>
           </Button>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar conversa..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9"
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar conversa..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+            </div>
+            
+            {/* Mais filtros popover - estilo Kanban */}
+            <Popover open={filtersPopoverOpen} onOpenChange={setFiltersPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-9 gap-1.5 px-2.5">
+                  <Filter className="h-4 w-4" />
+                  <span className="hidden sm:inline text-xs">Mais filtros</span>
+                  {activeFiltersCount > 0 && (
+                    <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                      {activeFiltersCount}
+                    </Badge>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="end">
+                <div className="p-3 border-b">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-sm">Filtros</h4>
+                    {activeFiltersCount > 0 && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-7 px-2 text-xs text-muted-foreground"
+                        onClick={clearAllFilters}
+                      >
+                        Limpar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                
+                <ScrollArea className="max-h-[60vh]">
+                  <div className="p-2 space-y-1">
+                    {/* Status Filter */}
+                    <Collapsible open={statusFilterOpen} onOpenChange={setStatusFilterOpen}>
+                      <CollapsibleTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          className="w-full justify-between h-9 px-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Tag className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">Status</span>
+                            {conversationFilters.statuses.length > 0 && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                {conversationFilters.statuses.length}
+                              </Badge>
+                            )}
+                          </div>
+                          {statusFilterOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                        {statuses.map(status => (
+                          <label 
+                            key={status.id} 
+                            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
+                          >
+                            <Checkbox 
+                              checked={conversationFilters.statuses.includes(status.id)}
+                              onCheckedChange={() => toggleStatusFilter(status.id)}
+                            />
+                            <div 
+                              className="w-2.5 h-2.5 rounded-full" 
+                              style={{ backgroundColor: status.color }} 
+                            />
+                            <span className="text-sm">{status.name}</span>
+                          </label>
+                        ))}
+                        {statuses.length === 0 && (
+                          <p className="text-xs text-muted-foreground py-1">Nenhum status</p>
+                        )}
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    <Separator className="my-1" />
+
+                    {/* Handler Filter */}
+                    <Collapsible open={handlerFilterOpen} onOpenChange={setHandlerFilterOpen}>
+                      <CollapsibleTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          className="w-full justify-between h-9 px-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">Atendente</span>
+                            {conversationFilters.handlers.length > 0 && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                {conversationFilters.handlers.length}
+                              </Badge>
+                            )}
+                          </div>
+                          {handlerFilterOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                          <Checkbox 
+                            checked={conversationFilters.handlers.includes('ai')}
+                            onCheckedChange={() => toggleHandlerFilter('ai')}
+                          />
+                          <Bot className="h-4 w-4 text-purple-500" />
+                          <span className="text-sm">Inteligência Artificial</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                          <Checkbox 
+                            checked={conversationFilters.handlers.includes('human')}
+                            onCheckedChange={() => toggleHandlerFilter('human')}
+                          />
+                          <User className="h-4 w-4 text-green-500" />
+                          <span className="text-sm">Humano</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                          <Checkbox 
+                            checked={conversationFilters.handlers.includes('unassigned')}
+                            onCheckedChange={() => toggleHandlerFilter('unassigned')}
+                          />
+                          <UserX className="h-4 w-4 text-amber-500" />
+                          <span className="text-sm">Sem responsável</span>
+                        </label>
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    <Separator className="my-1" />
+
+                    {/* Tags Filter */}
+                    <Collapsible open={tagFilterOpen} onOpenChange={setTagFilterOpen}>
+                      <CollapsibleTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          className="w-full justify-between h-9 px-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Tag className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">Etiquetas</span>
+                            {conversationFilters.tags.length > 0 && (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                {conversationFilters.tags.length}
+                              </Badge>
+                            )}
+                          </div>
+                          {tagFilterOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                        {tags.map(tag => (
+                          <label 
+                            key={tag.id} 
+                            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
+                          >
+                            <Checkbox 
+                              checked={conversationFilters.tags.includes(tag.id)}
+                              onCheckedChange={() => toggleTagFilter(tag.id)}
+                            />
+                            <div 
+                              className="w-2.5 h-2.5 rounded-full" 
+                              style={{ backgroundColor: tag.color }} 
+                            />
+                            <span className="text-sm">{tag.name}</span>
+                          </label>
+                        ))}
+                        {tags.length === 0 && (
+                          <p className="text-xs text-muted-foreground py-1">Nenhuma etiqueta</p>
+                        )}
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    {departments.length > 0 && (
+                      <>
+                        <Separator className="my-1" />
+
+                        {/* Department Filter */}
+                        <Collapsible open={departmentFilterOpen} onOpenChange={setDepartmentFilterOpen}>
+                          <CollapsibleTrigger asChild>
+                            <Button 
+                              variant="ghost" 
+                              className="w-full justify-between h-9 px-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Folder className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm">Departamento</span>
+                                {conversationFilters.departments.length > 0 && (
+                                  <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                    {conversationFilters.departments.length}
+                                  </Badge>
+                                )}
+                              </div>
+                              {departmentFilterOpen ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                            {departments.map(dept => (
+                              <label 
+                                key={dept.id} 
+                                className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
+                              >
+                                <Checkbox 
+                                  checked={conversationFilters.departments.includes(dept.id)}
+                                  onCheckedChange={() => toggleDepartmentFilter(dept.id)}
+                                />
+                                <div 
+                                  className="w-2.5 h-2.5 rounded-full" 
+                                  style={{ backgroundColor: dept.color }} 
+                                />
+                                <span className="text-sm">{dept.name}</span>
+                              </label>
+                            ))}
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </>
+                    )}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 
