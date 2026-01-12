@@ -77,19 +77,17 @@ interface ConversationSidebarCardProps {
 }
 
 function ConversationSidebarCardComponent({ conversation, selected, onClick }: ConversationSidebarCardProps) {
+  const isAI = conversation.handler === "ai";
   const hasAssigned = !!conversation.assignedTo;
-  
-  // Only consider it AI-handled if there's actually an agent name (not just "IA" fallback)
-  const agentName = conversation.aiAgentName && conversation.aiAgentName !== "IA" 
-    ? conversation.aiAgentName 
+
+  // Show "IA · AgentName" when available, otherwise just "IA"
+  const agentName = conversation.aiAgentName && conversation.aiAgentName !== "IA"
+    ? conversation.aiAgentName
     : null;
-  
-  // If handler is 'ai' but there's no real agent configured, treat as unassigned
-  const isAI = conversation.handler === "ai" && !!agentName;
 
   let handlerLabel: string;
   if (isAI) {
-    handlerLabel = `IA · ${agentName}`;
+    handlerLabel = agentName ? `IA · ${agentName}` : "IA";
   } else if (hasAssigned) {
     handlerLabel = conversation.assignedTo!;
   } else {
