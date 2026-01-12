@@ -2,10 +2,6 @@ import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, 
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
 import { useState, useRef, ReactNode, useEffect, useCallback, memo, useReducer } from "react";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { QuotedMessage } from "./ReplyPreview";
 import { Slider } from "@/components/ui/slider";
@@ -17,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ImageViewerDialog } from "./ImageViewerDialog";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
 
@@ -911,15 +908,12 @@ function ImageViewer({
           onError={() => setError(true)}
         />
       </div>
-      <Dialog open={imageOpen} onOpenChange={setImageOpen}>
-        <DialogContent className="max-w-4xl p-0 bg-transparent border-none">
-          <img
-            src={imageSrc || src}
-            alt="Imagem ampliada"
-            className="w-full h-auto rounded-lg"
-          />
-        </DialogContent>
-      </Dialog>
+      <ImageViewerDialog
+        open={imageOpen}
+        onClose={() => setImageOpen(false)}
+        images={[{ src: imageSrc || src, alt: "Imagem" }]}
+        initialIndex={0}
+      />
     </>
   );
 }

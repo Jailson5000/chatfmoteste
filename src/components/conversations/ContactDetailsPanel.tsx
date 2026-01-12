@@ -793,7 +793,7 @@ export function ContactDetailsPanel({
                     "gap-2",
                     mediaTab === "images" ? "grid grid-cols-3" : "space-y-2"
                   )}>
-                    {filteredMedia.map(item => (
+                    {filteredMedia.map((item, index) => (
                       <div key={item.id}>
                         {mediaTab === "images" ? (
                           <MediaGalleryItem
@@ -801,6 +801,12 @@ export function ContactDetailsPanel({
                             whatsappMessageId={item.whatsapp_message_id}
                             conversationId={item.conversation_id}
                             content={item.content}
+                            allImages={filteredMedia.map(img => ({
+                              mediaUrl: img.media_url,
+                              whatsappMessageId: img.whatsapp_message_id,
+                              content: img.content
+                            }))}
+                            currentIndex={index}
                           />
                         ) : (
                           <DecryptedMediaListItem
