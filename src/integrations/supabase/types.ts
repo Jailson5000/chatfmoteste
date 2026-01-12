@@ -2302,11 +2302,13 @@ export type Database = {
           id: string
           is_from_me: boolean
           is_internal: boolean
+          is_revoked: boolean | null
           media_mime_type: string | null
           media_url: string | null
           message_type: string
           read_at: string | null
           reply_to_message_id: string | null
+          revoked_at: string | null
           sender_id: string | null
           sender_type: string
           status: string | null
@@ -2323,11 +2325,13 @@ export type Database = {
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
+          is_revoked?: boolean | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
           read_at?: string | null
           reply_to_message_id?: string | null
+          revoked_at?: string | null
           sender_id?: string | null
           sender_type: string
           status?: string | null
@@ -2344,11 +2348,13 @@ export type Database = {
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
+          is_revoked?: boolean | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
           read_at?: string | null
           reply_to_message_id?: string | null
+          revoked_at?: string | null
           sender_id?: string | null
           sender_type?: string
           status?: string | null

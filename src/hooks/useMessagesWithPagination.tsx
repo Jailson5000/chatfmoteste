@@ -21,6 +21,7 @@ export interface PaginatedMessage {
   delivered_at?: string;
   is_internal?: boolean;
   is_pontual?: boolean;
+  is_revoked?: boolean;
   reply_to?: {
     id: string;
     content: string;
@@ -126,7 +127,7 @@ export function useMessagesWithPagination({
         // Fetch the most recent messages (ordered desc, then reverse for display)
         const { data, error } = await supabase
           .from("messages")
-          .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal")
+          .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_revoked")
           .eq("conversation_id", conversationId)
           .order("created_at", { ascending: false })
           .limit(initialBatchSize);
@@ -204,7 +205,7 @@ export function useMessagesWithPagination({
       const { data, error } = await supabase
         .from("messages")
         .select(
-          "id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal"
+          "id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_revoked"
         )
         .eq("conversation_id", conversationId)
         .lt("created_at", oldestTimestampRef.current)
