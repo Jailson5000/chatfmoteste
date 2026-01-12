@@ -977,8 +977,8 @@ export default function Conversations() {
         ));
       } else {
         // Normal message - send to WhatsApp
-        // If NOT in pontual mode and handler is AI, switch to human FIRST (await!)
-        if (!wasPontualMode && selectedConversation.current_handler === "ai") {
+        // If NOT in pontual mode: assign to current user if handler is AI or no responsible assigned
+        if (!wasPontualMode && (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to)) {
           await transferHandler.mutateAsync({
             conversationId: selectedConversationId,
             handlerType: "human",
@@ -1191,6 +1191,15 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
+      // Auto-assign conversation to current user if handler is AI or no responsible assigned
+      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
+        await transferHandler.mutateAsync({
+          conversationId: selectedConversationId,
+          handlerType: "human",
+          assignedTo: user?.id,
+        });
+      }
+
       // Convert file to base64
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
@@ -1291,6 +1300,15 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
+      // Auto-assign conversation to current user if handler is AI or no responsible assigned
+      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
+        await transferHandler.mutateAsync({
+          conversationId: selectedConversationId,
+          handlerType: "human",
+          assignedTo: user?.id,
+        });
+      }
+
       // Convert file to base64
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
