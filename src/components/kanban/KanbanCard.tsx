@@ -112,11 +112,14 @@ export function KanbanCard({
   
   // Get handler name (backend-first):
   // - AI with automation: IA · <automation name>
-  // - AI without automation: just "IA"
+  // - AI without automation AND no assigned_to: "Sem responsável" (not really AI)
   // - Human with assignment: <full name>
   // - No assignment: "Sem responsável"
-  const isAI = conversation.current_handler === 'ai';
+  const hasActiveAutomation = !!conversation.current_automation_id;
   const hasAssignment = !!conversation.assigned_profile?.full_name;
+  
+  // Only consider it AI-handled if there's actually an automation configured
+  const isAI = conversation.current_handler === 'ai' && hasActiveAutomation;
   
   const automationName =
     conversation.current_automation?.name ||
