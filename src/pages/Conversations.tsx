@@ -1304,6 +1304,7 @@ export default function Conversations() {
           mediaBase64,
           fileName: file.name,
           caption: "",
+          mimeType: file.type,
         },
       });
 
@@ -1315,30 +1316,8 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mídia");
       }
 
-      // Optimistically add message to local state with media URL for instant display
-      // Use friendly display name for audio (remove .webm extension)
-      const friendlyFileName = mediaType === "audio" ? "Mensagem de voz" : file.name;
-      
-      // Create a local blob URL for immediate display
-      const localMediaUrl = URL.createObjectURL(file);
-      
-      const localWhatsappMessageId = response.data.messageId || null;
-
-      const newMessage: Message = {
-        id: crypto.randomUUID(),
-        whatsapp_message_id: localWhatsappMessageId,
-        content: friendlyFileName,
-        created_at: new Date().toISOString(),
-        is_from_me: true,
-        sender_type: "human",
-        ai_generated: false,
-        media_url: localMediaUrl,
-        media_mime_type: file.type,
-        message_type: mediaType,
-        status: "sent",
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
+      // Do NOT add optimistic message here - backend already inserted via send_media
+      // Realtime will bring the message with correct whatsapp_message_id
       
       toast({
         title: "Mídia enviada",
@@ -1386,9 +1365,9 @@ export default function Conversations() {
     
     try {
       // Auto-assign conversation to current user if handler is AI or no responsible assigned
-      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
+      if (selectedConversation?.current_handler === "ai" || !selectedConversation?.assigned_to) {
         await transferHandler.mutateAsync({
-          conversationId: selectedConversationId,
+          conversationId: selectedConversationId!,
           handlerType: "human",
           assignedTo: user?.id,
         });
@@ -1416,6 +1395,7 @@ export default function Conversations() {
           mediaBase64,
           fileName: mediaPreview.file.name,
           caption,
+          mimeType: mediaPreview.file.type,
         },
       });
 
@@ -1427,25 +1407,8 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar mídia");
       }
 
-      // Optimistically add message to local state
-      const localMediaUrl = URL.createObjectURL(mediaPreview.file);
-      const localWhatsappMessageId = response.data.messageId || null;
-
-      const newMessage: Message = {
-        id: crypto.randomUUID(),
-        whatsapp_message_id: localWhatsappMessageId,
-        content: caption || mediaPreview.file.name,
-        created_at: new Date().toISOString(),
-        is_from_me: true,
-        sender_type: "human",
-        ai_generated: false,
-        media_url: localMediaUrl,
-        media_mime_type: mediaPreview.file.type,
-        message_type: mediaPreview.mediaType,
-        status: "sent",
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
+      // Do NOT add optimistic message - backend already inserted via send_media
+      // Realtime will bring the message with correct whatsapp_message_id
       handleMediaPreviewClose();
       
       toast({
@@ -1491,6 +1454,7 @@ export default function Conversations() {
           mediaType: "audio",
           mediaBase64,
           fileName: "audio.webm",
+          mimeType: audioBlob.type || "audio/webm",
         },
       });
 
@@ -1502,19 +1466,8 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar áudio");
       }
 
-      // Optimistically add message to local state
-      const newMessage: Message = {
-        id: response.data.messageId || crypto.randomUUID(),
-        content: null,
-        created_at: new Date().toISOString(),
-        is_from_me: true,
-        sender_type: "human",
-        ai_generated: false,
-        message_type: "audio",
-        status: "sent",
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
+      // Do NOT add optimistic message here - let realtime handle it
+      // The backend already inserted the message and realtime will bring it
       setShowAudioRecorder(false);
       
       toast({

@@ -1466,6 +1466,9 @@ export function KanbanChatPanel({
       
       if (response.error) throw response.error;
       
+      // Do NOT add optimistic message - backend already inserted via send_media
+      // Realtime will bring the message with correct whatsapp_message_id
+      
       toast({ title: `${mediaType === "image" ? "Imagem" : "Documento"} enviado` });
     } catch (error) {
       console.error("Erro ao enviar arquivo:", error);
@@ -1527,6 +1530,9 @@ export function KanbanChatPanel({
       });
 
       if (response.error) throw response.error;
+
+      // Do NOT add optimistic message - backend already inserted via send_media
+      // Realtime will bring the message with correct whatsapp_message_id
 
       toast({ title: "Mídia enviada" });
     } catch (error) {
