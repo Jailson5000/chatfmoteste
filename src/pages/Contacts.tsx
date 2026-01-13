@@ -277,7 +277,7 @@ export default function Contacts() {
   };
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
+    <div className="h-full flex flex-col p-6 space-y-6 animate-fade-in overflow-hidden">
       {/* Search and Filters Row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="relative flex-1 max-w-md">
@@ -381,7 +381,8 @@ export default function Contacts() {
       </div>
 
       {/* Contacts Table */}
-      <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="flex-1 min-h-0 rounded-lg border bg-card overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -578,7 +579,7 @@ export default function Contacts() {
             </TableBody>
           </Table>
         )}
-        
+        </div>
         {/* Pagination Controls */}
         {!isLoading && filteredClients.length > 0 && (
           <PaginationControls
