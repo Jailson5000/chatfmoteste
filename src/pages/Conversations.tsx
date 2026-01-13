@@ -810,6 +810,39 @@ export default function Conversations() {
       return acc;
     }, {} as Record<string, string>);
 
+    // Helper to format last message preview - hide file names for audio/media
+    const getLastMessagePreview = (lastMessage: { content?: string | null; message_type?: string; is_from_me?: boolean } | null): string => {
+      if (!lastMessage) return "Sem mensagens";
+      const { content, message_type, is_from_me } = lastMessage;
+      
+      // For audio messages, show a friendly preview instead of filename
+      if (message_type === "audio" || content?.toLowerCase().endsWith(".webm") || content?.toLowerCase().endsWith(".ogg")) {
+        return is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio";
+      }
+      
+      // For images
+      if (message_type === "image") {
+        return is_from_me ? "📷 Imagem enviada" : "📷 Imagem";
+      }
+      
+      // For videos
+      if (message_type === "video") {
+        return is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo";
+      }
+      
+      // For documents
+      if (message_type === "document") {
+        return is_from_me ? "📄 Documento enviado" : "📄 Documento";
+      }
+      
+      // For stickers
+      if (message_type === "sticker") {
+        return "🎭 Figurinha";
+      }
+      
+      return content || "Sem mensagens";
+    };
+
     const formatTimeAgoShort = (date: string | null) => {
       if (!date) return "---";
       try {
@@ -862,7 +895,7 @@ export default function Conversations() {
         id: conv.id,
         name: conv.contact_name || conv.contact_phone || "Sem nome",
         phone: conv.contact_phone || "",
-        lastMessage: conv.last_message?.content || "Sem mensagens",
+        lastMessage: getLastMessagePreview(conv.last_message),
         time: formatTimeAgoShort(conv.last_message_at),
         unread: unreadCounts[conv.id] || 0,
         handler: effectiveHandler,
