@@ -80,12 +80,14 @@ interface EvolutionRequest {
   conversationId?: string;
   message?: string;
   remoteJid?: string;
+  replyToMessageId?: string; // For quoted replies
   // For send_media
   mediaType?: "image" | "audio" | "video" | "document";
   mediaBase64?: string;
   mediaUrl?: string;
   fileName?: string;
   caption?: string;
+  mimeType?: string; // Real MIME type of the file (e.g., "image/png", "application/pdf")
   // For get_media
   whatsappMessageId?: string;
 }
@@ -1110,6 +1112,9 @@ serve(async (req) => {
         // Generate a temporary ID for the message
         const tempMessageId = crypto.randomUUID();
 
+        // Get reply_to_message_id if provided (for quoted replies)
+        const replyToMessageId = body.replyToMessageId || null;
+
         // Save message to database IMMEDIATELY with pending status
         if (conversationId) {
           const { error: msgError } = await supabaseClient
@@ -1123,6 +1128,7 @@ serve(async (req) => {
               is_from_me: true,
               sender_type: "human",
               ai_generated: false,
+              reply_to_message_id: replyToMessageId,
             });
 
           if (msgError) {
@@ -1483,7 +1489,7 @@ serve(async (req) => {
             payload = {
               ...payload,
               mediatype: "image",
-              mimetype: "image/jpeg",
+              mimetype: body.mimeType || "image/jpeg",
               caption: body.caption || "",
               media: body.mediaBase64 || body.mediaUrl,
             };
@@ -1500,7 +1506,7 @@ serve(async (req) => {
             payload = {
               ...payload,
               mediatype: "video",
-              mimetype: "video/mp4",
+              mimetype: body.mimeType || "video/mp4",
               caption: body.caption || "",
               media: body.mediaBase64 || body.mediaUrl,
             };
@@ -1510,7 +1516,7 @@ serve(async (req) => {
             payload = {
               ...payload,
               mediatype: "document",
-              mimetype: "application/octet-stream",
+              mimetype: body.mimeType || "application/octet-stream",
               fileName: body.fileName || "document",
               media: body.mediaBase64 || body.mediaUrl,
             };
@@ -1551,6 +1557,7 @@ serve(async (req) => {
               content: body.caption || body.fileName || `[${body.mediaType}]`,
               message_type: body.mediaType,
               media_url: body.mediaUrl || null,
+              media_mime_type: body.mimeType || null,
               is_from_me: true,
               sender_type: "human",
               ai_generated: false,

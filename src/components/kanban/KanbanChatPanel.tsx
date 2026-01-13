@@ -1347,6 +1347,7 @@ export function KanbanChatPanel({
             action: "send_message_async",
             conversationId,
             message: messageToSend,
+            replyToMessageId: replyToId,
           },
         });
 
@@ -1401,6 +1402,7 @@ export function KanbanChatPanel({
           conversationId,
           mediaUrl: urlData.publicUrl,
           mediaType: "audio",
+          mimeType: audioBlob.type || "audio/webm",
         },
       });
       
@@ -1453,6 +1455,7 @@ export function KanbanChatPanel({
           conversationId,
           mediaUrl: urlData.publicUrl,
           mediaType: mediaType === "image" ? "image" : "document",
+          mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
           fileName: file.name,
         },
       });
@@ -1513,6 +1516,7 @@ export function KanbanChatPanel({
           conversationId,
           mediaUrl: urlData.publicUrl,
           mediaType: mediaPreview.mediaType,
+          mimeType: mediaPreview.file.type || "application/octet-stream",
           fileName: mediaPreview.file.name,
           caption: caption || undefined,
         },
@@ -1560,6 +1564,7 @@ export function KanbanChatPanel({
           conversationId,
           mediaUrl: urlData.publicUrl,
           mediaType: type,
+          mimeType: file.type || "application/octet-stream",
           fileName: file.name,
         },
       });
@@ -2137,10 +2142,23 @@ export function KanbanChatPanel({
                   key={msg.id}
                   data-message-id={msg.id}
                   className={cn(
-                    "flex",
+                    "flex group",
                     isFromMe ? "justify-end" : "justify-start"
                   )}
                 >
+                  {/* Reply button for received messages (left side) */}
+                  {!isFromMe && !isInternal && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity self-center mr-1 flex-shrink-0"
+                      onClick={() => handleReply(msg.id)}
+                      title="Responder"
+                    >
+                      <Reply className="h-3.5 w-3.5 text-muted-foreground" />
+                    </Button>
+                  )}
+                  
                   <div
                     className={cn(
                       "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm break-words overflow-wrap-anywhere",
@@ -2264,6 +2282,19 @@ export function KanbanChatPanel({
                       )}
                     </div>
                   </div>
+                  
+                  {/* Reply button for sent messages (right side) */}
+                  {isFromMe && !isInternal && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1 flex-shrink-0"
+                      onClick={() => handleReply(msg.id)}
+                      title="Responder"
+                    >
+                      <Reply className="h-3.5 w-3.5 text-muted-foreground" />
+                    </Button>
+                  )}
                 </div>
               );
             })}
