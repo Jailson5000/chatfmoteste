@@ -126,7 +126,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type ConversationTab = "chat" | "ai" | "queue" | "archived";
+type ConversationTab = "chat" | "ai" | "queue" | "all" | "archived";
 
 // Archive reason options
 const ARCHIVE_REASONS = [
@@ -929,7 +929,10 @@ export default function Conversations() {
           // Exclude archived from AI tab
           return !isArchived && conv.handler === "ai";
         case "queue":
-          // Exclude archived from Fila tab
+          // "Fila": Only show unassigned conversations (pending - without responsible)
+          return !isArchived && conv.handler === "human" && !conv.assignedUserId;
+        case "all":
+          // "Todos": Show all non-archived conversations
           return !isArchived;
         case "archived":
           // Only show archived conversations
@@ -1728,6 +1731,10 @@ export default function Conversations() {
       case "ai":
         return mappedConversations.filter((c) => c.handler === "ai" && !c.archivedAt).length;
       case "queue":
+        // Fila: apenas conversas sem responsável (pendentes)
+        return mappedConversations.filter((c) => c.handler === "human" && !c.assignedUserId && !c.archivedAt).length;
+      case "all":
+        // Todos: todas as conversas não arquivadas
         return mappedConversations.filter((c) => !c.archivedAt).length;
       case "archived":
         return mappedConversations.filter((c) => !!c.archivedAt).length;
@@ -1769,30 +1776,37 @@ export default function Conversations() {
           <div className="p-3 border-b border-border space-y-3">
             <h1 className="text-lg font-bold text-foreground">Atendimentos</h1>
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
-              <TabsList className="grid w-full grid-cols-3 h-8">
-                <TabsTrigger value="chat" className="gap-1 text-xs h-7">
+              <TabsList className="grid w-full grid-cols-4 h-8">
+                <TabsTrigger value="chat" className="gap-1 text-xs h-7 px-1">
                   <Users className="h-3 w-3" />
                   Chat
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("chat")}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="ai" className="gap-1 text-xs h-7">
+                <TabsTrigger value="ai" className="gap-1 text-xs h-7 px-1">
                   <Bot className="h-3 w-3" />
                   IA
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("ai")}
                   </Badge>
                 </TabsTrigger>
-                <TabsTrigger value="queue" className="gap-1 text-xs h-7">
+                <TabsTrigger value="queue" className="gap-1 text-xs h-7 px-1">
                   <Inbox className="h-3 w-3" />
                   Fila
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     {getTabCount("queue")}
                   </Badge>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+                </TabsTrigger>
+                <TabsTrigger value="all" className="gap-1 text-xs h-7 px-1">
+                  <Users className="h-3 w-3" />
+                  Todos
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                    {getTabCount("all")}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
           {/* Archived button below tabs (mobile) */}
           <Button
@@ -2241,26 +2255,33 @@ export default function Conversations() {
           
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ConversationTab)}>
-            <TabsList className="grid w-full grid-cols-3 h-8">
-              <TabsTrigger value="chat" className="gap-1 text-xs h-7">
+            <TabsList className="grid w-full grid-cols-4 h-8">
+              <TabsTrigger value="chat" className="gap-1 text-xs h-7 px-1">
                 <Users className="h-3 w-3" />
                 Chat
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("chat")}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="ai" className="gap-1 text-xs h-7">
+              <TabsTrigger value="ai" className="gap-1 text-xs h-7 px-1">
                 <Bot className="h-3 w-3" />
                 IA
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("ai")}
                 </Badge>
               </TabsTrigger>
-              <TabsTrigger value="queue" className="gap-1 text-xs h-7">
+              <TabsTrigger value="queue" className="gap-1 text-xs h-7 px-1">
                 <Inbox className="h-3 w-3" />
                 Fila
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {getTabCount("queue")}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="all" className="gap-1 text-xs h-7 px-1">
+                <Users className="h-3 w-3" />
+                Todos
+                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                  {getTabCount("all")}
                 </Badge>
               </TabsTrigger>
             </TabsList>
