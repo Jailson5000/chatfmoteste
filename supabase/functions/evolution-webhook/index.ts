@@ -653,6 +653,17 @@ interface ContextInfo {
   };
 }
 
+// MessageContextInfo - contains quoted message info for some message types
+interface MessageContextInfo {
+  stanzaId?: string;
+  quotedMessage?: Record<string, unknown>;
+  deviceListMetadata?: Record<string, unknown>;
+  deviceListMetadataVersion?: number;
+  messageAddOnDurationInSecs?: number;
+  // Additional fields that may contain the stanza ID
+  quotedStanzaId?: string;
+}
+
 interface MessageData {
   key: {
     remoteJid: string;
@@ -662,6 +673,7 @@ interface MessageData {
   pushName?: string;
   message?: {
     conversation?: string;
+    messageContextInfo?: MessageContextInfo;
     extendedTextMessage?: {
       text: string;
       contextInfo?: ContextInfo;
@@ -2888,17 +2900,34 @@ serve(async (req) => {
 
         // Extract contextInfo (quoted message reference) from any message type
         // The contextInfo can be in extendedTextMessage, imageMessage, audioMessage, etc.
+        // Also check messageContextInfo for quoted messages (used in some Evolution API versions)
         const contextInfo = data.message?.extendedTextMessage?.contextInfo ||
                            data.message?.imageMessage?.contextInfo ||
                            data.message?.audioMessage?.contextInfo ||
                            data.message?.videoMessage?.contextInfo ||
                            data.message?.documentMessage?.contextInfo ||
                            data.message?.stickerMessage?.contextInfo ||
+                           data.message?.messageContextInfo ||
                            null;
         
-        if (contextInfo?.stanzaId) {
-          quotedWhatsAppMessageId = contextInfo.stanzaId;
+        // Check for stanzaId in contextInfo - use type assertions for dynamic properties
+        const stanzaId = contextInfo?.stanzaId || 
+                        (contextInfo?.quotedMessage as Record<string, unknown>)?.stanzaId as string | undefined ||
+                        (contextInfo as MessageContextInfo)?.quotedStanzaId ||
+                        data.message?.extendedTextMessage?.contextInfo?.stanzaId;
+        
+        if (stanzaId) {
+          quotedWhatsAppMessageId = stanzaId;
           logDebug('MESSAGE', `Message is a reply to WhatsApp message ID: ${quotedWhatsAppMessageId}`, { requestId });
+        } else {
+          // Log contextInfo for debugging if present but no stanzaId
+          if (contextInfo && Object.keys(contextInfo).length > 0) {
+            logDebug('DEBUG', `ContextInfo present but no stanzaId`, { 
+              requestId, 
+              contextInfoKeys: Object.keys(contextInfo).slice(0, 10).join(','),
+              hasQuotedMessage: !!(contextInfo as ContextInfo).quotedMessage
+            });
+          }
         }
 
         if (data.message?.conversation) {
