@@ -1342,12 +1342,16 @@ export function KanbanChatPanel({
           });
         }
 
+        // Send whatsapp_message_id for reply linking in WhatsApp (not DB id)
+        const replyWhatsAppId = replyToMessage?.whatsapp_message_id || null;
+        
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_message_async",
             conversationId,
             message: messageToSend,
-            replyToMessageId: replyToId,
+            replyToWhatsAppMessageId: replyWhatsAppId,
+            replyToMessageId: replyToId, // For DB linking
           },
         });
 

@@ -80,7 +80,8 @@ interface EvolutionRequest {
   conversationId?: string;
   message?: string;
   remoteJid?: string;
-  replyToMessageId?: string; // For quoted replies
+  replyToMessageId?: string; // For DB linking (message.id)
+  replyToWhatsAppMessageId?: string; // For WhatsApp quoted reply (whatsapp_message_id)
   // For send_media
   mediaType?: "image" | "audio" | "video" | "document";
   mediaBase64?: string;
@@ -1112,8 +1113,9 @@ serve(async (req) => {
         // Generate a temporary ID for the message
         const tempMessageId = crypto.randomUUID();
 
-        // Get reply_to_message_id if provided (for quoted replies)
-        const replyToMessageId = body.replyToMessageId || null;
+        // Get reply IDs if provided (for quoted replies)
+        const replyToMessageId = body.replyToMessageId || null; // DB message ID
+        const replyToWhatsAppMessageId = body.replyToWhatsAppMessageId || null; // WhatsApp message ID for quote
 
         // Save message to database IMMEDIATELY with pending status
         if (conversationId) {
@@ -1154,16 +1156,29 @@ serve(async (req) => {
         // Background task: send to Evolution API
         const backgroundSend = async () => {
           try {
+            // Build payload with optional quoted message for reply
+            const sendPayload: Record<string, unknown> = {
+              number: targetNumber,
+              text: body.message,
+            };
+            
+            // Include quoted message info if replying (Evolution API v2 format)
+            if (replyToWhatsAppMessageId) {
+              sendPayload.quoted = {
+                key: {
+                  id: replyToWhatsAppMessageId,
+                },
+              };
+              console.log(`[Evolution API] Including quoted message: ${replyToWhatsAppMessageId}`);
+            }
+            
             const sendResponse = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
               method: "POST",
               headers: {
                 apikey: instance.api_key || "",
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({
-                number: targetNumber,
-                text: body.message,
-              }),
+              body: JSON.stringify(sendPayload),
             });
 
             if (!sendResponse.ok) {
