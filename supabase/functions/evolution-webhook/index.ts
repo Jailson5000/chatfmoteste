@@ -3031,21 +3031,79 @@ serve(async (req) => {
           break;
         }
 
-        const { data: savedMessage, error: msgError } = await supabaseClient
-          .from('messages')
-          .insert({
-            conversation_id: conversation.id,
-            whatsapp_message_id: data.key.id,
-            content: messageContent,
-            message_type: messageType,
-            media_url: mediaUrl || null,
-            media_mime_type: mediaMimeType || null,
-            is_from_me: isFromMe,
-            sender_type: isFromMe ? 'system' : 'client',
-            ai_generated: false,
-          })
-          .select()
-          .single();
+        // For outgoing messages (fromMe), check if there's a pending message we should UPDATE instead of INSERT
+        // This prevents duplication when send_message_async inserts with tempMessageId and webhook arrives later
+        let savedMessage: any = null;
+        let msgError: any = null;
+
+        if (isFromMe) {
+          // Look for a pending message with same content inserted recently (within 2 minutes)
+          // that has a UUID-like whatsapp_message_id (tempMessageId pattern)
+          const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+          
+          const { data: pendingMsg } = await supabaseClient
+            .from('messages')
+            .select('id, whatsapp_message_id')
+            .eq('conversation_id', conversation.id)
+            .eq('is_from_me', true)
+            .eq('content', messageContent)
+            .gte('created_at', twoMinutesAgo)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          // Check if the existing message has a UUID-like ID (36 chars with hyphens = temp ID from send_message_async)
+          const looksLikeTempId = pendingMsg?.whatsapp_message_id && 
+            pendingMsg.whatsapp_message_id.length === 36 && 
+            pendingMsg.whatsapp_message_id.includes('-');
+          
+          if (pendingMsg && looksLikeTempId) {
+            // UPDATE the existing pending message with the real WhatsApp ID
+            const { error: updateErr } = await supabaseClient
+              .from('messages')
+              .update({ 
+                whatsapp_message_id: data.key.id,
+                media_url: mediaUrl || null,
+                media_mime_type: mediaMimeType || null,
+              })
+              .eq('id', pendingMsg.id);
+            
+            if (!updateErr) {
+              logDebug('MESSAGE', `Updated pending message with real WhatsApp ID`, { 
+                requestId, 
+                dbMessageId: pendingMsg.id, 
+                oldWhatsAppId: pendingMsg.whatsapp_message_id,
+                newWhatsAppId: data.key.id 
+              });
+              savedMessage = { id: pendingMsg.id };
+            } else {
+              msgError = updateErr;
+              logDebug('ERROR', `Failed to update pending message`, { requestId, error: updateErr });
+            }
+          }
+        }
+
+        // If we didn't update a pending message, insert a new one
+        if (!savedMessage) {
+          const insertResult = await supabaseClient
+            .from('messages')
+            .insert({
+              conversation_id: conversation.id,
+              whatsapp_message_id: data.key.id,
+              content: messageContent,
+              message_type: messageType,
+              media_url: mediaUrl || null,
+              media_mime_type: mediaMimeType || null,
+              is_from_me: isFromMe,
+              sender_type: isFromMe ? 'system' : 'client',
+              ai_generated: false,
+            })
+            .select()
+            .single();
+          
+          savedMessage = insertResult.data;
+          msgError = insertResult.error;
+        }
 
         if (msgError) {
           logDebug('ERROR', `Failed to save message`, { requestId, error: msgError, code: msgError.code });

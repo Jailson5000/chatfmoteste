@@ -1060,13 +1060,21 @@ export default function Conversations() {
         }
         
         // Use async send for <1s response
+        // Send whatsapp_message_id for reply linking (not DB id)
+        const replyWhatsAppId = replyToMessage?.whatsapp_message_id || null;
+        
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_message_async",
             conversationId: selectedConversationId,
             message: messageToSend,
+            replyToWhatsAppMessageId: replyWhatsAppId,
+            replyToMessageId: replyToMessage?.id || null, // For DB linking
           },
         });
+        
+        // Clear reply state after sending
+        setReplyToMessage(null);
 
         if (response.error) {
           throw new Error(response.error.message || "Falha ao enviar mensagem");

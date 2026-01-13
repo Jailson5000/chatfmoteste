@@ -42,9 +42,10 @@ export function MediaPreviewDialog({
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    // Use base 1000 (kB/MB) to match WhatsApp's display
+    if (bytes < 1000) return bytes + " B";
+    if (bytes < 1000 * 1000) return (bytes / 1000).toFixed(1) + " KB";
+    return (bytes / (1000 * 1000)).toFixed(1) + " MB";
   };
 
   const getMediaIcon = () => {
