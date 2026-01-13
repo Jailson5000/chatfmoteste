@@ -1474,6 +1474,16 @@ export function MessageBubble({
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
+    // For audio/ptt messages, hide the filename (e.g., "audio.webm", "audio.ogg")
+    // since the audio player is rendered separately
+    if (messageType === "audio" || messageType === "ptt") {
+      const singleLine = !normalized.includes("\n");
+      const looksLikeAudioFileName =
+        singleLine && /^audio\.(webm|ogg|mp3|m4a|wav|oga)$/i.test(normalized);
+
+      if (looksLikeAudioFileName) return "";
+    }
+
     // For document messages, WhatsApp often sets the content as just the filename.
     // We already render the filename in the document card, so avoid duplicating it.
     if (messageType === "document") {
