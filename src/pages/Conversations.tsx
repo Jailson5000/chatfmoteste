@@ -1917,6 +1917,38 @@ export default function Conversations() {
                           </label>
                         </CollapsibleContent>
                       </Collapsible>
+                      
+                      <Separator className="my-1" />
+                      
+                      {/* Department Filter (mobile) */}
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" className="w-full justify-between h-9 px-2">
+                            <div className="flex items-center gap-2">
+                              <Folder className="h-4 w-4 text-muted-foreground" />
+                              <span className="text-sm">Departamento</span>
+                              {conversationFilters.departments.length > 0 && (
+                                <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+                                  {conversationFilters.departments.length}
+                                </Badge>
+                              )}
+                            </div>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="pl-6 pr-2 pb-2 space-y-1">
+                          {departments.map(dept => (
+                            <label key={dept.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded">
+                              <Checkbox 
+                                checked={conversationFilters.departments.includes(dept.id)}
+                                onCheckedChange={() => toggleDepartmentFilter(dept.id)}
+                              />
+                              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
+                              <span className="text-sm">{dept.name}</span>
+                            </label>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
                     </div>
                   </ScrollArea>
                 </PopoverContent>
