@@ -1266,6 +1266,109 @@ export default function Conversations() {
     }
   }, [selectedConversationId, selectedConversation, isSending, toast]);
 
+  // Toggle star/favorite on a message
+  const handleToggleStar = useCallback(async (messageId: string, starred: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("messages")
+        .update({ is_starred: starred })
+        .eq("id", messageId);
+
+      if (error) throw error;
+
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, is_starred: starred } : m
+      ));
+
+      toast({
+        title: starred ? "Mensagem favoritada" : "Favorito removido",
+      });
+    } catch (error) {
+      console.error("Error toggling star:", error);
+      toast({
+        title: "Erro ao favoritar",
+        description: error instanceof Error ? error.message : "Falha ao favoritar mensagem",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
+  // Delete message for everyone on WhatsApp
+  const handleDeleteMessage = useCallback(async (messageId: string, whatsappMessageId: string, remoteJid: string) => {
+    if (!selectedConversationId) return;
+
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "delete_message",
+          conversationId: selectedConversationId,
+          whatsappMessageId,
+          remoteJid,
+        },
+      });
+
+      if (response.error || !response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao apagar mensagem");
+      }
+
+      // Update local state to show as revoked
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, is_revoked: true } : m
+      ));
+
+      toast({
+        title: "Mensagem apagada",
+        description: "A mensagem foi apagada para todos.",
+      });
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      toast({
+        title: "Erro ao apagar",
+        description: error instanceof Error ? error.message : "Falha ao apagar mensagem",
+        variant: "destructive",
+      });
+    }
+  }, [selectedConversationId, toast]);
+
+  // Download media from a message
+  const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationId: string, fileName?: string) => {
+    try {
+      toast({ title: "Baixando mídia..." });
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "get_media",
+          conversationId,
+          whatsappMessageId,
+        },
+      });
+
+      if (response.error || !response.data?.success || !response.data?.base64) {
+        throw new Error(response.data?.error || "Falha ao baixar mídia");
+      }
+
+      const { base64, mimetype } = response.data;
+      const dataUrl = `data:${mimetype || "application/octet-stream"};base64,${base64}`;
+
+      // Create download link
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = fileName || `download_${whatsappMessageId.slice(0, 8)}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({ title: "Download concluído" });
+    } catch (error) {
+      console.error("Error downloading media:", error);
+      toast({
+        title: "Erro ao baixar",
+        description: error instanceof Error ? error.message : "Falha ao baixar mídia",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
   const handleSendMedia = async (file: File, mediaType: "image" | "audio" | "video" | "document") => {
     if (!selectedConversationId || !selectedConversation || isSending) return;
     
@@ -2024,14 +2127,19 @@ export default function Conversations() {
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
+                              remoteJid={selectedConversation?.remote_jid}
                               replyTo={item.data.reply_to}
                               isInternal={item.data.is_internal}
                               isPontual={item.data.is_pontual}
                               aiAgentName={item.data.ai_agent_name}
                               isRevoked={item.data.is_revoked}
+                              isStarred={item.data.is_starred}
                               onReply={handleReply}
                               onScrollToMessage={scrollToMessage}
                               onRetry={handleRetryMessage}
+                              onToggleStar={handleToggleStar}
+                              onDelete={handleDeleteMessage}
+                              onDownloadMedia={handleDownloadMedia}
                             />
                           )
                         ))}
@@ -2798,14 +2906,19 @@ export default function Conversations() {
                               readAt={item.data.read_at}
                               whatsappMessageId={item.data.whatsapp_message_id}
                               conversationId={selectedConversationId || undefined}
+                              remoteJid={selectedConversation?.remote_jid}
                               replyTo={item.data.reply_to}
                               isInternal={item.data.is_internal}
                               isPontual={item.data.is_pontual}
                               aiAgentName={item.data.ai_agent_name}
                               isRevoked={item.data.is_revoked}
+                              isStarred={item.data.is_starred}
                               onReply={handleReply}
                               onScrollToMessage={scrollToMessage}
                               onRetry={handleRetryMessage}
+                              onToggleStar={handleToggleStar}
+                              onDelete={handleDeleteMessage}
+                              onDownloadMedia={handleDownloadMedia}
                               highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
                               isHighlighted={highlightedMessageId === item.data.id}
                             />
