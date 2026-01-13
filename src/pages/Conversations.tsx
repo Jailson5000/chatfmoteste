@@ -930,7 +930,8 @@ export default function Conversations() {
           return !isArchived && conv.handler === "ai";
         case "queue":
           // "Fila": Only show unassigned conversations (pending - without responsible)
-          return !isArchived && conv.handler === "human" && !conv.assignedUserId;
+          // Include both "unassigned" handler AND "human" with no assigned user
+          return !isArchived && (conv.handler === "unassigned" || (conv.handler === "human" && !conv.assignedUserId));
         case "all":
           // "Todos": Show all non-archived conversations
           return !isArchived;
@@ -1732,7 +1733,8 @@ export default function Conversations() {
         return mappedConversations.filter((c) => c.handler === "ai" && !c.archivedAt).length;
       case "queue":
         // Fila: apenas conversas sem responsável (pendentes)
-        return mappedConversations.filter((c) => c.handler === "human" && !c.assignedUserId && !c.archivedAt).length;
+        // Include both "unassigned" handler AND "human" with no assigned user
+        return mappedConversations.filter((c) => (c.handler === "unassigned" || (c.handler === "human" && !c.assignedUserId)) && !c.archivedAt).length;
       case "all":
         // Todos: todas as conversas não arquivadas
         return mappedConversations.filter((c) => !c.archivedAt).length;
