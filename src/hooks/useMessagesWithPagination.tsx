@@ -500,14 +500,25 @@ export function useMessagesWithPagination({
             }
 
             // Last-resort duplicate guard for any message from me
+            // For audio/ptt messages, we rely on message ID to prevent duplicates since
+            // content is often just "audio.webm" which can match other audio messages
             if (rawMsg.is_from_me) {
-              const isDuplicate = prev.some(m =>
-                m.content === rawMsg.content &&
-                m.is_from_me === true &&
-                m.message_type === rawMsg.message_type &&
-                Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
-              );
-              if (isDuplicate) return prev;
+              const isMediaType = rawMsg.message_type && ['audio', 'ptt', 'image', 'video', 'document'].includes(rawMsg.message_type);
+              
+              if (isMediaType) {
+                // For media messages, only dedupe by whatsapp_message_id (already checked above)
+                // or DB id (already checked at start) - don't dedupe by content
+                // This allows multiple audio messages to appear correctly
+              } else {
+                // For text messages, check content-based deduplication
+                const isDuplicate = prev.some(m =>
+                  m.content === rawMsg.content &&
+                  m.is_from_me === true &&
+                  m.message_type === rawMsg.message_type &&
+                  Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
+                );
+                if (isDuplicate) return prev;
+              }
             }
 
             return [...prev, rawMsg];
