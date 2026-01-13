@@ -537,7 +537,7 @@ export default function Kanban() {
 
       {/* Conversation Chat Panel - Floating side panel */}
       {sheetOpen && selectedConversation && (
-        <div className="fixed top-0 right-0 h-full w-full sm:w-[420px] lg:w-[480px] bg-background border-l border-border shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
+        <div className="fixed top-0 right-0 h-full w-full sm:w-[525px] lg:w-[600px] bg-background border-l border-border shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
           <KanbanChatPanel
             conversationId={selectedConversation.id}
             contactName={selectedConversation.contact_name}
