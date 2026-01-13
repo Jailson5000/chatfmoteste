@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown, Star, Trash2, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
 import { useState, useRef, ReactNode, useEffect, useCallback, memo, useReducer } from "react";
@@ -11,6 +11,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ImageViewerDialog } from "./ImageViewerDialog";
@@ -31,10 +32,12 @@ interface MessageBubbleProps {
   readAt?: string | null;
   whatsappMessageId?: string | null;
   conversationId?: string;
+  remoteJid?: string; // For delete action
   isInternal?: boolean;
   isPontual?: boolean;
   aiAgentName?: string | null; // Name of the AI agent that sent this message
   isRevoked?: boolean; // Indicates if the message was deleted by sender
+  isStarred?: boolean; // Indicates if message is favorited
   replyTo?: {
     id: string;
     content: string | null;
@@ -43,6 +46,9 @@ interface MessageBubbleProps {
   onReply?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   onRetry?: (messageId: string, content: string) => void;
+  onToggleStar?: (messageId: string, isStarred: boolean) => void;
+  onDelete?: (messageId: string, whatsappMessageId: string, remoteJid: string) => void;
+  onDownloadMedia?: (whatsappMessageId: string, conversationId: string, fileName?: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
 }
@@ -1278,14 +1284,19 @@ export function MessageBubble({
   readAt,
   whatsappMessageId,
   conversationId,
+  remoteJid,
   replyTo,
   isInternal = false,
   isPontual = false,
   aiAgentName,
   isRevoked = false,
+  isStarred = false,
   onReply,
   onScrollToMessage,
   onRetry,
+  onToggleStar,
+  onDelete,
+  onDownloadMedia,
   highlightText,
   isHighlighted = false,
 }: MessageBubbleProps) {
@@ -1484,16 +1495,51 @@ export function MessageBubble({
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
-      {/* Reply button for outgoing messages */}
-      {isFromMe && showActions && onReply && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 mr-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
-          onClick={() => onReply(id)}
-        >
-          <Reply className="h-4 w-4" />
-        </Button>
+      {/* Actions menu for outgoing messages */}
+      {isFromMe && showActions && !isRevoked && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 mr-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            {onReply && (
+              <DropdownMenuItem onClick={() => onReply(id)}>
+                <Reply className="h-4 w-4 mr-2" />
+                Responder
+              </DropdownMenuItem>
+            )}
+            {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
+              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
+                <Download className="h-4 w-4 mr-2" />
+                Baixar
+              </DropdownMenuItem>
+            )}
+            {onToggleStar && (
+              <DropdownMenuItem onClick={() => onToggleStar(id, !isStarred)}>
+                <Star className={cn("h-4 w-4 mr-2", isStarred && "fill-yellow-500 text-yellow-500")} />
+                {isStarred ? "Remover favorito" : "Favoritar"}
+              </DropdownMenuItem>
+            )}
+            {whatsappMessageId && remoteJid && onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => onDelete(id, whatsappMessageId, remoteJid)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Apagar
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       
       <div
@@ -1627,16 +1673,39 @@ export function MessageBubble({
         </div>
       </div>
       
-      {/* Reply button for incoming messages */}
-      {!isFromMe && showActions && onReply && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 ml-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
-          onClick={() => onReply(id)}
-        >
-          <Reply className="h-4 w-4" />
-        </Button>
+      {/* Actions menu for incoming messages */}
+      {!isFromMe && showActions && !isRevoked && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 ml-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-44">
+            {onReply && (
+              <DropdownMenuItem onClick={() => onReply(id)}>
+                <Reply className="h-4 w-4 mr-2" />
+                Responder
+              </DropdownMenuItem>
+            )}
+            {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
+              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
+                <Download className="h-4 w-4 mr-2" />
+                Baixar
+              </DropdownMenuItem>
+            )}
+            {onToggleStar && (
+              <DropdownMenuItem onClick={() => onToggleStar(id, !isStarred)}>
+                <Star className={cn("h-4 w-4 mr-2", isStarred && "fill-yellow-500 text-yellow-500")} />
+                {isStarred ? "Remover favorito" : "Favoritar"}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );

@@ -54,6 +54,7 @@ type EvolutionAction =
   | "send_message_async"
   | "send_media"
   | "get_media"
+  | "delete_message" // Delete message for everyone on WhatsApp
   // New centralized management endpoints
   | "global_create_instance"
   | "global_delete_instance"
@@ -2195,6 +2196,94 @@ serve(async (req) => {
             message: "Reply sent via N8N",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      case "delete_message": {
+        // Delete message for everyone on WhatsApp
+        if (!body.conversationId) {
+          throw new Error("conversationId is required for delete_message");
+        }
+        if (!body.whatsappMessageId) {
+          throw new Error("whatsappMessageId is required for delete_message");
+        }
+        if (!body.remoteJid) {
+          throw new Error("remoteJid is required for delete_message");
+        }
+
+        // Get conversation with instance
+        const { data: deleteConversation, error: deleteConvError } =
+          await supabaseClient
+            .from("conversations")
+            .select("*, whatsapp_instances!inner(*)")
+            .eq("id", body.conversationId)
+            .single();
+
+        if (deleteConvError || !deleteConversation) {
+          throw new Error(
+            `Conversation not found: ${deleteConvError?.message}`
+          );
+        }
+
+        const deleteInstance = deleteConversation.whatsapp_instances;
+        if (!deleteInstance) {
+          throw new Error("No WhatsApp instance associated with conversation");
+        }
+
+        // Use instance's api_url and api_key (same pattern as other actions)
+        const deleteApiUrl = normalizeUrl(deleteInstance.api_url || "");
+        const deleteApiKey = deleteInstance.api_key || "";
+
+        if (!deleteApiUrl || !deleteApiKey) {
+          throw new Error("Evolution API not configured for this instance");
+        }
+
+        // Call Evolution API to delete message for everyone
+        const deleteResponse = await fetchWithTimeout(
+          `${deleteApiUrl}/chat/deleteMessageForEveryone/${deleteInstance.instance_name}`,
+          {
+            method: "DELETE",
+            headers: {
+              apikey: deleteApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              id: body.whatsappMessageId,
+              remoteJid: body.remoteJid,
+              fromMe: true,
+            }),
+          },
+          DEFAULT_TIMEOUT_MS
+        );
+
+        if (!deleteResponse.ok) {
+          const errorText = await safeReadResponseText(deleteResponse);
+          console.error("[delete_message] Evolution API error:", errorText);
+          throw new Error(
+            `Failed to delete message: ${simplifyEvolutionError(deleteResponse.status, errorText)}`
+          );
+        }
+
+        // Mark message as revoked in database
+        const { error: revokeUpdateError } = await supabaseClient
+          .from("messages")
+          .update({
+            is_revoked: true,
+            revoked_at: new Date().toISOString(),
+          })
+          .eq("whatsapp_message_id", body.whatsappMessageId);
+
+        if (revokeUpdateError) {
+          console.error("[delete_message] Database update error:", revokeUpdateError);
+          // Don't throw - message was deleted on WhatsApp, just log DB error
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: "Message deleted successfully",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 

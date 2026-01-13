@@ -2313,6 +2313,7 @@ export type Database = {
           is_from_me: boolean
           is_internal: boolean
           is_revoked: boolean | null
+          is_starred: boolean | null
           media_mime_type: string | null
           media_url: string | null
           message_type: string
@@ -2336,6 +2337,7 @@ export type Database = {
           is_from_me?: boolean
           is_internal?: boolean
           is_revoked?: boolean | null
+          is_starred?: boolean | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
@@ -2359,6 +2361,7 @@ export type Database = {
           is_from_me?: boolean
           is_internal?: boolean
           is_revoked?: boolean | null
+          is_starred?: boolean | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
