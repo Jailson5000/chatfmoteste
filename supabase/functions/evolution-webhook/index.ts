@@ -639,6 +639,20 @@ interface QRCodeData {
   code?: string;
 }
 
+// Context info for quoted/reply messages
+interface ContextInfo {
+  stanzaId?: string;  // WhatsApp message ID of the quoted message
+  participant?: string;
+  quotedMessage?: {
+    conversation?: string;
+    extendedTextMessage?: { text: string };
+    imageMessage?: { caption?: string };
+    audioMessage?: Record<string, unknown>;
+    videoMessage?: { caption?: string };
+    documentMessage?: { fileName?: string };
+  };
+}
+
 interface MessageData {
   key: {
     remoteJid: string;
@@ -650,25 +664,35 @@ interface MessageData {
     conversation?: string;
     extendedTextMessage?: {
       text: string;
+      contextInfo?: ContextInfo;
     };
     imageMessage?: {
       url?: string;
       mimetype?: string;
       caption?: string;
+      contextInfo?: ContextInfo;
     };
     audioMessage?: {
       url?: string;
       mimetype?: string;
+      contextInfo?: ContextInfo;
     };
     videoMessage?: {
       url?: string;
       mimetype?: string;
       caption?: string;
+      contextInfo?: ContextInfo;
     };
     documentMessage?: {
       url?: string;
       mimetype?: string;
       fileName?: string;
+      contextInfo?: ContextInfo;
+    };
+    stickerMessage?: {
+      url?: string;
+      mimetype?: string;
+      contextInfo?: ContextInfo;
     };
   };
   messageType?: string;
@@ -2860,6 +2884,22 @@ serve(async (req) => {
         let messageType = 'text';
         let mediaUrl = '';
         let mediaMimeType = '';
+        let quotedWhatsAppMessageId: string | null = null;
+
+        // Extract contextInfo (quoted message reference) from any message type
+        // The contextInfo can be in extendedTextMessage, imageMessage, audioMessage, etc.
+        const contextInfo = data.message?.extendedTextMessage?.contextInfo ||
+                           data.message?.imageMessage?.contextInfo ||
+                           data.message?.audioMessage?.contextInfo ||
+                           data.message?.videoMessage?.contextInfo ||
+                           data.message?.documentMessage?.contextInfo ||
+                           data.message?.stickerMessage?.contextInfo ||
+                           null;
+        
+        if (contextInfo?.stanzaId) {
+          quotedWhatsAppMessageId = contextInfo.stanzaId;
+          logDebug('MESSAGE', `Message is a reply to WhatsApp message ID: ${quotedWhatsAppMessageId}`, { requestId });
+        }
 
         if (data.message?.conversation) {
           messageContent = data.message.conversation;
@@ -3085,6 +3125,33 @@ serve(async (req) => {
 
         // If we didn't update a pending message, insert a new one
         if (!savedMessage) {
+          // Resolve quoted message to get reply_to_message_id
+          let replyToMessageId: string | null = null;
+          if (quotedWhatsAppMessageId) {
+            // Search for the original message in the same conversation
+            const { data: quotedMsg } = await supabaseClient
+              .from('messages')
+              .select('id')
+              .eq('conversation_id', conversation.id)
+              .eq('whatsapp_message_id', quotedWhatsAppMessageId)
+              .limit(1)
+              .maybeSingle();
+            
+            if (quotedMsg) {
+              replyToMessageId = quotedMsg.id;
+              logDebug('MESSAGE', `Resolved quoted message`, { 
+                requestId, 
+                quotedWhatsAppId: quotedWhatsAppMessageId, 
+                replyToMessageId 
+              });
+            } else {
+              logDebug('MESSAGE', `Could not find quoted message in DB`, { 
+                requestId, 
+                quotedWhatsAppId: quotedWhatsAppMessageId 
+              });
+            }
+          }
+
           const insertResult = await supabaseClient
             .from('messages')
             .insert({
@@ -3097,6 +3164,7 @@ serve(async (req) => {
               is_from_me: isFromMe,
               sender_type: isFromMe ? 'system' : 'client',
               ai_generated: false,
+              reply_to_message_id: replyToMessageId,
             })
             .select()
             .single();
