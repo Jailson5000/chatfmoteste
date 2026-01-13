@@ -542,6 +542,7 @@ export default function Kanban() {
             conversationId={selectedConversation.id}
             contactName={selectedConversation.contact_name}
             contactPhone={selectedConversation.contact_phone}
+            remoteJid={selectedConversation.remote_jid}
             currentHandler={selectedConversation.current_handler}
             currentAutomationId={selectedConversation.current_automation_id}
             currentAutomationName={(selectedConversation as any).current_automation?.name || null}
