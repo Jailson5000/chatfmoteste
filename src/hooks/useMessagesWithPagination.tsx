@@ -353,6 +353,48 @@ export function useMessagesWithPagination({
   useEffect(() => {
     if (!conversationId) return;
 
+    // Helper to resolve reply_to for a message
+    const resolveReplyTo = async (msg: PaginatedMessage, existingMessages: PaginatedMessage[]): Promise<PaginatedMessage> => {
+      if (!msg.reply_to_message_id) return { ...msg, reply_to: null };
+      
+      // First check in existing messages
+      const existingReply = existingMessages.find(m => m.id === msg.reply_to_message_id);
+      if (existingReply) {
+        return {
+          ...msg,
+          reply_to: {
+            id: existingReply.id,
+            content: existingReply.content,
+            is_from_me: existingReply.is_from_me,
+          }
+        };
+      }
+      
+      // Fetch from database if not found locally
+      try {
+        const { data: replyMsg } = await supabase
+          .from("messages")
+          .select("id, content, is_from_me")
+          .eq("id", msg.reply_to_message_id)
+          .single();
+        
+        if (replyMsg) {
+          return {
+            ...msg,
+            reply_to: {
+              id: replyMsg.id,
+              content: replyMsg.content,
+              is_from_me: replyMsg.is_from_me,
+            }
+          };
+        }
+      } catch (e) {
+        console.error("Error fetching reply_to message:", e);
+      }
+      
+      return { ...msg, reply_to: null };
+    };
+
     // Subscribe to new messages (INSERT)
     const insertChannel = supabase
       .channel(`messages-insert-paginated-${conversationId}`)
@@ -364,45 +406,54 @@ export function useMessagesWithPagination({
           table: 'messages',
           filter: `conversation_id=eq.${conversationId}`
         },
-        (payload) => {
-          const newMsg = payload.new as PaginatedMessage;
+        async (payload) => {
+          const rawMsg = payload.new as PaginatedMessage;
+
+          // Helper to check if URL is a temporary blob URL
+          const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
+          
+          // Helper to check if ID is a temporary UUID (36 chars with hyphens)
+          const isTempId = (id?: string | null) => id && id.length === 36 && id.includes('-');
 
           setMessages(prev => {
             // Prevent duplicates by DB id
-            if (prev.some(m => m.id === newMsg.id)) return prev;
-
-            // Helper to check if URL is a temporary blob URL
-            const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
+            if (prev.some(m => m.id === rawMsg.id)) return prev;
 
             // Prefer replacing optimistic messages by WhatsApp message id (most reliable)
-            if (newMsg.whatsapp_message_id) {
+            if (rawMsg.whatsapp_message_id && !isTempId(rawMsg.whatsapp_message_id)) {
               const sameWhatsappIndex = prev.findIndex(
-                m => m.whatsapp_message_id && m.whatsapp_message_id === newMsg.whatsapp_message_id
+                m => m.whatsapp_message_id && m.whatsapp_message_id === rawMsg.whatsapp_message_id
               );
 
               if (sameWhatsappIndex !== -1) {
                 const updated = [...prev];
                 const prevMsg = updated[sameWhatsappIndex];
+                // Revoke old blob URL if present
+                if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
+                  try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
+                }
                 updated[sameWhatsappIndex] = {
                   ...prevMsg,
-                  ...newMsg,
+                  ...rawMsg,
                   status: "sent",
                   // Keep local preview URL if backend hasn't stored a URL yet
-                  media_url: newMsg.media_url ?? prevMsg.media_url,
-                  media_mime_type: newMsg.media_mime_type ?? prevMsg.media_mime_type,
+                  media_url: rawMsg.media_url ?? prevMsg.media_url,
+                  media_mime_type: rawMsg.media_mime_type ?? prevMsg.media_mime_type,
+                  // Preserve reply_to if already resolved locally
+                  reply_to: prevMsg.reply_to ?? rawMsg.reply_to,
                 };
                 return updated;
               }
             }
 
             // For media messages from me: find optimistic message with blob URL and same content
-            if (newMsg.is_from_me && newMsg.message_type && ['image', 'audio', 'document', 'video'].includes(newMsg.message_type)) {
+            if (rawMsg.is_from_me && rawMsg.message_type && ['image', 'audio', 'document', 'video'].includes(rawMsg.message_type)) {
               const optimisticMediaIndex = prev.findIndex(m =>
                 m.is_from_me === true &&
-                m.content === newMsg.content &&
-                m.message_type === newMsg.message_type &&
+                m.content === rawMsg.content &&
+                m.message_type === rawMsg.message_type &&
                 isBlobUrl(m.media_url) &&
-                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 60000
+                Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
               );
 
               if (optimisticMediaIndex !== -1) {
@@ -414,7 +465,7 @@ export function useMessagesWithPagination({
                 }
                 updated[optimisticMediaIndex] = {
                   ...prevMsg,
-                  ...newMsg,
+                  ...rawMsg,
                   status: "sent",
                 };
                 return updated;
@@ -423,48 +474,63 @@ export function useMessagesWithPagination({
 
             // Fallback: Check for optimistic message replacement by content+timestamp
             const optimisticIndex = prev.findIndex(m =>
-              m.is_from_me === newMsg.is_from_me &&
-              m.content === newMsg.content &&
-              (m.status === "sending" || m.status === "sent" || !m.whatsapp_message_id) &&
-              Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30000
+              m.is_from_me === rawMsg.is_from_me &&
+              m.content === rawMsg.content &&
+              (m.status === "sending" || m.status === "sent" || !m.whatsapp_message_id || isTempId(m.whatsapp_message_id)) &&
+              Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
             );
 
             if (optimisticIndex !== -1) {
               const updated = [...prev];
               const prevMsg = updated[optimisticIndex];
+              // Revoke old blob URL if present
+              if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
+                try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
+              }
               updated[optimisticIndex] = {
                 ...prevMsg,
-                ...newMsg,
+                ...rawMsg,
                 status: "sent",
-                media_url: newMsg.media_url ?? prevMsg.media_url,
-                media_mime_type: newMsg.media_mime_type ?? prevMsg.media_mime_type,
+                media_url: rawMsg.media_url ?? prevMsg.media_url,
+                media_mime_type: rawMsg.media_mime_type ?? prevMsg.media_mime_type,
+                reply_to: prevMsg.reply_to ?? rawMsg.reply_to,
               };
               return updated;
             }
 
             // Last-resort duplicate guard for any message from me
-            if (newMsg.is_from_me) {
+            if (rawMsg.is_from_me) {
               const isDuplicate = prev.some(m =>
-                m.content === newMsg.content &&
+                m.content === rawMsg.content &&
                 m.is_from_me === true &&
-                m.message_type === newMsg.message_type &&
-                Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 60000
+                m.message_type === rawMsg.message_type &&
+                Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
               );
               if (isDuplicate) return prev;
             }
 
-            return [...prev, newMsg];
+            return [...prev, rawMsg];
           });
 
+          // Resolve reply_to asynchronously and update the message
+          if (rawMsg.reply_to_message_id && !rawMsg.reply_to) {
+            const resolvedMsg = await resolveReplyTo(rawMsg, []);
+            if (resolvedMsg.reply_to) {
+              setMessages(prev => prev.map(m => 
+                m.id === rawMsg.id ? { ...m, reply_to: resolvedMsg.reply_to } : m
+              ));
+            }
+          }
+
           // Callback for new message (e.g., play notification)
-          if (!newMsg.is_from_me && onNewMessage) {
-            onNewMessage(newMsg);
+          if (!rawMsg.is_from_me && onNewMessage) {
+            onNewMessage(rawMsg);
           }
         }
       )
       .subscribe();
 
-    // Subscribe to message updates (UPDATE) for status ticks
+    // Subscribe to message updates (UPDATE) for status ticks and reconciliation
     const updateChannel = supabase
       .channel(`messages-update-paginated-${conversationId}`)
       .on(
@@ -475,18 +541,74 @@ export function useMessagesWithPagination({
           table: 'messages',
           filter: `conversation_id=eq.${conversationId}`
         },
-        (payload) => {
+        async (payload) => {
           const updatedMsg = payload.new as PaginatedMessage;
-          setMessages(prev => prev.map(m =>
-            m.id === updatedMsg.id
-              ? {
-                  ...m,
-                  status: updatedMsg.status,
-                  delivered_at: updatedMsg.delivered_at,
-                  read_at: updatedMsg.read_at,
+          const oldMsg = payload.old as Partial<PaginatedMessage>;
+          
+          // Helper to check if ID is a temporary UUID (36 chars with hyphens)
+          const isTempId = (id?: string | null) => id && id.length === 36 && id.includes('-');
+          const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
+          
+          // Check if this is a temp->real ID reconciliation (from webhook updating pending message)
+          const wasReconciled = oldMsg.whatsapp_message_id && 
+            isTempId(oldMsg.whatsapp_message_id) && 
+            updatedMsg.whatsapp_message_id && 
+            !isTempId(updatedMsg.whatsapp_message_id);
+          
+          setMessages(prev => {
+            // If reconciled, find by old temp ID or by DB id
+            const targetIndex = prev.findIndex(m => 
+              m.id === updatedMsg.id || 
+              (wasReconciled && m.whatsapp_message_id === oldMsg.whatsapp_message_id)
+            );
+            
+            if (targetIndex === -1) return prev;
+            
+            const updated = [...prev];
+            const prevMsg = updated[targetIndex];
+            
+            // Revoke old blob URL if backend now has a real URL
+            if (prevMsg.media_url && isBlobUrl(prevMsg.media_url) && updatedMsg.media_url && !isBlobUrl(updatedMsg.media_url)) {
+              try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
+            }
+            
+            updated[targetIndex] = {
+              ...prevMsg,
+              ...updatedMsg,
+              status: updatedMsg.status ?? prevMsg.status ?? "sent",
+              delivered_at: updatedMsg.delivered_at ?? prevMsg.delivered_at,
+              read_at: updatedMsg.read_at ?? prevMsg.read_at,
+              // Keep local blob URL if backend hasn't stored yet
+              media_url: updatedMsg.media_url ?? prevMsg.media_url,
+              media_mime_type: updatedMsg.media_mime_type ?? prevMsg.media_mime_type,
+              // Preserve reply_to
+              reply_to: prevMsg.reply_to ?? updatedMsg.reply_to,
+            };
+            
+            return updated;
+          });
+          
+          // Resolve reply_to asynchronously if needed
+          if (updatedMsg.reply_to_message_id) {
+            setMessages(prev => {
+              const msg = prev.find(m => m.id === updatedMsg.id);
+              if (msg && !msg.reply_to) {
+                // Find reply in existing messages
+                const replyMsg = prev.find(m => m.id === updatedMsg.reply_to_message_id);
+                if (replyMsg) {
+                  return prev.map(m => m.id === updatedMsg.id ? {
+                    ...m,
+                    reply_to: {
+                      id: replyMsg.id,
+                      content: replyMsg.content,
+                      is_from_me: replyMsg.is_from_me,
+                    }
+                  } : m);
                 }
-              : m
-          ));
+              }
+              return prev;
+            });
+          }
         }
       )
       .subscribe();
