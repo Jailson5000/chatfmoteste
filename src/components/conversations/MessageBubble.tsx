@@ -1301,6 +1301,7 @@ export function MessageBubble({
   isHighlighted = false,
 }: MessageBubbleProps) {
   const [showActions, setShowActions] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [, bumpDeliveryRender] = useReducer((x: number) => x + 1, 0);
 
   // Ensure the "assume delivered after 3s" fallback updates even when this bubble is memoized
@@ -1493,21 +1494,26 @@ export function MessageBubble({
         isFromMe ? "justify-end" : "justify-start"
       )}
       onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
+      onMouseLeave={() => {
+        if (!menuOpen) setShowActions(false);
+      }}
     >
       {/* Actions menu for outgoing messages */}
-      {isFromMe && showActions && !isRevoked && (
-        <DropdownMenu>
+      {isFromMe && (showActions || menuOpen) && !isRevoked && (
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 mr-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+              className={cn(
+                "h-7 w-7 mr-1 transition-opacity self-center",
+                menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
             >
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-44 z-50 bg-popover">
             {onReply && (
               <DropdownMenuItem onClick={() => onReply(id)}>
                 <Reply className="h-4 w-4 mr-2" />
@@ -1674,18 +1680,21 @@ export function MessageBubble({
       </div>
       
       {/* Actions menu for incoming messages */}
-      {!isFromMe && showActions && !isRevoked && (
-        <DropdownMenu>
+      {!isFromMe && (showActions || menuOpen) && !isRevoked && (
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 ml-1 opacity-0 group-hover:opacity-100 transition-opacity self-center"
+              className={cn(
+                "h-7 w-7 ml-1 transition-opacity self-center",
+                menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
             >
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44">
+          <DropdownMenuContent align="start" className="w-44 z-50 bg-popover">
             {onReply && (
               <DropdownMenuItem onClick={() => onReply(id)}>
                 <Reply className="h-4 w-4 mr-2" />
