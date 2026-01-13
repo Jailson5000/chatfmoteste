@@ -1669,6 +1669,10 @@ export function MessageBubble({
                   : "text-green-700/80 dark:text-green-300/80"
               : "text-muted-foreground"
         )}>
+          {/* Star indicator for favorited messages */}
+          {isStarred && (
+            <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+          )}
           <span className="text-xs">
             {new Date(createdAt).toLocaleTimeString('pt-BR', { 
               hour: '2-digit', 
