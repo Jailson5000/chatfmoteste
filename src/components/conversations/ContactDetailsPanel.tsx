@@ -358,12 +358,17 @@ export function ContactDetailsPanel({
                             {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
                           </span>
                         </Badge>
-                      ) : (
+                      ) : conversation.assigned_to ? (
                         <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate">
                           <User className="h-3 w-3 mr-1 flex-shrink-0" />
                           <span className="truncate max-w-[120px]">
                             {conversation.assigned_profile?.full_name || "Atendente"}
                           </span>
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="bg-muted text-muted-foreground border-0 truncate">
+                          <User className="h-3 w-3 mr-1 flex-shrink-0" />
+                          <span className="truncate max-w-[120px]">Sem responsável</span>
                         </Badge>
                       )}
                     </div>
@@ -380,6 +385,33 @@ export function ContactDetailsPanel({
                     <CommandList>
                       <CommandEmpty>Nenhum responsável encontrado.</CommandEmpty>
                       
+                      {/* No Responsible Option */}
+                      <CommandGroup heading="Sem atribuição">
+                        <CommandItem
+                          value="nenhum"
+                          onSelect={() => {
+                            onTransferHandler("human", null, null);
+                            setAttendantPopoverOpen(false);
+                            setAttendantSearch("");
+                          }}
+                          className="flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span>Nenhum</span>
+                              <span className="text-[10px] text-muted-foreground">Sem responsável atribuído</span>
+                            </div>
+                          </div>
+                          {conversation.current_handler === "human" && 
+                           !conversation.assigned_to && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </CommandItem>
+                      </CommandGroup>
+
                       {/* AI Agents Section */}
                       {filteredAutomations.length > 0 && (
                         <CommandGroup heading="Agentes IA">
