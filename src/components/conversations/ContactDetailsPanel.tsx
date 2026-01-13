@@ -651,7 +651,7 @@ export function ContactDetailsPanel({
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-1">
-                <ScrollArea className="max-h-48">
+                <ScrollArea className="max-h-[60vh]">
                   <div className="space-y-0.5 pl-2">
                     {departments.map(dept => {
                       const isSelected = currentDepartment?.id === dept.id;
