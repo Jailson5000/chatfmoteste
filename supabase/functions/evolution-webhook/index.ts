@@ -311,6 +311,7 @@ interface AutomationIdentity {
   version: number;
   updated_at: string;
   law_firm_id: string;
+  response_delay_seconds: number | null;
   // Canonical identity fields for audit
   // Priority: conversation_transfer > whatsapp_instance > law_firm_settings
   resolved_from: 'conversation_transfer' | 'whatsapp_instance' | 'law_firm_settings';
@@ -341,7 +342,7 @@ async function resolveAutomationForConversation(
     if (conversation?.current_automation_id) {
       const { data: automation } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
         .eq('id', conversation.current_automation_id)
         .eq('is_active', true)
         .not('ai_prompt', 'is', null)
@@ -405,7 +406,7 @@ async function resolveAutomationForConversation(
       if (instance?.default_automation_id) {
         const { data: automation, error: automationError } = await supabaseClient
           .from('automations')
-          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
+          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
           .not('ai_prompt', 'is', null)
@@ -507,7 +508,7 @@ async function resolveAutomationForConversation(
     if (settings?.default_automation_id) {
       const { data: automation } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
         .eq('id', settings.default_automation_id)
         .eq('is_active', true)
         .not('ai_prompt', 'is', null)
@@ -1715,11 +1716,13 @@ async function sendTextFallbackWithWarning(
 // Helper function to send AI response back to WhatsApp and save to database
 // Splits response into paragraphs and sends them separately for natural feel
 // If voice is enabled, also sends audio response
+// responseDelaySeconds: delay configured by client (summed with jitter)
 async function sendAIResponseToWhatsApp(
   supabaseClient: any,
   context: AutomationContext,
   aiResponse: string,
-  voiceConfig?: VoiceConfig
+  voiceConfig?: VoiceConfig,
+  responseDelaySeconds: number = 0
 ): Promise<boolean> {
   try {
     const AUDIO_PLACEHOLDER_RE = /\[\s*mensagem de [áa]udio\s*\]/gi;
@@ -1872,9 +1875,14 @@ async function sendAIResponseToWhatsApp(
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
 
-        // Apply human-like jitter before first audio, shorter delay between chunks
+        // Apply client delay + human-like jitter before first audio, shorter delay between chunks
         if (i === 0) {
-          await humanDelay(DELAY_CONFIG.AI_RESPONSE.min, DELAY_CONFIG.AI_RESPONSE.max, '[TTS_AUDIO]');
+          const clientDelayMs = responseDelaySeconds * 1000;
+          await humanDelay(
+            DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
+            DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, 
+            '[TTS_AUDIO]'
+          );
         } else {
           await humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[TTS_CHUNK]');
         }
@@ -1983,12 +1991,17 @@ async function sendAIResponseToWhatsApp(
         continue;
       }
 
-      // Add human-like jitter delay between messages
+      // Add client delay + human-like jitter delay between messages
       if (i > 0) {
         await messageSplitDelay(i, messageParts.length, '[AI_RESPONSE]');
       } else if (i === 0) {
-        // First message also gets a human-like delay (7-15s)
-        await humanDelay(DELAY_CONFIG.AI_RESPONSE.min, DELAY_CONFIG.AI_RESPONSE.max, '[AI_RESPONSE]');
+        // First message gets client delay + human-like jitter (e.g., 10s + 7-15s = 17-25s)
+        const clientDelayMs = responseDelaySeconds * 1000;
+        await humanDelay(
+          DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
+          DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, 
+          '[AI_RESPONSE]'
+        );
       }
 
       logDebug('SEND_RESPONSE', `Sending message part ${i + 1}/${messageParts.length}`, {
@@ -2182,8 +2195,8 @@ async function processWithGemini(
         automationName: automation.name,
       };
 
-      // Send the response back to WhatsApp (with optional voice)
-      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig);
+      // Send the response back to WhatsApp (with optional voice and client delay)
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, automation.response_delay_seconds || 0);
     }
 
     // Log the AI processing with tool calls
@@ -2339,8 +2352,8 @@ async function processWithGPT(
         automationName: automation.name,
       };
 
-      // Send the response back to WhatsApp (with optional voice)
-      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig);
+      // Send the response back to WhatsApp (with optional voice and client delay)
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, automation.response_delay_seconds || 0);
 
       // Log the AI processing with tool calls
       await supabaseClient
