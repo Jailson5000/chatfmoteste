@@ -811,36 +811,34 @@ export default function Conversations() {
     }, {} as Record<string, string>);
 
     // Helper to format last message preview - hide file names for audio/media
+    // Check message_type FIRST before falling back to content (received media often has empty content)
     const getLastMessagePreview = (lastMessage: { content?: string | null; message_type?: string; is_from_me?: boolean } | null): string => {
       if (!lastMessage) return "Sem mensagens";
       const { content, message_type, is_from_me } = lastMessage;
       
-      // For audio messages, show a friendly preview instead of filename
-      if (message_type === "audio" || content?.toLowerCase().endsWith(".webm") || content?.toLowerCase().endsWith(".ogg")) {
+      // Check message_type first - this handles received media with empty content
+      switch (message_type) {
+        case "audio":
+          return is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio";
+        case "image":
+          return is_from_me ? "📷 Imagem enviada" : "📷 Imagem";
+        case "video":
+          return is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo";
+        case "document":
+          return is_from_me ? "📄 Documento enviado" : "📄 Documento";
+        case "sticker":
+          return "🎭 Figurinha";
+        case "ptt": // Push-to-talk voice messages
+          return is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio";
+      }
+      
+      // Fallback checks for content-based detection (older messages or edge cases)
+      if (content?.toLowerCase().endsWith(".webm") || content?.toLowerCase().endsWith(".ogg")) {
         return is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio";
       }
       
-      // For images
-      if (message_type === "image") {
-        return is_from_me ? "📷 Imagem enviada" : "📷 Imagem";
-      }
-      
-      // For videos
-      if (message_type === "video") {
-        return is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo";
-      }
-      
-      // For documents
-      if (message_type === "document") {
-        return is_from_me ? "📄 Documento enviado" : "📄 Documento";
-      }
-      
-      // For stickers
-      if (message_type === "sticker") {
-        return "🎭 Figurinha";
-      }
-      
-      return content || "Sem mensagens";
+      // Return content if available, otherwise show "Sem mensagens"
+      return content?.trim() || "Sem mensagens";
     };
 
     const formatTimeAgoShort = (date: string | null) => {
