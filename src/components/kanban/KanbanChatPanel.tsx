@@ -53,6 +53,7 @@ import {
   Reply
 } from "lucide-react";
 import { ReplyPreview, QuotedMessage } from "@/components/conversations/ReplyPreview";
+import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -977,6 +978,7 @@ interface KanbanChatPanelProps {
   conversationId: string;
   contactName: string | null;
   contactPhone: string | null;
+  remoteJid?: string | null;
   currentHandler: 'ai' | 'human';
   /** The specific AI agent assigned to this conversation (source of truth for prompt selection) */
   currentAutomationId?: string | null;
@@ -999,6 +1001,7 @@ export function KanbanChatPanel({
   conversationId,
   contactName,
   contactPhone,
+  remoteJid,
   currentHandler,
   currentAutomationId,
   currentAutomationName,
@@ -1135,6 +1138,107 @@ export function KanbanChatPanel({
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, []);
+
+  // Toggle star/favorite on a message
+  const handleToggleStar = useCallback(async (messageId: string, starred: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("messages")
+        .update({ is_starred: starred })
+        .eq("id", messageId);
+
+      if (error) throw error;
+
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, is_starred: starred } : m
+      ));
+
+      toast({
+        title: starred ? "Mensagem favoritada" : "Favorito removido",
+      });
+    } catch (error) {
+      console.error("Error toggling star:", error);
+      toast({
+        title: "Erro ao favoritar",
+        description: error instanceof Error ? error.message : "Falha ao favoritar mensagem",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
+  // Delete message for everyone on WhatsApp
+  const handleDeleteMessage = useCallback(async (messageId: string, whatsappMessageId: string, remoteJid: string) => {
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "delete_message",
+          conversationId,
+          whatsappMessageId,
+          remoteJid,
+        },
+      });
+
+      if (response.error || !response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao apagar mensagem");
+      }
+
+      // Update local state to show as revoked
+      setMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, is_revoked: true } : m
+      ));
+
+      toast({
+        title: "Mensagem apagada",
+        description: "A mensagem foi apagada para todos.",
+      });
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      toast({
+        title: "Erro ao apagar",
+        description: error instanceof Error ? error.message : "Falha ao apagar mensagem",
+        variant: "destructive",
+      });
+    }
+  }, [conversationId, toast]);
+
+  // Download media from a message
+  const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, fileName?: string) => {
+    try {
+      toast({ title: "Baixando mídia..." });
+
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "get_media",
+          conversationId: conversationIdParam,
+          whatsappMessageId,
+        },
+      });
+
+      if (response.error || !response.data?.success || !response.data?.base64) {
+        throw new Error(response.data?.error || "Falha ao baixar mídia");
+      }
+
+      const { base64, mimetype } = response.data;
+      const dataUrl = `data:${mimetype || "application/octet-stream"};base64,${base64}`;
+
+      // Create download link
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = fileName || `download_${whatsappMessageId.slice(0, 8)}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({ title: "Download concluído" });
+    } catch (error) {
+      console.error("Error downloading media:", error);
+      toast({
+        title: "Erro ao baixar",
+        description: error instanceof Error ? error.message : "Falha ao baixar mídia",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
 
   // Get current status
   const currentStatusObj = customStatuses.find(s => s.id === clientStatus);
@@ -2142,169 +2246,35 @@ export function KanbanChatPanel({
               }
               
               const msg = item.data;
-              const isFromMe = msg.is_from_me;
-              const isInternal = msg.is_internal;
-              const isAI = msg.ai_generated;
-              const msgIcon = getMessageIcon(msg.message_type);
 
               return (
-                <div
-                  key={msg.id}
-                  data-message-id={msg.id}
-                  className={cn(
-                    "flex group",
-                    isFromMe ? "justify-end" : "justify-start"
-                  )}
-                >
-                  {/* Reply button for received messages (left side) */}
-                  {!isFromMe && !isInternal && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity self-center mr-1 flex-shrink-0"
-                      onClick={() => handleReply(msg.id)}
-                      title="Responder"
-                    >
-                      <Reply className="h-3.5 w-3.5 text-muted-foreground" />
-                    </Button>
-                  )}
-                  
-                  <div
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm break-words overflow-wrap-anywhere",
-                      isInternal
-                        ? "bg-yellow-100 text-yellow-900 rounded-br-md dark:bg-yellow-900/40 dark:text-yellow-100 border border-yellow-300 dark:border-yellow-700"
-                        : isFromMe
-                          ? isAI
-                            ? "bg-purple-500 text-white rounded-br-md dark:bg-purple-600"
-                            : "bg-green-500 text-white rounded-br-md dark:bg-green-600"
-                          : "bg-muted rounded-bl-md"
-                    )}
-                  >
-                    {/* Sender indicator */}
-                    {isInternal && (
-                      <div className="flex items-center gap-1 text-xs text-yellow-700 mb-1 dark:text-yellow-300">
-                        <Lock className="h-3 w-3" />
-                        Interno
-                      </div>
-                    )}
-                    
-                    {isAI && isFromMe && !isInternal && (
-                      <div className="flex items-center gap-1 text-xs text-white/80 mb-1">
-                        <Bot className="h-3 w-3" />
-                        {msg.ai_agent_name || "Assistente IA"}
-                      </div>
-                    )}
-
-                    {/* Quoted reply message */}
-                    {msg.reply_to && (
-                      <QuotedMessage
-                        content={msg.reply_to.content}
-                        isFromMe={msg.reply_to.is_from_me}
-                        onClick={() => scrollToMessage(msg.reply_to!.id)}
-                      />
-                    )}
-
-                    {/* Audio player */}
-                    {msg.message_type === 'audio' && msg.media_url && (
-                      <KanbanAudioPlayer
-                        src={msg.media_url}
-                        mimeType={msg.media_mime_type || undefined}
-                        whatsappMessageId={msg.whatsapp_message_id || undefined}
-                        conversationId={conversationId}
-                        isFromMe={isFromMe}
-                      />
-                    )}
-
-                    {/* Image viewer */}
-                    {msg.message_type === 'image' && (msg.media_url || msg.whatsapp_message_id) && (
-                      <KanbanImageViewer
-                        src={msg.media_url ?? null}
-                        mimeType={msg.media_mime_type || undefined}
-                        whatsappMessageId={msg.whatsapp_message_id || undefined}
-                        conversationId={conversationId}
-                      />
-                    )}
-
-                    {/* Video player */}
-                    {msg.message_type === 'video' && msg.media_url && (
-                      <KanbanVideoPlayer
-                        src={msg.media_url}
-                        mimeType={msg.media_mime_type || undefined}
-                        whatsappMessageId={msg.whatsapp_message_id || undefined}
-                        conversationId={conversationId}
-                      />
-                    )}
-
-                    {/* Document viewer */}
-                    {msg.message_type === 'document' && (msg.media_url || msg.whatsapp_message_id) && (
-                      <KanbanDocumentViewer
-                        src={msg.media_url ?? null}
-                        mimeType={msg.media_mime_type || undefined}
-                        whatsappMessageId={msg.whatsapp_message_id || undefined}
-                        conversationId={conversationId}
-                        isFromMe={isFromMe}
-                        content={msg.content}
-                      />
-                    )}
-
-                    {/* Media type indicator for other types (sticker, etc) */}
-                    {msgIcon && !['audio', 'image', 'video', 'document'].includes(msg.message_type || '') && (
-                      <div className={cn(
-                        "flex items-center gap-1 mb-1",
-                        isFromMe && !isInternal ? "text-white/70" : "text-muted-foreground"
-                      )}>
-                        {msgIcon}
-                        <span className="text-xs capitalize">{msg.message_type}</span>
-                      </div>
-                    )}
-
-                    {/* Content (hide for media types that already display content) */}
-                    {!['audio', 'image', 'video', 'document'].includes(msg.message_type || '') && msg.content && (
-                      <p className="whitespace-pre-wrap">
-                        {renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all")}
-                      </p>
-                    )}
-                    
-                    {/* Caption for media with text */}
-                    {['image', 'video'].includes(msg.message_type || '') && msg.content && (
-                      <p className="whitespace-pre-wrap mt-2">
-                        {renderWithLinks(msg.content, isFromMe && !isInternal ? "text-white underline hover:text-white/80 break-all" : "text-primary underline hover:text-primary/80 break-all")}
-                      </p>
-                    )}
-
-                    {/* Time and status */}
-                    <div className={cn(
-                      "flex items-center justify-end gap-1 mt-1",
-                      isFromMe && !isInternal ? "text-white/70" : "opacity-70"
-                    )}>
-                      <span className="text-xs">{formatTime(msg.created_at)}</span>
-                      {renderStatusIcon(
-                        !isFromMe || isInternal
-                          ? msg.status
-                          : msg.status === "read" || msg.status === "delivered"
-                            ? msg.status
-                            : (msg.status === "sent" || !msg.status) &&
-                                Date.now() - new Date(msg.created_at).getTime() > 2000
-                              ? "delivered"
-                              : msg.status || "sent",
-                        isFromMe
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Reply button for sent messages (right side) */}
-                  {isFromMe && !isInternal && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1 flex-shrink-0"
-                      onClick={() => handleReply(msg.id)}
-                      title="Responder"
-                    >
-                      <Reply className="h-3.5 w-3.5 text-muted-foreground" />
-                    </Button>
-                  )}
+                <div key={msg.id} data-message-id={msg.id}>
+                  <MessageBubble
+                    id={msg.id}
+                    content={msg.content}
+                    createdAt={msg.created_at}
+                    isFromMe={msg.is_from_me}
+                    senderType={msg.sender_type || "user"}
+                    aiGenerated={msg.ai_generated || false}
+                    mediaUrl={msg.media_url}
+                    mediaMimeType={msg.media_mime_type}
+                    messageType={msg.message_type}
+                    status={(msg.status || "sent") as MessageStatus}
+                    readAt={msg.read_at}
+                    whatsappMessageId={msg.whatsapp_message_id}
+                    conversationId={conversationId}
+                    remoteJid={remoteJid || undefined}
+                    replyTo={msg.reply_to}
+                    isInternal={msg.is_internal}
+                    aiAgentName={msg.ai_agent_name}
+                    isRevoked={msg.is_revoked}
+                    isStarred={msg.is_starred}
+                    onReply={handleReply}
+                    onScrollToMessage={scrollToMessage}
+                    onToggleStar={handleToggleStar}
+                    onDelete={handleDeleteMessage}
+                    onDownloadMedia={handleDownloadMedia}
+                  />
                 </div>
               );
             })}
