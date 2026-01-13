@@ -1435,8 +1435,30 @@ serve(async (req) => {
           instanceId = conversation.whatsapp_instance_id;
         }
 
+        // Fallback: old conversations may not have whatsapp_instance_id set.
+        // If there's a connected instance for the law firm, use it and persist back to the conversation.
+        if (!instanceId && conversationId) {
+          const { data: fallbackInstance } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("status", "connected")
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (fallbackInstance?.id) {
+            instanceId = fallbackInstance.id;
+            await supabaseClient
+              .from("conversations")
+              .update({ whatsapp_instance_id: instanceId })
+              .eq("id", conversationId)
+              .eq("law_firm_id", lawFirmId);
+          }
+        }
+
         if (!instanceId) {
-          throw new Error("instanceId is required (either directly or via conversationId)");
+          throw new Error("Nenhuma instância WhatsApp conectada para enviar arquivos.");
         }
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);

@@ -49,8 +49,10 @@ import {
   RotateCw,
   Download,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Reply
 } from "lucide-react";
+import { ReplyPreview, QuotedMessage } from "@/components/conversations/ReplyPreview";
 import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -1113,6 +1115,27 @@ export function KanbanChatPanel({
   const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
   const [archiveNextResponsibleType, setArchiveNextResponsibleType] = useState<"human" | "ai" | null>(null);
 
+  // Reply state
+  const [replyToMessage, setReplyToMessage] = useState<PaginatedMessage | null>(null);
+
+  // Handle reply
+  const handleReply = useCallback((messageId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (message) {
+      setReplyToMessage(message);
+    }
+  }, [messages]);
+
+  // Scroll to message
+  const scrollToMessage = useCallback((messageId: string) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const el = viewport.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
+
   // Get current status
   const currentStatusObj = customStatuses.find(s => s.id === clientStatus);
   
@@ -1285,23 +1308,12 @@ export function KanbanChatPanel({
     const wasPontualMode = isPontualMode;
     const wasInternalMode = isInternalMode;
     const messageToSend = messageInput.trim();
+    const replyToId = replyToMessage?.id || null;
+    
     setMessageInput("");
     setIsSending(true);
     setIsPontualMode(false);
-
-    // Optimistic update
-    const tempId = crypto.randomUUID();
-    const newMessage: Message = {
-      id: tempId,
-      content: messageToSend,
-      created_at: new Date().toISOString(),
-      is_from_me: true,
-      sender_type: "human",
-      ai_generated: false,
-      status: wasInternalMode ? "sent" : "sending",
-      is_internal: wasInternalMode,
-    };
-    setMessages((prev) => [...prev, newMessage]);
+    setReplyToMessage(null);
 
     try {
       if (wasInternalMode) {
@@ -1317,13 +1329,10 @@ export function KanbanChatPanel({
           status: "sent",
           message_type: "text",
           sender_id: userData.user?.id,
+          reply_to_message_id: replyToId,
         });
         
         if (error) throw error;
-        
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, status: "sent" } : m))
-        );
       } else {
         // External message - send via WhatsApp
         if (!wasPontualMode && currentHandler === "ai") {
@@ -1348,20 +1357,11 @@ export function KanbanChatPanel({
         if (!response.data?.success) {
           throw new Error(response.data?.error || "Falha ao enviar mensagem");
         }
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId
-              ? { ...m, id: response.data.messageId || tempId, status: "sent" }
-              : m
-          )
-        );
+        
+        // Message is inserted by backend and will arrive via realtime
       }
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? { ...m, status: "error" } : m))
-      );
       setMessageInput(messageToSend);
       toast({
         title: "Erro ao enviar",
@@ -2168,6 +2168,15 @@ export function KanbanChatPanel({
                       </div>
                     )}
 
+                    {/* Quoted reply message */}
+                    {msg.reply_to && (
+                      <QuotedMessage
+                        content={msg.reply_to.content}
+                        isFromMe={msg.reply_to.is_from_me}
+                        onClick={() => scrollToMessage(msg.reply_to!.id)}
+                      />
+                    )}
+
                     {/* Audio player */}
                     {msg.message_type === 'audio' && msg.media_url && (
                       <KanbanAudioPlayer
@@ -2321,6 +2330,17 @@ export function KanbanChatPanel({
             </Button>
           </div>
         )}
+
+        {/* Reply Preview */}
+        <ReplyPreview
+          replyToMessage={replyToMessage ? {
+            id: replyToMessage.id,
+            content: replyToMessage.content || null,
+            is_from_me: replyToMessage.is_from_me,
+            sender_type: replyToMessage.sender_type || "human",
+          } : null}
+          onCancelReply={() => setReplyToMessage(null)}
+        />
 
         {/* Audio Recorder */}
         {isRecordingAudio ? (
