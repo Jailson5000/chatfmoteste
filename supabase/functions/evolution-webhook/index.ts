@@ -671,6 +671,8 @@ interface MessageData {
     id: string;
   };
   pushName?: string;
+  /** Some Evolution payloads provide reply/quote context at this level */
+  contextInfo?: ContextInfo;
   message?: {
     conversation?: string;
     messageContextInfo?: MessageContextInfo;
@@ -2898,36 +2900,40 @@ serve(async (req) => {
         let mediaMimeType = '';
         let quotedWhatsAppMessageId: string | null = null;
 
-        // Extract contextInfo (quoted message reference) from any message type
-        // The contextInfo can be in extendedTextMessage, imageMessage, audioMessage, etc.
-        // Also check messageContextInfo for quoted messages (used in some Evolution API versions)
-        const contextInfo = data.message?.extendedTextMessage?.contextInfo ||
-                           data.message?.imageMessage?.contextInfo ||
-                           data.message?.audioMessage?.contextInfo ||
-                           data.message?.videoMessage?.contextInfo ||
-                           data.message?.documentMessage?.contextInfo ||
-                           data.message?.stickerMessage?.contextInfo ||
-                           data.message?.messageContextInfo ||
-                           null;
-        
-        // Check for stanzaId in contextInfo - use type assertions for dynamic properties
-        const stanzaId = contextInfo?.stanzaId || 
-                        (contextInfo?.quotedMessage as Record<string, unknown>)?.stanzaId as string | undefined ||
-                        (contextInfo as MessageContextInfo)?.quotedStanzaId ||
-                        data.message?.extendedTextMessage?.contextInfo?.stanzaId;
-        
+        // Extract reply/quote context.
+        // IMPORTANT: For some Evolution payloads, the quoted reference is at `data.contextInfo` (sibling of `message`).
+        const replyContext: ContextInfo | MessageContextInfo | null =
+          data.contextInfo ||
+          data.message?.extendedTextMessage?.contextInfo ||
+          data.message?.imageMessage?.contextInfo ||
+          data.message?.audioMessage?.contextInfo ||
+          data.message?.videoMessage?.contextInfo ||
+          data.message?.documentMessage?.contextInfo ||
+          data.message?.stickerMessage?.contextInfo ||
+          data.message?.messageContextInfo ||
+          null;
+
+        const stanzaId =
+          (data.contextInfo?.stanzaId ??
+            data.message?.extendedTextMessage?.contextInfo?.stanzaId ??
+            data.message?.imageMessage?.contextInfo?.stanzaId ??
+            data.message?.audioMessage?.contextInfo?.stanzaId ??
+            data.message?.videoMessage?.contextInfo?.stanzaId ??
+            data.message?.documentMessage?.contextInfo?.stanzaId ??
+            data.message?.stickerMessage?.contextInfo?.stanzaId ??
+            (data.message?.messageContextInfo as unknown as MessageContextInfo | undefined)?.stanzaId ??
+            (data.message?.messageContextInfo as unknown as MessageContextInfo | undefined)?.quotedStanzaId) ||
+          null;
+
         if (stanzaId) {
           quotedWhatsAppMessageId = stanzaId;
           logDebug('MESSAGE', `Message is a reply to WhatsApp message ID: ${quotedWhatsAppMessageId}`, { requestId });
-        } else {
-          // Log contextInfo for debugging if present but no stanzaId
-          if (contextInfo && Object.keys(contextInfo).length > 0) {
-            logDebug('DEBUG', `ContextInfo present but no stanzaId`, { 
-              requestId, 
-              contextInfoKeys: Object.keys(contextInfo).slice(0, 10).join(','),
-              hasQuotedMessage: !!(contextInfo as ContextInfo).quotedMessage
-            });
-          }
+        } else if (replyContext && Object.keys(replyContext).length > 0) {
+          logDebug('MESSAGE', `Reply context present but no stanzaId (debug)`, {
+            requestId,
+            replyContextKeys: Object.keys(replyContext).slice(0, 12).join(','),
+            hasQuotedMessage: !!(data.contextInfo as ContextInfo | undefined)?.quotedMessage,
+          });
         }
 
         if (data.message?.conversation) {
