@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -2566,10 +2567,12 @@ export function KanbanChatPanel({
 
             {/* Message input */}
             <div className="flex gap-2">
-              <Textarea
+              <AutoResizeTextarea
                 placeholder={isInternalMode ? "Mensagem interna..." : "Digite sua mensagem..."}
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
+                minRows={1}
+                maxRows={8}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -2625,7 +2628,6 @@ export function KanbanChatPanel({
                   // Text paste is handled by default browser behavior
                 }}
                 className={cn(
-                  "min-h-[60px] resize-none",
                   isInternalMode && "border-yellow-400"
                 )}
                 disabled={isSending}

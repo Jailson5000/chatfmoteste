@@ -56,6 +56,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -3305,11 +3306,11 @@ export default function Conversations() {
                         setTemplateSearchTerm("");
                       }}
                     />
-                    <Textarea
+                    <AutoResizeTextarea
                       ref={textareaRef}
                       placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
-                      className="min-h-[44px] max-h-[160px] resize-none overflow-y-auto"
-                      rows={1}
+                      minRows={1}
+                      maxRows={8}
                       value={messageInput}
                       onChange={(e) => {
                         const value = e.target.value;
