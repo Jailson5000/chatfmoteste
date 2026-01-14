@@ -162,12 +162,30 @@ export function useConversations() {
         setHasMore(initialData.length === CONVERSATIONS_BATCH_SIZE);
       } else {
         // Same law firm - merge with existing (for realtime updates)
-        // Replace existing conversations while keeping ones loaded via loadMore
+        // CRITICAL: Update ALL matching conversations with fresh data from initialData
+        // This ensures status/department changes are properly reflected
         setAllConversations(prev => {
-          const initialIds = new Set(initialData.map(c => c.id));
-          const additionalConversations = prev.filter(c => !initialIds.has(c.id));
-          // Initial data comes first (most recent), then any additional loaded later
-          return [...initialData, ...additionalConversations];
+          const initialMap = new Map(initialData.map(c => [c.id, c]));
+          
+          // Update existing conversations with fresh data, keep others
+          const updatedPrev = prev.map(c => {
+            const fresh = initialMap.get(c.id);
+            // If conversation exists in initialData, use the fresh version
+            return fresh ? fresh : c;
+          });
+          
+          // Add any new conversations from initialData that weren't in prev
+          const existingIds = new Set(prev.map(c => c.id));
+          const newConversations = initialData.filter(c => !existingIds.has(c.id));
+          
+          // Combine: fresh updated data + new conversations
+          // Sort by last_message_at to maintain proper order
+          const combined = [...updatedPrev, ...newConversations];
+          return combined.sort((a, b) => {
+            const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+            const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+            return bTime - aTime;
+          });
         });
       }
     }
