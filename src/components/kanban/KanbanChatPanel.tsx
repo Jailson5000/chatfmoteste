@@ -1429,9 +1429,10 @@ export function KanbanChatPanel({
     setIsPontualMode(false);
     setReplyToMessage(null);
 
-    // Enqueue message send to ensure strict ordering
-    // Messages are sent sequentially in the order they were typed
-    enqueueMessage(async () => {
+    // Enqueue message send to ensure strict ordering PER CONVERSATION
+    // Messages within the same conversation are sent sequentially
+    // Different conversations can send messages in parallel
+    enqueueMessage(conversationId, async () => {
       if (wasInternalMode) {
         // Internal message - save directly to database
         const { data: userData } = await supabase.auth.getUser();
