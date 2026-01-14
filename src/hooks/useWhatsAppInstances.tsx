@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
 import { useCompanyLimits } from "./useCompanyLimits";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useEffect } from "react";
 
 export type WhatsAppInstance = Tables<"whatsapp_instances">;
 
@@ -66,6 +67,32 @@ export function useWhatsAppInstances() {
     },
     enabled: !!lawFirm?.id,
   });
+
+  // Real-time subscription for instant updates
+  useEffect(() => {
+    if (!lawFirm?.id) return;
+
+    const channel = supabase
+      .channel('whatsapp-instances-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'whatsapp_instances',
+          filter: `law_firm_id=eq.${lawFirm.id}`,
+        },
+        (payload) => {
+          console.log("[useWhatsAppInstances] Realtime update:", payload.eventType);
+          queryClient.invalidateQueries({ queryKey: ["whatsapp-instances", lawFirm.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [lawFirm?.id, queryClient]);
 
   const testConnection = useMutation({
     mutationFn: async ({ apiUrl, apiKey }: { apiUrl: string; apiKey: string }): Promise<EvolutionResponse> => {

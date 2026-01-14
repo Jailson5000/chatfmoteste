@@ -3295,9 +3295,21 @@ serve(async (req) => {
             updatePayload.assigned_to = conversation.archived_next_responsible_id;
             updatePayload.current_automation_id = null;
           } else {
-            // No next responsible defined, default to AI if instance has default automation
-            updatePayload.current_handler = instance.default_assigned_to ? 'human' : 'ai';
-            updatePayload.assigned_to = instance.default_assigned_to || null;
+            // No next responsible defined, check instance defaults (AI takes priority)
+            if (instance.default_automation_id) {
+              updatePayload.current_handler = 'ai';
+              updatePayload.current_automation_id = instance.default_automation_id;
+              updatePayload.assigned_to = null;
+            } else if (instance.default_assigned_to) {
+              updatePayload.current_handler = 'human';
+              updatePayload.assigned_to = instance.default_assigned_to;
+              updatePayload.current_automation_id = null;
+            } else {
+              // No defaults, go to queue
+              updatePayload.current_handler = 'human';
+              updatePayload.assigned_to = null;
+              updatePayload.current_automation_id = null;
+            }
           }
           
           // Clear archived metadata
