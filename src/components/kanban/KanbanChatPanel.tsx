@@ -2572,7 +2572,7 @@ export function KanbanChatPanel({
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
                 minRows={1}
-                maxRows={8}
+                maxRows={5}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
