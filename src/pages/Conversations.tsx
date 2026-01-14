@@ -1077,9 +1077,10 @@ export default function Conversations() {
       if (pendingOutgoingRef.current.length > 50) pendingOutgoingRef.current.shift();
     }
     
-    // Enqueue message send to ensure strict ordering
-    // Messages are sent sequentially in the order they were typed
-    enqueueMessage(async () => {
+    // Enqueue message send to ensure strict ordering PER CONVERSATION
+    // Messages within the same conversation are sent sequentially
+    // Different conversations can send messages in parallel
+    enqueueMessage(conversationId, async () => {
       if (wasInternalMode) {
         // Internal message - save directly to database, don't send to WhatsApp
         const { error } = await supabase
