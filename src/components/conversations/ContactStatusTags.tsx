@@ -120,6 +120,8 @@ export function ContactStatusTags({
 
     setClientTagIds((prev) => [...prev, tagId]);
     queryClient.invalidateQueries({ queryKey: ["clients"] });
+    // Force immediate refetch of conversations to sync sidebar/kanban tags
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleRemoveTag = async (tagId: string) => {
@@ -145,6 +147,8 @@ export function ContactStatusTags({
 
     setClientTagIds((prev) => prev.filter((id) => id !== tagId));
     queryClient.invalidateQueries({ queryKey: ["clients"] });
+    // Force immediate refetch of conversations to sync sidebar/kanban tags
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleLinkClient = async () => {
