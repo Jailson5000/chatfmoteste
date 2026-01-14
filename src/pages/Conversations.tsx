@@ -309,8 +309,7 @@ export default function Conversations() {
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
   const [templateSearchTerm, setTemplateSearchTerm] = useState("");
   
-  // Unread counts state
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  // Note: unread counts now come directly from RPC (conv.unread_count) - no separate state needed
 
   // New messages indicator state (when user scrolls up)
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -456,36 +455,11 @@ export default function Conversations() {
     fetchProfile();
   }, []);
 
-  // Fetch unread counts for all conversations
-  useEffect(() => {
-    const fetchUnreadCounts = async () => {
-      const counts: Record<string, number> = {};
-      
-      await Promise.all(
-        conversations.map(async (conv) => {
-          const { count } = await supabase
-            .from("messages")
-            .select("*", { count: "exact", head: true })
-            .eq("conversation_id", conv.id)
-            .is("read_at", null)
-            .eq("is_from_me", false);
-          
-          counts[conv.id] = count || 0;
-        })
-      );
-      
-      setUnreadCounts(counts);
-    };
-
-    if (conversations.length > 0) {
-      fetchUnreadCounts();
-    }
-  }, [conversations]);
-
-  // Calculate total unread for favicon and title
+  // Calculate total unread from RPC data (already includes unread_count)
+  // This eliminates N+1 queries - the RPC returns unread_count for each conversation
   const totalUnread = useMemo(() => 
-    Object.values(unreadCounts).reduce((sum, count) => sum + count, 0),
-    [unreadCounts]
+    conversations.reduce((sum, conv) => sum + ((conv as any).unread_count || 0), 0),
+    [conversations]
   );
 
   // Dynamic favicon based on unread count
@@ -909,7 +883,7 @@ export default function Conversations() {
         phone: conv.contact_phone || "",
         lastMessage: getLastMessagePreview(conv.last_message),
         time: formatTimeAgoShort(conv.last_message_at),
-        unread: unreadCounts[conv.id] || 0,
+        unread: (conv as any).unread_count || 0,
         handler: effectiveHandler,
         status: conv.status,
         archivedAt: (conv as any).archived_at || null,
@@ -926,7 +900,7 @@ export default function Conversations() {
         scheduledFollowUps: followUpsByConversation[conv.id] || 0,
       };
     });
-  }, [conversations, unreadCounts, tags, automations, followUpsByConversation]);
+  }, [conversations, tags, automations, followUpsByConversation]);
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
