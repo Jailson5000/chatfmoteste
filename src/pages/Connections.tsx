@@ -176,6 +176,34 @@ export default function Connections() {
     );
   }, [instances, searchQuery]);
 
+  // Mantém o painel lateral sincronizado com atualizações em tempo real / refetches
+  useEffect(() => {
+    if (!selectedInstance) return;
+
+    const updated = instances.find((i) => i.id === selectedInstance.id);
+    if (!updated) {
+      setSelectedInstance(null);
+      return;
+    }
+
+    setSelectedInstance((prev) => {
+      if (!prev) return prev;
+      if (prev.id !== updated.id) return prev;
+
+      const hasMeaningfulChange =
+        prev.status !== updated.status ||
+        prev.phone_number !== updated.phone_number ||
+        prev.last_webhook_at !== updated.last_webhook_at ||
+        prev.updated_at !== updated.updated_at ||
+        prev.default_department_id !== updated.default_department_id ||
+        prev.default_status_id !== updated.default_status_id ||
+        prev.default_assigned_to !== updated.default_assigned_to ||
+        prev.default_automation_id !== updated.default_automation_id;
+
+      return hasMeaningfulChange ? updated : prev;
+    });
+  }, [instances, selectedInstance?.id]);
+
   const handleCreateInstance = async (displayName: string, instanceName: string) => {
     try {
       // Use the random instanceName for Evolution API, displayName for user display
@@ -294,14 +322,6 @@ export default function Connections() {
       });
     }
     return "—";
-  };
-
-  // Get a random department for display (in a real app, this would be stored per instance)
-  const getDefaultDepartment = () => {
-    if (departments.length > 0) {
-      return departments[0];
-    }
-    return null;
   };
 
   // Get responsible: can be AI automation or human attendant
@@ -485,7 +505,12 @@ export default function Connections() {
                 </tr>
               ) : (
                 filteredInstances.map((instance) => {
-                  const dept = getDefaultDepartment();
+                  const dept = instance.default_department_id
+                    ? departments.find((d) => d.id === instance.default_department_id) || null
+                    : null;
+                  const status = instance.default_status_id
+                    ? statuses.find((s) => s.id === instance.default_status_id) || null
+                    : null;
                   const responsible = getResponsibleForInstance(instance);
 
                   return (
