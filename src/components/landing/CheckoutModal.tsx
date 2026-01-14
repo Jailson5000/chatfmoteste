@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, CreditCard, Calendar } from "lucide-react";
+import { Loader2, CreditCard, Calendar, AlertTriangle, MessageCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { formatPhone, formatDocument } from "@/lib/inputMasks";
@@ -22,6 +22,7 @@ interface CheckoutModalProps {
 export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [paymentProvider, setPaymentProvider] = useState<"stripe" | "asaas">("stripe");
+  const [paymentsDisabled, setPaymentsDisabled] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
   const [formData, setFormData] = useState({
     companyName: "",
@@ -31,29 +32,36 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
     document: "",
   });
 
-  // Fetch payment provider setting on mount
+  // Fetch payment provider and disabled settings on mount
   useEffect(() => {
-    const fetchPaymentProvider = async () => {
+    const fetchPaymentSettings = async () => {
       try {
         const { data, error } = await supabase
           .from("system_settings")
-          .select("value")
-          .eq("key", "payment_provider")
-          .single();
+          .select("key, value")
+          .in("key", ["payment_provider", "payments_disabled"]);
 
-        if (!error && data?.value) {
-          const provider = String(data.value).replace(/"/g, "");
-          if (provider === "stripe" || provider === "asaas") {
-            setPaymentProvider(provider);
+        if (!error && data) {
+          for (const setting of data) {
+            if (setting.key === "payment_provider") {
+              const provider = String(setting.value).replace(/"/g, "");
+              if (provider === "stripe" || provider === "asaas") {
+                setPaymentProvider(provider);
+              }
+            }
+            if (setting.key === "payments_disabled") {
+              const disabled = String(setting.value).replace(/"/g, "") === "true";
+              setPaymentsDisabled(disabled);
+            }
           }
         }
       } catch (err) {
-        console.log("Using default payment provider (stripe)");
+        console.log("Using default payment settings");
       }
     };
 
     if (open) {
-      fetchPaymentProvider();
+      fetchPaymentSettings();
     }
   }, [open]);
 
@@ -127,6 +135,52 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
   const savings = monthlyPrice * 12 - yearlyPrice;
 
   const providerLabel = paymentProvider === "asaas" ? "ASAAS" : "Stripe";
+
+  // If payments are disabled, show contact message instead
+  if (paymentsDisabled) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md bg-[#0a0a0a] border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              Pagamentos Temporariamente Indisponíveis
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              Estamos processando assinaturas manualmente no momento
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
+              <p className="font-medium mb-2">Plano selecionado: {plan.name}</p>
+              <p className="text-white/60">
+                Para assinar este plano, entre em contato conosco diretamente. 
+                Nossa equipe fará a liberação manual da sua conta.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={() => window.open("https://wa.me/5563999916064?text=Olá! Gostaria de assinar o plano " + plan.name, "_blank")}
+                className="w-full bg-green-600 hover:bg-green-500 h-12 text-base font-semibold"
+              >
+                <MessageCircle className="mr-2 h-5 w-5" />
+                Falar pelo WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                className="w-full border-white/20 text-white hover:bg-white/10"
+              >
+                Voltar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
