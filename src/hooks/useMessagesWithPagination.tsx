@@ -521,7 +521,11 @@ export function useMessagesWithPagination({
               }
             }
 
-            return [...prev, rawMsg];
+            // Add new message and sort to maintain chronological order
+            const updated = [...prev, rawMsg];
+            return updated.sort((a, b) => 
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
           });
 
           // Resolve reply_to asynchronously and update the message

@@ -1428,6 +1428,34 @@ export function KanbanChatPanel({
     setMessageInput("");
     setIsPontualMode(false);
     setReplyToMessage(null);
+    
+    // Optimistically add message to local state with "sending" status
+    const tempId = crypto.randomUUID();
+    const tempWhatsAppId = `temp_${tempId}`;
+    const messageTimestamp = new Date().toISOString();
+    
+    const optimisticMessage = {
+      id: tempId,
+      content: messageToSend,
+      created_at: messageTimestamp,
+      is_from_me: true,
+      sender_type: "human",
+      ai_generated: false,
+      status: wasInternalMode ? "sent" : "sending",
+      is_internal: wasInternalMode,
+      is_pontual: wasPontualMode,
+      whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
+      message_type: "text",
+      reply_to: null,
+    };
+    
+    // Add message and ensure list stays sorted by created_at
+    setMessages(prev => {
+      const updated = [...prev, optimisticMessage];
+      return updated.sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
 
     // Enqueue message send to ensure strict ordering PER CONVERSATION
     // Messages within the same conversation are sent sequentially
@@ -1450,6 +1478,11 @@ export function KanbanChatPanel({
         });
         
         if (error) throw error;
+        
+        // Update optimistic message status
+        setMessages(prev => prev.map(m => 
+          m.id === tempId ? { ...m, status: "sent" } : m
+        ));
       } else {
         // External message - send via WhatsApp
         const { data: userData } = await supabase.auth.getUser();
@@ -1486,9 +1519,20 @@ export function KanbanChatPanel({
         if (!response.data?.success) {
           throw new Error(response.data?.error || "Falha ao enviar mensagem");
         }
+        
+        // Update optimistic message with real data
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" }
+            : m
+        ));
       }
     }).catch((error) => {
       console.error("Erro ao enviar mensagem:", error);
+      // Update message to show error status
+      setMessages(prev => prev.map(m => 
+        m.id === tempId ? { ...m, status: "error" } : m
+      ));
       toast({
         title: "Erro ao enviar",
         description: error instanceof Error ? error.message : "Falha ao enviar mensagem",

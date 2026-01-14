@@ -1057,20 +1057,32 @@ export default function Conversations() {
     setReplyToMessage(null);
     
     // Optimistically add message to local state with "sending" status
+    // Use a temp whatsapp_message_id prefix to help with reconciliation
     const tempId = crypto.randomUUID();
+    const tempWhatsAppId = `temp_${tempId}`;
+    const messageTimestamp = new Date().toISOString();
+    
     const newMessage: Message = {
       id: tempId,
       content: messageToSend,
-      created_at: new Date().toISOString(),
+      created_at: messageTimestamp,
       is_from_me: true,
       sender_type: "human",
       ai_generated: false,
       status: wasInternalMode ? "sent" as MessageStatus : "sending" as MessageStatus,
       is_internal: wasInternalMode,
       is_pontual: wasPontualMode,
+      whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
     };
     
-    setMessages(prev => [...prev, newMessage]);
+    // Add message and ensure list stays sorted by created_at
+    setMessages(prev => {
+      const updated = [...prev, newMessage];
+      // Sort by created_at to maintain chronological order
+      return updated.sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+    });
 
     if (!wasInternalMode) {
       pendingOutgoingRef.current.push({ tempId, content: messageToSend, sentAt: Date.now() });
