@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { format, startOfDay, endOfDay, addDays, subDays, isToday, isTomorrow, isPast } from "date-fns";
+import { useState, useMemo } from "react";
+import { format, startOfDay, endOfDay, addDays, subDays, isToday, isTomorrow, isPast, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Calendar,
@@ -12,6 +12,7 @@ import {
   XCircle,
   AlertCircle,
   Filter,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,26 +36,100 @@ const STATUS_CONFIG = {
   no_show: { label: "Não compareceu", color: "bg-orange-500", icon: AlertCircle },
 };
 
+type PeriodFilter = "day" | "week" | "month" | "all";
+
 export function AgendaAppointmentsList() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("day");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
-  const { appointments, isLoading } = useAppointments(selectedDate);
+  // Fetch all appointments when period is not "day", otherwise fetch by specific date
+  const { appointments: allAppointments, isLoading } = useAppointments(
+    periodFilter === "day" ? selectedDate : undefined
+  );
+
+  // Filter appointments by period
+  const appointments = useMemo(() => {
+    if (periodFilter === "day" || periodFilter === "all") {
+      return allAppointments;
+    }
+
+    const now = selectedDate;
+    let start: Date;
+    let end: Date;
+
+    if (periodFilter === "week") {
+      start = startOfWeek(now, { weekStartsOn: 0 });
+      end = endOfWeek(now, { weekStartsOn: 0 });
+    } else if (periodFilter === "month") {
+      start = startOfMonth(now);
+      end = endOfMonth(now);
+    } else {
+      return allAppointments;
+    }
+
+    return allAppointments.filter((apt) => {
+      const aptDate = parseISO(apt.start_time);
+      return isWithinInterval(aptDate, { start, end });
+    });
+  }, [allAppointments, periodFilter, selectedDate]);
 
   const filteredAppointments =
     statusFilter === "all"
       ? appointments
       : appointments.filter((apt) => apt.status === statusFilter);
 
+  // Sort by date when showing multiple days
+  const sortedAppointments = useMemo(() => {
+    return [...filteredAppointments].sort((a, b) => 
+      new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+  }, [filteredAppointments]);
+
   const handlePrevDay = () => setSelectedDate(subDays(selectedDate, 1));
   const handleNextDay = () => setSelectedDate(addDays(selectedDate, 1));
   const handleToday = () => setSelectedDate(new Date());
 
+  const handlePrevPeriod = () => {
+    if (periodFilter === "week") {
+      setSelectedDate(subDays(selectedDate, 7));
+    } else if (periodFilter === "month") {
+      setSelectedDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, 1));
+    } else {
+      handlePrevDay();
+    }
+  };
+
+  const handleNextPeriod = () => {
+    if (periodFilter === "week") {
+      setSelectedDate(addDays(selectedDate, 7));
+    } else if (periodFilter === "month") {
+      setSelectedDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 1));
+    } else {
+      handleNextDay();
+    }
+  };
+
   const getDateLabel = () => {
+    if (periodFilter === "all") return "Todos os agendamentos";
+    if (periodFilter === "month") {
+      return format(selectedDate, "MMMM 'de' yyyy", { locale: ptBR });
+    }
+    if (periodFilter === "week") {
+      const start = startOfWeek(selectedDate, { weekStartsOn: 0 });
+      const end = endOfWeek(selectedDate, { weekStartsOn: 0 });
+      return `${format(start, "d MMM", { locale: ptBR })} - ${format(end, "d MMM", { locale: ptBR })}`;
+    }
     if (isToday(selectedDate)) return "Hoje";
     if (isTomorrow(selectedDate)) return "Amanhã";
     return format(selectedDate, "EEEE", { locale: ptBR });
+  };
+
+  const getDateSubLabel = () => {
+    if (periodFilter === "all") return "";
+    if (periodFilter === "month" || periodFilter === "week") return "";
+    return format(selectedDate, "d 'de' MMMM, yyyy", { locale: ptBR });
   };
 
   return (
@@ -62,38 +137,61 @@ export function AgendaAppointmentsList() {
       {/* Header with date navigation */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handlePrevDay}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" onClick={handleToday}>
-            Hoje
-          </Button>
-          <Button variant="outline" size="icon" onClick={handleNextDay}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+          {periodFilter !== "all" && (
+            <>
+              <Button variant="outline" size="icon" onClick={handlePrevPeriod}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" onClick={handleToday}>
+                Hoje
+              </Button>
+              <Button variant="outline" size="icon" onClick={handleNextPeriod}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           <div className="ml-2">
-            <p className="font-medium">{getDateLabel()}</p>
-            <p className="text-sm text-muted-foreground">
-              {format(selectedDate, "d 'de' MMMM, yyyy", { locale: ptBR })}
-            </p>
+            <p className="font-medium capitalize">{getDateLabel()}</p>
+            {getDateSubLabel() && (
+              <p className="text-sm text-muted-foreground">
+                {getDateSubLabel()}
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Filtrar status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="scheduled">Agendados</SelectItem>
-              <SelectItem value="confirmed">Confirmados</SelectItem>
-              <SelectItem value="completed">Concluídos</SelectItem>
-              <SelectItem value="cancelled">Cancelados</SelectItem>
-              <SelectItem value="no_show">Não compareceu</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            <Select value={periodFilter} onValueChange={(v) => setPeriodFilter(v as PeriodFilter)}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Período" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="day">Dia</SelectItem>
+                <SelectItem value="week">Semana</SelectItem>
+                <SelectItem value="month">Mês</SelectItem>
+                <SelectItem value="all">Todos</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Filtrar status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="scheduled">Agendados</SelectItem>
+                <SelectItem value="confirmed">Confirmados</SelectItem>
+                <SelectItem value="completed">Concluídos</SelectItem>
+                <SelectItem value="cancelled">Cancelados</SelectItem>
+                <SelectItem value="no_show">Não compareceu</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -169,11 +267,12 @@ export function AgendaAppointmentsList() {
             <div className="flex justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
             </div>
-          ) : filteredAppointments.length > 0 ? (
+          ) : sortedAppointments.length > 0 ? (
             <div className="space-y-3">
-              {filteredAppointments.map((apt) => {
+              {sortedAppointments.map((apt) => {
                 const StatusIcon = STATUS_CONFIG[apt.status].icon;
                 const isPastAppointment = isPast(new Date(apt.end_time));
+                const showDate = periodFilter !== "day";
 
                 return (
                   <div
@@ -190,7 +289,7 @@ export function AgendaAppointmentsList() {
                         style={{ backgroundColor: apt.service?.color || "#6366f1" }}
                       />
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{apt.service?.name || "Serviço"}</p>
                           <Badge
                             variant="secondary"
@@ -203,7 +302,13 @@ export function AgendaAppointmentsList() {
                             {STATUS_CONFIG[apt.status].label}
                           </Badge>
                         </div>
-                        <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground flex-wrap">
+                          {showDate && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {format(new Date(apt.start_time), "dd/MM", { locale: ptBR })}
+                            </span>
+                          )}
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             {format(new Date(apt.start_time), "HH:mm")} -{" "}
