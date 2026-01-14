@@ -1,17 +1,54 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Home } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
 
 export default function PrivacyPolicy() {
+  // SEO: Set document title and meta tags
+  useEffect(() => {
+    document.title = "Política de Privacidade | MiauChat";
+    
+    // Update meta description
+    let metaDesc = document.querySelector('meta[name="description"]');
+    if (!metaDesc) {
+      metaDesc = document.createElement('meta');
+      metaDesc.setAttribute('name', 'description');
+      document.head.appendChild(metaDesc);
+    }
+    metaDesc.setAttribute('content', 'Política de Privacidade da MiauChat - Saiba como protegemos seus dados pessoais e respeitamos sua privacidade.');
+    
+    // Add canonical link
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute('href', 'https://www.miauchat.com.br/privacidade');
+    
+    return () => {
+      document.title = "MiauChat";
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container max-w-4xl mx-auto py-12 px-4">
-        <Link to="/">
-          <Button variant="ghost" className="mb-8">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Voltar
-          </Button>
-        </Link>
+        <div className="flex items-center gap-4 mb-8">
+          <Link to="/">
+            <Button variant="ghost">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Voltar
+            </Button>
+          </Link>
+          <a 
+            href="https://www.miauchat.com.br/" 
+            className="text-muted-foreground hover:text-foreground text-sm flex items-center gap-1"
+          >
+            <Home className="h-4 w-4" />
+            www.miauchat.com.br
+          </a>
+        </div>
 
         <h1 className="text-4xl font-bold mb-2">Política de Privacidade</h1>
         <p className="text-muted-foreground mb-8">Última atualização: {new Date().toLocaleDateString('pt-BR')}</p>
@@ -134,9 +171,17 @@ export default function PrivacyPolicy() {
         </div>
 
         <div className="mt-12 pt-8 border-t">
-          <p className="text-sm text-muted-foreground text-center">
-            © {new Date().getFullYear()} MiauChat. Todos os direitos reservados.
-          </p>
+          <div className="flex flex-col items-center gap-4">
+            <a 
+              href="https://www.miauchat.com.br/" 
+              className="text-primary hover:underline text-sm"
+            >
+              ← Voltar para a página principal
+            </a>
+            <p className="text-sm text-muted-foreground text-center">
+              © {new Date().getFullYear()} MiauChat. Todos os direitos reservados.
+            </p>
+          </div>
         </div>
       </div>
     </div>
