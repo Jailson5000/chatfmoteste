@@ -228,6 +228,7 @@ export function useConversations() {
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
         }
       )
       .subscribe();
