@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useReducer, useCallback, useLayoutEffect } from "react";
+import React, { useState, useEffect, useRef, useMemo, useReducer, useCallback, useLayoutEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
-import { InlineActivityBadge } from "@/components/conversations/InlineActivityBadge";
+import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
+import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
 import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
 
@@ -2240,42 +2241,63 @@ export function KanbanChatPanel({
                 <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
               </div>
             )}
-            {timelineItems.map((item) => {
+            {timelineItems.map((item, index) => {
+              const prevItem = index > 0 ? timelineItems[index - 1] : null;
+              // Get date from the correct field based on item type
+              const getItemDate = (timelineItem: { type: string; data: ActivityItem | PaginatedMessage } | null): string | Date | null => {
+                if (!timelineItem) return null;
+                if (timelineItem.type === 'activity') {
+                  return (timelineItem.data as ActivityItem).timestamp;
+                }
+                return (timelineItem.data as PaginatedMessage).created_at;
+              };
+              const currentDate = getItemDate(item);
+              const prevDate = getItemDate(prevItem);
+              const showDateSep = shouldShowDateSeparator(currentDate!, prevDate);
+              
               if (item.type === 'activity') {
-                return <InlineActivityBadge key={item.data.id} activity={item.data} />;
+                return (
+                  <React.Fragment key={item.data.id}>
+                    {showDateSep && currentDate && <DateSeparator date={new Date(currentDate)} />}
+                    <InlineActivityBadge activity={item.data} />
+                  </React.Fragment>
+                );
               }
               
               const msg = item.data;
 
               return (
-                <div key={msg.id} data-message-id={msg.id}>
-                  <MessageBubble
-                    id={msg.id}
-                    content={msg.content}
-                    createdAt={msg.created_at}
-                    isFromMe={msg.is_from_me}
-                    senderType={msg.sender_type || "user"}
-                    aiGenerated={msg.ai_generated || false}
-                    mediaUrl={msg.media_url}
-                    mediaMimeType={msg.media_mime_type}
-                    messageType={msg.message_type}
-                    status={(msg.status || "sent") as MessageStatus}
-                    readAt={msg.read_at}
-                    whatsappMessageId={msg.whatsapp_message_id}
-                    conversationId={conversationId}
-                    remoteJid={remoteJid || undefined}
-                    replyTo={msg.reply_to}
-                    isInternal={msg.is_internal}
-                    aiAgentName={msg.ai_agent_name}
-                    isRevoked={msg.is_revoked}
-                    isStarred={msg.is_starred}
-                    onReply={handleReply}
-                    onScrollToMessage={scrollToMessage}
-                    onToggleStar={handleToggleStar}
-                    onDelete={handleDeleteMessage}
-                    onDownloadMedia={handleDownloadMedia}
-                  />
-                </div>
+                <React.Fragment key={msg.id}>
+                  {showDateSep && currentDate && <DateSeparator date={new Date(currentDate)} />}
+                  <div data-message-id={msg.id}>
+                    <MessageBubble
+                      id={msg.id}
+                      content={msg.content}
+                      createdAt={msg.created_at}
+                      isFromMe={msg.is_from_me}
+                      senderType={msg.sender_type || "user"}
+                      aiGenerated={msg.ai_generated || false}
+                      mediaUrl={msg.media_url}
+                      mediaMimeType={msg.media_mime_type}
+                      messageType={msg.message_type}
+                      status={(msg.status || "sent") as MessageStatus}
+                      readAt={msg.read_at}
+                      whatsappMessageId={msg.whatsapp_message_id}
+                      conversationId={conversationId}
+                      remoteJid={remoteJid || undefined}
+                      replyTo={msg.reply_to}
+                      isInternal={msg.is_internal}
+                      aiAgentName={msg.ai_agent_name}
+                      isRevoked={msg.is_revoked}
+                      isStarred={msg.is_starred}
+                      onReply={handleReply}
+                      onScrollToMessage={scrollToMessage}
+                      onToggleStar={handleToggleStar}
+                      onDelete={handleDeleteMessage}
+                      onDownloadMedia={handleDownloadMedia}
+                    />
+                  </div>
+                </React.Fragment>
               );
             })}
             {/* Scroll anchor */}
