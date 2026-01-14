@@ -165,6 +165,9 @@ interface Message {
     content: string | null;
     is_from_me: boolean;
   } | null;
+  // Client-side fields for stable ordering during optimistic updates
+  _clientOrder?: number;
+  _clientTempId?: string;
 }
 
 export default function Conversations() {
@@ -379,6 +382,9 @@ export default function Conversations() {
   const isAtBottomRef = useRef(true);
   const lastTailMessageIdRef = useRef<string | null>(null);
   const pendingOutgoingRef = useRef<Array<{ tempId: string; content: string; sentAt: number }>>([]);
+  
+  // Monotonic counter for stable message ordering (prevents visual shuffle during reconciliation)
+  const clientOrderRef = useRef(Date.now());
 
   // Media preview state
   const [mediaPreview, setMediaPreview] = useState<{
@@ -430,8 +436,22 @@ export default function Conversations() {
       items.push({ type: 'activity', data: activity });
     });
     
-    // Sort by timestamp (ascending for chronological order)
+    // Sort with stable ordering: use _clientOrder for optimistic messages to prevent shuffle
     return items.sort((a, b) => {
+      // Get _clientOrder if it's a message (activities don't have it)
+      const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
+      const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
+      
+      // If both have _clientOrder, use that for stable ordering
+      if (aClientOrder !== undefined && bClientOrder !== undefined) {
+        return aClientOrder - bClientOrder;
+      }
+      
+      // If only one has _clientOrder, that one should come after (it's newer/optimistic)
+      if (aClientOrder !== undefined) return 1;
+      if (bClientOrder !== undefined) return -1;
+      
+      // Fallback to timestamp for backend messages and activities
       const aTime = a.type === 'message' 
         ? new Date(a.data.created_at).getTime() 
         : a.data.timestamp.getTime();
@@ -1062,6 +1082,9 @@ export default function Conversations() {
     const tempWhatsAppId = `temp_${tempId}`;
     const messageTimestamp = new Date().toISOString();
     
+    // Increment client order for stable sorting (prevents visual shuffle)
+    const clientOrder = clientOrderRef.current++;
+    
     const newMessage: Message = {
       id: tempId,
       content: messageToSend,
@@ -1073,16 +1096,14 @@ export default function Conversations() {
       is_internal: wasInternalMode,
       is_pontual: wasPontualMode,
       whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
+      // Client-side ordering fields for stable visual order during reconciliation
+      _clientOrder: clientOrder,
+      _clientTempId: tempId,
     };
     
-    // Add message and ensure list stays sorted by created_at
-    setMessages(prev => {
-      const updated = [...prev, newMessage];
-      // Sort by created_at to maintain chronological order
-      return updated.sort((a, b) => 
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      );
-    });
+    // Add message - no sorting needed, _clientOrder ensures stable order
+    // Messages with _clientOrder will always appear after messages without (older backend msgs)
+    setMessages(prev => [...prev, newMessage]);
 
     if (!wasInternalMode) {
       pendingOutgoingRef.current.push({ tempId, content: messageToSend, sentAt: Date.now() });
@@ -2228,8 +2249,13 @@ export default function Conversations() {
                           const prevDate = getItemDate(prevItem);
                           const showDateSep = shouldShowDateSeparator(currentDate!, prevDate);
                           
+                          // Use _clientTempId for stable key during reconciliation (prevents remount/shuffle)
+                          const stableKey = item.type === 'message' 
+                            ? ((item.data as PaginatedMessage)._clientTempId || item.data.id)
+                            : item.data.id;
+                          
                           return (
-                            <React.Fragment key={item.data.id}>
+                            <React.Fragment key={stableKey}>
                               {showDateSep && currentDate && (
                                 <DateSeparator date={new Date(currentDate)} />
                               )}
@@ -3028,8 +3054,13 @@ export default function Conversations() {
                         const prevDate = getItemDate(prevItem);
                         const showDateSep = shouldShowDateSeparator(currentDate!, prevDate);
                         
+                        // Use _clientTempId for stable key during reconciliation (prevents remount/shuffle)
+                        const stableKey = item.type === 'message' 
+                          ? ((item.data as PaginatedMessage)._clientTempId || item.data.id)
+                          : item.data.id;
+                        
                         return (
-                          <React.Fragment key={item.data.id}>
+                          <React.Fragment key={stableKey}>
                             {showDateSep && currentDate && (
                               <DateSeparator date={new Date(currentDate)} />
                             )}

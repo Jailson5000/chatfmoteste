@@ -28,6 +28,10 @@ export interface PaginatedMessage {
     content: string;
     is_from_me: boolean;
   } | null;
+  // Client-side fields for stable ordering during optimistic updates
+  // These ensure messages don't visually shuffle during reconciliation
+  _clientOrder?: number;      // Monotonic sequence number for stable sort
+  _clientTempId?: string;     // Original temp ID for stable React key
 }
 
 interface UseMessagesWithPaginationOptions {
@@ -442,6 +446,9 @@ export function useMessagesWithPagination({
                   media_mime_type: rawMsg.media_mime_type ?? prevMsg.media_mime_type,
                   // Preserve reply_to if already resolved locally
                   reply_to: prevMsg.reply_to ?? rawMsg.reply_to,
+                  // CRITICAL: Preserve client-side ordering fields to prevent visual shuffle
+                  _clientOrder: prevMsg._clientOrder,
+                  _clientTempId: prevMsg._clientTempId,
                 };
                 return updated;
               }
@@ -468,6 +475,9 @@ export function useMessagesWithPagination({
                   ...prevMsg,
                   ...rawMsg,
                   status: "sent",
+                  // CRITICAL: Preserve client-side ordering fields to prevent visual shuffle
+                  _clientOrder: prevMsg._clientOrder,
+                  _clientTempId: prevMsg._clientTempId,
                 };
                 return updated;
               }
@@ -495,6 +505,9 @@ export function useMessagesWithPagination({
                 media_url: rawMsg.media_url ?? prevMsg.media_url,
                 media_mime_type: rawMsg.media_mime_type ?? prevMsg.media_mime_type,
                 reply_to: prevMsg.reply_to ?? rawMsg.reply_to,
+                // CRITICAL: Preserve client-side ordering fields to prevent visual shuffle
+                _clientOrder: prevMsg._clientOrder,
+                _clientTempId: prevMsg._clientTempId,
               };
               return updated;
             }
@@ -521,11 +534,20 @@ export function useMessagesWithPagination({
               }
             }
 
-            // Add new message and sort to maintain chronological order
+            // Add new message and sort using stable ordering
+            // Priority: _clientOrder (for optimistic msgs) > created_at (for backend msgs)
             const updated = [...prev, rawMsg];
-            return updated.sort((a, b) => 
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
+            return updated.sort((a, b) => {
+              // If both have _clientOrder, use that for stable ordering
+              if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                return a._clientOrder - b._clientOrder;
+              }
+              // If only one has _clientOrder, that one should come after (it's newer/optimistic)
+              if (a._clientOrder !== undefined) return 1;
+              if (b._clientOrder !== undefined) return -1;
+              // Fallback to created_at for backend messages
+              return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+            });
           });
 
           // Resolve reply_to asynchronously and update the message
