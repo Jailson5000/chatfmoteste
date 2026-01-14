@@ -304,9 +304,23 @@ export default function Connections() {
     return null;
   };
 
+  // Get responsible: can be AI automation or human attendant
   const getResponsibleForInstance = (instance: WhatsAppInstance) => {
-    if (!instance.default_assigned_to) return null;
-    return teamMembers.find((m) => m.id === instance.default_assigned_to) ?? null;
+    // Check for AI automation first
+    if (instance.default_automation_id) {
+      const automation = automations.find((a) => a.id === instance.default_automation_id);
+      if (automation) {
+        return { type: 'ai' as const, name: automation.name, id: automation.id };
+      }
+    }
+    // Check for human attendant
+    if (instance.default_assigned_to) {
+      const member = teamMembers.find((m) => m.id === instance.default_assigned_to);
+      if (member) {
+        return { type: 'human' as const, name: member.full_name, avatar_url: member.avatar_url, id: member.id };
+      }
+    }
+    return null;
   };
   if (isLoading) {
     return (
@@ -576,15 +590,23 @@ export default function Connections() {
                       </td>
                       <td className="px-4 py-3">
                         {responsible ? (
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-6 w-6">
-                              <AvatarImage src={responsible.avatar_url || undefined} />
-                              <AvatarFallback className="text-xs bg-primary/20 text-primary">
-                                {responsible.full_name.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm">{responsible.full_name}</span>
-                          </div>
+                          responsible.type === 'ai' ? (
+                            <div className="flex items-center gap-2">
+                              <Bot className="h-4 w-4 text-blue-500" />
+                              <span className="text-sm">{responsible.name}</span>
+                              <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">IA</Badge>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6">
+                                <AvatarImage src={responsible.avatar_url || undefined} />
+                                <AvatarFallback className="text-xs bg-primary/20 text-primary">
+                                  {responsible.name.charAt(0)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm">{responsible.name}</span>
+                            </div>
+                          )
                         ) : (
                           <span className="text-muted-foreground text-sm">Nenhum</span>
                         )}
