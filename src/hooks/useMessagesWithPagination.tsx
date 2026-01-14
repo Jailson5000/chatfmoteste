@@ -50,7 +50,7 @@ interface UseMessagesWithPaginationReturn {
 
 export function useMessagesWithPagination({
   conversationId,
-  initialBatchSize = 50,
+  initialBatchSize = 35,
   loadMoreBatchSize = 30,
   onNewMessage,
 }: UseMessagesWithPaginationOptions): UseMessagesWithPaginationReturn {

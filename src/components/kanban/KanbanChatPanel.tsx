@@ -1045,7 +1045,7 @@ export function KanbanChatPanel({
     handleScrollToTop,
   } = useMessagesWithPagination({
     conversationId,
-    initialBatchSize: 50,
+    initialBatchSize: 35,
     loadMoreBatchSize: 30,
   });
 
