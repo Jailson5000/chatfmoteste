@@ -94,6 +94,16 @@ export function useWhatsAppInstances() {
     };
   }, [lawFirm?.id, queryClient]);
 
+  const instancesQueryKey = ["whatsapp-instances", lawFirm?.id] as const;
+
+  const patchInstanceInCache = (instanceId: string, patch: Partial<WhatsAppInstance>) => {
+    if (!lawFirm?.id) return;
+    queryClient.setQueryData<WhatsAppInstance[]>(instancesQueryKey, (old) => {
+      if (!old) return old;
+      return old.map((i) => (i.id === instanceId ? ({ ...i, ...patch } as WhatsAppInstance) : i));
+    });
+  };
+
   const testConnection = useMutation({
     mutationFn: async ({ apiUrl, apiKey }: { apiUrl: string; apiKey: string }): Promise<EvolutionResponse> => {
       console.log("[useWhatsAppInstances] Testing connection to:", apiUrl);
@@ -437,19 +447,31 @@ export function useWhatsAppInstances() {
 
       if (error) throw error;
     },
+    onMutate: async ({ instanceId, departmentId }) => {
+      if (!lawFirm?.id) return;
+      await queryClient.cancelQueries({ queryKey: instancesQueryKey });
+      const previous = queryClient.getQueryData<WhatsAppInstance[]>(instancesQueryKey);
+      patchInstanceInCache(instanceId, { default_department_id: departmentId });
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
       toast({
         title: "Departamento atualizado",
         description: "O departamento padrão foi configurado com sucesso.",
       });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _vars, context) => {
+      if ((context as any)?.previous) {
+        queryClient.setQueryData(instancesQueryKey, (context as any).previous);
+      }
       toast({
         title: "Erro ao atualizar departamento",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: instancesQueryKey });
     },
   });
 
@@ -462,19 +484,31 @@ export function useWhatsAppInstances() {
 
       if (error) throw error;
     },
+    onMutate: async ({ instanceId, statusId }) => {
+      if (!lawFirm?.id) return;
+      await queryClient.cancelQueries({ queryKey: instancesQueryKey });
+      const previous = queryClient.getQueryData<WhatsAppInstance[]>(instancesQueryKey);
+      patchInstanceInCache(instanceId, { default_status_id: statusId });
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
       toast({
         title: "Status atualizado",
         description: "O status padrão foi configurado com sucesso.",
       });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _vars, context) => {
+      if ((context as any)?.previous) {
+        queryClient.setQueryData(instancesQueryKey, (context as any).previous);
+      }
       toast({
         title: "Erro ao atualizar status",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: instancesQueryKey });
     },
   });
 
@@ -483,7 +517,7 @@ export function useWhatsAppInstances() {
   const updateDefaultResponsible = useMutation({
     mutationFn: async ({ instanceId, value }: { instanceId: string; value: string | null }) => {
       let updateData: { default_assigned_to: string | null; default_automation_id: string | null };
-      
+
       if (!value || value === "none") {
         // No responsible selected - clear both
         updateData = { default_assigned_to: null, default_automation_id: null };
@@ -495,7 +529,7 @@ export function useWhatsAppInstances() {
         // Human selected - set human, clear automation
         updateData = { default_assigned_to: value, default_automation_id: null };
       }
-      
+
       const { error } = await supabase
         .from("whatsapp_instances")
         .update(updateData as any)
@@ -503,19 +537,39 @@ export function useWhatsAppInstances() {
 
       if (error) throw error;
     },
+    onMutate: async ({ instanceId, value }) => {
+      if (!lawFirm?.id) return;
+      await queryClient.cancelQueries({ queryKey: instancesQueryKey });
+      const previous = queryClient.getQueryData<WhatsAppInstance[]>(instancesQueryKey);
+
+      const patch: Partial<WhatsAppInstance> =
+        !value || value === "none"
+          ? { default_assigned_to: null, default_automation_id: null }
+          : value.startsWith("ai:")
+            ? { default_assigned_to: null, default_automation_id: value.replace("ai:", "") }
+            : { default_assigned_to: value, default_automation_id: null };
+
+      patchInstanceInCache(instanceId, patch);
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
       toast({
         title: "Responsável atualizado",
         description: "O responsável padrão foi configurado com sucesso.",
       });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _vars, context) => {
+      if ((context as any)?.previous) {
+        queryClient.setQueryData(instancesQueryKey, (context as any).previous);
+      }
       toast({
         title: "Erro ao atualizar responsável",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: instancesQueryKey });
     },
   });
 
