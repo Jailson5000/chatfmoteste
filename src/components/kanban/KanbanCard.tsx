@@ -172,7 +172,7 @@ export function KanbanCard({
   return (
     <div
       className={cn(
-        "group relative rounded-lg bg-card border border-border/50 p-3 cursor-grab active:cursor-grabbing",
+        "group relative rounded-lg bg-card border border-border/50 p-2.5 cursor-grab active:cursor-grabbing",
         "transition-all duration-200 hover:border-border hover:shadow-md hover:-translate-y-0.5",
         isDragging && "opacity-50 scale-95"
       )}
@@ -186,52 +186,52 @@ export function KanbanCard({
     >
       {/* Unread Badge */}
       {unreadCount > 0 && (
-        <div className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1.5 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs font-bold">
+        <div className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold">
           {unreadCount > 99 ? "99+" : unreadCount}
         </div>
       )}
 
       {/* Header: Avatar, Name, Phone, Time */}
-      <div className="flex items-start gap-3">
-        <Avatar className="h-10 w-10 border-2 border-success/30">
+      <div className="flex items-start gap-2">
+        <Avatar className="h-8 w-8 border border-success/30">
           <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} />
-          <AvatarFallback className="bg-muted text-muted-foreground text-sm font-medium">
+          <AvatarFallback className="bg-muted text-muted-foreground text-xs font-medium">
             {getInitials(conversation.contact_name)}
           </AvatarFallback>
         </Avatar>
         
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="font-semibold text-sm truncate">
+          <div className="flex items-center justify-between gap-1">
+            <h4 className="font-medium text-xs truncate">
               {conversation.contact_name || conversation.contact_phone || "Sem nome"}
             </h4>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
-              <div className="w-1.5 h-1.5 rounded-full bg-success" />
+            <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground flex-shrink-0">
+              <div className="w-1 h-1 rounded-full bg-success" />
               <span>{timeAgo}</span>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">{maskedPhone}</p>
+          <p className="text-[10px] text-muted-foreground">{maskedPhone}</p>
         </div>
       </div>
 
       {/* Message Preview */}
-      <div className="mt-2 flex items-start gap-1.5">
+      <div className="mt-1.5 flex items-start gap-1">
         {isFromMe && (
-          <CheckCheck className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
+          <CheckCheck className="h-3 w-3 text-primary flex-shrink-0 mt-0.5" />
         )}
         {messageIcon && (
           <span className="text-muted-foreground flex-shrink-0 mt-0.5">{messageIcon}</span>
         )}
-        <p className="text-xs text-muted-foreground line-clamp-2">
+        <p className="text-[10px] text-muted-foreground line-clamp-1">
           {messagePreview}
         </p>
       </div>
 
       {/* Status Badge */}
       {customStatus && (
-        <div className="mt-2">
+        <div className="mt-1.5">
           <Badge 
-            className="text-xs h-5 px-2 border-0"
+            className="text-[10px] h-4 px-1.5 border-0"
             style={{ 
               backgroundColor: `${customStatus.color}20`,
               color: customStatus.color 
@@ -243,14 +243,14 @@ export function KanbanCard({
       )}
 
       {/* Footer: Tags, Instance, Handler */}
-      <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           {/* Tags icon with tooltip */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center cursor-pointer hover:text-foreground transition-colors">
-                  <Tag className="h-3 w-3" />
+                  <Tag className="h-2.5 w-2.5" />
                 </div>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-xs">
@@ -274,23 +274,23 @@ export function KanbanCard({
           </TooltipProvider>
 
           {/* Instance phone (last 4 digits) with signal icon */}
-          <div className="flex items-center gap-1">
-            <Radio className="h-3 w-3" />
+          <div className="flex items-center gap-0.5">
+            <Radio className="h-2.5 w-2.5" />
             <span>{instanceDisplay}</span>
           </div>
         </div>
 
         {/* Handler */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           {isAI ? (
-            <Bot className="h-3.5 w-3.5 text-purple-500" />
+            <Bot className="h-3 w-3 text-purple-500" />
           ) : hasAssignment ? (
-            <User className="h-3.5 w-3.5 text-success" />
+            <User className="h-3 w-3 text-success" />
           ) : (
-            <User className="h-3.5 w-3.5 text-amber-500" />
+            <User className="h-3 w-3 text-amber-500" />
           )}
           <span className={cn(
-            "text-xs truncate max-w-[100px]",
+            "text-[10px] truncate max-w-[80px]",
             isAI ? "text-purple-500" : hasAssignment ? "text-success" : "text-amber-500"
           )}>
             {handlerName}
