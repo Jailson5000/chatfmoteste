@@ -52,26 +52,25 @@ export function useInfiniteScroll<T>(
   const armedRef = useRef(true); // must "re-arm" by scrolling away from the threshold
 
   const totalCount = data.length;
-  const hasMore = displayedCount < totalCount;
+  
+  // Show all available data up to displayedCount, or ALL data if less than initial batch
+  // This ensures we always show at least initialBatchSize items (or all items if fewer)
+  const effectiveDisplayCount = Math.max(displayedCount, Math.min(initialBatchSize, totalCount));
+  const hasMore = effectiveDisplayCount < totalCount;
 
-  // Visible data slice
+  // Visible data slice - always show at least initialBatchSize or all available
   const visibleData = useMemo(() => {
-    return data.slice(0, displayedCount);
-  }, [data, displayedCount]);
+    return data.slice(0, effectiveDisplayCount);
+  }, [data, effectiveDisplayCount]);
 
-  // Keep displayedCount consistent when data shrinks temporarily (e.g. realtime/drag moves)
+  // Keep displayedCount consistent when data grows (new items added)
+  // Only reset if significantly over total (allows seamless realtime updates)
   useEffect(() => {
-    const minCount = Math.min(initialBatchSize, data.length);
-
-    if (displayedCount < minCount) {
-      setDisplayedCount(minCount);
-      return;
+    // If displayed count is way beyond data (user switched tabs/filters), reset to initial
+    if (displayedCount > totalCount + batchIncrement * 2) {
+      setDisplayedCount(initialBatchSize);
     }
-
-    if (displayedCount > data.length + batchIncrement) {
-      setDisplayedCount(minCount);
-    }
-  }, [data.length, displayedCount, initialBatchSize, batchIncrement]);
+  }, [totalCount, displayedCount, initialBatchSize, batchIncrement]);
 
   const loadMore = useCallback(() => {
     // Triple guard: loading flag, hasMore check, AND debounce
