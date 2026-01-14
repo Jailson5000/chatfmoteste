@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
 import { useSearchParams } from "react-router-dom";
@@ -47,7 +47,8 @@ import { ReplyPreview } from "@/components/conversations/ReplyPreview";
 import { TemplatePopup } from "@/components/conversations/TemplatePopup";
 import { ContactStatusTags } from "@/components/conversations/ContactStatusTags";
 import { UnreadBadge } from "@/components/conversations/UnreadBadge";
-import { InlineActivityBadge } from "@/components/conversations/InlineActivityBadge";
+import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
+import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
 import { useNotificationSound } from "@/hooks/useNotificationSound";
 import { useTemplates, Template } from "@/hooks/useTemplates";
@@ -2187,41 +2188,60 @@ export default function Conversations() {
                             <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
                           </div>
                         )}
-                        {timelineItems.map((item) => (
-                          item.type === 'activity' ? (
-                            <InlineActivityBadge key={item.data.id} activity={item.data} />
-                          ) : (
-                            <MessageBubble
-                              key={item.data.id}
-                              id={item.data.id}
-                              content={item.data.content}
-                              createdAt={item.data.created_at}
-                              isFromMe={item.data.is_from_me}
-                              senderType={item.data.sender_type || "user"}
-                              aiGenerated={item.data.ai_generated || false}
-                              mediaUrl={item.data.media_url}
-                              mediaMimeType={item.data.media_mime_type}
-                              messageType={item.data.message_type}
-                              status={(item.data.status || "sent") as MessageStatus}
-                              readAt={item.data.read_at}
-                              whatsappMessageId={item.data.whatsapp_message_id}
-                              conversationId={selectedConversationId || undefined}
-                              remoteJid={selectedConversation?.remote_jid}
-                              replyTo={item.data.reply_to}
-                              isInternal={item.data.is_internal}
-                              isPontual={item.data.is_pontual}
-                              aiAgentName={item.data.ai_agent_name}
-                              isRevoked={item.data.is_revoked}
-                              isStarred={item.data.is_starred}
-                              onReply={handleReply}
-                              onScrollToMessage={scrollToMessage}
-                              onRetry={handleRetryMessage}
-                              onToggleStar={handleToggleStar}
-                              onDelete={handleDeleteMessage}
-                              onDownloadMedia={handleDownloadMedia}
-                            />
-                          )
-                        ))}
+                        {timelineItems.map((item, index) => {
+                          const prevItem = index > 0 ? timelineItems[index - 1] : null;
+                          // Get date from the correct field based on item type
+                          const getItemDate = (timelineItem: { type: string; data: ActivityItem | PaginatedMessage } | null): string | Date | null => {
+                            if (!timelineItem) return null;
+                            if (timelineItem.type === 'activity') {
+                              return (timelineItem.data as ActivityItem).timestamp;
+                            }
+                            return (timelineItem.data as PaginatedMessage).created_at;
+                          };
+                          const currentDate = getItemDate(item);
+                          const prevDate = getItemDate(prevItem);
+                          const showDateSep = shouldShowDateSeparator(currentDate!, prevDate);
+                          
+                          return (
+                            <React.Fragment key={item.data.id}>
+                              {showDateSep && currentDate && (
+                                <DateSeparator date={new Date(currentDate)} />
+                              )}
+                              {item.type === 'activity' ? (
+                                <InlineActivityBadge activity={item.data} />
+                              ) : (
+                                <MessageBubble
+                                  id={item.data.id}
+                                  content={item.data.content}
+                                  createdAt={item.data.created_at}
+                                  isFromMe={item.data.is_from_me}
+                                  senderType={item.data.sender_type || "user"}
+                                  aiGenerated={item.data.ai_generated || false}
+                                  mediaUrl={item.data.media_url}
+                                  mediaMimeType={item.data.media_mime_type}
+                                  messageType={item.data.message_type}
+                                  status={(item.data.status || "sent") as MessageStatus}
+                                  readAt={item.data.read_at}
+                                  whatsappMessageId={item.data.whatsapp_message_id}
+                                  conversationId={selectedConversationId || undefined}
+                                  remoteJid={selectedConversation?.remote_jid}
+                                  replyTo={item.data.reply_to}
+                                  isInternal={item.data.is_internal}
+                                  isPontual={item.data.is_pontual}
+                                  aiAgentName={item.data.ai_agent_name}
+                                  isRevoked={item.data.is_revoked}
+                                  isStarred={item.data.is_starred}
+                                  onReply={handleReply}
+                                  onScrollToMessage={scrollToMessage}
+                                  onRetry={handleRetryMessage}
+                                  onToggleStar={handleToggleStar}
+                                  onDelete={handleDeleteMessage}
+                                  onDownloadMedia={handleDownloadMedia}
+                                />
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
                       </>
                     )}
                   </div>
@@ -2973,44 +2993,64 @@ export default function Conversations() {
                           <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
                         </div>
                       )}
-                      {timelineItems.map((item) => (
-                        item.type === 'activity' ? (
-                          <InlineActivityBadge key={item.data.id} activity={item.data} />
-                        ) : (
-                          <div key={item.data.id} data-message-id={item.data.id} ref={(el) => { if (el) messageRefs.current.set(item.data.id, el); }}>
-                            <MessageBubble
-                              id={item.data.id}
-                              content={item.data.content}
-                              createdAt={item.data.created_at}
-                              isFromMe={item.data.is_from_me}
-                              senderType={item.data.sender_type || "user"}
-                              aiGenerated={item.data.ai_generated || false}
-                              mediaUrl={item.data.media_url}
-                              mediaMimeType={item.data.media_mime_type}
-                              messageType={item.data.message_type}
-                              status={(item.data.status || "sent") as MessageStatus}
-                              readAt={item.data.read_at}
-                              whatsappMessageId={item.data.whatsapp_message_id}
-                              conversationId={selectedConversationId || undefined}
-                              remoteJid={selectedConversation?.remote_jid}
-                              replyTo={item.data.reply_to}
-                              isInternal={item.data.is_internal}
-                              isPontual={item.data.is_pontual}
-                              aiAgentName={item.data.ai_agent_name}
-                              isRevoked={item.data.is_revoked}
-                              isStarred={item.data.is_starred}
-                              onReply={handleReply}
-                              onScrollToMessage={scrollToMessage}
-                              onRetry={handleRetryMessage}
-                              onToggleStar={handleToggleStar}
-                              onDelete={handleDeleteMessage}
-                              onDownloadMedia={handleDownloadMedia}
-                              highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
-                              isHighlighted={highlightedMessageId === item.data.id}
-                            />
-                          </div>
-                        )
-                      ))}
+                      {timelineItems.map((item, index) => {
+                        const prevItem = index > 0 ? timelineItems[index - 1] : null;
+                        // Get date from the correct field based on item type
+                        const getItemDate = (timelineItem: { type: string; data: ActivityItem | PaginatedMessage } | null): string | Date | null => {
+                          if (!timelineItem) return null;
+                          if (timelineItem.type === 'activity') {
+                            return (timelineItem.data as ActivityItem).timestamp;
+                          }
+                          return (timelineItem.data as PaginatedMessage).created_at;
+                        };
+                        const currentDate = getItemDate(item);
+                        const prevDate = getItemDate(prevItem);
+                        const showDateSep = shouldShowDateSeparator(currentDate!, prevDate);
+                        
+                        return (
+                          <React.Fragment key={item.data.id}>
+                            {showDateSep && currentDate && (
+                              <DateSeparator date={new Date(currentDate)} />
+                            )}
+                            {item.type === 'activity' ? (
+                              <InlineActivityBadge activity={item.data} />
+                            ) : (
+                              <div data-message-id={item.data.id} ref={(el) => { if (el) messageRefs.current.set(item.data.id, el); }}>
+                                <MessageBubble
+                                  id={item.data.id}
+                                  content={item.data.content}
+                                  createdAt={item.data.created_at}
+                                  isFromMe={item.data.is_from_me}
+                                  senderType={item.data.sender_type || "user"}
+                                  aiGenerated={item.data.ai_generated || false}
+                                  mediaUrl={item.data.media_url}
+                                  mediaMimeType={item.data.media_mime_type}
+                                  messageType={item.data.message_type}
+                                  status={(item.data.status || "sent") as MessageStatus}
+                                  readAt={item.data.read_at}
+                                  whatsappMessageId={item.data.whatsapp_message_id}
+                                  conversationId={selectedConversationId || undefined}
+                                  remoteJid={selectedConversation?.remote_jid}
+                                  replyTo={item.data.reply_to}
+                                  isInternal={item.data.is_internal}
+                                  isPontual={item.data.is_pontual}
+                                  aiAgentName={item.data.ai_agent_name}
+                                  isRevoked={item.data.is_revoked}
+                                  isStarred={item.data.is_starred}
+                                  onReply={handleReply}
+                                  onScrollToMessage={scrollToMessage}
+                                  onRetry={handleRetryMessage}
+                                  onToggleStar={handleToggleStar}
+                                  onDelete={handleDeleteMessage}
+                                  onDownloadMedia={handleDownloadMedia}
+                                  highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
+                                  isHighlighted={highlightedMessageId === item.data.id}
+                                />
+                              </div>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </>
                   )}
                   <div ref={messagesEndRef} />
