@@ -1024,11 +1024,13 @@ export default function Conversations() {
   ]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversationId || !selectedConversation || isSending) return;
+    if (!messageInput.trim() || !selectedConversationId || !selectedConversation) return;
     
     let messageToSend = messageInput.trim();
     const wasPontualMode = isPontualMode;
     const wasInternalMode = isInternalMode;
+    const conversationId = selectedConversationId;
+    const conversation = selectedConversation;
     
     // Add signature if enabled and not internal mode - name in bold+italic on top, message below
     if (signatureEnabled && userProfile?.full_name && !wasInternalMode) {
@@ -1042,9 +1044,13 @@ export default function Conversations() {
       messageToSend = `${signature}\n${messageInput.trim()}`;
     }
     
-    setMessageInput(""); // Clear input immediately for better UX
-    setIsSending(true);
-    setIsPontualMode(false); // Reset pontual mode after sending
+    // Clear input IMMEDIATELY for instant UX - user can type next message right away
+    setMessageInput("");
+    setIsPontualMode(false);
+    
+    // Capture reply state before clearing
+    const replyMessage = replyToMessage;
+    setReplyToMessage(null);
     
     // Optimistically add message to local state with "sending" status
     const tempId = crypto.randomUUID();
@@ -1067,96 +1073,92 @@ export default function Conversations() {
       if (pendingOutgoingRef.current.length > 50) pendingOutgoingRef.current.shift();
     }
     
-    try {
-      if (wasInternalMode) {
-        // Internal message - save directly to database, don't send to WhatsApp
-        const { error } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: selectedConversationId,
-            content: messageToSend,
-            message_type: "text",
-            is_from_me: true,
-            sender_type: "human",
-            ai_generated: false,
-            is_internal: true,
+    // Send message in background - don't block the UI
+    (async () => {
+      try {
+        if (wasInternalMode) {
+          // Internal message - save directly to database, don't send to WhatsApp
+          const { error } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              content: messageToSend,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+              is_internal: true,
+            });
+          
+          if (error) throw error;
+          
+          // Update temp message to saved
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
+          ));
+        } else {
+          // Normal message - send to WhatsApp
+          // If NOT in pontual mode: auto-assign to current user if:
+          // 1. Handler is AI, or
+          // 2. No responsible assigned, or
+          // 3. Another attendant is assigned (transfer to current user)
+          const shouldTransfer = !wasPontualMode && (
+            conversation.current_handler === "ai" || 
+            !conversation.assigned_to ||
+            (conversation.assigned_to !== user?.id)
+          );
+          
+          if (shouldTransfer) {
+            await transferHandler.mutateAsync({
+              conversationId: conversationId,
+              handlerType: "human",
+              assignedTo: user?.id,
+            });
+          }
+          
+          // Use async send for <1s response
+          const replyWhatsAppId = replyMessage?.whatsapp_message_id || null;
+          
+          const response = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "send_message_async",
+              conversationId: conversationId,
+              message: messageToSend,
+              replyToWhatsAppMessageId: replyWhatsAppId,
+              replyToMessageId: replyMessage?.id || null,
+            },
           });
-        
-        if (error) throw error;
-        
-        // Update temp message to saved
-        setMessages(prev => prev.map(m => 
-          m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
-        ));
-      } else {
-        // Normal message - send to WhatsApp
-        // If NOT in pontual mode: auto-assign to current user if:
-        // 1. Handler is AI, or
-        // 2. No responsible assigned, or
-        // 3. Another attendant is assigned (transfer to current user)
-        const shouldTransfer = !wasPontualMode && (
-          selectedConversation.current_handler === "ai" || 
-          !selectedConversation.assigned_to ||
-          (selectedConversation.assigned_to !== user?.id)
-        );
-        
-        if (shouldTransfer) {
-          await transferHandler.mutateAsync({
-            conversationId: selectedConversationId,
-            handlerType: "human",
-            assignedTo: user?.id, // Atribuir ao usuário que está enviando a mensagem
-          });
-        }
-        
-        // Use async send for <1s response
-        // Send whatsapp_message_id for reply linking (not DB id)
-        const replyWhatsAppId = replyToMessage?.whatsapp_message_id || null;
-        
-        const response = await supabase.functions.invoke("evolution-api", {
-          body: {
-            action: "send_message_async",
-            conversationId: selectedConversationId,
-            message: messageToSend,
-            replyToWhatsAppMessageId: replyWhatsAppId,
-            replyToMessageId: replyToMessage?.id || null, // For DB linking
-          },
-        });
-        
-        // Clear reply state after sending
-        setReplyToMessage(null);
 
-        if (response.error) {
-          throw new Error(response.error.message || "Falha ao enviar mensagem");
-        }
+          if (response.error) {
+            throw new Error(response.error.message || "Falha ao enviar mensagem");
+          }
 
-        if (!response.data?.success) {
-          throw new Error(response.data?.error || "Falha ao enviar mensagem");
-        }
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          }
 
-        // Update to "sent" - message is now queued
+          // Update to "sent" - message is now queued
+          setMessages(prev => prev.map(m => 
+            m.id === tempId 
+              ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
+              : m
+          ));
+        }
+      } catch (error) {
+        console.error("Erro ao enviar mensagem:", error);
+        // Update message to show error status
         setMessages(prev => prev.map(m => 
           m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
+            ? { ...m, status: "error" as MessageStatus }
             : m
         ));
+        toast({
+          title: "Erro ao enviar",
+          description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+          variant: "destructive",
+        });
       }
-    } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
-      // Update message to show error status
-      setMessages(prev => prev.map(m => 
-        m.id === tempId 
-          ? { ...m, status: "error" as MessageStatus }
-          : m
-      ));
-      setMessageInput(messageToSend); // Restore message on error
-      toast({
-        title: "Erro ao enviar",
-        description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSending(false);
-    }
+    })();
   };
   
   // Handle internal file upload
@@ -2264,7 +2266,6 @@ export default function Conversations() {
                       rows={1}
                       value={messageInput}
                       onChange={(e) => setMessageInput(e.target.value)}
-                      disabled={isSending}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
@@ -2275,13 +2276,9 @@ export default function Conversations() {
                     <Button 
                       size="icon" 
                       onClick={handleSendMessage}
-                      disabled={isSending || !messageInput.trim()}
+                      disabled={!messageInput.trim()}
                     >
-                      {isSending ? (
-                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                      ) : (
-                        <Send className="h-5 w-5" />
-                      )}
+                      <Send className="h-5 w-5" />
                     </Button>
                   </div>
                 </div>
@@ -3217,7 +3214,6 @@ export default function Conversations() {
                           variant="ghost" 
                           size="icon" 
                           className="text-muted-foreground"
-                          disabled={isSending}
                         >
                           <Plus className="h-5 w-5" />
                         </Button>
@@ -3306,7 +3302,7 @@ export default function Conversations() {
                     />
                     <AutoResizeTextarea
                       ref={textareaRef}
-                      placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
+                      placeholder="Digite / para templates..."
                       minRows={1}
                       maxRows={5}
                       value={messageInput}
@@ -3323,7 +3319,6 @@ export default function Conversations() {
                           setTemplateSearchTerm("");
                         }
                       }}
-                      disabled={isSending}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey && !showTemplatePopup) {
                           e.preventDefault();
@@ -3394,13 +3389,9 @@ export default function Conversations() {
                     <Button 
                       size="icon" 
                       onClick={handleSendMessage}
-                      disabled={isSending || !messageInput.trim()}
+                      disabled={!messageInput.trim()}
                     >
-                      {isSending ? (
-                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                      ) : (
-                        <Send className="h-5 w-5" />
-                      )}
+                      <Send className="h-5 w-5" />
                     </Button>
                   </div>
                 </div>

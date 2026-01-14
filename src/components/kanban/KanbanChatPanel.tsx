@@ -1412,93 +1412,85 @@ export function KanbanChatPanel({
   }, [contactName]);
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || isSending) return;
+    if (!messageInput.trim()) return;
 
     const wasPontualMode = isPontualMode;
     const wasInternalMode = isInternalMode;
     const messageToSend = messageInput.trim();
     const replyToId = replyToMessage?.id || null;
+    const replyWhatsAppId = replyToMessage?.whatsapp_message_id || null;
     
+    // Clear input IMMEDIATELY for instant UX
     setMessageInput("");
-    setIsSending(true);
     setIsPontualMode(false);
     setReplyToMessage(null);
 
-    try {
-      if (wasInternalMode) {
-        // Internal message - save directly to database
-        const { data: userData } = await supabase.auth.getUser();
-        const { error } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          content: messageToSend,
-          is_from_me: true,
-          sender_type: "human",
-          ai_generated: false,
-          is_internal: true,
-          status: "sent",
-          message_type: "text",
-          sender_id: userData.user?.id,
-          reply_to_message_id: replyToId,
-        });
-        
-        if (error) throw error;
-      } else {
-        // External message - send via WhatsApp
-        // Auto-assign to current user if:
-        // 1. Handler is AI, or
-        // 2. No responsible assigned, or
-        // 3. Another attendant is assigned (transfer to current user)
-        const { data: userData } = await supabase.auth.getUser();
-        const currentUserId = userData.user?.id;
-        
-        const shouldTransfer = !wasPontualMode && (
-          currentHandler === "ai" || 
-          !assignedTo ||
-          (assignedTo !== currentUserId)
-        );
-        
-        if (shouldTransfer && currentUserId) {
-          await transferHandler.mutateAsync({
-            conversationId,
-            handlerType: "human",
-            assignedTo: currentUserId,
+    // Send message in background - don't block the UI
+    (async () => {
+      try {
+        if (wasInternalMode) {
+          // Internal message - save directly to database
+          const { data: userData } = await supabase.auth.getUser();
+          const { error } = await supabase.from("messages").insert({
+            conversation_id: conversationId,
+            content: messageToSend,
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+            is_internal: true,
+            status: "sent",
+            message_type: "text",
+            sender_id: userData.user?.id,
+            reply_to_message_id: replyToId,
           });
-        }
+          
+          if (error) throw error;
+        } else {
+          // External message - send via WhatsApp
+          const { data: userData } = await supabase.auth.getUser();
+          const currentUserId = userData.user?.id;
+          
+          const shouldTransfer = !wasPontualMode && (
+            currentHandler === "ai" || 
+            !assignedTo ||
+            (assignedTo !== currentUserId)
+          );
+          
+          if (shouldTransfer && currentUserId) {
+            await transferHandler.mutateAsync({
+              conversationId,
+              handlerType: "human",
+              assignedTo: currentUserId,
+            });
+          }
+          
+          const response = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "send_message_async",
+              conversationId,
+              message: messageToSend,
+              replyToWhatsAppMessageId: replyWhatsAppId,
+              replyToMessageId: replyToId,
+            },
+          });
 
-        // Send whatsapp_message_id for reply linking in WhatsApp (not DB id)
-        const replyWhatsAppId = replyToMessage?.whatsapp_message_id || null;
-        
-        const response = await supabase.functions.invoke("evolution-api", {
-          body: {
-            action: "send_message_async",
-            conversationId,
-            message: messageToSend,
-            replyToWhatsAppMessageId: replyWhatsAppId,
-            replyToMessageId: replyToId, // For DB linking
-          },
+          if (response.error) {
+            throw new Error(response.error.message || "Falha ao enviar mensagem");
+          }
+
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao enviar mensagem:", error);
+        toast({
+          title: "Erro ao enviar",
+          description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+          variant: "destructive",
         });
-
-        if (response.error) {
-          throw new Error(response.error.message || "Falha ao enviar mensagem");
-        }
-
-        if (!response.data?.success) {
-          throw new Error(response.data?.error || "Falha ao enviar mensagem");
-        }
-        
-        // Message is inserted by backend and will arrive via realtime
       }
-    } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
-      setMessageInput(messageToSend);
-      toast({
-        title: "Erro ao enviar",
-        description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSending(false);
-    }
+    })();
   };
 
   const handleSendAudio = async (audioBlob: Blob) => {
@@ -2630,18 +2622,13 @@ export function KanbanChatPanel({
                 className={cn(
                   isInternalMode && "border-yellow-400"
                 )}
-                disabled={isSending}
               />
               <Button
                 onClick={handleSendMessage}
-                disabled={!messageInput.trim() || isSending}
+                disabled={!messageInput.trim()}
                 className="h-auto"
               >
-                {isSending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
+                <Send className="h-4 w-4" />
               </Button>
             </div>
           </>
