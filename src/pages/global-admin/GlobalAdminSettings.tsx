@@ -74,6 +74,42 @@ export default function GlobalAdminSettings() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Master toggle to disable all payments */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                <Label className="font-medium">Desativar Todos os Pagamentos</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Bloqueia checkout na landing page. Clientes precisam de liberação manual.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("payments_disabled") === "true" || getSetting("payments_disabled") === true}
+                onCheckedChange={(checked) => handleChange("payments_disabled", checked.toString())}
+              />
+              {localSettings["payments_disabled"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("payments_disabled")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("payments_disabled") === "true" || getSetting("payments_disabled") === true) && (
+            <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 text-sm flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Pagamentos online estão <strong>desativados</strong>. 
+                Clientes verão uma mensagem para entrar em contato diretamente.
+              </span>
+            </div>
+          )}
+
+          <Separator />
+
           <div className="space-y-4">
             <RadioGroup
               value={currentPaymentProvider}
