@@ -93,6 +93,7 @@ import { ConversationSidebarCard } from "@/components/conversations/Conversation
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { AudioModeIndicator } from "@/components/conversations/AudioModeIndicator";
 import { useConversations } from "@/hooks/useConversations";
+import { useConversationCounts } from "@/hooks/useConversationCounts";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useTags } from "@/hooks/useTags";
@@ -180,6 +181,7 @@ export default function Conversations() {
     hasMoreConversations: hasMoreFromBackend,
     isLoadingMoreConversations: isLoadingMoreFromBackend,
   } = useConversations();
+  const { counts: tabCounts } = useConversationCounts();
   const { members: teamMembers } = useTeamMembers();
   const { departments } = useDepartments();
   const { tags } = useTags();
@@ -1765,24 +1767,19 @@ export default function Conversations() {
     }
   };
 
+  // Get tab counts from dedicated backend query for consistency
   const getTabCount = (tab: ConversationTab) => {
     switch (tab) {
       case "chat":
-        // Cada atendente vê o número correto de atendimentos dele
-        return user?.id
-          ? mappedConversations.filter((c) => c.handler === "human" && c.assignedUserId === user.id && !c.archivedAt).length
-          : 0;
+        return tabCounts.chat;
       case "ai":
-        return mappedConversations.filter((c) => c.handler === "ai" && !c.archivedAt).length;
+        return tabCounts.ai;
       case "queue":
-        // Fila: apenas conversas sem responsável (pendentes)
-        // Include both "unassigned" handler AND "human" with no assigned user
-        return mappedConversations.filter((c) => (c.handler === "unassigned" || (c.handler === "human" && !c.assignedUserId)) && !c.archivedAt).length;
+        return tabCounts.queue;
       case "all":
-        // Todos: todas as conversas não arquivadas
-        return mappedConversations.filter((c) => !c.archivedAt).length;
+        return tabCounts.all;
       case "archived":
-        return mappedConversations.filter((c) => !!c.archivedAt).length;
+        return tabCounts.archived;
     }
   };
 
