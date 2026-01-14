@@ -172,7 +172,7 @@ export function KanbanColumn({
 
         {/* Cards */}
         <div 
-          className="p-2 space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto"
+          className="p-2 space-y-2 max-h-[calc(100vh-140px)] overflow-y-auto"
           onScroll={cardScroll.handleScroll}
         >
           {cardScroll.visibleData.map((conv) => (
