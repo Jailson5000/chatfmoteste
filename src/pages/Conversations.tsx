@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
+import { useMessageQueue } from "@/hooks/useMessageQueue";
 import { useSearchParams } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
@@ -196,6 +197,9 @@ export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { lawFirm } = useLawFirm();
   const { followUpsByConversation } = useScheduledFollowUps();
+  
+  // Message queue to ensure messages are sent in strict order
+  const { enqueue: enqueueMessage, clearQueue: clearMessageQueue } = useMessageQueue();
 
   // Filter connected instances for the selector
   const connectedInstances = useMemo(() => 
@@ -1073,92 +1077,91 @@ export default function Conversations() {
       if (pendingOutgoingRef.current.length > 50) pendingOutgoingRef.current.shift();
     }
     
-    // Send message in background - don't block the UI
-    (async () => {
-      try {
-        if (wasInternalMode) {
-          // Internal message - save directly to database, don't send to WhatsApp
-          const { error } = await supabase
-            .from("messages")
-            .insert({
-              conversation_id: conversationId,
-              content: messageToSend,
-              message_type: "text",
-              is_from_me: true,
-              sender_type: "human",
-              ai_generated: false,
-              is_internal: true,
-            });
-          
-          if (error) throw error;
-          
-          // Update temp message to saved
-          setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
-          ));
-        } else {
-          // Normal message - send to WhatsApp
-          // If NOT in pontual mode: auto-assign to current user if:
-          // 1. Handler is AI, or
-          // 2. No responsible assigned, or
-          // 3. Another attendant is assigned (transfer to current user)
-          const shouldTransfer = !wasPontualMode && (
-            conversation.current_handler === "ai" || 
-            !conversation.assigned_to ||
-            (conversation.assigned_to !== user?.id)
-          );
-          
-          if (shouldTransfer) {
-            await transferHandler.mutateAsync({
-              conversationId: conversationId,
-              handlerType: "human",
-              assignedTo: user?.id,
-            });
-          }
-          
-          // Use async send for <1s response
-          const replyWhatsAppId = replyMessage?.whatsapp_message_id || null;
-          
-          const response = await supabase.functions.invoke("evolution-api", {
-            body: {
-              action: "send_message_async",
-              conversationId: conversationId,
-              message: messageToSend,
-              replyToWhatsAppMessageId: replyWhatsAppId,
-              replyToMessageId: replyMessage?.id || null,
-            },
+    // Enqueue message send to ensure strict ordering
+    // Messages are sent sequentially in the order they were typed
+    enqueueMessage(async () => {
+      if (wasInternalMode) {
+        // Internal message - save directly to database, don't send to WhatsApp
+        const { error } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            content: messageToSend,
+            message_type: "text",
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+            is_internal: true,
           });
-
-          if (response.error) {
-            throw new Error(response.error.message || "Falha ao enviar mensagem");
-          }
-
-          if (!response.data?.success) {
-            throw new Error(response.data?.error || "Falha ao enviar mensagem");
-          }
-
-          // Update to "sent" - message is now queued
-          setMessages(prev => prev.map(m => 
-            m.id === tempId 
-              ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
-              : m
-          ));
+        
+        if (error) throw error;
+        
+        // Update temp message to saved
+        setMessages(prev => prev.map(m => 
+          m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
+        ));
+      } else {
+        // Normal message - send to WhatsApp
+        // If NOT in pontual mode: auto-assign to current user if:
+        // 1. Handler is AI, or
+        // 2. No responsible assigned, or
+        // 3. Another attendant is assigned (transfer to current user)
+        const shouldTransfer = !wasPontualMode && (
+          conversation.current_handler === "ai" || 
+          !conversation.assigned_to ||
+          (conversation.assigned_to !== user?.id)
+        );
+        
+        if (shouldTransfer) {
+          await transferHandler.mutateAsync({
+            conversationId: conversationId,
+            handlerType: "human",
+            assignedTo: user?.id,
+          });
         }
-      } catch (error) {
-        console.error("Erro ao enviar mensagem:", error);
-        // Update message to show error status
+        
+        // Use async send for <1s response
+        const replyWhatsAppId = replyMessage?.whatsapp_message_id || null;
+        
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_message_async",
+            conversationId: conversationId,
+            message: messageToSend,
+            replyToWhatsAppMessageId: replyWhatsAppId,
+            replyToMessageId: replyMessage?.id || null,
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar mensagem");
+        }
+
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar mensagem");
+        }
+
+        // Update to "sent" - message is now queued
         setMessages(prev => prev.map(m => 
           m.id === tempId 
-            ? { ...m, status: "error" as MessageStatus }
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
             : m
         ));
-        toast({
-          title: "Erro ao enviar",
-          description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
-          variant: "destructive",
-        });
       }
-    })();
+    }).catch((error) => {
+      console.error("Erro ao enviar mensagem:", error);
+      // Update message to show error status
+      setMessages(prev => prev.map(m => 
+        m.id === tempId 
+          ? { ...m, status: "error" as MessageStatus }
+          : m
+      ));
+      toast({
+        title: "Erro ao enviar",
+        description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+        variant: "destructive",
+      });
+    });
   };
   
   // Handle internal file upload
