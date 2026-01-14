@@ -4079,6 +4079,10 @@ export type Database = {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["admin_role"]
       }
+      get_conversations_with_metadata: {
+        Args: { _law_firm_id: string }
+        Returns: Json[]
+      }
       get_law_firm_by_subdomain: {
         Args: { _subdomain: string }
         Returns: string
