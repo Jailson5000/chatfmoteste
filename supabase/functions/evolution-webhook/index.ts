@@ -3229,11 +3229,19 @@ serve(async (req) => {
 
         // Update conversation last_message_at
         // IMPORTANT: Do NOT overwrite contact_name on outbound messages (fromMe), because pushName is our own display name.
+        // IMPORTANT: Do NOT overwrite contact_name if conversation already has a linked client (manual name edit protection)
         // IMPORTANT: If conversation is archived (archived_at is not null), unarchive it when a new message arrives
         const isArchived = conversation.archived_at !== null;
+        
+        // Only update contact_name from pushName if:
+        // 1. Message is from client (not from us)
+        // 2. Conversation does NOT have a linked client (client_id is null)
+        // This protects manual name edits made by users
+        const shouldUpdateContactName = !isFromMe && !conversation.client_id && data.pushName;
+        
         const updatePayload: Record<string, unknown> = {
           last_message_at: new Date().toISOString(),
-          contact_name: !isFromMe ? (data.pushName || conversation.contact_name) : conversation.contact_name,
+          contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
         };
 
         // If archived, unarchive and restore to appropriate handler
