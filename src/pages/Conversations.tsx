@@ -216,7 +216,7 @@ export default function Conversations() {
     handleScrollToTop: handleMessagesScrollToTop,
   } = useMessagesWithPagination({
     conversationId: selectedConversationId,
-    initialBatchSize: 50,
+    initialBatchSize: 35,
     loadMoreBatchSize: 30,
     onNewMessage: () => playNotification(),
   });
