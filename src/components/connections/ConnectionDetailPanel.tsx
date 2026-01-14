@@ -38,7 +38,8 @@ import {
   Loader2,
   Building2,
   User,
-  TrendingUp,
+  Bot,
+  UserX,
 } from "lucide-react";
 import { formatDistanceToNow, format, subDays, eachDayOfInterval, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -62,8 +63,7 @@ interface ConnectionDetailPanelProps {
   onToggleRejectCalls: (enabled: boolean) => void;
   onUpdateDefaultDepartment: (departmentId: string | null) => void;
   onUpdateDefaultStatus: (statusId: string | null) => void;
-  onUpdateDefaultAssigned: (userId: string | null) => void;
-  onUpdateDefaultAutomation: (automationId: string | null) => void;
+  onUpdateDefaultResponsible: (value: string | null) => void;
   automations?: { id: string; name: string }[];
   isLoading: {
     status: boolean;
@@ -86,8 +86,7 @@ export function ConnectionDetailPanel({
   onToggleRejectCalls,
   onUpdateDefaultDepartment,
   onUpdateDefaultStatus,
-  onUpdateDefaultAssigned,
-  onUpdateDefaultAutomation,
+  onUpdateDefaultResponsible,
   automations = [],
   isLoading,
 }: ConnectionDetailPanelProps) {
@@ -317,77 +316,81 @@ export function ConnectionDetailPanel({
                 </Select>
               </div>
 
-              {/* Agente IA Padrão */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <TrendingUp className="h-4 w-4" />
-                  <span>Agente IA Padrão</span>
-                </div>
-                <Select
-                  value={instance.default_automation_id || "none"}
-                  onValueChange={(value) => onUpdateDefaultAutomation(value === "none" ? null : value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Selecionar agente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum (usa padrão da empresa)</SelectItem>
-                    {automations.map((automation) => (
-                      <SelectItem key={automation.id} value={automation.id}>
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-primary" />
-                          {automation.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               <p className="text-xs text-muted-foreground">
-                Novos clientes desta instância serão vinculados automaticamente a esses valores. O Agente IA define qual prompt será usado para responder.
+                Novos clientes desta instância serão vinculados automaticamente a esses valores.
               </p>
             </div>
 
             <Separator />
 
-            {/* Default Responsible */}
+            {/* Unified Default Responsible - Humans AND AIs */}
             <div className="space-y-3">
               <h4 className="font-medium">Responsável Padrão</h4>
               
               <div className="space-y-2">
                 <Select
-                  value={instance.default_assigned_to || "none"}
-                  onValueChange={(value) => onUpdateDefaultAssigned(value === "none" ? null : value)}
+                  value={
+                    instance.default_automation_id 
+                      ? `ai:${instance.default_automation_id}` 
+                      : instance.default_assigned_to || "none"
+                  }
+                  onValueChange={(value) => onUpdateDefaultResponsible(value === "none" ? null : value)}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Selecionar responsável" />
                   </SelectTrigger>
                   <SelectContent>
+                    {/* None option */}
                     <SelectItem value="none">
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-muted-foreground" />
-                        <span>Nenhum</span>
+                        <UserX className="h-4 w-4 text-muted-foreground" />
+                        <span>Nenhum (vai para fila)</span>
                       </div>
                     </SelectItem>
-                    {teamMembers.map((member) => (
-                      <SelectItem key={member.id} value={member.id}>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-5 w-5">
-                            <AvatarImage src={member.avatar_url || undefined} />
-                            <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
-                              {member.full_name.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span>{member.full_name}</span>
+                    
+                    {/* AI Agents section */}
+                    {automations.length > 0 && (
+                      <>
+                        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50">
+                          Agentes de IA
                         </div>
-                      </SelectItem>
-                    ))}
+                        {automations.map((automation) => (
+                          <SelectItem key={`ai:${automation.id}`} value={`ai:${automation.id}`}>
+                            <div className="flex items-center gap-2">
+                              <Bot className="h-4 w-4 text-primary" />
+                              <span>{automation.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
+                    
+                    {/* Human Attendants section */}
+                    {teamMembers.length > 0 && (
+                      <>
+                        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50">
+                          Atendentes
+                        </div>
+                        {teamMembers.map((member) => (
+                          <SelectItem key={member.id} value={member.id}>
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-5 w-5">
+                                <AvatarImage src={member.avatar_url || undefined} />
+                                <AvatarFallback className="text-[10px] bg-primary/20 text-primary">
+                                  {member.full_name.charAt(0)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span>{member.full_name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
                 
                 <p className="text-xs text-muted-foreground">
-                  Novas conversas serão atribuídas automaticamente a este responsável.
+                  Novas conversas serão atribuídas automaticamente a este responsável. Selecione um Agente de IA para atendimento automático ou um atendente humano.
                 </p>
               </div>
             </div>

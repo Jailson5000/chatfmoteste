@@ -451,6 +451,48 @@ export function useWhatsAppInstances() {
     },
   });
 
+  // UNIFIED: Updates both assigned_to AND automation_id based on selection type
+  // If value starts with "ai:" it's an automation, otherwise it's a human user
+  const updateDefaultResponsible = useMutation({
+    mutationFn: async ({ instanceId, value }: { instanceId: string; value: string | null }) => {
+      let updateData: { default_assigned_to: string | null; default_automation_id: string | null };
+      
+      if (!value || value === "none") {
+        // No responsible selected - clear both
+        updateData = { default_assigned_to: null, default_automation_id: null };
+      } else if (value.startsWith("ai:")) {
+        // AI agent selected - set automation, clear human
+        const automationId = value.replace("ai:", "");
+        updateData = { default_assigned_to: null, default_automation_id: automationId };
+      } else {
+        // Human selected - set human, clear automation
+        updateData = { default_assigned_to: value, default_automation_id: null };
+      }
+      
+      const { error } = await supabase
+        .from("whatsapp_instances")
+        .update(updateData as any)
+        .eq("id", instanceId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Responsável atualizado",
+        description: "O responsável padrão foi configurado com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao atualizar responsável",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Keep legacy mutations for backwards compatibility
   const updateDefaultAssigned = useMutation({
     mutationFn: async ({ instanceId, userId }: { instanceId: string; userId: string | null }) => {
       const { error } = await supabase
@@ -462,10 +504,6 @@ export function useWhatsAppInstances() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
-      toast({
-        title: "Responsável atualizado",
-        description: "O responsável padrão foi configurado com sucesso.",
-      });
     },
     onError: (error: Error) => {
       toast({
@@ -487,10 +525,6 @@ export function useWhatsAppInstances() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
-      toast({
-        title: "Agente IA atualizado",
-        description: "O agente de IA padrão foi configurado com sucesso.",
-      });
     },
     onError: (error: Error) => {
       toast({
@@ -520,5 +554,6 @@ export function useWhatsAppInstances() {
     updateDefaultStatus,
     updateDefaultAssigned,
     updateDefaultAutomation,
+    updateDefaultResponsible,
   };
 }

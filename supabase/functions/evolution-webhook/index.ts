@@ -2748,17 +2748,41 @@ serve(async (req) => {
           logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
           // Use instance defaults for handler
-          // FIXED: If default_automation_id is set, use 'ai' handler regardless of default_assigned_to
-          // This allows AI to handle initial contact while also having a default human fallback
+          // UNIFIED LOGIC: default_automation_id and default_assigned_to are mutually exclusive
+          // - If default_automation_id is set → AI handles (assigned_to will be null)
+          // - If default_assigned_to is set → Human handles (automation_id will be null)
+          // - If neither → Goes to queue (human handler, no assigned_to)
           const hasDefaultAutomation = !!instance.default_automation_id;
-          const defaultHandler = hasDefaultAutomation ? 'ai' : (instance.default_assigned_to ? 'human' : 'ai');
+          const hasDefaultHuman = !!instance.default_assigned_to;
           
-          logDebug('DB', `Creating conversation with handler logic`, { 
+          let defaultHandler: string;
+          let defaultAutomationId: string | null = null;
+          let defaultAssignedTo: string | null = null;
+          
+          if (hasDefaultAutomation) {
+            // AI agent takes priority (this is the new unified behavior)
+            defaultHandler = 'ai';
+            defaultAutomationId = instance.default_automation_id;
+            defaultAssignedTo = null; // AI doesn't need human assigned
+          } else if (hasDefaultHuman) {
+            // Human attendant selected
+            defaultHandler = 'human';
+            defaultAutomationId = null;
+            defaultAssignedTo = instance.default_assigned_to;
+          } else {
+            // No default - goes to queue
+            defaultHandler = 'human';
+            defaultAutomationId = null;
+            defaultAssignedTo = null;
+          }
+          
+          logDebug('DB', `Creating conversation with unified handler logic`, { 
             requestId,
             hasDefaultAutomation,
-            defaultAssignedTo: instance.default_assigned_to,
+            hasDefaultHuman,
             defaultHandler,
-            defaultAutomationId: instance.default_automation_id
+            defaultAutomationId,
+            defaultAssignedTo
           });
           
           const { data: newConv, error: createError } = await supabaseClient
@@ -2770,8 +2794,8 @@ serve(async (req) => {
               contact_phone: phoneNumber,
               status: 'novo_contato',
               current_handler: defaultHandler,
-              current_automation_id: hasDefaultAutomation ? instance.default_automation_id : null,
-              assigned_to: instance.default_assigned_to || null,
+              current_automation_id: defaultAutomationId,
+              assigned_to: defaultAssignedTo,
               department_id: instance.default_department_id || null,
               whatsapp_instance_id: instance.id,
               last_message_at: new Date().toISOString(),
