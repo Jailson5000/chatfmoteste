@@ -311,7 +311,6 @@ interface AutomationIdentity {
   version: number;
   updated_at: string;
   law_firm_id: string;
-  response_delay_seconds: number | null;
   // Canonical identity fields for audit
   // Priority: conversation_transfer > whatsapp_instance > law_firm_settings
   resolved_from: 'conversation_transfer' | 'whatsapp_instance' | 'law_firm_settings';
@@ -355,7 +354,7 @@ async function resolveAutomationForConversation(
       // Use maybeSingle instead of single to avoid throwing on no match
       const { data: automation, error: autoError } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
         .eq('id', conversation.current_automation_id)
         .eq('is_active', true)
         .maybeSingle();
@@ -436,7 +435,7 @@ async function resolveAutomationForConversation(
       if (instance?.default_automation_id) {
         const { data: automation, error: automationError } = await supabaseClient
           .from('automations')
-          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
+          .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
           .maybeSingle();
@@ -544,7 +543,7 @@ async function resolveAutomationForConversation(
     if (settings?.default_automation_id) {
       const { data: automation, error: settingsAutoError } = await supabaseClient
         .from('automations')
-        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
+        .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id')
         .eq('id', settings.default_automation_id)
         .eq('is_active', true)
         .maybeSingle();
@@ -996,14 +995,38 @@ async function scheduleQueueProcessing(
   debounceSeconds: number,
   requestId: string
 ): Promise<void> {
-  // Use EdgeRuntime.waitUntil for background processing if available
-  // Otherwise, we'll rely on a cron or the next message to trigger processing
-  try {
-    // Check if there's already a setTimeout-style mechanism
-    // For Deno edge functions, we can use a short delay then check
-    setTimeout(async () => {
+  const delayMs = Math.max(0, (debounceSeconds + 0.5) * 1000);
+
+  const task = async () => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
       await processQueuedMessages(supabaseClient, conversationId, requestId);
-    }, (debounceSeconds + 0.5) * 1000); // Add 0.5s buffer
+    } catch (error) {
+      logDebug('DEBOUNCE', 'Background queue processing failed', {
+        requestId,
+        conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  // Prefer EdgeRuntime.waitUntil for reliable background execution in serverless
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
+  if (edgeRuntime && typeof edgeRuntime.waitUntil === 'function') {
+    edgeRuntime.waitUntil(task());
+    logDebug('DEBOUNCE', 'Scheduled queue processing via EdgeRuntime.waitUntil', {
+      requestId,
+      conversationId,
+      delayMs,
+    });
+    return;
+  }
+
+  // Fallback: best-effort setTimeout
+  try {
+    setTimeout(() => {
+      void task();
+    }, delayMs);
   } catch (error) {
     logDebug('DEBOUNCE', 'setTimeout not available, queue will be processed by next trigger', { requestId });
   }
@@ -2239,8 +2262,8 @@ async function processWithGemini(
       };
 
       // Send the response back to WhatsApp (with optional voice and client delay)
-      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, automation.response_delay_seconds || 0);
-    }
+      const responseDelaySeconds = Number((triggerConfig as any)?.response_delay_seconds ?? 0) || 0;
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
 
     // Log the AI processing with tool calls
     await supabaseClient
@@ -2396,8 +2419,8 @@ async function processWithGPT(
       };
 
       // Send the response back to WhatsApp (with optional voice and client delay)
-      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, automation.response_delay_seconds || 0);
-
+      const responseDelaySeconds = Number((triggerConfig as any)?.response_delay_seconds ?? 0) || 0;
+      await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
       // Log the AI processing with tool calls
       await supabaseClient
         .from('webhook_logs')
