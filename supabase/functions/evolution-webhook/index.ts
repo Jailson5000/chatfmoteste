@@ -2241,14 +2241,14 @@ async function processWithGemini(
       const triggerConfig = automation.trigger_config as Record<string, unknown> | null;
       const agentVoiceId = triggerConfig?.voice_id as string | null;
       const resolvedVoice = await resolveVoiceWithPrecedence(supabaseClient, context.lawFirmId, agentVoiceId);
-      
+
       const voiceConfig: VoiceConfig = {
         enabled: Boolean(triggerConfig?.voice_enabled),
         voiceId: resolvedVoice.voiceId,
         source: resolvedVoice.source,
       };
 
-      logDebug('AI_PROVIDER', 'Voice config (with precedence)', { 
+      logDebug('AI_PROVIDER', 'Voice config (with precedence)', {
         voiceConfig,
         agentVoiceId,
         lawFirmId: context.lawFirmId,
@@ -2264,6 +2264,7 @@ async function processWithGemini(
       // Send the response back to WhatsApp (with optional voice and client delay)
       const responseDelaySeconds = Number((triggerConfig as any)?.response_delay_seconds ?? 0) || 0;
       await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
+    }
 
     // Log the AI processing with tool calls
     await supabaseClient
