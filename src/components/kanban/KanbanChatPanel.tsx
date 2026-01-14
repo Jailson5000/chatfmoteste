@@ -1066,6 +1066,9 @@ export function KanbanChatPanel({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+  
+  // Monotonic counter for stable message ordering (prevents visual shuffle during reconciliation)
+  const clientOrderRef = useRef(Date.now());
 
   // Media preview state (for Ctrl+V paste)
   const [mediaPreview, setMediaPreview] = useState<{
@@ -1278,8 +1281,22 @@ export function KanbanChatPanel({
       items.push({ type: 'activity', data: activity });
     });
     
-    // Sort by timestamp (ascending for chronological order)
+    // Sort with stable ordering: use _clientOrder for optimistic messages to prevent shuffle
     return items.sort((a, b) => {
+      // Get _clientOrder if it's a message (activities don't have it)
+      const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
+      const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
+      
+      // If both have _clientOrder, use that for stable ordering
+      if (aClientOrder !== undefined && bClientOrder !== undefined) {
+        return aClientOrder - bClientOrder;
+      }
+      
+      // If only one has _clientOrder, that one should come after (it's newer/optimistic)
+      if (aClientOrder !== undefined) return 1;
+      if (bClientOrder !== undefined) return -1;
+      
+      // Fallback to timestamp for backend messages and activities
       const aTime = a.type === 'message' 
         ? new Date(a.data.created_at).getTime() 
         : a.data.timestamp.getTime();
@@ -1434,6 +1451,9 @@ export function KanbanChatPanel({
     const tempWhatsAppId = `temp_${tempId}`;
     const messageTimestamp = new Date().toISOString();
     
+    // Increment client order for stable sorting (prevents visual shuffle)
+    const clientOrder = clientOrderRef.current++;
+    
     const optimisticMessage = {
       id: tempId,
       content: messageToSend,
@@ -1447,15 +1467,13 @@ export function KanbanChatPanel({
       whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
       message_type: "text",
       reply_to: null,
+      // Client-side ordering fields for stable visual order during reconciliation
+      _clientOrder: clientOrder,
+      _clientTempId: tempId,
     };
     
-    // Add message and ensure list stays sorted by created_at
-    setMessages(prev => {
-      const updated = [...prev, optimisticMessage];
-      return updated.sort((a, b) => 
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      );
-    });
+    // Add message - no sorting needed, _clientOrder ensures stable order
+    setMessages(prev => [...prev, optimisticMessage]);
 
     // Enqueue message send to ensure strict ordering PER CONVERSATION
     // Messages within the same conversation are sent sequentially
@@ -2376,8 +2394,11 @@ export function KanbanChatPanel({
               
               const msg = item.data;
 
+              // Use _clientTempId for stable key during reconciliation
+              const stableKey = (msg as PaginatedMessage)._clientTempId || msg.id;
+
               return (
-                <React.Fragment key={msg.id}>
+                <React.Fragment key={stableKey}>
                   {showDateSep && currentDate && <DateSeparator date={new Date(currentDate)} />}
                   <div data-message-id={msg.id}>
                     <MessageBubble
