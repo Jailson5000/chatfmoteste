@@ -138,7 +138,7 @@ function simplifyEvolutionError(status: number, bodyText: string): string {
 
   // Handle 413 - file too large
   if (status === 413) {
-    return `Arquivo muito grande para enviar. Áudios devem ter no máximo ~1 minuto. Por favor, grave um áudio menor e reenvie.`;
+    return `Arquivo muito grande para enviar. Grave um áudio menor e reenvie.`;
   }
 
   if (looksHtml && (status === 522 || status === 524)) {
