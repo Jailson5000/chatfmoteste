@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
+import { useMessageQueue } from "@/hooks/useMessageQueue";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
 import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
@@ -1027,6 +1028,9 @@ export function KanbanChatPanel({
   const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
   const { updateClientStatus, updateClient } = useClients();
   
+  // Message queue to ensure messages are sent in strict order
+  const { enqueue: enqueueMessage } = useMessageQueue();
+  
   // Get inline activities for this conversation
   const { activities: inlineActivities } = useInlineActivities(conversationId, clientId || null);
 
@@ -1425,72 +1429,71 @@ export function KanbanChatPanel({
     setIsPontualMode(false);
     setReplyToMessage(null);
 
-    // Send message in background - don't block the UI
-    (async () => {
-      try {
-        if (wasInternalMode) {
-          // Internal message - save directly to database
-          const { data: userData } = await supabase.auth.getUser();
-          const { error } = await supabase.from("messages").insert({
-            conversation_id: conversationId,
-            content: messageToSend,
-            is_from_me: true,
-            sender_type: "human",
-            ai_generated: false,
-            is_internal: true,
-            status: "sent",
-            message_type: "text",
-            sender_id: userData.user?.id,
-            reply_to_message_id: replyToId,
-          });
-          
-          if (error) throw error;
-        } else {
-          // External message - send via WhatsApp
-          const { data: userData } = await supabase.auth.getUser();
-          const currentUserId = userData.user?.id;
-          
-          const shouldTransfer = !wasPontualMode && (
-            currentHandler === "ai" || 
-            !assignedTo ||
-            (assignedTo !== currentUserId)
-          );
-          
-          if (shouldTransfer && currentUserId) {
-            await transferHandler.mutateAsync({
-              conversationId,
-              handlerType: "human",
-              assignedTo: currentUserId,
-            });
-          }
-          
-          const response = await supabase.functions.invoke("evolution-api", {
-            body: {
-              action: "send_message_async",
-              conversationId,
-              message: messageToSend,
-              replyToWhatsAppMessageId: replyWhatsAppId,
-              replyToMessageId: replyToId,
-            },
-          });
-
-          if (response.error) {
-            throw new Error(response.error.message || "Falha ao enviar mensagem");
-          }
-
-          if (!response.data?.success) {
-            throw new Error(response.data?.error || "Falha ao enviar mensagem");
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao enviar mensagem:", error);
-        toast({
-          title: "Erro ao enviar",
-          description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
-          variant: "destructive",
+    // Enqueue message send to ensure strict ordering
+    // Messages are sent sequentially in the order they were typed
+    enqueueMessage(async () => {
+      if (wasInternalMode) {
+        // Internal message - save directly to database
+        const { data: userData } = await supabase.auth.getUser();
+        const { error } = await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          content: messageToSend,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          is_internal: true,
+          status: "sent",
+          message_type: "text",
+          sender_id: userData.user?.id,
+          reply_to_message_id: replyToId,
         });
+        
+        if (error) throw error;
+      } else {
+        // External message - send via WhatsApp
+        const { data: userData } = await supabase.auth.getUser();
+        const currentUserId = userData.user?.id;
+        
+        const shouldTransfer = !wasPontualMode && (
+          currentHandler === "ai" || 
+          !assignedTo ||
+          (assignedTo !== currentUserId)
+        );
+        
+        if (shouldTransfer && currentUserId) {
+          await transferHandler.mutateAsync({
+            conversationId,
+            handlerType: "human",
+            assignedTo: currentUserId,
+          });
+        }
+        
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_message_async",
+            conversationId,
+            message: messageToSend,
+            replyToWhatsAppMessageId: replyWhatsAppId,
+            replyToMessageId: replyToId,
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar mensagem");
+        }
+
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar mensagem");
+        }
       }
-    })();
+    }).catch((error) => {
+      console.error("Erro ao enviar mensagem:", error);
+      toast({
+        title: "Erro ao enviar",
+        description: error instanceof Error ? error.message : "Falha ao enviar mensagem",
+        variant: "destructive",
+      });
+    });
   };
 
   const handleSendAudio = async (audioBlob: Blob) => {
