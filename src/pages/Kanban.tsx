@@ -547,6 +547,7 @@ export default function Kanban() {
             currentAutomationId={selectedConversation.current_automation_id}
             currentAutomationName={(selectedConversation as any).current_automation?.name || null}
             assignedProfile={selectedConversation.assigned_profile}
+            assignedTo={selectedConversation.assigned_to}
             clientId={selectedConversation.client_id}
             clientStatus={selectedConversation.client?.custom_status_id}
             conversationTags={selectedConversation.tags}

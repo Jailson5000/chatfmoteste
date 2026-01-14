@@ -986,6 +986,8 @@ interface KanbanChatPanelProps {
   /** The name of current automation from backend join - use this for display (source of truth) */
   currentAutomationName?: string | null;
   assignedProfile?: { full_name: string } | null;
+  /** The ID of the currently assigned attendant (for auto-transfer logic) */
+  assignedTo?: string | null;
   clientId?: string | null;
   clientStatus?: string | null;
   conversationTags?: string[] | null;
@@ -1007,6 +1009,7 @@ export function KanbanChatPanel({
   currentAutomationId,
   currentAutomationName,
   assignedProfile,
+  assignedTo,
   clientId,
   clientStatus,
   conversationTags,
@@ -1440,10 +1443,24 @@ export function KanbanChatPanel({
         if (error) throw error;
       } else {
         // External message - send via WhatsApp
-        if (!wasPontualMode && currentHandler === "ai") {
+        // Auto-assign to current user if:
+        // 1. Handler is AI, or
+        // 2. No responsible assigned, or
+        // 3. Another attendant is assigned (transfer to current user)
+        const { data: userData } = await supabase.auth.getUser();
+        const currentUserId = userData.user?.id;
+        
+        const shouldTransfer = !wasPontualMode && (
+          currentHandler === "ai" || 
+          !assignedTo ||
+          (assignedTo !== currentUserId)
+        );
+        
+        if (shouldTransfer && currentUserId) {
           await transferHandler.mutateAsync({
             conversationId,
             handlerType: "human",
+            assignedTo: currentUserId,
           });
         }
 
@@ -1497,11 +1514,24 @@ export function KanbanChatPanel({
         .from("chat-media")
         .getPublicUrl(`${conversationId}/${fileName}`);
       
-      // Transfer to human if AI is handling and not pontual mode
-      if (!isPontualMode && currentHandler === "ai") {
+      // Auto-assign to current user if:
+      // 1. Handler is AI, or
+      // 2. No responsible assigned, or
+      // 3. Another attendant is assigned (transfer to current user)
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id;
+      
+      const shouldTransfer = !isPontualMode && (
+        currentHandler === "ai" || 
+        !assignedTo ||
+        (assignedTo !== currentUserId)
+      );
+      
+      if (shouldTransfer && currentUserId) {
         await transferHandler.mutateAsync({
           conversationId,
           handlerType: "human",
+          assignedTo: currentUserId,
         });
       }
       
@@ -1550,11 +1580,24 @@ export function KanbanChatPanel({
         .from("chat-media")
         .getPublicUrl(`${conversationId}/${fileName}`);
       
-      // Transfer to human if AI is handling and not pontual mode
-      if (!isPontualMode && currentHandler === "ai") {
+      // Auto-assign to current user if:
+      // 1. Handler is AI, or
+      // 2. No responsible assigned, or
+      // 3. Another attendant is assigned (transfer to current user)
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id;
+      
+      const shouldTransfer = !isPontualMode && (
+        currentHandler === "ai" || 
+        !assignedTo ||
+        (assignedTo !== currentUserId)
+      );
+      
+      if (shouldTransfer && currentUserId) {
         await transferHandler.mutateAsync({
           conversationId,
           handlerType: "human",
+          assignedTo: currentUserId,
         });
       }
       
@@ -1614,11 +1657,24 @@ export function KanbanChatPanel({
         .from("chat-media")
         .getPublicUrl(`${conversationId}/${fileName}`);
 
-      // Transfer to human if AI is handling and not pontual mode
-      if (!isPontualMode && currentHandler === "ai") {
+      // Auto-assign to current user if:
+      // 1. Handler is AI, or
+      // 2. No responsible assigned, or
+      // 3. Another attendant is assigned (transfer to current user)
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id;
+      
+      const shouldTransfer = !isPontualMode && (
+        currentHandler === "ai" || 
+        !assignedTo ||
+        (assignedTo !== currentUserId)
+      );
+      
+      if (shouldTransfer && currentUserId) {
         await transferHandler.mutateAsync({
           conversationId,
           handlerType: "human",
+          assignedTo: currentUserId,
         });
       }
 
@@ -1665,11 +1721,24 @@ export function KanbanChatPanel({
         .from("chat-media")
         .getPublicUrl(`${conversationId}/${fileName}`);
 
-      // Transfer to human if AI is handling and not pontual mode
-      if (!isPontualMode && currentHandler === "ai") {
+      // Auto-assign to current user if:
+      // 1. Handler is AI, or
+      // 2. No responsible assigned, or
+      // 3. Another attendant is assigned (transfer to current user)
+      const { data: userData } = await supabase.auth.getUser();
+      const currentUserId = userData.user?.id;
+      
+      const shouldTransfer = !isPontualMode && (
+        currentHandler === "ai" || 
+        !assignedTo ||
+        (assignedTo !== currentUserId)
+      );
+      
+      if (shouldTransfer && currentUserId) {
         await transferHandler.mutateAsync({
           conversationId,
           handlerType: "human",
+          assignedTo: currentUserId,
         });
       }
 
