@@ -982,53 +982,112 @@ async function queueMessageForAIProcessing(
 
   // Trigger async processing check
   // This ensures queued messages get processed even if no more messages arrive
-  await scheduleQueueProcessing(supabaseClient, context.conversationId, debounceSeconds, requestId);
+  scheduleQueueProcessing(supabaseClient, context.conversationId, debounceSeconds, requestId);
 }
 
 /**
  * Schedule processing of the queue after the debounce period.
  * Uses a non-blocking approach to avoid holding the webhook connection.
  */
-async function scheduleQueueProcessing(
+/**
+ * Schedule processing of the queue after the debounce period.
+ * Uses EdgeRuntime.waitUntil when available so the work survives the request lifecycle.
+ *
+ * IMPORTANT: We do NOT trust the local `debounceSeconds` for scheduling, because
+ * the queue's `process_after` can be extended by subsequent messages.
+ * Instead, we re-check the DB each attempt and compute the remaining delay.
+ */
+function scheduleQueueProcessing(
   supabaseClient: any,
   conversationId: string,
-  debounceSeconds: number,
+  _debounceSeconds: number,
   requestId: string
-): Promise<void> {
-  const delayMs = Math.max(0, (debounceSeconds + 0.5) * 1000);
+): void {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const task = async () => {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      await processQueuedMessages(supabaseClient, conversationId, requestId);
-    } catch (error) {
-      logDebug('DEBOUNCE', 'Background queue processing failed', {
-        requestId,
-        conversationId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+  const runTask = async () => {
+    const MAX_ATTEMPTS = 6;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Always read the current `process_after` from DB (it may have been extended)
+        const { data: queueItem, error: fetchError } = await supabaseClient
+          .from('ai_processing_queue')
+          .select('id, process_after')
+          .eq('conversation_id', conversationId)
+          .eq('status', 'pending')
+          .maybeSingle();
+
+        if (fetchError) {
+          logDebug('DEBOUNCE', 'Failsafe scheduler: error fetching queue item', {
+            requestId,
+            conversationId,
+            error: fetchError,
+            attempt,
+          });
+          return;
+        }
+
+        // Nothing pending -> nothing to do
+        if (!queueItem) {
+          return;
+        }
+
+        const processAfterMs = new Date(queueItem.process_after).getTime();
+        const delayMs = Math.max(0, processAfterMs - Date.now()) + 500;
+
+        logDebug('DEBOUNCE', 'Failsafe scheduler: waiting until process_after', {
+          requestId,
+          conversationId,
+          queueId: queueItem.id,
+          attempt,
+          delayMs,
+        });
+
+        await sleep(delayMs);
+
+        // Try to process now (this function is concurrency-safe via status update)
+        await processQueuedMessages(supabaseClient, conversationId, requestId);
+
+        // Loop continues: if new messages arrived and queue is still pending,
+        // we'll fetch it again and wait again.
+      } catch (error) {
+        logDebug('DEBOUNCE', 'Failsafe scheduler: background processing failed', {
+          requestId,
+          conversationId,
+          attempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        // Small backoff before retrying
+        await sleep(1000);
+      }
     }
+
+    logDebug('DEBOUNCE', 'Failsafe scheduler: max attempts reached', {
+      requestId,
+      conversationId,
+      maxAttempts: MAX_ATTEMPTS,
+    });
   };
 
   // Prefer EdgeRuntime.waitUntil for reliable background execution in serverless
   const edgeRuntime = (globalThis as any).EdgeRuntime;
   if (edgeRuntime && typeof edgeRuntime.waitUntil === 'function') {
-    edgeRuntime.waitUntil(task());
-    logDebug('DEBOUNCE', 'Scheduled queue processing via EdgeRuntime.waitUntil', {
-      requestId,
-      conversationId,
-      delayMs,
-    });
+    edgeRuntime.waitUntil(runTask());
     return;
   }
 
-  // Fallback: best-effort setTimeout
+  // Fallback: best-effort setTimeout (still OK in most Deno runtimes)
   try {
     setTimeout(() => {
-      void task();
-    }, delayMs);
-  } catch (error) {
-    logDebug('DEBOUNCE', 'setTimeout not available, queue will be processed by next trigger', { requestId });
+      void runTask();
+    }, 0);
+  } catch (_error) {
+    logDebug('DEBOUNCE', 'Failsafe scheduler: setTimeout not available', {
+      requestId,
+      conversationId,
+    });
   }
 }
 
@@ -2262,7 +2321,8 @@ async function processWithGemini(
       };
 
       // Send the response back to WhatsApp (with optional voice and client delay)
-      const responseDelaySeconds = Number((triggerConfig as any)?.response_delay_seconds ?? 0) || 0;
+      const responseDelaySeconds =
+        Number((triggerConfig as any)?.response_delay_seconds ?? (triggerConfig as any)?.response_delay ?? 0) || 0;
       await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
     }
 
@@ -2420,7 +2480,8 @@ async function processWithGPT(
       };
 
       // Send the response back to WhatsApp (with optional voice and client delay)
-      const responseDelaySeconds = Number((triggerConfig as any)?.response_delay_seconds ?? 0) || 0;
+      const responseDelaySeconds =
+        Number((triggerConfig as any)?.response_delay_seconds ?? (triggerConfig as any)?.response_delay ?? 0) || 0;
       await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
       // Log the AI processing with tool calls
       await supabaseClient
