@@ -329,24 +329,48 @@ async function resolveAutomationForConversation(
     // ========================================================================
     // Step 1: Get conversation to find whatsapp_instance_id AND current_automation_id
     // ========================================================================
-    const { data: conversation } = await supabaseClient
+    const { data: conversation, error: convError } = await supabaseClient
       .from('conversations')
       .select('whatsapp_instance_id, current_automation_id')
       .eq('id', conversationId)
       .single();
+
+    console.log(`[AI_ISOLATION] 🔍 DEBUG - Conversation lookup`, JSON.stringify({
+      conversation_id: conversationId,
+      conversation_found: !!conversation,
+      conversation_error: convError?.message || null,
+      current_automation_id: conversation?.current_automation_id || null,
+      whatsapp_instance_id: conversation?.whatsapp_instance_id || null,
+    }));
 
     // ========================================================================
     // Step 2: HIGHEST PRIORITY - Check if conversation has a specific automation assigned
     // This happens when a conversation is transferred to a specific AI agent
     // ========================================================================
     if (conversation?.current_automation_id) {
-      const { data: automation } = await supabaseClient
+      console.log(`[AI_ISOLATION] 🔍 DEBUG - Priority 1: Looking up automation from conversation`, JSON.stringify({
+        automation_id: conversation.current_automation_id,
+      }));
+      
+      // Use maybeSingle instead of single to avoid throwing on no match
+      const { data: automation, error: autoError } = await supabaseClient
         .from('automations')
         .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
         .eq('id', conversation.current_automation_id)
         .eq('is_active', true)
-        .not('ai_prompt', 'is', null)
-        .single();
+        .maybeSingle();
+
+      console.log(`[AI_ISOLATION] 🔍 DEBUG - Priority 1: Automation query result`, JSON.stringify({
+        automation_id: conversation.current_automation_id,
+        automation_found: !!automation,
+        automation_error: autoError?.message || null,
+        automation_name: automation?.name || null,
+        automation_law_firm_id: automation?.law_firm_id || null,
+        has_ai_prompt: !!automation?.ai_prompt,
+        expected_law_firm_id: lawFirmId,
+        tenant_match: automation?.law_firm_id === lawFirmId,
+        has_prompt: !!automation?.ai_prompt?.trim(),
+      }));
 
       // CRITICAL: Validate tenant isolation - automation must belong to same tenant
       if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
@@ -381,7 +405,13 @@ async function resolveAutomationForConversation(
         }));
         return null;
       }
-      // If automation not found or inactive, fall through to next priority
+      
+      // If automation not found or inactive, log and fall through to next priority
+      console.warn(`[AI_ISOLATION] ⚠️ Priority 1 FAILED - Automation not found or invalid`, JSON.stringify({
+        automation_id: conversation.current_automation_id,
+        automation_error: autoError?.message || 'unknown',
+        falling_through_to: 'Priority 2 (instance default)',
+      }));
     }
 
     // ========================================================================
@@ -409,15 +439,15 @@ async function resolveAutomationForConversation(
           .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
           .eq('id', instance.default_automation_id)
           .eq('is_active', true)
-          .not('ai_prompt', 'is', null)
-          .single();
+          .maybeSingle();
 
-        console.log(`[AI_ISOLATION] 🔍 DEBUG - Automation lookup`, JSON.stringify({
+        console.log(`[AI_ISOLATION] 🔍 DEBUG - Priority 2: Automation lookup`, JSON.stringify({
           automation_id: instance.default_automation_id,
           automation_found: !!automation,
           automation_error: automationError?.message || null,
           automation_name: automation?.name || null,
           automation_law_firm_id: automation?.law_firm_id || null,
+          has_ai_prompt: !!automation?.ai_prompt,
           expected_law_firm_id: lawFirmId,
           tenant_match: automation?.law_firm_id === lawFirmId,
           has_prompt: !!automation?.ai_prompt?.trim(),
@@ -503,16 +533,29 @@ async function resolveAutomationForConversation(
       .from('law_firm_settings')
       .select('default_automation_id')
       .eq('law_firm_id', lawFirmId)
-      .single();
+      .maybeSingle();
+
+    console.log(`[AI_ISOLATION] 🔍 DEBUG - Priority 3: Law firm settings lookup`, JSON.stringify({
+      law_firm_id: lawFirmId,
+      settings_found: !!settings,
+      default_automation_id: settings?.default_automation_id || null,
+    }));
 
     if (settings?.default_automation_id) {
-      const { data: automation } = await supabaseClient
+      const { data: automation, error: settingsAutoError } = await supabaseClient
         .from('automations')
         .select('id, ai_prompt, ai_temperature, name, trigger_config, version, updated_at, law_firm_id, response_delay_seconds')
         .eq('id', settings.default_automation_id)
         .eq('is_active', true)
-        .not('ai_prompt', 'is', null)
-        .single();
+        .maybeSingle();
+
+      console.log(`[AI_ISOLATION] 🔍 DEBUG - Priority 3: Automation lookup`, JSON.stringify({
+        automation_id: settings.default_automation_id,
+        automation_found: !!automation,
+        automation_error: settingsAutoError?.message || null,
+        automation_name: automation?.name || null,
+        has_ai_prompt: !!automation?.ai_prompt,
+      }));
 
       // CRITICAL: Validate tenant isolation - automation must belong to same tenant
       if (automation && automation.law_firm_id === lawFirmId && automation.ai_prompt?.trim()) {
