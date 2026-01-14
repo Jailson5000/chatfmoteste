@@ -605,10 +605,20 @@ export default function Connections() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">—</td>
+                      <td className="px-4 py-3">
+                        {status ? (
+                          <Badge variant="outline" style={{ borderColor: status.color, color: status.color }}>
+                            {status.name}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         {dept ? (
-                          <Badge variant="outline">{dept.name}</Badge>
+                          <Badge variant="outline" style={{ borderColor: dept.color, color: dept.color }}>
+                            {dept.name}
+                          </Badge>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
