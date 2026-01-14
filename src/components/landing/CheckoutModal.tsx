@@ -171,7 +171,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
               <Button
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                className="w-full border-white/20 text-white hover:bg-white/10"
+                className="w-full bg-white/10 border-white/30 text-white hover:bg-white/20"
               >
                 Voltar
               </Button>
