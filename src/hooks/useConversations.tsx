@@ -58,111 +58,73 @@ export function useConversations() {
     queryFn: async () => {
       if (!lawFirm?.id) return [];
 
-      // Fetch conversations with related data including phone_number + current automation name
-      // Use explicit hint for automations relationship since FK was added
-      const { data: convs, error: convError } = await supabase
-        .from("conversations")
-        .select(`
-          *,
-          whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
-          current_automation:automations!fk_conversations_current_automation(id, name),
-          client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
-          department:departments(id, name, color)
-        `)
-        .eq("law_firm_id", lawFirm.id)
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+      // Use optimized RPC that fetches everything in a single query
+      // This eliminates the N+1 problem (2*N extra queries for last_message + unread_count)
+      const { data, error: rpcError } = await supabase
+        .rpc('get_conversations_with_metadata', { _law_firm_id: lawFirm.id });
 
-      if (convError) throw convError;
-
-      // Fetch assigned profiles separately
-      const assignedIds = (convs || [])
-        .map((c) => c.assigned_to)
-        .filter((id): id is string => id !== null);
-
-      let profilesMap: Record<string, string> = {};
-      if (assignedIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, full_name")
-          .in("id", assignedIds);
-
-        profilesMap = (profiles || []).reduce((acc, p) => {
-          acc[p.id] = p.full_name;
-          return acc;
-        }, {} as Record<string, string>);
+      if (rpcError) {
+        console.error('Error fetching conversations via RPC:', rpcError);
+        throw rpcError;
       }
 
-      // Fetch client IDs to get their tags
-      const clientIds = (convs || [])
-        .map((c) => (c.client as { id?: string } | null)?.id)
-        .filter((id): id is string => id !== null && id !== undefined);
-
-      // Fetch client tags from client_tags table
-      let clientTagsMap: Record<string, Array<{ name: string; color: string }>> = {};
-      if (clientIds.length > 0) {
-        const { data: clientTagsData } = await supabase
-          .from("client_tags")
-          .select("client_id, tag:tags(name, color)")
-          .in("client_id", clientIds);
-
-        if (clientTagsData) {
-          clientTagsMap = clientTagsData.reduce((acc, ct) => {
-            const clientId = ct.client_id;
-            const tag = ct.tag as { name: string; color: string } | null;
-            if (tag) {
-              if (!acc[clientId]) acc[clientId] = [];
-              acc[clientId].push({ name: tag.name, color: tag.color });
-            }
-            return acc;
-          }, {} as Record<string, Array<{ name: string; color: string }>>);
-        }
-      }
-
-      // Fetch last message and unread count for each conversation
-      const conversationsWithMessages: ConversationWithLastMessage[] = await Promise.all(
-        (convs || []).map(async (conv) => {
-          const [lastMsgResult, unreadResult] = await Promise.all([
-            supabase
-              .from("messages")
-              .select("content, created_at, message_type, is_from_me")
-              .eq("conversation_id", conv.id)
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle(),
-            supabase
-              .from("messages")
-              .select("id", { count: "exact", head: true })
-              .eq("conversation_id", conv.id)
-              .eq("is_from_me", false)
-              .is("read_at", null),
-          ]);
-
-          const clientData = conv.client as
-            | {
-                id?: string;
-                custom_status_id?: string | null;
-                avatar_url?: string | null;
-                custom_status?: { id: string; name: string; color: string } | null;
-              }
-            | null;
-          const clientId = clientData?.id;
-
-          return {
-            ...conv,
-            last_message: lastMsgResult.data,
-            whatsapp_instance: conv.whatsapp_instance as
-              | { instance_name: string; display_name?: string | null; phone_number?: string | null }
-              | null,
-            current_automation: conv.current_automation as { id: string; name: string } | null,
-            assigned_profile: conv.assigned_to
-              ? { full_name: profilesMap[conv.assigned_to] || "Desconhecido" }
-              : null,
-            unread_count: unreadResult.count || 0,
-            client: clientData,
-            client_tags: clientId ? clientTagsMap[clientId] || [] : [],
-          };
-        })
-      );
+      // Map RPC response to match the expected ConversationWithLastMessage format
+      // RPC returns JSONB objects with all fields already structured
+      const conversationsWithMessages: ConversationWithLastMessage[] = (data || []).map((row: any) => ({
+        // Base conversation fields - spread all from RPC response
+        id: row.id,
+        law_firm_id: row.law_firm_id,
+        remote_jid: row.remote_jid,
+        contact_name: row.contact_name,
+        contact_phone: row.contact_phone,
+        status: row.status,
+        priority: row.priority,
+        current_handler: row.current_handler,
+        assigned_to: row.assigned_to,
+        current_automation_id: row.current_automation_id,
+        department_id: row.department_id,
+        client_id: row.client_id,
+        whatsapp_instance_id: row.whatsapp_instance_id,
+        last_message_at: row.last_message_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        ai_summary: row.ai_summary,
+        internal_notes: row.internal_notes,
+        tags: row.tags,
+        needs_human_handoff: row.needs_human_handoff,
+        ai_audio_enabled: row.ai_audio_enabled,
+        ai_audio_enabled_by: row.ai_audio_enabled_by,
+        ai_audio_last_enabled_at: row.ai_audio_last_enabled_at,
+        ai_audio_last_disabled_at: row.ai_audio_last_disabled_at,
+        archived_at: row.archived_at,
+        archived_reason: row.archived_reason,
+        archived_next_responsible_id: row.archived_next_responsible_id,
+        archived_next_responsible_type: row.archived_next_responsible_type,
+        origin: row.origin,
+        origin_metadata: row.origin_metadata,
+        last_summarized_at: row.last_summarized_at,
+        summary_message_count: row.summary_message_count,
+        n8n_last_response_at: row.n8n_last_response_at,
+        // Related data from nested JSONB
+        whatsapp_instance: row.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
+        current_automation: row.current_automation as { id: string; name: string } | null,
+        department: row.department as { id: string; name: string; color: string } | null,
+        client: row.client as {
+          id?: string;
+          custom_status_id?: string | null;
+          avatar_url?: string | null;
+          custom_status?: { id: string; name: string; color: string } | null;
+        } | null,
+        assigned_profile: row.assigned_profile as { full_name: string } | null,
+        client_tags: (row.client_tags || []) as Array<{ name: string; color: string }>,
+        last_message: row.last_message as {
+          content: string | null;
+          created_at: string;
+          message_type?: string;
+          is_from_me?: boolean;
+        } | null,
+        unread_count: Number(row.unread_count) || 0,
+      }));
 
       return conversationsWithMessages;
     },
