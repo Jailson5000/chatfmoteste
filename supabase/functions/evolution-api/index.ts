@@ -136,6 +136,11 @@ function simplifyEvolutionError(status: number, bodyText: string): string {
   const trimmed = (bodyText || "").trim();
   const looksHtml = /^<!DOCTYPE html>|^<html/i.test(trimmed);
 
+  // Handle 413 - file too large
+  if (status === 413) {
+    return `Arquivo muito grande para enviar. Áudios devem ter no máximo ~1 minuto. Por favor, grave um áudio menor e reenvie.`;
+  }
+
   if (looksHtml && (status === 522 || status === 524)) {
     return `Evolution API não respondeu (erro ${status}). Verifique se o servidor está online e acessível externamente.`;
   }
