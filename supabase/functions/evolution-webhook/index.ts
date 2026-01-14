@@ -1101,45 +1101,36 @@ async function processQueuedMessages(
 ): Promise<void> {
   const now = new Date().toISOString();
 
-  // Get pending queue item that's ready to process
-  const { data: queueItem, error: fetchError } = await supabaseClient
+  // ATOMIC LOCK: Update status to 'processing' and return the item in a single operation
+  // This prevents race conditions where multiple schedulers could process the same item
+  // The .select() returns the updated row(s), so we know we got the lock if data is returned
+  const { data: lockedItem, error: lockError } = await supabaseClient
     .from('ai_processing_queue')
-    .select('*')
+    .update({
+      status: 'processing',
+      processing_started_at: now,
+    })
     .eq('conversation_id', conversationId)
     .eq('status', 'pending')
     .lte('process_after', now)
+    .select()
     .maybeSingle();
 
-  if (fetchError) {
-    logDebug('DEBOUNCE', 'Error fetching queue for processing', { requestId, error: fetchError });
+  if (lockError) {
+    logDebug('DEBOUNCE', 'Error acquiring lock on queue item', { requestId, error: lockError });
     return;
   }
 
-  if (!queueItem) {
-    logDebug('DEBOUNCE', 'No ready queue item found (still in debounce or already processed)', { 
+  if (!lockedItem) {
+    // Either no pending item exists, or another process already locked it
+    logDebug('DEBOUNCE', 'No ready queue item to lock (still in debounce, already processing, or already completed)', { 
       requestId, 
       conversationId 
     });
     return;
   }
 
-  // Mark as processing to prevent duplicate processing
-  const { error: updateError } = await supabaseClient
-    .from('ai_processing_queue')
-    .update({
-      status: 'processing',
-      processing_started_at: now,
-    })
-    .eq('id', queueItem.id)
-    .eq('status', 'pending'); // Ensure we don't override if already processing
-
-  if (updateError) {
-    logDebug('DEBOUNCE', 'Failed to mark queue as processing (likely race condition)', { 
-      requestId, 
-      error: updateError 
-    });
-    return;
-  }
+  const queueItem = lockedItem;
 
   logDebug('DEBOUNCE', `Processing ${queueItem.message_count} batched messages`, {
     requestId,
