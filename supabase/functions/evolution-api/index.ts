@@ -1184,13 +1184,35 @@ serve(async (req) => {
 
             if (!sendResponse.ok) {
               const errorText = await sendResponse.text();
-              console.error(`[Evolution API] Background send failed:`, errorText);
-              // Mark message as failed in DB
+              console.error(`[Evolution API] Background send failed:`, JSON.stringify({ status: sendResponse.status, error: errorText }));
+              
+              // Parse error to detect specific failure reasons
+              let errorReason = "Falha no envio";
+              try {
+                const errorJson = JSON.parse(errorText);
+                // Check for "number not on WhatsApp" error
+                if (errorJson.message && Array.isArray(errorJson.message)) {
+                  const notOnWhatsApp = errorJson.message.find((m: any) => m.exists === false);
+                  if (notOnWhatsApp) {
+                    errorReason = "Número não registrado no WhatsApp";
+                  }
+                } else if (errorJson.error) {
+                  errorReason = errorJson.error;
+                }
+              } catch {
+                // Keep generic error if parsing fails
+              }
+              
+              // Mark message as failed in DB (don't delete - show error to user)
               if (conversationId) {
                 await supabaseClient
                   .from("messages")
-                  .delete()
+                  .update({ 
+                    status: "failed",
+                    content: `❌ ${errorReason}: ${body.message}`,
+                  })
                   .eq("id", tempMessageId);
+                console.log(`[Evolution API] Message marked as failed: ${errorReason}`, { tempMessageId });
               }
               return;
             }
@@ -1203,16 +1225,23 @@ serve(async (req) => {
             if (conversationId && whatsappMessageId) {
               await supabaseClient
                 .from("messages")
-                .update({ whatsapp_message_id: whatsappMessageId })
+                .update({ 
+                  whatsapp_message_id: whatsappMessageId,
+                  status: "sent"
+                })
                 .eq("id", tempMessageId);
             }
           } catch (error) {
             console.error("[Evolution API] Background send error:", error);
-            // Delete failed message
+            // Mark message as failed (don't delete - show error to user)
             if (conversationId) {
+              const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
               await supabaseClient
                 .from("messages")
-                .delete()
+                .update({ 
+                  status: "failed",
+                  content: `❌ Erro ao enviar: ${body.message}`,
+                })
                 .eq("id", tempMessageId);
             }
           }

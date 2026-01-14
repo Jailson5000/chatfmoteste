@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ImageViewerDialog } from "./ImageViewerDialog";
 
-export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error";
+export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error" | "failed";
 
 interface MessageBubbleProps {
   id: string;
@@ -1325,7 +1325,7 @@ export function MessageBubble({
   const actualStatus: MessageStatus = (() => {
     if (!isFromMe) return status;
     if (readAt || status === "read") return "read";
-    if (status === "sending" || status === "error") return status;
+    if (status === "sending" || status === "error" || status === "failed") return status;
     if (status === "delivered") return "delivered";
 
     // Fallback (WhatsApp-like): if no delivery ACK arrived, assume delivered after 3s
@@ -1339,6 +1339,9 @@ export function MessageBubble({
 
     return assumeDelivered ? "delivered" : "sent";
   })();
+  
+  // Normalize "failed" to "error" for styling purposes
+  const displayStatus = actualStatus === "failed" ? "error" : actualStatus;
 
   const renderStatusIcon = () => {
     if (!isFromMe) return null;
@@ -1363,6 +1366,7 @@ export function MessageBubble({
         // 2 blue ticks - message read by recipient
         return <CheckCheck className={cn(iconClass, "text-blue-600 dark:text-blue-400")} />;
       case "error":
+      case "failed":
         return (
           <button
             onClick={() => onRetry?.(id, content || "")}
@@ -1569,7 +1573,7 @@ export function MessageBubble({
               : isFromMe
                 ? aiGenerated
                   ? "bg-purple-100 text-purple-900 rounded-br-md dark:bg-purple-900/30 dark:text-purple-100"
-                  : status === "error"
+                  : (displayStatus === "error")
                     ? "bg-red-100 text-red-900 rounded-br-md dark:bg-red-900/30 dark:text-red-100 border border-red-300 dark:border-red-700"
                     : "bg-green-100 text-green-900 rounded-br-md dark:bg-green-900/30 dark:text-green-100"
                 : "bg-muted rounded-bl-md",
@@ -1674,7 +1678,7 @@ export function MessageBubble({
             : isFromMe
               ? aiGenerated
                 ? "text-purple-700/80 dark:text-purple-300/80"
-                : status === "error"
+                : (displayStatus === "error")
                   ? "text-red-700/80 dark:text-red-300/80"
                   : "text-green-700/80 dark:text-green-300/80"
               : "text-muted-foreground"
