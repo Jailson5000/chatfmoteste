@@ -23,22 +23,28 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
       const textarea = internalRef.current;
       if (!textarea) return;
 
-      // Reset height to measure scrollHeight correctly
+      // Reset height to auto to measure scrollHeight correctly
       textarea.style.height = "auto";
 
       // Calculate line height from computed styles
       const computedStyle = window.getComputedStyle(textarea);
-      const lineHeight = parseFloat(computedStyle.lineHeight) || 20;
-      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
-      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
-      const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
-      const borderBottom = parseFloat(computedStyle.borderBottomWidth) || 0;
+      const fontSize = parseFloat(computedStyle.fontSize) || 14;
+      // lineHeight can be "normal" which returns NaN, so use fontSize * 1.5 as fallback
+      let lineHeight = parseFloat(computedStyle.lineHeight);
+      if (isNaN(lineHeight)) {
+        lineHeight = fontSize * 1.5;
+      }
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 8;
+      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 8;
 
-      const minHeight = lineHeight * minRows + paddingTop + paddingBottom + borderTop + borderBottom;
-      const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom + borderTop + borderBottom;
+      const contentHeight = lineHeight * minRows;
+      const maxContentHeight = lineHeight * maxRows;
 
       // Set the height based on content, clamped between min and max
       const scrollHeight = textarea.scrollHeight;
+      const minHeight = contentHeight + paddingTop + paddingBottom;
+      const maxHeight = maxContentHeight + paddingTop + paddingBottom;
+      
       const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
       
       textarea.style.height = `${newHeight}px`;
@@ -68,7 +74,7 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
     return (
       <textarea
         className={cn(
-          "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none transition-[height] duration-100",
+          "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none",
           className
         )}
         ref={combinedRef}

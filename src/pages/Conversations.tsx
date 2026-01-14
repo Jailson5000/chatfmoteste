@@ -3310,7 +3310,7 @@ export default function Conversations() {
                       ref={textareaRef}
                       placeholder={isSending ? "Enviando..." : "Digite / para templates..."}
                       minRows={1}
-                      maxRows={8}
+                      maxRows={5}
                       value={messageInput}
                       onChange={(e) => {
                         const value = e.target.value;
