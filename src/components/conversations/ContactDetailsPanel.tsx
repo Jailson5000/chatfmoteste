@@ -146,7 +146,7 @@ export function ContactDetailsPanel({
   const [departmentOpen, setDepartmentOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
 
-  // Fetch media items when conversation changes
+  // Fetch media items when conversation changes + realtime subscription
   useEffect(() => {
     if (!conversation?.id) return;
     
@@ -168,6 +168,54 @@ export function ContactDetailsPanel({
     };
     
     fetchMedia();
+
+    // Subscribe to new media messages in realtime
+    const channel = supabase
+      .channel(`media-updates-${conversation.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversation.id}`
+        },
+        (payload) => {
+          const newMsg = payload.new as MediaItem;
+          // Only add if it's a media message
+          if (newMsg.message_type && ["image", "video", "audio", "ptt", "document"].includes(newMsg.message_type)) {
+            setMediaItems(prev => {
+              // Prevent duplicates
+              if (prev.some(m => m.id === newMsg.id)) return prev;
+              // Add to the beginning (most recent first)
+              return [newMsg, ...prev].slice(0, 50);
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversation.id}`
+        },
+        (payload) => {
+          const updatedMsg = payload.new as MediaItem;
+          // Update existing media item if URL changed
+          if (updatedMsg.message_type && ["image", "video", "audio", "ptt", "document"].includes(updatedMsg.message_type)) {
+            setMediaItems(prev => prev.map(m => 
+              m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m
+            ));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversation?.id]);
 
   // Fetch cloud files from storage
