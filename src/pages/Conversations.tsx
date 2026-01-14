@@ -1086,8 +1086,17 @@ export default function Conversations() {
         ));
       } else {
         // Normal message - send to WhatsApp
-        // If NOT in pontual mode: assign to current user if handler is AI or no responsible assigned
-        if (!wasPontualMode && (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to)) {
+        // If NOT in pontual mode: auto-assign to current user if:
+        // 1. Handler is AI, or
+        // 2. No responsible assigned, or
+        // 3. Another attendant is assigned (transfer to current user)
+        const shouldTransfer = !wasPontualMode && (
+          selectedConversation.current_handler === "ai" || 
+          !selectedConversation.assigned_to ||
+          (selectedConversation.assigned_to !== user?.id)
+        );
+        
+        if (shouldTransfer) {
           await transferHandler.mutateAsync({
             conversationId: selectedConversationId,
             handlerType: "human",
