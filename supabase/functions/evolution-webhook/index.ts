@@ -2748,7 +2748,18 @@ serve(async (req) => {
           logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
           // Use instance defaults for handler
-          const defaultHandler = instance.default_assigned_to ? 'human' : 'ai';
+          // FIXED: If default_automation_id is set, use 'ai' handler regardless of default_assigned_to
+          // This allows AI to handle initial contact while also having a default human fallback
+          const hasDefaultAutomation = !!instance.default_automation_id;
+          const defaultHandler = hasDefaultAutomation ? 'ai' : (instance.default_assigned_to ? 'human' : 'ai');
+          
+          logDebug('DB', `Creating conversation with handler logic`, { 
+            requestId,
+            hasDefaultAutomation,
+            defaultAssignedTo: instance.default_assigned_to,
+            defaultHandler,
+            defaultAutomationId: instance.default_automation_id
+          });
           
           const { data: newConv, error: createError } = await supabaseClient
             .from('conversations')
@@ -2759,6 +2770,7 @@ serve(async (req) => {
               contact_phone: phoneNumber,
               status: 'novo_contato',
               current_handler: defaultHandler,
+              current_automation_id: hasDefaultAutomation ? instance.default_automation_id : null,
               assigned_to: instance.default_assigned_to || null,
               department_id: instance.default_department_id || null,
               whatsapp_instance_id: instance.id,
