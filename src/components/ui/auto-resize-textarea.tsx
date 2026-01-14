@@ -23,9 +23,6 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
       const textarea = internalRef.current;
       if (!textarea) return;
 
-      // Reset height to auto to measure scrollHeight correctly
-      textarea.style.height = "auto";
-
       // Calculate line height from computed styles
       const computedStyle = window.getComputedStyle(textarea);
       const fontSize = parseFloat(computedStyle.fontSize) || 14;
@@ -37,14 +34,17 @@ const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, AutoResizeTexta
       const paddingTop = parseFloat(computedStyle.paddingTop) || 8;
       const paddingBottom = parseFloat(computedStyle.paddingBottom) || 8;
 
-      const contentHeight = lineHeight * minRows;
-      const maxContentHeight = lineHeight * maxRows;
+      // Calculate min and max heights
+      const minHeight = lineHeight * minRows + paddingTop + paddingBottom;
+      const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-      // Set the height based on content, clamped between min and max
-      const scrollHeight = textarea.scrollHeight;
-      const minHeight = contentHeight + paddingTop + paddingBottom;
-      const maxHeight = maxContentHeight + paddingTop + paddingBottom;
+      // Reset height to minimum to measure scrollHeight correctly
+      textarea.style.height = `${minHeight}px`;
       
+      // Get actual content height
+      const scrollHeight = textarea.scrollHeight;
+      
+      // Set the height based on content, clamped between min and max
       const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
       
       textarea.style.height = `${newHeight}px`;
