@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,7 @@ export function ContactDetailsPanel({
   onChangeStatus,
   onChangeTags,
 }: ContactDetailsPanelProps) {
+  const queryClient = useQueryClient();
   const [infoOpen, setInfoOpen] = useState(false);
   const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
   const [attendantSearch, setAttendantSearch] = useState("");
@@ -145,6 +147,28 @@ export function ContactDetailsPanel({
   const [tagsOpen, setTagsOpen] = useState(false);
   const [departmentOpen, setDepartmentOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+
+  // Client tags state - synced with client_tags table
+  const [clientTagIds, setClientTagIds] = useState<string[]>([]);
+  const clientId = conversation?.client?.id;
+
+  // Fetch client tags from client_tags table (same source as ContactStatusTags)
+  const fetchClientTags = useCallback(async (cId: string) => {
+    const { data } = await supabase
+      .from("client_tags")
+      .select("tag_id")
+      .eq("client_id", cId);
+    setClientTagIds((data || []).map((t) => t.tag_id));
+  }, []);
+
+  // Sync client tags when conversation/client changes
+  useEffect(() => {
+    if (clientId) {
+      fetchClientTags(clientId);
+    } else {
+      setClientTagIds([]);
+    }
+  }, [clientId, fetchClientTags]);
 
   // Fetch media items when conversation changes + realtime subscription
   useEffect(() => {
@@ -276,13 +300,12 @@ export function ContactDetailsPanel({
     return departments.find(d => d.id === conversation.department_id);
   }, [conversation?.department_id, departments]);
 
-  // Get current tags (max 4)
+  // Get current tags based on client_tags table (synced with header)
   const conversationTags = useMemo(() => {
-    if (!conversation?.tags) return [];
-    return (conversation.tags || [])
-      .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
+    return clientTagIds
+      .map(tagId => tags.find(t => t.id === tagId))
       .filter(Boolean) as Array<{ id: string; name: string; color: string }>;
-  }, [conversation?.tags, tags]);
+  }, [clientTagIds, tags]);
 
   // Filtered members for search
   const filteredMembers = useMemo(() => {
@@ -308,19 +331,37 @@ export function ContactDetailsPanel({
     );
   }
 
-  const handleTagToggle = (tag: { id: string; name: string }) => {
-    if (!onChangeTags) return;
+  // Handle tag toggle using client_tags table (same as ContactStatusTags)
+  const handleTagToggle = async (tag: { id: string; name: string }) => {
+    if (!clientId) return;
     
-    const currentTagNames = conversation.tags || [];
-    const hasTag = currentTagNames.includes(tag.name);
+    const hasTag = clientTagIds.includes(tag.id);
     
     if (hasTag) {
-      onChangeTags(currentTagNames.filter(t => t !== tag.name));
+      // Remove tag
+      await supabase
+        .from("client_tags")
+        .delete()
+        .eq("client_id", clientId)
+        .eq("tag_id", tag.id);
+      
+      setClientTagIds((prev) => prev.filter((id) => id !== tag.id));
     } else {
       // Max 4 tags
-      if (currentTagNames.length >= 4) return;
-      onChangeTags([...currentTagNames, tag.name]);
+      if (clientTagIds.length >= 4) return;
+      
+      // Add tag
+      await supabase.from("client_tags").insert({
+        client_id: clientId,
+        tag_id: tag.id,
+      });
+      
+      setClientTagIds((prev) => [...prev, tag.id]);
     }
+    
+    // Invalidate queries to sync with header and sidebar
+    queryClient.invalidateQueries({ queryKey: ["clients"] });
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleStatusSelect = (statusId: string) => {
