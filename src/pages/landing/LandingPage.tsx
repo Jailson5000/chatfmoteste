@@ -604,20 +604,20 @@ export function LandingPage() {
               </span>
             </div>
             
-            <div className="flex items-center gap-6 text-sm">
+            <nav className="flex items-center gap-6 text-sm" aria-label="Links legais">
               <a 
-                href="https://www.miauchat.com.br/privacidade" 
-                className="text-white/50 hover:text-white transition-colors"
+                href="/privacidade" 
+                className="text-white/50 hover:text-white transition-colors underline-offset-4 hover:underline"
               >
                 Política de Privacidade
               </a>
               <a 
-                href="https://www.miauchat.com.br/termos" 
-                className="text-white/50 hover:text-white transition-colors"
+                href="/termos" 
+                className="text-white/50 hover:text-white transition-colors underline-offset-4 hover:underline"
               >
                 Termos de Serviço
               </a>
-            </div>
+            </nav>
             
             <p className="text-xs text-white/30">
               © {new Date().getFullYear()} MiauChat. Todos os direitos
