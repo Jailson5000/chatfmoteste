@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
 import { useLawFirm } from "@/hooks/useLawFirm";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 type Conversation = Tables<"conversations">;
 
@@ -48,88 +48,172 @@ interface ConversationWithLastMessage extends Conversation {
   }>;
 }
 
+const CONVERSATIONS_BATCH_SIZE = 30;
+
+// Helper function to map RPC response to ConversationWithLastMessage
+function mapRpcRowToConversation(row: any): ConversationWithLastMessage {
+  return {
+    id: row.id,
+    law_firm_id: row.law_firm_id,
+    remote_jid: row.remote_jid,
+    contact_name: row.contact_name,
+    contact_phone: row.contact_phone,
+    status: row.status,
+    priority: row.priority,
+    current_handler: row.current_handler,
+    assigned_to: row.assigned_to,
+    current_automation_id: row.current_automation_id,
+    department_id: row.department_id,
+    client_id: row.client_id,
+    whatsapp_instance_id: row.whatsapp_instance_id,
+    last_message_at: row.last_message_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    ai_summary: row.ai_summary,
+    internal_notes: row.internal_notes,
+    tags: row.tags,
+    needs_human_handoff: row.needs_human_handoff,
+    ai_audio_enabled: row.ai_audio_enabled,
+    ai_audio_enabled_by: row.ai_audio_enabled_by,
+    ai_audio_last_enabled_at: row.ai_audio_last_enabled_at,
+    ai_audio_last_disabled_at: row.ai_audio_last_disabled_at,
+    archived_at: row.archived_at,
+    archived_reason: row.archived_reason,
+    archived_next_responsible_id: row.archived_next_responsible_id,
+    archived_next_responsible_type: row.archived_next_responsible_type,
+    origin: row.origin,
+    origin_metadata: row.origin_metadata,
+    last_summarized_at: row.last_summarized_at,
+    summary_message_count: row.summary_message_count,
+    n8n_last_response_at: row.n8n_last_response_at,
+    whatsapp_instance: row.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
+    current_automation: row.current_automation as { id: string; name: string } | null,
+    department: row.department as { id: string; name: string; color: string } | null,
+    client: row.client as {
+      id?: string;
+      custom_status_id?: string | null;
+      avatar_url?: string | null;
+      custom_status?: { id: string; name: string; color: string } | null;
+    } | null,
+    assigned_profile: row.assigned_profile as { full_name: string } | null,
+    client_tags: (row.client_tags || []) as Array<{ name: string; color: string }>,
+    last_message: row.last_message as {
+      content: string | null;
+      created_at: string;
+      message_type?: string;
+      is_from_me?: boolean;
+    } | null,
+    unread_count: Number(row.unread_count) || 0,
+  };
+}
+
 export function useConversations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  
+  // Pagination state
+  const [allConversations, setAllConversations] = useState<ConversationWithLastMessage[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const offsetRef = useRef(0);
+  const lawFirmIdRef = useRef<string | null>(null);
 
-  const { data: conversations = [], isLoading, error } = useQuery({
+  // Initial fetch query
+  const { data: initialData, isLoading, error } = useQuery({
     queryKey: ["conversations", lawFirm?.id],
     queryFn: async () => {
       if (!lawFirm?.id) return [];
 
-      // Use optimized RPC that fetches everything in a single query
-      // This eliminates the N+1 problem (2*N extra queries for last_message + unread_count)
+      // Reset pagination state on fresh fetch
+      offsetRef.current = 0;
+      
       const { data, error: rpcError } = await supabase
-        .rpc('get_conversations_with_metadata', { _law_firm_id: lawFirm.id });
+        .rpc('get_conversations_with_metadata', { 
+          _law_firm_id: lawFirm.id,
+          _limit: CONVERSATIONS_BATCH_SIZE,
+          _offset: 0
+        });
 
       if (rpcError) {
         console.error('Error fetching conversations via RPC:', rpcError);
         throw rpcError;
       }
 
-      // Map RPC response to match the expected ConversationWithLastMessage format
-      // RPC returns JSONB objects with all fields already structured
-      const conversationsWithMessages: ConversationWithLastMessage[] = (data || []).map((row: any) => ({
-        // Base conversation fields - spread all from RPC response
-        id: row.id,
-        law_firm_id: row.law_firm_id,
-        remote_jid: row.remote_jid,
-        contact_name: row.contact_name,
-        contact_phone: row.contact_phone,
-        status: row.status,
-        priority: row.priority,
-        current_handler: row.current_handler,
-        assigned_to: row.assigned_to,
-        current_automation_id: row.current_automation_id,
-        department_id: row.department_id,
-        client_id: row.client_id,
-        whatsapp_instance_id: row.whatsapp_instance_id,
-        last_message_at: row.last_message_at,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        ai_summary: row.ai_summary,
-        internal_notes: row.internal_notes,
-        tags: row.tags,
-        needs_human_handoff: row.needs_human_handoff,
-        ai_audio_enabled: row.ai_audio_enabled,
-        ai_audio_enabled_by: row.ai_audio_enabled_by,
-        ai_audio_last_enabled_at: row.ai_audio_last_enabled_at,
-        ai_audio_last_disabled_at: row.ai_audio_last_disabled_at,
-        archived_at: row.archived_at,
-        archived_reason: row.archived_reason,
-        archived_next_responsible_id: row.archived_next_responsible_id,
-        archived_next_responsible_type: row.archived_next_responsible_type,
-        origin: row.origin,
-        origin_metadata: row.origin_metadata,
-        last_summarized_at: row.last_summarized_at,
-        summary_message_count: row.summary_message_count,
-        n8n_last_response_at: row.n8n_last_response_at,
-        // Related data from nested JSONB
-        whatsapp_instance: row.whatsapp_instance as { instance_name: string; display_name?: string | null; phone_number?: string | null } | null,
-        current_automation: row.current_automation as { id: string; name: string } | null,
-        department: row.department as { id: string; name: string; color: string } | null,
-        client: row.client as {
-          id?: string;
-          custom_status_id?: string | null;
-          avatar_url?: string | null;
-          custom_status?: { id: string; name: string; color: string } | null;
-        } | null,
-        assigned_profile: row.assigned_profile as { full_name: string } | null,
-        client_tags: (row.client_tags || []) as Array<{ name: string; color: string }>,
-        last_message: row.last_message as {
-          content: string | null;
-          created_at: string;
-          message_type?: string;
-          is_from_me?: boolean;
-        } | null,
-        unread_count: Number(row.unread_count) || 0,
-      }));
-
-      return conversationsWithMessages;
+      const conversations = (data || []).map(mapRpcRowToConversation);
+      
+      // Update pagination state
+      offsetRef.current = conversations.length;
+      setHasMore(conversations.length === CONVERSATIONS_BATCH_SIZE);
+      
+      return conversations;
     },
     enabled: !!lawFirm?.id,
   });
+
+  // Sync initialData to allConversations state
+  useEffect(() => {
+    if (initialData && lawFirm?.id) {
+      // If law firm changed, reset everything
+      if (lawFirmIdRef.current !== lawFirm.id) {
+        lawFirmIdRef.current = lawFirm.id;
+        setAllConversations(initialData);
+        offsetRef.current = initialData.length;
+        setHasMore(initialData.length === CONVERSATIONS_BATCH_SIZE);
+      } else {
+        // Same law firm - merge with existing (for realtime updates)
+        // Replace existing conversations while keeping ones loaded via loadMore
+        setAllConversations(prev => {
+          const initialIds = new Set(initialData.map(c => c.id));
+          const additionalConversations = prev.filter(c => !initialIds.has(c.id));
+          // Initial data comes first (most recent), then any additional loaded later
+          return [...initialData, ...additionalConversations];
+        });
+      }
+    }
+  }, [initialData, lawFirm?.id]);
+
+  // Load more conversations
+  const loadMoreConversations = useCallback(async () => {
+    if (!lawFirm?.id || isLoadingMore || !hasMore) return;
+    
+    setIsLoadingMore(true);
+    
+    try {
+      const { data, error: rpcError } = await supabase
+        .rpc('get_conversations_with_metadata', { 
+          _law_firm_id: lawFirm.id,
+          _limit: CONVERSATIONS_BATCH_SIZE,
+          _offset: offsetRef.current
+        });
+
+      if (rpcError) {
+        console.error('Error loading more conversations:', rpcError);
+        throw rpcError;
+      }
+
+      const newConversations = (data || []).map(mapRpcRowToConversation);
+      
+      if (newConversations.length > 0) {
+        setAllConversations(prev => {
+          // Deduplicate by ID
+          const existingIds = new Set(prev.map(c => c.id));
+          const uniqueNew = newConversations.filter(c => !existingIds.has(c.id));
+          return [...prev, ...uniqueNew];
+        });
+        offsetRef.current += newConversations.length;
+      }
+      
+      setHasMore(newConversations.length === CONVERSATIONS_BATCH_SIZE);
+    } catch (error) {
+      console.error('Failed to load more conversations:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [lawFirm?.id, isLoadingMore, hasMore]);
+
+  // Use allConversations as the source of truth
+  const conversations = allConversations;
 
   // Real-time subscription for conversations, messages, clients, and custom_statuses
   useEffect(() => {
@@ -696,6 +780,11 @@ export function useConversations() {
     conversations,
     isLoading,
     error,
+    // Pagination
+    loadMoreConversations,
+    hasMoreConversations: hasMore,
+    isLoadingMoreConversations: isLoadingMore,
+    // Mutations
     updateConversation,
     updateConversationStatus,
     updateConversationDepartment,

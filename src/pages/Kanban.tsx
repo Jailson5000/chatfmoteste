@@ -34,7 +34,15 @@ import { cn } from "@/lib/utils";
 
 export default function Kanban() {
   const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
-  const { conversations, isLoading: convsLoading, updateConversationDepartment, transferHandler } = useConversations();
+  const { 
+    conversations, 
+    isLoading: convsLoading, 
+    updateConversationDepartment, 
+    transferHandler,
+    loadMoreConversations,
+    hasMoreConversations,
+    isLoadingMoreConversations,
+  } = useConversations();
   const { tags } = useTags();
   const { statuses: customStatuses } = useCustomStatuses();
   const { members } = useTeamMembers();
@@ -68,7 +76,12 @@ export default function Kanban() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [isCreatingContact, setIsCreatingContact] = useState(false);
 
-  // Get available connections with phone numbers from WhatsApp instances
+  // Auto-load all conversations for Kanban (needs full dataset for board view)
+  useEffect(() => {
+    if (hasMoreConversations && !isLoadingMoreConversations && !convsLoading) {
+      loadMoreConversations();
+    }
+  }, [hasMoreConversations, isLoadingMoreConversations, convsLoading, loadMoreConversations]);
   const availableConnections = useMemo(() => {
     const instancesMap = new Map<string, { id: string; name: string; phone?: string | null }>();
     conversations.forEach(conv => {

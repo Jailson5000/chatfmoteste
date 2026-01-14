@@ -167,7 +167,19 @@ interface Message {
 
 export default function Conversations() {
   const { user } = useAuth();
-  const { conversations, isLoading, transferHandler, updateConversation, updateConversationDepartment, updateConversationTags, updateClientStatus, updateConversationAudioMode } = useConversations();
+  const { 
+    conversations, 
+    isLoading, 
+    transferHandler, 
+    updateConversation, 
+    updateConversationDepartment, 
+    updateConversationTags, 
+    updateClientStatus, 
+    updateConversationAudioMode,
+    loadMoreConversations: loadMoreFromBackend,
+    hasMoreConversations: hasMoreFromBackend,
+    isLoadingMoreConversations: isLoadingMoreFromBackend,
+  } = useConversations();
   const { members: teamMembers } = useTeamMembers();
   const { departments } = useDepartments();
   const { tags } = useTags();
@@ -977,7 +989,8 @@ export default function Conversations() {
     });
   }, [mappedConversations, conversationFilters, searchQuery, activeTab, user?.id]);
 
-  // Infinite scroll for conversation list (30 initial, +20 on scroll)
+  // Infinite scroll for conversation list - frontend pagination over already-loaded data
+  // Combined with backend pagination for loading more when needed
   const conversationScroll = useInfiniteScroll(filteredConversations, {
     initialBatchSize: 30,
     batchIncrement: 20,
@@ -985,10 +998,24 @@ export default function Conversations() {
   });
 
   const {
-    loadMore: loadMoreConversations,
-    hasMore: hasMoreConversations,
-    isLoadingMore: isLoadingMoreConversations,
+    loadMore: loadMoreFrontend,
+    hasMore: hasMoreFrontend,
+    isLoadingMore: isLoadingMoreFrontend,
+    displayedCount,
   } = conversationScroll;
+
+  // Combined hasMore: frontend has more to show OR backend has more to load
+  const hasMoreConversations = hasMoreFrontend || hasMoreFromBackend;
+  const isLoadingMoreConversations = isLoadingMoreFrontend || isLoadingMoreFromBackend;
+
+  // Load more function: first exhaust frontend, then load from backend
+  const loadMoreConversations = useCallback(() => {
+    if (hasMoreFrontend) {
+      loadMoreFrontend();
+    } else if (hasMoreFromBackend && !isLoadingMoreFromBackend) {
+      loadMoreFromBackend();
+    }
+  }, [hasMoreFrontend, loadMoreFrontend, hasMoreFromBackend, isLoadingMoreFromBackend, loadMoreFromBackend]);
 
   // Radix ScrollArea: bind scroll listener to the internal viewport
   useEffect(() => {
@@ -1017,7 +1044,7 @@ export default function Conversations() {
     hasMoreConversations,
     isLoadingMoreConversations,
     filteredConversations.length,
-    conversationScroll.displayedCount,
+    displayedCount,
   ]);
 
   const handleSendMessage = async () => {
