@@ -796,6 +796,44 @@ export function useConversations() {
   });
 
   // Mutation específica para troca de instância WhatsApp com mensagem de sistema
+  // Helper function to check for existing conversation in destination
+  const checkExistingConversationInDestination = async (
+    conversationId: string,
+    newInstanceId: string,
+    lawFirmId: string
+  ): Promise<{ exists: boolean; existingConvId?: string; existingConvName?: string }> => {
+    // Get current conversation data
+    const { data: currentConversation } = await supabase
+      .from("conversations")
+      .select("remote_jid, contact_name")
+      .eq("id", conversationId)
+      .single();
+
+    if (!currentConversation?.remote_jid) {
+      return { exists: false };
+    }
+
+    // Check if there's a conversation with same remote_jid in destination
+    const { data: existingConvs } = await supabase
+      .from("conversations")
+      .select("id, contact_name")
+      .eq("law_firm_id", lawFirmId)
+      .eq("whatsapp_instance_id", newInstanceId)
+      .eq("remote_jid", currentConversation.remote_jid)
+      .neq("id", conversationId)
+      .limit(1);
+
+    if (existingConvs && existingConvs.length > 0) {
+      return { 
+        exists: true, 
+        existingConvId: existingConvs[0].id,
+        existingConvName: existingConvs[0].contact_name || "Sem nome"
+      };
+    }
+
+    return { exists: false };
+  };
+
   const changeWhatsAppInstance = useMutation({
     mutationFn: async ({
       conversationId,
@@ -804,6 +842,7 @@ export function useConversations() {
       newInstanceName,
       oldPhoneDigits,
       newPhoneDigits,
+      forceUnify = false,
     }: {
       conversationId: string;
       newInstanceId: string;
@@ -811,6 +850,7 @@ export function useConversations() {
       newInstanceName: string;
       oldPhoneDigits?: string;
       newPhoneDigits?: string;
+      forceUnify?: boolean;
     }) => {
       if (!lawFirm?.id) throw new Error("Escritório não encontrado");
 
@@ -840,7 +880,7 @@ export function useConversations() {
       if (currentConversation?.remote_jid) {
         const { data: existingConvs } = await supabase
           .from("conversations")
-          .select("id")
+          .select("id, client_id")
           .eq("law_firm_id", lawFirm.id)
           .eq("whatsapp_instance_id", newInstanceId)
           .eq("remote_jid", currentConversation.remote_jid)
@@ -850,9 +890,44 @@ export function useConversations() {
         existingConversationInDestination = existingConvs?.[0] || null;
       }
 
-      // 4. Se já existe uma conversa no destino, bloquear a operação (evita duplicação)
-      if (existingConversationInDestination) {
-        throw new Error(`Já existe uma conversa com este contato na instância ${newInstanceName}. Para unificar, acesse a conversa existente.`);
+      // 4. Se já existe uma conversa no destino e forceUnify não foi ativado, lançar erro especial
+      if (existingConversationInDestination && !forceUnify) {
+        const error = new Error("CONFLICT_EXISTS");
+        (error as any).conflictData = {
+          existingConvId: existingConversationInDestination.id,
+        };
+        throw error;
+      }
+
+      // 5. Se forceUnify está ativado, arquivar a conversa existente no destino
+      if (existingConversationInDestination && forceUnify) {
+        // Arquivar a conversa duplicada no destino
+        await supabase
+          .from("conversations")
+          .update({ 
+            archived_at: new Date().toISOString(),
+            archived_reason: `Unificada com conversa movida de ${oldInstanceName}`
+          })
+          .eq("id", existingConversationInDestination.id)
+          .eq("law_firm_id", lawFirm.id);
+
+        // Se a conversa arquivada tinha um cliente, e esse cliente não tem mais conversas ativas, excluir
+        if (existingConversationInDestination.client_id) {
+          const { data: otherConvs } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("client_id", existingConversationInDestination.client_id)
+            .is("archived_at", null)
+            .limit(1);
+          
+          if (!otherConvs || otherConvs.length === 0) {
+            await supabase
+              .from("clients")
+              .delete()
+              .eq("id", existingConversationInDestination.client_id)
+              .eq("law_firm_id", lawFirm.id);
+          }
+        }
       }
 
       // 5. Atualizar a conversa com a nova instância
@@ -952,5 +1027,7 @@ export function useConversations() {
     updateConversationAudioMode,
     transferHandler,
     changeWhatsAppInstance,
+    // Helpers
+    checkExistingConversationInDestination,
   };
 }

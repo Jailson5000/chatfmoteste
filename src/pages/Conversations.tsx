@@ -81,6 +81,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -182,6 +192,7 @@ export default function Conversations() {
     updateClientStatus, 
     updateConversationAudioMode,
     changeWhatsAppInstance,
+    checkExistingConversationInDestination,
     loadMoreConversations: loadMoreFromBackend,
     hasMoreConversations: hasMoreFromBackend,
     isLoadingMoreConversations: isLoadingMoreFromBackend,
@@ -337,6 +348,18 @@ export default function Conversations() {
   const [archiveCustomReason, setArchiveCustomReason] = useState<string>("");
   const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
   const [archiveNextResponsibleType, setArchiveNextResponsibleType] = useState<"human" | "ai" | null>(null);
+
+  // Instance change confirmation dialog state
+  const [instanceChangeDialogOpen, setInstanceChangeDialogOpen] = useState(false);
+  const [pendingInstanceChange, setPendingInstanceChange] = useState<{
+    conversationId: string;
+    newInstanceId: string;
+    oldInstanceName: string;
+    newInstanceName: string;
+    oldPhoneDigits?: string;
+    newPhoneDigits?: string;
+    existingConvName?: string;
+  } | null>(null);
 
   // Details panel state
   const [showDetailsPanel, setShowDetailsPanel] = useState(true);
@@ -2763,7 +2786,7 @@ export default function Conversations() {
                       {connectedInstances.length > 1 ? (
                         <Select
                           value={selectedConversation.whatsapp_instance_id || ""}
-                          onValueChange={(value) => {
+                          onValueChange={async (value) => {
                             if (value && selectedConversation?.id && value !== selectedConversation.whatsapp_instance_id) {
                               // Buscar dados das instâncias antiga e nova
                               const oldInstance = whatsappInstances.find(
@@ -2773,14 +2796,38 @@ export default function Conversations() {
                                 (inst) => inst.id === value
                               );
                               
-                              changeWhatsAppInstance.mutate({
+                              const changeData = {
                                 conversationId: selectedConversation.id,
                                 newInstanceId: value,
                                 oldInstanceName: oldInstance?.display_name || oldInstance?.instance_name || "Desconhecido",
                                 newInstanceName: newInstance?.display_name || newInstance?.instance_name || "Desconhecido",
                                 oldPhoneDigits: oldInstance?.phone_number?.slice(-4),
                                 newPhoneDigits: newInstance?.phone_number?.slice(-4),
-                              });
+                              };
+
+                              // Check if there's a conflict before proceeding
+                              try {
+                                const result = await checkExistingConversationInDestination(
+                                  selectedConversation.id,
+                                  value,
+                                  selectedConversation.law_firm_id
+                                );
+                                
+                                if (result.exists) {
+                                  // Show confirmation dialog
+                                  setPendingInstanceChange({
+                                    ...changeData,
+                                    existingConvName: result.existingConvName,
+                                  });
+                                  setInstanceChangeDialogOpen(true);
+                                } else {
+                                  // No conflict, proceed directly
+                                  changeWhatsAppInstance.mutate(changeData);
+                                }
+                              } catch (error) {
+                                // If check fails, try direct mutation (will handle errors there)
+                                changeWhatsAppInstance.mutate(changeData);
+                              }
                             }
                           }}
                         >
@@ -3740,6 +3787,50 @@ export default function Conversations() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Instance Change Confirmation Dialog */}
+      <AlertDialog open={instanceChangeDialogOpen} onOpenChange={setInstanceChangeDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unificar conversas?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>
+                Já existe uma conversa com este contato na instância <strong>{pendingInstanceChange?.newInstanceName}</strong>.
+              </p>
+              <p>
+                Ao continuar:
+              </p>
+              <ul className="list-disc list-inside text-sm space-y-1 ml-2">
+                <li>A conversa atual ({pendingInstanceChange?.oldInstanceName}) será <strong>movida</strong> para a nova instância</li>
+                <li>A conversa existente na instância de destino será <strong>arquivada</strong></li>
+                <li>Todo o histórico de mensagens da conversa atual será preservado</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setInstanceChangeDialogOpen(false);
+              setPendingInstanceChange(null);
+            }}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingInstanceChange) {
+                  changeWhatsAppInstance.mutate({
+                    ...pendingInstanceChange,
+                    forceUnify: true,
+                  });
+                }
+                setInstanceChangeDialogOpen(false);
+                setPendingInstanceChange(null);
+              }}
+            >
+              Unificar e mover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
     </TooltipProvider>
