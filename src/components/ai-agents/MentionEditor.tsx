@@ -108,27 +108,37 @@ function parseValueToParts(value: string): ParsedPart[] {
   const allMatches: MentionMatch[] = [];
 
   // Find structured mentions (@type:value)
-  // Stop at connector words (e, para, que, um, uma, o, a, no, na, do, da, de, coloca, adiciona, etc.)
-  // These words indicate the end of the mention value and the start of regular text
-  const connectorWords = /\s+(e|para|que|um|uma|o|a|no|na|do|da|de|coloca|adiciona|transfere|você|com|sem)\s/i;
+  // The value should stop at connector words that indicate transition to regular text
+  const connectorWordsList = ['\\be\\b', '\\bpara\\b', '\\bque\\b', '\\bum\\b', '\\buma\\b', '\\bo\\b', '\\ba\\b', '\\bno\\b', '\\bna\\b', '\\bdo\\b', '\\bda\\b', '\\bde\\b', '\\bcoloca\\b', '\\badiciona\\b', '\\btransfere\\b', '\\bvocê\\b', '\\bcom\\b', '\\bsem\\b', '\\bao\\b', '\\bà\\b', '\\bàs\\b', '\\baos\\b', '\\bem\\b', '\\bpelo\\b', '\\bpela\\b', '\\bpor\\b', '\\bse\\b', '\\bou\\b', '\\bmas\\b', '\\bporém\\b', '\\bonde\\b', '\\bcomo\\b', '\\bquando\\b', '\\besse\\b', '\\bessa\\b', '\\besses\\b', '\\bessas\\b', '\\beste\\b', '\\besta\\b', '\\bestes\\b', '\\bestas\\b'];
+  
+  // Create a regex that captures ONLY valid mention characters (letters, numbers, accents, and some special chars)
+  // But NOT spaces followed by connector words
   const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_/|<>.-]+(?:\s+[A-Za-zÀ-ÿ0-9_/|<>.-]+)*)/gi;
   let match: RegExpExecArray | null;
   
   while ((match = structuredRegex.exec(value)) !== null) {
     let capturedValue = match[2];
     
-    // Check if the captured value contains connector words and truncate there
-    const connectorMatch = connectorWords.exec(' ' + capturedValue + ' ');
-    if (connectorMatch) {
-      // Find the position in the original captured value
-      const connectorPos = connectorMatch.index - 1; // -1 because we added a space at the beginning
-      if (connectorPos > 0) {
-        capturedValue = capturedValue.substring(0, connectorPos).trim();
+    // Split the captured value into words and find where connector words start
+    const words = capturedValue.split(/\s+/);
+    const validWords: string[] = [];
+    
+    for (const word of words) {
+      const lowerWord = word.toLowerCase();
+      // Check if this word is a connector word (indicating end of mention value)
+      const isConnector = connectorWordsList.some(pattern => {
+        const regex = new RegExp(pattern, 'i');
+        return regex.test(lowerWord);
+      });
+      
+      if (isConnector) {
+        break; // Stop here - this and subsequent words are not part of the mention
       }
+      validWords.push(word);
     }
     
-    // Also trim trailing whitespace
-    capturedValue = capturedValue.replace(/\s+$/, '');
+    // Reconstruct the valid mention value
+    capturedValue = validWords.join(' ').trim();
     
     if (capturedValue.length === 0) continue;
     
