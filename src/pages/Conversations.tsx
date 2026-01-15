@@ -1238,19 +1238,18 @@ export default function Conversations() {
       
       if (uploadError) throw uploadError;
       
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("internal-chat-files")
-        .getPublicUrl(fileName);
+      // Store the file path (not public URL since bucket is private)
+      // The path will be used to generate signed URLs on download
+      const filePath = fileName;
       
-      // Save internal message with file
+      // Save internal message with file - store path prefixed to identify internal files
       const { error: msgError } = await supabase
         .from("messages")
         .insert({
           conversation_id: selectedConversationId,
           content: `📎 ${file.name}`,
           message_type: "document",
-          media_url: urlData.publicUrl,
+          media_url: `internal-chat-files://${filePath}`,
           media_mime_type: file.type,
           is_from_me: true,
           sender_type: "human",
@@ -1269,7 +1268,7 @@ export default function Conversations() {
         sender_type: "human",
         ai_generated: false,
         message_type: "document",
-        media_url: urlData.publicUrl,
+        media_url: `internal-chat-files://${filePath}`,
         media_mime_type: file.type,
         status: "sent",
         is_internal: true,

@@ -1072,6 +1072,11 @@ function DocumentViewer({
   // Para documentos do WhatsApp sempre forçar descriptografia via backend
   // para garantir download correto com extensão (sem .enc) e evitar URLs expiradas.
   const needsDecryption = !!whatsappMessageId && !!conversationId;
+  
+  // Check if this is an internal chat file (private bucket)
+  // Support both new format (internal-chat-files://) and old format (supabase URL with internal-chat-files)
+  const isInternalFile = src.startsWith('internal-chat-files://') || 
+    src.includes('/internal-chat-files/');
 
   // Extract display name from content or URL
   const getDisplayName = () => {
@@ -1122,6 +1127,49 @@ function DocumentViewer({
   };
 
   const handleDownload = async () => {
+    // Handle internal chat files (private bucket) - need signed URL
+    if (isInternalFile) {
+      setIsDecrypting(true);
+      setError(false);
+      try {
+        let filePath: string;
+        
+        // Handle new format: internal-chat-files://path
+        if (src.startsWith('internal-chat-files://')) {
+          filePath = src.replace('internal-chat-files://', '');
+        } else {
+          // Handle old format: extract path from Supabase URL
+          // URL format: .../storage/v1/object/public/internal-chat-files/path
+          const match = src.match(/\/internal-chat-files\/(.+)$/);
+          if (match) {
+            filePath = decodeURIComponent(match[1]);
+          } else {
+            console.error('Could not extract file path from URL:', src);
+            setError(true);
+            return;
+          }
+        }
+        
+        const { data, error: signError } = await supabase.storage
+          .from('internal-chat-files')
+          .createSignedUrl(filePath, 60); // 60 seconds expiry
+        
+        if (signError || !data?.signedUrl) {
+          console.error('Failed to create signed URL:', signError);
+          setError(true);
+          return;
+        }
+        
+        window.open(data.signedUrl, '_blank');
+      } catch (err) {
+        console.error('Error downloading internal file:', err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+      return;
+    }
+    
     if (!needsDecryption) {
       // Direct download for non-encrypted files
       window.open(src, "_blank");
