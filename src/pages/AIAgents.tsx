@@ -307,12 +307,22 @@ export default function AIAgents() {
       setIsActive(selectedAgent.is_active);
       setLastUpdated(new Date(selectedAgent.updated_at));
       
-      const config = selectedAgent.trigger_config;
-      if (config?.keywords && config.keywords.length > 0) {
-        setKeywords(config.keywords.join(", "));
+      const config = selectedAgent.trigger_config as Record<string, unknown> | undefined;
+      if (config?.keywords && Array.isArray(config.keywords) && config.keywords.length > 0) {
+        setKeywords((config.keywords as string[]).join(", "));
       } else {
         setKeywords("");
       }
+      
+      // Load response delay
+      setResponseDelay(Number(config?.response_delay ?? config?.response_delay_seconds ?? 2));
+      
+      // Load channel settings
+      const loadedChannelType = (config?.channel_type as string) || "all";
+      setChannelType(loadedChannelType === "instance" || loadedChannelType === "department" ? loadedChannelType : "all");
+      setSelectedInstance((config?.selected_instance as string) || "");
+      setSelectedDepartment((config?.selected_department as string) || "");
+      setSelectedKnowledge((config?.knowledge_base_ids as string[]) || []);
       
       // Load voice settings
       setVoiceEnabled(Boolean(config?.voice_enabled));
@@ -771,8 +781,8 @@ export default function AIAgents() {
   };
 
   const getAgentDelay = (agent: Automation) => {
-    const config = agent.trigger_config as any;
-    return config?.response_delay || 10;
+    const config = agent.trigger_config as Record<string, unknown> | undefined;
+    return Number(config?.response_delay ?? config?.response_delay_seconds ?? 2);
   };
 
   const isPrimaryAgent = (agent: Automation) => {
