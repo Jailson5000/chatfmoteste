@@ -2759,32 +2759,42 @@ export default function Conversations() {
                     </p>
                     <div className="flex items-center gap-1 mt-1 min-w-0">
                       <Inbox className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      {(() => {
-                        const currentInstance = whatsappInstances.find(
-                          (inst) => inst.id === selectedConversation.whatsapp_instance_id
-                        );
-                        const instanceName = currentInstance?.display_name || 
-                          currentInstance?.instance_name || 
-                          selectedConversation.whatsapp_instance?.display_name || 
-                          selectedConversation.whatsapp_instance?.instance_name || 
-                          "Não vinculado";
-                        const lastDigits = currentInstance?.phone_number 
-                          ? currentInstance.phone_number.slice(-4) 
-                          : null;
-                        const isConnected = currentInstance?.status === "connected";
-                        
-                        return (
-                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground truncate">
-                            {currentInstance && (
-                              <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                            )}
-                            <span className="truncate">
-                              {instanceName}
-                              {lastDigits && <span className="ml-1">(...{lastDigits})</span>}
-                            </span>
-                          </span>
-                        );
-                      })()}
+                      {connectedInstances.length > 1 ? (
+                        <Select
+                          value={selectedConversation.whatsapp_instance_id || ""}
+                          onValueChange={(value) => {
+                            if (value && selectedConversation?.id) {
+                              updateConversation.mutate({
+                                id: selectedConversation.id,
+                                whatsapp_instance_id: value,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px]">
+                            <SelectValue placeholder="Selecione um canal" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {whatsappInstances.map((inst) => {
+                              const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
+                              const isConnected = inst.status === "connected";
+                              return (
+                                <SelectItem key={inst.id} value={inst.id} className="text-xs">
+                                  <span className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                                    {inst.display_name || inst.instance_name}
+                                    {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
+                                  </span>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground truncate">
+                          Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
