@@ -109,10 +109,29 @@ function parseValueToParts(value: string): ParsedPart[] {
 
   // Find structured mentions (@type:value)
   // The value should stop at connector words that indicate transition to regular text
-  const connectorWordsList = ['\\be\\b', '\\bpara\\b', '\\bque\\b', '\\bum\\b', '\\buma\\b', '\\bo\\b', '\\ba\\b', '\\bno\\b', '\\bna\\b', '\\bdo\\b', '\\bda\\b', '\\bde\\b', '\\bcoloca\\b', '\\badiciona\\b', '\\btransfere\\b', '\\bvocê\\b', '\\bcom\\b', '\\bsem\\b', '\\bao\\b', '\\bà\\b', '\\bàs\\b', '\\baos\\b', '\\bem\\b', '\\bpelo\\b', '\\bpela\\b', '\\bpor\\b', '\\bse\\b', '\\bou\\b', '\\bmas\\b', '\\bporém\\b', '\\bonde\\b', '\\bcomo\\b', '\\bquando\\b', '\\besse\\b', '\\bessa\\b', '\\besses\\b', '\\bessas\\b', '\\beste\\b', '\\besta\\b', '\\bestes\\b', '\\bestas\\b'];
+  // These are common Portuguese words that typically follow a mention and start regular text
+  const connectorWordsSet = new Set([
+    // Articles and prepositions
+    'e', 'para', 'o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas',
+    'no', 'na', 'nos', 'nas', 'do', 'da', 'dos', 'das', 'de', 'ao', 'à', 'às', 'aos',
+    'em', 'pelo', 'pela', 'pelos', 'pelas', 'por', 'com', 'sem',
+    // Conjunctions
+    'que', 'se', 'ou', 'mas', 'porém', 'onde', 'como', 'quando', 'porque', 'pois',
+    // Pronouns
+    'você', 'ele', 'ela', 'eles', 'elas', 'eu', 'nós', 'vocês',
+    'esse', 'essa', 'esses', 'essas', 'este', 'esta', 'estes', 'estas',
+    'isso', 'isto', 'aquilo', 'aquele', 'aquela', 'aqueles', 'aquelas',
+    'seu', 'sua', 'seus', 'suas', 'meu', 'minha', 'meus', 'minhas',
+    'nosso', 'nossa', 'nossos', 'nossas',
+    // Common verbs that indicate action/transition
+    'coloca', 'adiciona', 'transfere', 'não', 'nunca', 'sempre', 'também',
+    'utilize', 'fale', 'fala', 'seja', 'será', 'deve', 'podem', 'pode',
+    's', // single 's' from plurals like "frases"
+    // Adverbs
+    'então', 'assim', 'ainda', 'já', 'agora', 'depois', 'antes',
+  ]);
   
   // Create a regex that captures ONLY valid mention characters (letters, numbers, accents, and some special chars)
-  // But NOT spaces followed by connector words
   const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_/|<>.-]+(?:\s+[A-Za-zÀ-ÿ0-9_/|<>.-]+)*)/gi;
   let match: RegExpExecArray | null;
   
@@ -125,13 +144,11 @@ function parseValueToParts(value: string): ParsedPart[] {
     
     for (const word of words) {
       const lowerWord = word.toLowerCase();
-      // Check if this word is a connector word (indicating end of mention value)
-      const isConnector = connectorWordsList.some(pattern => {
-        const regex = new RegExp(pattern, 'i');
-        return regex.test(lowerWord);
-      });
+      // Remove punctuation at the end for comparison
+      const cleanWord = lowerWord.replace(/[.,;:!?]$/, '');
       
-      if (isConnector) {
+      // Check if this word is a connector word (indicating end of mention value)
+      if (connectorWordsSet.has(cleanWord)) {
         break; // Stop here - this and subsequent words are not part of the mention
       }
       validWords.push(word);
