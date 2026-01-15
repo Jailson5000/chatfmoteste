@@ -235,6 +235,8 @@ export function useConversations() {
 
   // Real-time subscription for conversations, messages, clients, and custom_statuses
   useEffect(() => {
+    if (!lawFirm?.id) return;
+    
     const conversationsChannel = supabase
       .channel('conversations-realtime')
       .on(
@@ -242,11 +244,18 @@ export function useConversations() {
         {
           event: '*',
           schema: 'public',
-          table: 'conversations'
+          table: 'conversations',
+          filter: `law_firm_id=eq.${lawFirm.id}`
         },
-        () => {
+        (payload) => {
+          // Force immediate refetch for handler/assignment changes
           queryClient.invalidateQueries({ queryKey: ["conversations"] });
           queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
+          
+          // If it's an UPDATE with handler or assigned_to change, force refetch
+          if (payload.eventType === 'UPDATE') {
+            queryClient.refetchQueries({ queryKey: ["conversations", lawFirm.id] });
+          }
         }
       )
       .subscribe();
@@ -322,7 +331,7 @@ export function useConversations() {
       supabase.removeChannel(statusesChannel);
       supabase.removeChannel(departmentsChannel);
     };
-  }, [queryClient]);
+  }, [queryClient, lawFirm?.id]);
 
   const updateConversation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Conversation> & { id: string }) => {
