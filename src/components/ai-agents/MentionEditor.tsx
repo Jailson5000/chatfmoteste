@@ -94,10 +94,31 @@ interface ParsedPart {
   content: string;
 }
 
-function parseValueToParts(value: string): ParsedPart[] {
+interface KnownValues {
+  departments?: Array<{ name: string }>;
+  statuses?: Array<{ name: string }>;
+  tags?: Array<{ name: string }>;
+  templates?: Array<{ name: string }>;
+  teamMembers?: Array<{ full_name: string }>;
+  aiAgents?: Array<{ name: string }>;
+}
+
+function parseValueToParts(value: string, knownValues?: KnownValues): ParsedPart[] {
   if (!value) return [];
 
   const result: ParsedPart[] = [];
+  
+  // Build sets of known values for quick lookup (case-insensitive)
+  const knownDepartments = new Set(knownValues?.departments?.map(d => d.name.toLowerCase()) || []);
+  const knownStatuses = new Set(knownValues?.statuses?.map(s => s.name.toLowerCase()) || []);
+  const knownTags = new Set(knownValues?.tags?.map(t => t.name.toLowerCase()) || []);
+  const knownTemplates = new Set(knownValues?.templates?.map(t => t.name.toLowerCase()) || []);
+  const knownResponsaveis = new Set([
+    ...(knownValues?.teamMembers?.map(m => m.full_name.toLowerCase()) || []),
+    ...(knownValues?.aiAgents?.map(a => a.name.toLowerCase()) || []),
+    // Also add common IA prefixes
+    ...(knownValues?.aiAgents?.map(a => `ia:${a.name.toLowerCase()}`) || []),
+  ]);
   
   // Track all mentions with their positions
   interface MentionMatch {
@@ -107,60 +128,95 @@ function parseValueToParts(value: string): ParsedPart[] {
   }
   const allMatches: MentionMatch[] = [];
 
-  // Find structured mentions (@type:value)
-  // The value should stop at connector words that indicate transition to regular text
-  // These are common Portuguese words that typically follow a mention and start regular text
+  // Connector words as fallback when no exact match is found
   const connectorWordsSet = new Set([
-    // Articles and prepositions
     'e', 'para', 'o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas',
     'no', 'na', 'nos', 'nas', 'do', 'da', 'dos', 'das', 'de', 'ao', 'à', 'às', 'aos',
     'em', 'pelo', 'pela', 'pelos', 'pelas', 'por', 'com', 'sem',
-    // Conjunctions
     'que', 'se', 'ou', 'mas', 'porém', 'onde', 'como', 'quando', 'porque', 'pois',
-    // Pronouns
     'você', 'ele', 'ela', 'eles', 'elas', 'eu', 'nós', 'vocês',
     'esse', 'essa', 'esses', 'essas', 'este', 'esta', 'estes', 'estas',
     'isso', 'isto', 'aquilo', 'aquele', 'aquela', 'aqueles', 'aquelas',
     'seu', 'sua', 'seus', 'suas', 'meu', 'minha', 'meus', 'minhas',
     'nosso', 'nossa', 'nossos', 'nossas',
-    // Common verbs that indicate action/transition
     'coloca', 'adiciona', 'transfere', 'não', 'nunca', 'sempre', 'também',
     'utilize', 'fale', 'fala', 'seja', 'será', 'deve', 'podem', 'pode',
-    's', // single 's' from plurals like "frases"
-    // Adverbs
     'então', 'assim', 'ainda', 'já', 'agora', 'depois', 'antes',
   ]);
   
-  // Create a regex that captures ONLY valid mention characters (letters, numbers, accents, and some special chars)
+  // Helper function to find best match from known values
+  const findBestKnownMatch = (type: string, capturedText: string): string | null => {
+    const lowerText = capturedText.toLowerCase();
+    let knownSet: Set<string>;
+    
+    switch (type.toLowerCase()) {
+      case 'departamento': knownSet = knownDepartments; break;
+      case 'status': knownSet = knownStatuses; break;
+      case 'etiqueta': knownSet = knownTags; break;
+      case 'responsavel': knownSet = knownResponsaveis; break;
+      case 'template': knownSet = knownTemplates; break;
+      default: return null;
+    }
+    
+    if (knownSet.size === 0) return null;
+    
+    // Try to find the longest matching known value
+    let bestMatch: string | null = null;
+    let bestLength = 0;
+    
+    for (const known of knownSet) {
+      // Check if the captured text starts with this known value
+      if (lowerText.startsWith(known) && known.length > bestLength) {
+        // Verify it's a complete word match (not partial)
+        const nextCharPos = known.length;
+        if (nextCharPos >= lowerText.length || /\s/.test(lowerText[nextCharPos])) {
+          bestMatch = known;
+          bestLength = known.length;
+        }
+      }
+      // Also check exact match
+      if (lowerText === known) {
+        return capturedText.substring(0, known.length);
+      }
+    }
+    
+    return bestMatch ? capturedText.substring(0, bestLength) : null;
+  };
+  
+  // Create a regex that captures mention type and potential value
   const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_/|<>.-]+(?:\s+[A-Za-zÀ-ÿ0-9_/|<>.-]+)*)/gi;
   let match: RegExpExecArray | null;
   
   while ((match = structuredRegex.exec(value)) !== null) {
+    const mentionType = match[1];
     let capturedValue = match[2];
     
-    // Split the captured value into words and find where connector words start
-    const words = capturedValue.split(/\s+/);
-    const validWords: string[] = [];
+    // STRATEGY 1: Try to match against known values first (most accurate)
+    const knownMatch = findBestKnownMatch(mentionType, capturedValue);
     
-    for (const word of words) {
-      const lowerWord = word.toLowerCase();
-      // Remove punctuation at the end for comparison
-      const cleanWord = lowerWord.replace(/[.,;:!?]$/, '');
+    if (knownMatch) {
+      // Found a match in known values - use it
+      capturedValue = knownMatch;
+    } else {
+      // STRATEGY 2: Fall back to connector words detection
+      const words = capturedValue.split(/\s+/);
+      const validWords: string[] = [];
       
-      // Check if this word is a connector word (indicating end of mention value)
-      if (connectorWordsSet.has(cleanWord)) {
-        break; // Stop here - this and subsequent words are not part of the mention
+      for (const word of words) {
+        const cleanWord = word.toLowerCase().replace(/[.,;:!?]$/, '');
+        if (connectorWordsSet.has(cleanWord)) {
+          break;
+        }
+        validWords.push(word);
       }
-      validWords.push(word);
+      
+      capturedValue = validWords.join(' ').trim();
     }
-    
-    // Reconstruct the valid mention value
-    capturedValue = validWords.join(' ').trim();
     
     if (capturedValue.length === 0) continue;
     
-    const fullMention = `@${match[1]}:${capturedValue}`;
-    const actualLength = match[1].length + 1 + capturedValue.length + 1; // @type:value
+    const fullMention = `@${mentionType}:${capturedValue}`;
+    const actualLength = mentionType.length + 1 + capturedValue.length + 1; // @type:value
     allMatches.push({
       index: match.index,
       length: actualLength,
@@ -261,7 +317,17 @@ export function MentionEditor({
   const editingBadgeRef = useRef<HTMLElement | null>(null);
   const lastSyncedValueRef = useRef<string>("");
 
-  const parts = useMemo(() => parseValueToParts(value), [value]);
+  // Build known values object for hybrid validation
+  const knownValues: KnownValues = useMemo(() => ({
+    departments,
+    statuses,
+    tags,
+    templates,
+    teamMembers,
+    aiAgents,
+  }), [departments, statuses, tags, templates, teamMembers, aiAgents]);
+
+  const parts = useMemo(() => parseValueToParts(value, knownValues), [value, knownValues]);
 
   const createMentionBadge = useCallback((fullMention: string): HTMLElement => {
     // fullMention must include '@'
@@ -307,7 +373,7 @@ export function MentionEditor({
         return;
       }
 
-      const parsed = parseValueToParts(nextValue);
+      const parsed = parseValueToParts(nextValue, knownValues);
       parsed.forEach((p) => {
         if (p.type === "mention") {
           inputRef.current!.appendChild(createMentionBadge(p.content));
@@ -316,7 +382,7 @@ export function MentionEditor({
         }
       });
     },
-    [createMentionBadge]
+    [createMentionBadge, knownValues]
   );
 
   const getPlainText = useCallback(() => {
