@@ -3792,18 +3792,19 @@ export default function Conversations() {
       <AlertDialog open={instanceChangeDialogOpen} onOpenChange={setInstanceChangeDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Unificar conversas?</AlertDialogTitle>
+            <AlertDialogTitle className="text-destructive">Atenção: Conversa será excluída</AlertDialogTitle>
             <AlertDialogDescription className="space-y-2">
               <p>
                 Já existe uma conversa com este contato na instância <strong>{pendingInstanceChange?.newInstanceName}</strong>.
               </p>
-              <p>
-                Ao continuar:
+              <p className="font-medium text-destructive">
+                ⚠️ Ao continuar:
               </p>
               <ul className="list-disc list-inside text-sm space-y-1 ml-2">
                 <li>A conversa atual ({pendingInstanceChange?.oldInstanceName}) será <strong>movida</strong> para a nova instância</li>
-                <li>A conversa existente na instância de destino será <strong>arquivada</strong></li>
+                <li>A conversa existente em "{pendingInstanceChange?.newInstanceName}" será <strong className="text-destructive">EXCLUÍDA PERMANENTEMENTE</strong></li>
                 <li>Todo o histórico de mensagens da conversa atual será preservado</li>
+                <li className="text-muted-foreground">O histórico de mensagens da conversa de destino será perdido</li>
               </ul>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -3815,6 +3816,7 @@ export default function Conversations() {
               Cancelar
             </AlertDialogCancel>
             <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
               onClick={() => {
                 if (pendingInstanceChange) {
                   changeWhatsAppInstance.mutate({
@@ -3826,7 +3828,7 @@ export default function Conversations() {
                 setPendingInstanceChange(null);
               }}
             >
-              Unificar e mover
+              Excluir e mover
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
