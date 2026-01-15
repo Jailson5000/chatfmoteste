@@ -899,7 +899,7 @@ export function useConversations() {
         throw error;
       }
 
-      // 5. Se forceUnify está ativado, EXCLUIR a conversa existente no destino
+      // 5. Se forceUnify está ativado, EXCLUIR a conversa existente no destino E SEU CLIENTE
       if (existingConversationInDestination && forceUnify) {
         // Primeiro, excluir mensagens associadas à conversa antiga
         await supabase
@@ -914,26 +914,25 @@ export function useConversations() {
           .eq("id", existingConversationInDestination.id)
           .eq("law_firm_id", lawFirm.id);
 
-        // Se a conversa arquivada tinha um cliente, e esse cliente não tem mais conversas ativas, excluir
+        // IMPORTANTE: Excluir o cliente do destino para que novas mensagens não herdem status/tags
+        // Isso garante que se o contato mandar mensagem no número antigo, será criado um cliente limpo
         if (existingConversationInDestination.client_id) {
-          const { data: otherConvs } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("client_id", existingConversationInDestination.client_id)
-            .is("archived_at", null)
-            .limit(1);
+          // Excluir tags do cliente primeiro (evitar FK constraint)
+          await supabase
+            .from("client_tags")
+            .delete()
+            .eq("client_id", existingConversationInDestination.client_id);
           
-          if (!otherConvs || otherConvs.length === 0) {
-            await supabase
-              .from("clients")
-              .delete()
-              .eq("id", existingConversationInDestination.client_id)
-              .eq("law_firm_id", lawFirm.id);
-          }
+          // Excluir o cliente do destino
+          await supabase
+            .from("clients")
+            .delete()
+            .eq("id", existingConversationInDestination.client_id)
+            .eq("law_firm_id", lawFirm.id);
         }
       }
 
-      // 5. Atualizar a conversa com a nova instância
+      // 6. Atualizar a conversa com a nova instância
       const { error: updateError } = await supabase
         .from("conversations")
         .update({ whatsapp_instance_id: newInstanceId })
@@ -942,45 +941,21 @@ export function useConversations() {
 
       if (updateError) throw updateError;
 
-      // 6. Tratar o cliente vinculado
+      // 7. Tratar o cliente vinculado à conversa movida
       if (currentConversation?.client_id) {
-        if (existingClientInDestination) {
-          // Se já existe um cliente no destino, vincular a conversa a ele e remover o antigo
-          await supabase
-            .from("conversations")
-            .update({ client_id: existingClientInDestination.id })
-            .eq("id", conversationId)
-            .eq("law_firm_id", lawFirm.id);
-          
-          // Deletar o cliente antigo (agora órfão) se não tiver outras conversas
-          const { data: otherConversations } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("client_id", currentConversation.client_id)
-            .limit(1);
-          
-          if (!otherConversations || otherConversations.length === 0) {
-            await supabase
-              .from("clients")
-              .delete()
-              .eq("id", currentConversation.client_id)
-              .eq("law_firm_id", lawFirm.id);
-          }
-        } else {
-          // Atualizar o cliente existente para a nova instância
-          await supabase
-            .from("clients")
-            .update({ whatsapp_instance_id: newInstanceId })
-            .eq("id", currentConversation.client_id)
-            .eq("law_firm_id", lawFirm.id);
-        }
+        // Atualizar o cliente existente para a nova instância (mantém status, tags, etc.)
+        await supabase
+          .from("clients")
+          .update({ whatsapp_instance_id: newInstanceId })
+          .eq("id", currentConversation.client_id)
+          .eq("law_firm_id", lawFirm.id);
       }
 
-      // 7. Inserir mensagem de sistema no chat
+      // 8. Inserir mensagem de sistema no chat
       const oldLabel = oldPhoneDigits ? `${oldInstanceName} (...${oldPhoneDigits})` : oldInstanceName;
       const newLabel = newPhoneDigits ? `${newInstanceName} (...${newPhoneDigits})` : newInstanceName;
       
-      const { error: msgError } = await supabase
+      const { data: insertedMsg, error: msgError } = await supabase
         .from("messages")
         .insert([{
           conversation_id: conversationId,
@@ -991,9 +966,16 @@ export function useConversations() {
           is_internal: true,
           ai_generated: false,
           status: "read",
-        }]);
+        }])
+        .select()
+        .single();
 
-      if (msgError) throw msgError;
+      if (msgError) {
+        console.error("[changeWhatsAppInstance] Error inserting system message:", msgError);
+        throw msgError;
+      }
+      
+      console.log("[changeWhatsAppInstance] System message inserted successfully:", insertedMsg?.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
