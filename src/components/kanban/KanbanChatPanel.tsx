@@ -2418,6 +2418,7 @@ export function KanbanChatPanel({
                       remoteJid={remoteJid || undefined}
                       replyTo={msg.reply_to}
                       isInternal={msg.is_internal}
+                      isPontual={msg.is_pontual}
                       aiAgentName={msg.ai_agent_name}
                       isRevoked={msg.is_revoked}
                       isStarred={msg.is_starred}
