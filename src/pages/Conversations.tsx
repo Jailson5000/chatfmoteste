@@ -1151,7 +1151,6 @@ export default function Conversations() {
             sender_type: "human",
             ai_generated: false,
             is_internal: true, // Both internal and pontual are internal-only
-            is_pontual: wasPontualMode, // Mark as pontual for UI differentiation
           });
         
         if (error) throw error;
