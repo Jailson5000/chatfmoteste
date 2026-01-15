@@ -1150,9 +1150,12 @@ function DocumentViewer({
           }
         }
         
+        // Use download option to get file with Content-Disposition: attachment
         const { data, error: signError } = await supabase.storage
           .from('internal-chat-files')
-          .createSignedUrl(filePath, 60); // 60 seconds expiry
+          .createSignedUrl(filePath, 60, {
+            download: displayName // Sets Content-Disposition header with filename
+          });
         
         if (signError || !data?.signedUrl) {
           console.error('Failed to create signed URL:', signError);
@@ -1160,7 +1163,22 @@ function DocumentViewer({
           return;
         }
         
-        window.open(data.signedUrl, '_blank');
+        // Fetch the file and trigger download directly
+        const response = await fetch(data.signedUrl);
+        if (!response.ok) throw new Error('Failed to fetch file');
+        
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = displayName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Cleanup blob URL
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
       } catch (err) {
         console.error('Error downloading internal file:', err);
         setError(true);
