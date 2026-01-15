@@ -51,6 +51,7 @@ import {
   Play,
   Square,
   AlertTriangle,
+  Clock,
 } from "lucide-react";
 import { AgentKnowledgeSection } from "@/components/ai-agents/AgentKnowledgeSection";
 import { MentionEditor } from "@/components/ai-agents/MentionEditor";
@@ -96,6 +97,8 @@ export default function AIAgentEdit() {
   const [editedTriggerType, setEditedTriggerType] = useState("new_message");
   const [isActive, setIsActive] = useState(true);
   const [notifyOnTransfer, setNotifyOnTransfer] = useState(false);
+  // Response delay
+  const [editedResponseDelay, setEditedResponseDelay] = useState(2);
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceId, setVoiceId] = useState(DEFAULT_VOICE_ID);
@@ -111,6 +114,7 @@ export default function AIAgentEdit() {
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
 
   const currentTriggerConfig = automation?.trigger_config as Record<string, unknown> | null;
+  const currentResponseDelay = Number(currentTriggerConfig?.response_delay ?? currentTriggerConfig?.response_delay_seconds ?? 2);
   const hasChanges =
     !!automation &&
     (editedPrompt !== (automation.ai_prompt || "") ||
@@ -121,6 +125,7 @@ export default function AIAgentEdit() {
       editedTriggerType !== automation.trigger_type ||
       isActive !== automation.is_active ||
       notifyOnTransfer !== (automation.notify_on_transfer || false) ||
+      editedResponseDelay !== currentResponseDelay ||
       voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
       voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID));
 
@@ -139,11 +144,12 @@ export default function AIAgentEdit() {
         setNotifyOnTransfer(found.notify_on_transfer || false);
         setLastSaved(new Date(found.updated_at));
 
-        // Load voice settings from trigger_config
+        // Load voice and delay settings from trigger_config
         const triggerConfig = found.trigger_config as Record<string, unknown> | null;
         if (triggerConfig) {
           setVoiceEnabled(Boolean(triggerConfig.voice_enabled));
           setVoiceId((triggerConfig.voice_id as string) || DEFAULT_VOICE_ID);
+          setEditedResponseDelay(Number(triggerConfig.response_delay ?? triggerConfig.response_delay_seconds ?? 2));
         }
       }
     }
@@ -260,12 +266,13 @@ export default function AIAgentEdit() {
 
     setIsSaving(true);
     try {
-      // Build updated trigger_config with voice settings
+      // Build updated trigger_config with voice and delay settings
       const existingConfig = automation.trigger_config as Record<string, unknown> | null;
       const updatedTriggerConfig = {
         ...existingConfig,
         voice_enabled: voiceEnabled,
         voice_id: voiceId,
+        response_delay: editedResponseDelay,
       };
 
       // Update automation in database
@@ -701,6 +708,28 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                 checked={isActive}
                 onCheckedChange={setIsActive}
               />
+            </div>
+
+            {/* Response Delay */}
+            <div className="space-y-2 mb-4">
+              <Label className="text-sm flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Delay de Resposta
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={editedResponseDelay}
+                  onChange={(e) => setEditedResponseDelay(Number(e.target.value))}
+                  min={0}
+                  max={120}
+                  className="w-20"
+                />
+                <span className="text-sm text-muted-foreground">segundos</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Tempo adicional antes de responder (+ 7-15s de jitter humano)
+              </p>
             </div>
 
             {/* Notify on Transfer Toggle */}
