@@ -107,15 +107,19 @@ function parseValueToParts(value: string): ParsedPart[] {
   }
   const allMatches: MentionMatch[] = [];
 
-  // Find structured mentions (@type:value)
-  const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+[^@]|\s*$|[.,;:!?\n])/gi;
+  // Find structured mentions (@type:value) - capture value until next @ or end of meaningful content
+  // The value can contain multiple words, so we need to be greedy but stop at natural boundaries
+  const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+@|\s*@|\s*$|\s*\n|[.,;:!?]\s|$)/gi;
   let match: RegExpExecArray | null;
   
   while ((match = structuredRegex.exec(value)) !== null) {
-    const fullMention = `@${match[1]}:${match[2].trim()}`;
+    // Trim trailing whitespace from the captured value
+    const capturedValue = match[2].replace(/\s+$/, '');
+    const fullMention = `@${match[1]}:${capturedValue}`;
+    const actualLength = match[1].length + 1 + capturedValue.length + 1; // @type:value
     allMatches.push({
       index: match.index,
-      length: match[0].length,
+      length: actualLength,
       content: fullMention,
     });
   }
