@@ -515,7 +515,8 @@ export function useMessagesWithPagination({
             // Last-resort duplicate guard for any message from me
             // For audio/ptt messages, we rely on message ID to prevent duplicates since
             // content is often just "audio.webm" which can match other audio messages
-            if (rawMsg.is_from_me) {
+            // IMPORTANT: System messages (sender_type: 'system') should ALWAYS be added immediately
+            if (rawMsg.is_from_me && rawMsg.sender_type !== 'system') {
               const isMediaType = rawMsg.message_type && ['audio', 'ptt', 'image', 'video', 'document'].includes(rawMsg.message_type);
               
               if (isMediaType) {
