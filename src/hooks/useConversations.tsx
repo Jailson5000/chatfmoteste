@@ -899,16 +899,18 @@ export function useConversations() {
         throw error;
       }
 
-      // 5. Se forceUnify está ativado, arquivar a conversa existente no destino como PERMANENTEMENTE INATIVA
+      // 5. Se forceUnify está ativado, EXCLUIR a conversa existente no destino
       if (existingConversationInDestination && forceUnify) {
-        // Arquivar a conversa duplicada no destino com status especial que impede reativação
-        // O webhook ignora conversas com archived_reason = 'instance_unification'
+        // Primeiro, excluir mensagens associadas à conversa antiga
+        await supabase
+          .from("messages")
+          .delete()
+          .eq("conversation_id", existingConversationInDestination.id);
+        
+        // Excluir a conversa duplicada no destino
         await supabase
           .from("conversations")
-          .update({ 
-            archived_at: new Date().toISOString(),
-            archived_reason: 'instance_unification' // Marcador especial: permanentemente inativa
-          })
+          .delete()
           .eq("id", existingConversationInDestination.id)
           .eq("law_firm_id", lawFirm.id);
 
