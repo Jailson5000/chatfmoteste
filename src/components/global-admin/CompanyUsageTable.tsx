@@ -44,7 +44,19 @@ import {
   Loader2,
   Calendar,
   ArrowUpRight,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useCompanies } from "@/hooks/useCompanies";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
@@ -84,7 +96,7 @@ interface CompanyWithStatus extends CompanyUsage {
   agents?: AgentWithConversations[];
 }
 
-type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked";
+type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled";
 
 // Helper to calculate percentage
 const getPercentage = (current: number, max: number): number => {
@@ -187,7 +199,9 @@ export function CompanyUsageTable() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
+  const { deleteCompany } = useCompanies();
   const billingPeriod = getCurrentBillingPeriod();
 
   // Fetch company usage data with agent details
@@ -334,9 +348,27 @@ export function CompanyUsageTable() {
         return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">Suspensa</Badge>;
       case "blocked":
         return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Bloqueada</Badge>;
+      case "cancelled":
+        return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">cancelled</Badge>;
       default:
         return <Badge className="bg-white/20 text-white/60">{status}</Badge>;
     }
+  };
+
+  const handleDeleteCompany = async () => {
+    if (!deleteConfirm) return;
+    
+    // Fetch the full company data needed for deletion
+    const { data: companyData } = await supabase
+      .from("companies")
+      .select("*, law_firm:law_firms(id, subdomain)")
+      .eq("id", deleteConfirm.id)
+      .single();
+    
+    if (companyData) {
+      deleteCompany.mutate(companyData as any);
+    }
+    setDeleteConfirm(null);
   };
 
   return (
@@ -395,6 +427,7 @@ export function CompanyUsageTable() {
             <SelectItem value="pending" className="text-white hover:bg-white/10">Pendentes</SelectItem>
             <SelectItem value="suspended" className="text-white hover:bg-white/10">Suspensas</SelectItem>
             <SelectItem value="blocked" className="text-white hover:bg-white/10">Bloqueadas</SelectItem>
+            <SelectItem value="cancelled" className="text-white hover:bg-white/10">Canceladas</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -496,6 +529,28 @@ export function CompanyUsageTable() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
+                          {company.status === "cancelled" && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeleteConfirm({ id: company.company_id, name: company.company_name });
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent className="bg-[#1a1a1a] border-white/10">
+                                  Excluir empresa cancelada
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -687,6 +742,32 @@ export function CompanyUsageTable() {
           </Table>
         </ScrollArea>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        <AlertDialogContent className="bg-[#1a1a1a] border-white/10">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Excluir empresa?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/60">
+              Você está prestes a excluir permanentemente a empresa{" "}
+              <span className="font-medium text-white">{deleteConfirm?.name}</span>.
+              <br /><br />
+              Esta ação é irreversível e todos os dados relacionados serão perdidos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-white/5 border-white/10 text-white hover:bg-white/10 hover:text-white">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteCompany}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
