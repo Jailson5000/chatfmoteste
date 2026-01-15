@@ -2830,21 +2830,44 @@ serve(async (req) => {
         logDebug('DB', `Looking up conversation for remote_jid: ${remoteJid} (ending: ${phoneEnding}) on instance: ${instance.id}`, { requestId });
         
         // First try exact match by remote_jid AND instance
+        // IMPORTANT: Prioritize non-archived conversations first to avoid conflicts after unification
         let { data: conversation, error: convError } = await supabaseClient
           .from('conversations')
           .select('*')
           .eq('remote_jid', remoteJid)
           .eq('law_firm_id', lawFirmId)
           .eq('whatsapp_instance_id', instance.id)
+          .is('archived_at', null)
           .maybeSingle();
         
-        // If not found, try flexible matching by phone ending BUT STILL filtered by instance
+        // If no active conversation found, check for archived ones (will be reactivated)
+        if (!conversation && !convError) {
+          const { data: archivedConv } = await supabaseClient
+            .from('conversations')
+            .select('*')
+            .eq('remote_jid', remoteJid)
+            .eq('law_firm_id', lawFirmId)
+            .eq('whatsapp_instance_id', instance.id)
+            .not('archived_at', 'is', null)
+            .order('archived_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (archivedConv) {
+            logDebug('DB', `Found archived conversation, will reactivate`, { requestId, foundId: archivedConv.id, archivedAt: archivedConv.archived_at });
+            conversation = archivedConv;
+          }
+        }
+        
+        // If still not found, try flexible matching by phone ending BUT STILL filtered by instance
+        // Prioritize non-archived first
         if (!conversation && !convError) {
           const { data: flexConv } = await supabaseClient
             .from('conversations')
             .select('*')
             .eq('law_firm_id', lawFirmId)
             .eq('whatsapp_instance_id', instance.id)
+            .is('archived_at', null)
             .or(`contact_phone.ilike.%${phoneEnding},remote_jid.ilike.%${phoneEnding}@%`)
             .limit(1)
             .maybeSingle();
@@ -2857,6 +2880,29 @@ serve(async (req) => {
               .update({ remote_jid: remoteJid, contact_phone: phoneNumber })
               .eq('id', flexConv.id);
             conversation = { ...flexConv, remote_jid: remoteJid, contact_phone: phoneNumber };
+          }
+        }
+        
+        // Last resort: check for archived flexible match
+        if (!conversation && !convError) {
+          const { data: archivedFlexConv } = await supabaseClient
+            .from('conversations')
+            .select('*')
+            .eq('law_firm_id', lawFirmId)
+            .eq('whatsapp_instance_id', instance.id)
+            .not('archived_at', 'is', null)
+            .or(`contact_phone.ilike.%${phoneEnding},remote_jid.ilike.%${phoneEnding}@%`)
+            .order('archived_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (archivedFlexConv) {
+            logDebug('DB', `Found archived conversation via flexible phone match, will reactivate`, { requestId, foundId: archivedFlexConv.id, instanceId: instance.id });
+            await supabaseClient
+              .from('conversations')
+              .update({ remote_jid: remoteJid, contact_phone: phoneNumber })
+              .eq('id', archivedFlexConv.id);
+            conversation = { ...archivedFlexConv, remote_jid: remoteJid, contact_phone: phoneNumber };
           }
         }
 
