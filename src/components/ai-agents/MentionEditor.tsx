@@ -107,14 +107,31 @@ function parseValueToParts(value: string): ParsedPart[] {
   }
   const allMatches: MentionMatch[] = [];
 
-  // Find structured mentions (@type:value) - capture value until next @ or end of meaningful content
-  // The value can contain multiple words, so we need to be greedy but stop at natural boundaries
-  const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+@|\s*@|\s*$|\s*\n|[.,;:!?]\s|$)/gi;
+  // Find structured mentions (@type:value)
+  // Stop at connector words (e, para, que, um, uma, o, a, no, na, do, da, de, coloca, adiciona, etc.)
+  // These words indicate the end of the mention value and the start of regular text
+  const connectorWords = /\s+(e|para|que|um|uma|o|a|no|na|do|da|de|coloca|adiciona|transfere|você|com|sem)\s/i;
+  const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_/|<>.-]+(?:\s+[A-Za-zÀ-ÿ0-9_/|<>.-]+)*)/gi;
   let match: RegExpExecArray | null;
   
   while ((match = structuredRegex.exec(value)) !== null) {
-    // Trim trailing whitespace from the captured value
-    const capturedValue = match[2].replace(/\s+$/, '');
+    let capturedValue = match[2];
+    
+    // Check if the captured value contains connector words and truncate there
+    const connectorMatch = connectorWords.exec(' ' + capturedValue + ' ');
+    if (connectorMatch) {
+      // Find the position in the original captured value
+      const connectorPos = connectorMatch.index - 1; // -1 because we added a space at the beginning
+      if (connectorPos > 0) {
+        capturedValue = capturedValue.substring(0, connectorPos).trim();
+      }
+    }
+    
+    // Also trim trailing whitespace
+    capturedValue = capturedValue.replace(/\s+$/, '');
+    
+    if (capturedValue.length === 0) continue;
+    
     const fullMention = `@${match[1]}:${capturedValue}`;
     const actualLength = match[1].length + 1 + capturedValue.length + 1; // @type:value
     allMatches.push({
