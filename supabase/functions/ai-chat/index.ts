@@ -2386,6 +2386,104 @@ serve(async (req) => {
     }
 
     // ========================================================================
+    // PROCESS MENTIONS: Replace @mentions in the prompt with actual values
+    // ========================================================================
+    if (agentLawFirmId && systemPrompt) {
+      // Fetch law_firm data for mention replacement
+      const { data: lawFirmData } = await supabase
+        .from("law_firms")
+        .select("name, phone, email, address, instagram, facebook, website, business_hours, timezone")
+        .eq("id", agentLawFirmId)
+        .single();
+      
+      if (lawFirmData) {
+        // Process mentions - replace @mention placeholders with actual values
+        const mentionReplacements: Record<string, string> = {
+          "@Nome da empresa": lawFirmData.name || "",
+          "@Endereço": lawFirmData.address || "",
+          "@Telefone": lawFirmData.phone || "",
+          "@Email": lawFirmData.email || "",
+          "@Instagram": lawFirmData.instagram || "",
+          "@Facebook": lawFirmData.facebook || "",
+          "@Website": lawFirmData.website || "",
+        };
+        
+        // Process @Horário comercial - format business hours if available
+        if (lawFirmData.business_hours) {
+          const businessHours = lawFirmData.business_hours as Record<string, any>;
+          const dayNames: Record<string, string> = {
+            monday: "Segunda",
+            tuesday: "Terça",
+            wednesday: "Quarta",
+            thursday: "Quinta",
+            friday: "Sexta",
+            saturday: "Sábado",
+            sunday: "Domingo"
+          };
+          
+          const formattedHours = Object.entries(businessHours)
+            .filter(([_, config]) => (config as any)?.enabled)
+            .map(([day, config]) => {
+              const cfg = config as any;
+              return `${dayNames[day] || day}: ${cfg.start || "09:00"} - ${cfg.end || "18:00"}`;
+            })
+            .join(", ");
+          
+          mentionReplacements["@Horário comercial"] = formattedHours || "Horário não configurado";
+        } else {
+          mentionReplacements["@Horário comercial"] = "Horário não configurado";
+        }
+        
+        // Process @Data atual and @Hora atual
+        const now = new Date();
+        const brazilFormatter = new Intl.DateTimeFormat("pt-BR", {
+          timeZone: lawFirmData.timezone || "America/Sao_Paulo",
+          dateStyle: "full"
+        });
+        const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
+          timeZone: lawFirmData.timezone || "America/Sao_Paulo",
+          timeStyle: "short"
+        });
+        
+        mentionReplacements["@Data atual"] = brazilFormatter.format(now);
+        mentionReplacements["@Hora atual"] = timeFormatter.format(now);
+        
+        // Apply all replacements
+        for (const [mention, value] of Object.entries(mentionReplacements)) {
+          if (systemPrompt.includes(mention)) {
+            systemPrompt = systemPrompt.replace(new RegExp(mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+            console.log(`[AI Chat] Replaced mention ${mention} with: ${value.substring(0, 50)}...`);
+          }
+        }
+        
+        // Also handle the structured format @empresa:Nome, @empresa:Telefone, etc.
+        const structuredReplacements: Record<string, string> = {
+          "@empresa:Nome": lawFirmData.name || "",
+          "@empresa:Endereço": lawFirmData.address || "",
+          "@empresa:Telefone": lawFirmData.phone || "",
+          "@empresa:Email": lawFirmData.email || "",
+          "@empresa:Instagram": lawFirmData.instagram || "",
+          "@empresa:Facebook": lawFirmData.facebook || "",
+          "@empresa:Website": lawFirmData.website || "",
+          "@empresa:Horário comercial": mentionReplacements["@Horário comercial"],
+        };
+        
+        for (const [mention, value] of Object.entries(structuredReplacements)) {
+          if (systemPrompt.includes(mention)) {
+            systemPrompt = systemPrompt.replace(new RegExp(mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+            console.log(`[AI Chat] Replaced structured mention ${mention}`);
+          }
+        }
+      }
+      
+      // Process client context mentions if available
+      if (context?.clientName) {
+        systemPrompt = systemPrompt.replace(/@Nome do cliente/g, context.clientName);
+        systemPrompt = systemPrompt.replace(/@cliente:Nome/g, context.clientName);
+      }
+    }
+
+    // ========================================================================
     // AUDIT LOG: Canonical identity for every AI execution
     // ========================================================================
     console.log(`[AI_ISOLATION] ✅ EXECUTION START - Canonical Identity Validated`, JSON.stringify({
