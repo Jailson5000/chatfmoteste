@@ -913,11 +913,25 @@ export function useConversations() {
           .eq("conversation_id", existingConversationInDestination.id);
         
         // Excluir a conversa duplicada no destino
+        const deletedConvId = existingConversationInDestination.id;
         await supabase
           .from("conversations")
           .delete()
-          .eq("id", existingConversationInDestination.id)
+          .eq("id", deletedConvId)
           .eq("law_firm_id", lawFirm.id);
+        
+        // CRITICAL: Invalidar IMEDIATAMENTE para remover a conversa da lista do sidebar
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
+        
+        // Também remover do cache local para atualização instantânea
+        queryClient.setQueryData(
+          ["conversations", lawFirm.id],
+          (old: any) => old?.filter((c: any) => c.id !== deletedConvId) || []
+        );
+        
+        // Forçar refetch imediato para garantir sincronização
+        await queryClient.refetchQueries({ queryKey: ["conversations", lawFirm.id] });
 
         // IMPORTANTE: Só excluir o cliente do destino se for DIFERENTE do cliente de origem
         // Isso evita excluir o cliente da conversa que está sendo movida
@@ -985,11 +999,20 @@ export function useConversations() {
       }
       
       console.log("[changeWhatsAppInstance] System message inserted successfully:", insertedMsg?.id);
+      
+      // Retornar dados para o onSuccess usar
+      return { conversationId, insertedMsg };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      
+      // CRITICAL: Invalidar mensagens com a query key específica da conversa
+      // para forçar refetch e exibir a mensagem de sistema
+      if (result?.conversationId) {
+        queryClient.invalidateQueries({ queryKey: ["messages", result.conversationId] });
+      }
       toast({
         title: "Canal alterado",
         description: "A conversa foi movida para o novo canal WhatsApp.",

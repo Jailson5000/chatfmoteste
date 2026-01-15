@@ -413,6 +413,11 @@ export function useMessagesWithPagination({
         },
         async (payload) => {
           const rawMsg = payload.new as PaginatedMessage;
+          
+          // Debug: Log system messages to verify realtime is working
+          if (rawMsg.sender_type === 'system') {
+            console.log("[useMessagesWithPagination] System message received via Realtime:", rawMsg.id, rawMsg.content?.substring(0, 50));
+          }
 
           // Helper to check if URL is a temporary blob URL
           const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
@@ -423,6 +428,15 @@ export function useMessagesWithPagination({
           setMessages(prev => {
             // Prevent duplicates by DB id
             if (prev.some(m => m.id === rawMsg.id)) return prev;
+            
+            // CRITICAL: System messages should bypass all deduplication and be added immediately
+            if (rawMsg.sender_type === 'system') {
+              console.log("[useMessagesWithPagination] Adding system message immediately:", rawMsg.id);
+              const updated = [...prev, rawMsg];
+              return updated.sort((a, b) => 
+                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+              );
+            }
 
             // Prefer replacing optimistic messages by WhatsApp message id (most reliable)
             if (rawMsg.whatsapp_message_id && !isTempId(rawMsg.whatsapp_message_id)) {
