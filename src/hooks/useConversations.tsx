@@ -814,7 +814,48 @@ export function useConversations() {
     }) => {
       if (!lawFirm?.id) throw new Error("Escritório não encontrado");
 
-      // 1. Atualizar a conversa com a nova instância
+      // 1. Buscar dados da conversa atual (client_id e telefone)
+      const { data: currentConversation } = await supabase
+        .from("conversations")
+        .select("client_id, contact_phone, remote_jid")
+        .eq("id", conversationId)
+        .single();
+
+      // 2. Verificar se já existe um cliente com o mesmo telefone na instância de DESTINO
+      let existingClientInDestination = null;
+      if (currentConversation?.contact_phone) {
+        const { data: existingClients } = await supabase
+          .from("clients")
+          .select("id, name")
+          .eq("law_firm_id", lawFirm.id)
+          .eq("whatsapp_instance_id", newInstanceId)
+          .eq("phone", currentConversation.contact_phone)
+          .limit(1);
+        
+        existingClientInDestination = existingClients?.[0] || null;
+      }
+
+      // 3. Verificar se já existe uma conversa com o mesmo remote_jid na instância de DESTINO
+      let existingConversationInDestination = null;
+      if (currentConversation?.remote_jid) {
+        const { data: existingConvs } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("law_firm_id", lawFirm.id)
+          .eq("whatsapp_instance_id", newInstanceId)
+          .eq("remote_jid", currentConversation.remote_jid)
+          .neq("id", conversationId)
+          .limit(1);
+        
+        existingConversationInDestination = existingConvs?.[0] || null;
+      }
+
+      // 4. Se já existe uma conversa no destino, bloquear a operação (evita duplicação)
+      if (existingConversationInDestination) {
+        throw new Error(`Já existe uma conversa com este contato na instância ${newInstanceName}. Para unificar, acesse a conversa existente.`);
+      }
+
+      // 5. Atualizar a conversa com a nova instância
       const { error: updateError } = await supabase
         .from("conversations")
         .update({ whatsapp_instance_id: newInstanceId })
@@ -823,22 +864,41 @@ export function useConversations() {
 
       if (updateError) throw updateError;
 
-      // 2. Também atualizar o cliente vinculado (se houver)
-      const { data: conversation } = await supabase
-        .from("conversations")
-        .select("client_id")
-        .eq("id", conversationId)
-        .single();
-
-      if (conversation?.client_id) {
-        await supabase
-          .from("clients")
-          .update({ whatsapp_instance_id: newInstanceId })
-          .eq("id", conversation.client_id)
-          .eq("law_firm_id", lawFirm.id);
+      // 6. Tratar o cliente vinculado
+      if (currentConversation?.client_id) {
+        if (existingClientInDestination) {
+          // Se já existe um cliente no destino, vincular a conversa a ele e remover o antigo
+          await supabase
+            .from("conversations")
+            .update({ client_id: existingClientInDestination.id })
+            .eq("id", conversationId)
+            .eq("law_firm_id", lawFirm.id);
+          
+          // Deletar o cliente antigo (agora órfão) se não tiver outras conversas
+          const { data: otherConversations } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("client_id", currentConversation.client_id)
+            .limit(1);
+          
+          if (!otherConversations || otherConversations.length === 0) {
+            await supabase
+              .from("clients")
+              .delete()
+              .eq("id", currentConversation.client_id)
+              .eq("law_firm_id", lawFirm.id);
+          }
+        } else {
+          // Atualizar o cliente existente para a nova instância
+          await supabase
+            .from("clients")
+            .update({ whatsapp_instance_id: newInstanceId })
+            .eq("id", currentConversation.client_id)
+            .eq("law_firm_id", lawFirm.id);
+        }
       }
 
-      // 3. Inserir mensagem de sistema no chat
+      // 7. Inserir mensagem de sistema no chat
       const oldLabel = oldPhoneDigits ? `${oldInstanceName} (...${oldPhoneDigits})` : oldInstanceName;
       const newLabel = newPhoneDigits ? `${newInstanceName} (...${newPhoneDigits})` : newInstanceName;
       
