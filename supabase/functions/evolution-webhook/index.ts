@@ -2840,7 +2840,9 @@ serve(async (req) => {
           .is('archived_at', null)
           .maybeSingle();
         
-        // If no active conversation found, check for archived ones (will be reactivated)
+        // If no active conversation found, check for archived ones that CAN be reactivated
+        // IMPORTANT: Conversations with archived_reason = 'instance_unification' are PERMANENTLY INACTIVE
+        // They were archived during instance change unification and should NEVER receive new messages
         if (!conversation && !convError) {
           const { data: archivedConv } = await supabaseClient
             .from('conversations')
@@ -2849,12 +2851,13 @@ serve(async (req) => {
             .eq('law_firm_id', lawFirmId)
             .eq('whatsapp_instance_id', instance.id)
             .not('archived_at', 'is', null)
+            .or('archived_reason.is.null,archived_reason.neq.instance_unification') // Exclude permanently inactive
             .order('archived_at', { ascending: false })
             .limit(1)
             .maybeSingle();
           
           if (archivedConv) {
-            logDebug('DB', `Found archived conversation, will reactivate`, { requestId, foundId: archivedConv.id, archivedAt: archivedConv.archived_at });
+            logDebug('DB', `Found archived conversation (reactivatable), will reactivate`, { requestId, foundId: archivedConv.id, archivedAt: archivedConv.archived_at, reason: archivedConv.archived_reason });
             conversation = archivedConv;
           }
         }
@@ -2883,7 +2886,7 @@ serve(async (req) => {
           }
         }
         
-        // Last resort: check for archived flexible match
+        // Last resort: check for archived flexible match (excluding permanently inactive)
         if (!conversation && !convError) {
           const { data: archivedFlexConv } = await supabaseClient
             .from('conversations')
@@ -2891,18 +2894,24 @@ serve(async (req) => {
             .eq('law_firm_id', lawFirmId)
             .eq('whatsapp_instance_id', instance.id)
             .not('archived_at', 'is', null)
+            .or('archived_reason.is.null,archived_reason.neq.instance_unification') // Exclude permanently inactive
             .or(`contact_phone.ilike.%${phoneEnding},remote_jid.ilike.%${phoneEnding}@%`)
             .order('archived_at', { ascending: false })
             .limit(1)
             .maybeSingle();
           
           if (archivedFlexConv) {
-            logDebug('DB', `Found archived conversation via flexible phone match, will reactivate`, { requestId, foundId: archivedFlexConv.id, instanceId: instance.id });
-            await supabaseClient
-              .from('conversations')
-              .update({ remote_jid: remoteJid, contact_phone: phoneNumber })
-              .eq('id', archivedFlexConv.id);
-            conversation = { ...archivedFlexConv, remote_jid: remoteJid, contact_phone: phoneNumber };
+            // Double-check it's not a permanently inactive conversation
+            if (archivedFlexConv.archived_reason === 'instance_unification') {
+              logDebug('DB', `Skipping permanently inactive conversation`, { requestId, foundId: archivedFlexConv.id });
+            } else {
+              logDebug('DB', `Found archived conversation via flexible phone match (reactivatable), will reactivate`, { requestId, foundId: archivedFlexConv.id, instanceId: instance.id, reason: archivedFlexConv.archived_reason });
+              await supabaseClient
+                .from('conversations')
+                .update({ remote_jid: remoteJid, contact_phone: phoneNumber })
+                .eq('id', archivedFlexConv.id);
+              conversation = { ...archivedFlexConv, remote_jid: remoteJid, contact_phone: phoneNumber };
+            }
           }
         }
 
