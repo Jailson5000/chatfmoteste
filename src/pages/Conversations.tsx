@@ -181,6 +181,7 @@ export default function Conversations() {
     updateConversationTags, 
     updateClientStatus, 
     updateConversationAudioMode,
+    changeWhatsAppInstance,
     loadMoreConversations: loadMoreFromBackend,
     hasMoreConversations: hasMoreFromBackend,
     isLoadingMoreConversations: isLoadingMoreFromBackend,
@@ -2763,10 +2764,22 @@ export default function Conversations() {
                         <Select
                           value={selectedConversation.whatsapp_instance_id || ""}
                           onValueChange={(value) => {
-                            if (value && selectedConversation?.id) {
-                              updateConversation.mutate({
-                                id: selectedConversation.id,
-                                whatsapp_instance_id: value,
+                            if (value && selectedConversation?.id && value !== selectedConversation.whatsapp_instance_id) {
+                              // Buscar dados das instâncias antiga e nova
+                              const oldInstance = whatsappInstances.find(
+                                (inst) => inst.id === selectedConversation.whatsapp_instance_id
+                              );
+                              const newInstance = whatsappInstances.find(
+                                (inst) => inst.id === value
+                              );
+                              
+                              changeWhatsAppInstance.mutate({
+                                conversationId: selectedConversation.id,
+                                newInstanceId: value,
+                                oldInstanceName: oldInstance?.display_name || oldInstance?.instance_name || "Desconhecido",
+                                newInstanceName: newInstance?.display_name || newInstance?.instance_name || "Desconhecido",
+                                oldPhoneDigits: oldInstance?.phone_number?.slice(-4),
+                                newPhoneDigits: newInstance?.phone_number?.slice(-4),
                               });
                             }
                           }}

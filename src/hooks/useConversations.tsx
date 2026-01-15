@@ -795,6 +795,86 @@ export function useConversations() {
     },
   });
 
+  // Mutation específica para troca de instância WhatsApp com mensagem de sistema
+  const changeWhatsAppInstance = useMutation({
+    mutationFn: async ({
+      conversationId,
+      newInstanceId,
+      oldInstanceName,
+      newInstanceName,
+      oldPhoneDigits,
+      newPhoneDigits,
+    }: {
+      conversationId: string;
+      newInstanceId: string;
+      oldInstanceName: string;
+      newInstanceName: string;
+      oldPhoneDigits?: string;
+      newPhoneDigits?: string;
+    }) => {
+      if (!lawFirm?.id) throw new Error("Escritório não encontrado");
+
+      // 1. Atualizar a conversa com a nova instância
+      const { error: updateError } = await supabase
+        .from("conversations")
+        .update({ whatsapp_instance_id: newInstanceId })
+        .eq("id", conversationId)
+        .eq("law_firm_id", lawFirm.id);
+
+      if (updateError) throw updateError;
+
+      // 2. Também atualizar o cliente vinculado (se houver)
+      const { data: conversation } = await supabase
+        .from("conversations")
+        .select("client_id")
+        .eq("id", conversationId)
+        .single();
+
+      if (conversation?.client_id) {
+        await supabase
+          .from("clients")
+          .update({ whatsapp_instance_id: newInstanceId })
+          .eq("id", conversation.client_id)
+          .eq("law_firm_id", lawFirm.id);
+      }
+
+      // 3. Inserir mensagem de sistema no chat
+      const oldLabel = oldPhoneDigits ? `${oldInstanceName} (...${oldPhoneDigits})` : oldInstanceName;
+      const newLabel = newPhoneDigits ? `${newInstanceName} (...${newPhoneDigits})` : newInstanceName;
+      
+      const { error: msgError } = await supabase
+        .from("messages")
+        .insert([{
+          conversation_id: conversationId,
+          content: `📱 Canal alterado de "${oldLabel}" para "${newLabel}"`,
+          message_type: "note",
+          sender_type: "system",
+          is_from_me: true,
+          is_internal: true,
+          ai_generated: false,
+          status: "read",
+        }]);
+
+      if (msgError) throw msgError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast({
+        title: "Canal alterado",
+        description: "A conversa foi movida para o novo canal WhatsApp.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro ao alterar canal",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     conversations,
     isLoading,
@@ -811,5 +891,6 @@ export function useConversations() {
     updateClientStatus,
     updateConversationAudioMode,
     transferHandler,
+    changeWhatsAppInstance,
   };
 }
