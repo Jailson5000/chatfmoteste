@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, CreditCard, Calendar, AlertTriangle, MessageCircle } from "lucide-react";
+import { Loader2, CreditCard, Calendar, AlertTriangle, MessageCircle, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { formatPhone, formatDocument } from "@/lib/inputMasks";
+import { useNavigate } from "react-router-dom";
 
 interface CheckoutModalProps {
   open: boolean;
@@ -23,6 +24,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
   const [isLoading, setIsLoading] = useState(false);
   const [paymentProvider, setPaymentProvider] = useState<"stripe" | "asaas">("stripe");
   const [paymentsDisabled, setPaymentsDisabled] = useState(false);
+  const [manualRegistrationEnabled, setManualRegistrationEnabled] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
   const [formData, setFormData] = useState({
     companyName: "",
@@ -39,7 +41,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
         const { data, error } = await supabase
           .from("system_settings")
           .select("key, value")
-          .in("key", ["payment_provider", "payments_disabled"]);
+          .in("key", ["payment_provider", "payments_disabled", "manual_registration_enabled"]);
 
         if (!error && data) {
           for (const setting of data) {
@@ -52,6 +54,10 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
             if (setting.key === "payments_disabled") {
               const disabled = String(setting.value).replace(/"/g, "") === "true";
               setPaymentsDisabled(disabled);
+            }
+            if (setting.key === "manual_registration_enabled") {
+              const enabled = String(setting.value).replace(/"/g, "") === "true";
+              setManualRegistrationEnabled(enabled);
             }
           }
         }
@@ -135,6 +141,56 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
   const savings = monthlyPrice * 12 - yearlyPrice;
 
   const providerLabel = paymentProvider === "asaas" ? "ASAAS" : "Stripe";
+  const navigate = useNavigate();
+
+  // If manual registration is enabled, show registration redirect
+  if (manualRegistrationEnabled) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md bg-[#0a0a0a] border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-blue-500" />
+              Cadastre sua Empresa
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              Preencha o formulário para solicitar acesso ao MiauChat
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
+              <p className="font-medium mb-2">Plano selecionado: {plan.name}</p>
+              <p className="text-white/60">
+                Ao preencher o cadastro, sua solicitação será analisada pela nossa equipe. 
+                Após aprovação, você receberá um email com seus dados de acesso.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={() => {
+                  onOpenChange(false);
+                  navigate("/register");
+                }}
+                className="w-full bg-red-600 hover:bg-red-500 h-12 text-base font-semibold"
+              >
+                <UserPlus className="mr-2 h-5 w-5" />
+                Preencher Cadastro
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                className="w-full bg-white/10 border-white/30 text-white hover:bg-white/20"
+              >
+                Voltar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   // If payments are disabled, show contact message instead
   if (paymentsDisabled) {
