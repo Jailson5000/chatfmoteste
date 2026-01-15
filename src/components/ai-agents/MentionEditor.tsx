@@ -26,11 +26,29 @@ interface MentionEditorProps {
   };
 }
 
-// Regex to match mentions: @type:value pattern only (strict matching)
-// This ensures only properly formatted mentions like @departamento:Vendas are captured
-// and not regular text that happens to follow a mention
-const MENTION_REGEX =
-  /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s(?!@)|$|[.,;:!?\n](?!\S*@))/gi;
+// Simple mentions (without colon) - exact match for known mentions
+const SIMPLE_MENTIONS = [
+  "@Nome da empresa",
+  "@Endereço",
+  "@Telefone",
+  "@Email",
+  "@Instagram",
+  "@Facebook",
+  "@Website",
+  "@Horário comercial",
+  "@Data atual",
+  "@Hora atual",
+  "@Nome do cliente",
+  "@Responsável",
+  "@Ativar áudio",
+  "@Desativar áudio",
+  "@Base de conhecimento",
+  "@Calculadora",
+  "@Criar evento",
+  "@Listar eventos",
+  "@Verificar disponibilidade",
+  "@Cancelar evento",
+];
 
 // Explicit Tailwind classes for mention badges (dynamic classes don't work with JIT)
 const MENTION_COLORS = {
@@ -52,9 +70,21 @@ function getMentionColor(mentionText: string): string {
   if (lower.startsWith("etiqueta:")) return MENTION_COLORS.tag;
   if (lower.startsWith("responsavel:")) return MENTION_COLORS.responsible;
   if (lower.startsWith("template:")) return MENTION_COLORS.template;
-  if (lower.includes("evento")) return MENTION_COLORS.calendar;
-  // Data fields (empresa, cliente, etc.)
+  if (lower.includes("evento") || lower.includes("disponibilidade") || lower.includes("cancelar evento") || lower.includes("criar evento") || lower.includes("listar eventos")) return MENTION_COLORS.calendar;
+  // Data fields (empresa info, cliente, etc.)
   if (lower.startsWith("empresa:") || lower.startsWith("cliente:")) return MENTION_COLORS.data;
+  // Simple data mentions
+  if (lower.includes("nome da empresa") || lower.includes("endereço") || lower.includes("telefone") || 
+      lower.includes("email") || lower.includes("instagram") || lower.includes("facebook") || 
+      lower.includes("website") || lower.includes("horário comercial")) {
+    return MENTION_COLORS.data;
+  }
+  // Tools
+  if (lower.includes("data atual") || lower.includes("hora atual") || lower.includes("nome do cliente") || 
+      lower.includes("responsável") || lower.includes("áudio") || lower.includes("base de conhecimento") || 
+      lower.includes("calculadora")) {
+    return MENTION_COLORS.tool;
+  }
   // Default: tools (actions)
   return MENTION_COLORS.tool;
 }
@@ -68,20 +98,67 @@ function parseValueToParts(value: string): ParsedPart[] {
   if (!value) return [];
 
   const result: ParsedPart[] = [];
-  let lastIndex = 0;
+  
+  // Track all mentions with their positions
+  interface MentionMatch {
+    index: number;
+    length: number;
+    content: string;
+  }
+  const allMatches: MentionMatch[] = [];
 
-  // Use a simpler, more reliable regex for parsing that matches @type:value
-  const parseRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+[^@]|\s*$|[.,;:!?\n])/gi;
+  // Find structured mentions (@type:value)
+  const structuredRegex = /@(departamento|status|etiqueta|responsavel|template|empresa|cliente|evento_criar|evento_listar|evento_atualizar|evento_deletar|evento_buscar_disponibilidade):([A-Za-zÀ-ÿ0-9_\s/|<>.-]+?)(?=\s+[^@]|\s*$|[.,;:!?\n])/gi;
   let match: RegExpExecArray | null;
-
-  while ((match = parseRegex.exec(value)) !== null) {
-    if (match.index > lastIndex) {
-      result.push({ type: "text", content: value.slice(lastIndex, match.index) });
-    }
-    // Reconstruct the full mention
+  
+  while ((match = structuredRegex.exec(value)) !== null) {
     const fullMention = `@${match[1]}:${match[2].trim()}`;
-    result.push({ type: "mention", content: fullMention });
-    lastIndex = match.index + match[0].length;
+    allMatches.push({
+      index: match.index,
+      length: match[0].length,
+      content: fullMention,
+    });
+  }
+
+  // Find simple mentions (@Nome da empresa, @Data atual, etc.)
+  for (const simpleMention of SIMPLE_MENTIONS) {
+    let searchStart = 0;
+    while (true) {
+      const idx = value.toLowerCase().indexOf(simpleMention.toLowerCase(), searchStart);
+      if (idx === -1) break;
+      
+      // Extract the actual casing from the value
+      const actualMention = value.substring(idx, idx + simpleMention.length);
+      
+      // Check if this position overlaps with any existing match
+      const overlaps = allMatches.some(m => 
+        (idx >= m.index && idx < m.index + m.length) ||
+        (idx + simpleMention.length > m.index && idx + simpleMention.length <= m.index + m.length)
+      );
+      
+      if (!overlaps) {
+        allMatches.push({
+          index: idx,
+          length: simpleMention.length,
+          content: actualMention,
+        });
+      }
+      
+      searchStart = idx + 1;
+    }
+  }
+
+  // Sort matches by position
+  allMatches.sort((a, b) => a.index - b.index);
+
+  // Build result
+  let lastIndex = 0;
+  for (const m of allMatches) {
+    if (m.index > lastIndex) {
+      result.push({ type: "text", content: value.slice(lastIndex, m.index) });
+    }
+    result.push({ type: "mention", content: m.content });
+    lastIndex = m.index + m.length;
   }
 
   if (lastIndex < value.length) {

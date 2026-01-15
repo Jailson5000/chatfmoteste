@@ -2448,11 +2448,15 @@ serve(async (req) => {
         mentionReplacements["@Data atual"] = brazilFormatter.format(now);
         mentionReplacements["@Hora atual"] = timeFormatter.format(now);
         
+        // Log the prompt before replacement to debug
+        console.log(`[AI Chat] Processing prompt for mentions. Prompt length: ${systemPrompt.length}`);
+        console.log(`[AI Chat] Sample of prompt (first 200 chars): ${systemPrompt.substring(0, 200)}`);
+        
         // Apply all replacements
         for (const [mention, value] of Object.entries(mentionReplacements)) {
           if (systemPrompt.includes(mention)) {
             systemPrompt = systemPrompt.replace(new RegExp(mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-            console.log(`[AI Chat] Replaced mention ${mention} with: ${value.substring(0, 50)}...`);
+            console.log(`[AI Chat] ✅ Replaced mention "${mention}" with: "${value.substring(0, 50)}..."`);
           }
         }
         
