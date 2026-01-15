@@ -596,6 +596,23 @@ export function LandingPage() {
       {/* Footer */}
       <footer className="relative z-10 border-t border-white/[0.06] py-10">
         <div className="max-w-6xl mx-auto px-6">
+          {/* Links de Política - Seção destacada para Google OAuth */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8 pb-8 border-b border-white/[0.06]">
+            <span className="text-sm text-white/40">Documentos Legais:</span>
+            <a 
+              href="https://www.miauchat.com.br/privacidade" 
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white transition-all text-sm font-medium"
+            >
+              🔒 Política de Privacidade
+            </a>
+            <a 
+              href="https://www.miauchat.com.br/termos" 
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white transition-all text-sm font-medium"
+            >
+              📋 Termos de Serviço
+            </a>
+          </div>
+
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
               <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
@@ -606,14 +623,14 @@ export function LandingPage() {
             
             <nav className="flex items-center gap-6 text-sm" aria-label="Links legais">
               <a 
-                href="/privacidade" 
-                className="text-white/50 hover:text-white transition-colors underline-offset-4 hover:underline"
+                href="https://www.miauchat.com.br/privacidade" 
+                className="text-white/50 hover:text-white transition-colors underline"
               >
                 Política de Privacidade
               </a>
               <a 
-                href="/termos" 
-                className="text-white/50 hover:text-white transition-colors underline-offset-4 hover:underline"
+                href="https://www.miauchat.com.br/termos" 
+                className="text-white/50 hover:text-white transition-colors underline"
               >
                 Termos de Serviço
               </a>
