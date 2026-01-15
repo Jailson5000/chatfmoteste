@@ -1138,9 +1138,8 @@ export default function Conversations() {
     // Messages within the same conversation are sent sequentially
     // Different conversations can send messages in parallel
     enqueueMessage(conversationId, async () => {
-      // Internal mode OR Pontual mode - save directly to database, don't send to WhatsApp
-      if (wasInternalMode || wasPontualMode) {
-        // Internal/Pontual message - save directly to database, don't send to WhatsApp
+      if (wasInternalMode) {
+        // Internal message - save directly to database, don't send to WhatsApp
         const { error } = await supabase
           .from("messages")
           .insert({
@@ -1150,7 +1149,7 @@ export default function Conversations() {
             is_from_me: true,
             sender_type: "human",
             ai_generated: false,
-            is_internal: true, // Both internal and pontual are internal-only
+            is_internal: true,
           });
         
         if (error) throw error;
@@ -1160,12 +1159,10 @@ export default function Conversations() {
           m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
         ));
       } else {
-        // Normal message - send to WhatsApp
-        // Auto-assign to current user if:
-        // 1. Handler is AI, or
-        // 2. No responsible assigned, or
-        // 3. Another attendant is assigned (transfer to current user)
-        const shouldTransfer = (
+        // Normal message OR Pontual message - send to WhatsApp
+        // If NOT in pontual mode: auto-assign to current user
+        // If in pontual mode: send to WhatsApp but DON'T transfer from AI
+        const shouldTransfer = !wasPontualMode && (
           conversation.current_handler === "ai" || 
           !conversation.assigned_to ||
           (conversation.assigned_to !== user?.id)
@@ -1189,6 +1186,7 @@ export default function Conversations() {
             message: messageToSend,
             replyToWhatsAppMessageId: replyWhatsAppId,
             replyToMessageId: replyMessage?.id || null,
+            isPontual: wasPontualMode, // Mark as pontual intervention
           },
         });
 

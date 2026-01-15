@@ -2312,6 +2312,7 @@ export type Database = {
           id: string
           is_from_me: boolean
           is_internal: boolean
+          is_pontual: boolean | null
           is_revoked: boolean | null
           is_starred: boolean | null
           media_mime_type: string | null
@@ -2336,6 +2337,7 @@ export type Database = {
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
+          is_pontual?: boolean | null
           is_revoked?: boolean | null
           is_starred?: boolean | null
           media_mime_type?: string | null
@@ -2360,6 +2362,7 @@ export type Database = {
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
+          is_pontual?: boolean | null
           is_revoked?: boolean | null
           is_starred?: boolean | null
           media_mime_type?: string | null

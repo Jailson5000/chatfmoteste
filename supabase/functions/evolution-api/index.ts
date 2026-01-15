@@ -83,6 +83,7 @@ interface EvolutionRequest {
   remoteJid?: string;
   replyToMessageId?: string; // For DB linking (message.id)
   replyToWhatsAppMessageId?: string; // For WhatsApp quoted reply (whatsapp_message_id)
+  isPontual?: boolean; // For pontual intervention (sent to WhatsApp but doesn't transfer from AI)
   // For send_media
   mediaType?: "image" | "audio" | "video" | "document";
   mediaBase64?: string;
@@ -1142,6 +1143,7 @@ serve(async (req) => {
               sender_type: "human",
               ai_generated: false,
               reply_to_message_id: replyToMessageId,
+              is_pontual: body.isPontual || false, // Mark as pontual intervention
             });
 
           if (msgError) {
