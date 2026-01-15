@@ -901,6 +901,11 @@ export function useConversations() {
 
       // 5. Se forceUnify está ativado, EXCLUIR a conversa existente no destino E SEU CLIENTE
       if (existingConversationInDestination && forceUnify) {
+        const destinationClientId = existingConversationInDestination.client_id;
+        const originClientId = currentConversation?.client_id;
+        
+        console.log("[changeWhatsAppInstance] Force unify - Destination client:", destinationClientId, "Origin client:", originClientId);
+        
         // Primeiro, excluir mensagens associadas à conversa antiga
         await supabase
           .from("messages")
@@ -914,21 +919,25 @@ export function useConversations() {
           .eq("id", existingConversationInDestination.id)
           .eq("law_firm_id", lawFirm.id);
 
-        // IMPORTANTE: Excluir o cliente do destino para que novas mensagens não herdem status/tags
-        // Isso garante que se o contato mandar mensagem no número antigo, será criado um cliente limpo
-        if (existingConversationInDestination.client_id) {
+        // IMPORTANTE: Só excluir o cliente do destino se for DIFERENTE do cliente de origem
+        // Isso evita excluir o cliente da conversa que está sendo movida
+        if (destinationClientId && destinationClientId !== originClientId) {
+          console.log("[changeWhatsAppInstance] Deleting destination client:", destinationClientId);
+          
           // Excluir tags do cliente primeiro (evitar FK constraint)
           await supabase
             .from("client_tags")
             .delete()
-            .eq("client_id", existingConversationInDestination.client_id);
+            .eq("client_id", destinationClientId);
           
           // Excluir o cliente do destino
           await supabase
             .from("clients")
             .delete()
-            .eq("id", existingConversationInDestination.client_id)
+            .eq("id", destinationClientId)
             .eq("law_firm_id", lawFirm.id);
+        } else if (destinationClientId === originClientId) {
+          console.log("[changeWhatsAppInstance] Skipping client deletion - same client as origin");
         }
       }
 
