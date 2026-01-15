@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard } from "lucide-react";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { Json } from "@/integrations/supabase/types";
 
@@ -104,6 +104,43 @@ export default function GlobalAdminSettings() {
               <span>
                 Pagamentos online estão <strong>desativados</strong>. 
                 Clientes verão uma mensagem para entrar em contato diretamente.
+              </span>
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Manual Registration Mode */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-blue-500/30 bg-blue-500/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Building className="h-4 w-4 text-blue-500" />
+                <Label className="font-medium">Modo Cadastro Manual</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Clientes preenchem formulário de cadastro. Empresas ficam pendentes até aprovação.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("manual_registration_enabled") === "true" || getSetting("manual_registration_enabled") === true}
+                onCheckedChange={(checked) => handleChange("manual_registration_enabled", checked.toString())}
+              />
+              {localSettings["manual_registration_enabled"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("manual_registration_enabled")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("manual_registration_enabled") === "true" || getSetting("manual_registration_enabled") === true) && (
+            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm flex items-start gap-2">
+              <Building className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Modo cadastro manual <strong>ativo</strong>. 
+                Clientes serão redirecionados para página de cadastro em vez de pagamento.
+                Empresas aparecerão em <strong>Empresas → Pendentes</strong> para aprovação.
               </span>
             </div>
           )}
