@@ -168,14 +168,15 @@ export function KanbanCard({
       return messageType && messageType !== "text" ? messageLabel : "Sem mensagens";
     }
     
-    // Check for media patterns [IMAGE], [VIDEO], etc.
-    const mediaMatch = rawContent.match(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i);
+    // Check for media patterns [IMAGE]url, [VIDEO]url, etc.
+    const mediaMatch = rawContent.match(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i);
     if (mediaMatch) {
       const type = mediaMatch[1].toUpperCase();
-      // Get text before the pattern
-      const textBefore = rawContent.substring(0, rawContent.search(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i)).trim();
-      const mediaEmoji = type === "IMAGE" ? "📷 Imagem" : type === "VIDEO" ? "🎬 Vídeo" : type === "AUDIO" ? "🎤 Áudio" : "📄 Documento";
-      return textBefore ? `${textBefore.slice(0, 25)}... ${mediaEmoji.split(" ")[0]}` : mediaEmoji;
+      // Get caption (text after the media pattern)
+      const caption = rawContent.replace(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/gi, "").trim();
+      const mediaEmoji = type === "IMAGE" ? "📷" : type === "VIDEO" ? "🎬" : type === "AUDIO" ? "🎤" : "📄";
+      const mediaLabel = type === "IMAGE" ? "Imagem" : type === "VIDEO" ? "Vídeo" : type === "AUDIO" ? "Áudio" : "Documento";
+      return caption ? `${mediaEmoji} ${caption.slice(0, 35)}` : `${mediaEmoji} ${mediaLabel}`;
     }
     
     // For typed media without content
