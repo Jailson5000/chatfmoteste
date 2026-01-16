@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface MediaPreviewDialogProps {
   open: boolean;
@@ -18,6 +18,7 @@ interface MediaPreviewDialogProps {
   mediaType: "image" | "audio" | "video" | "document";
   previewUrl: string | null;
   isSending?: boolean;
+  initialCaption?: string;
 }
 
 export function MediaPreviewDialog({
@@ -28,8 +29,16 @@ export function MediaPreviewDialog({
   mediaType,
   previewUrl,
   isSending = false,
+  initialCaption = "",
 }: MediaPreviewDialogProps) {
-  const [caption, setCaption] = useState("");
+  const [caption, setCaption] = useState(initialCaption);
+
+  // Update caption when initialCaption changes (e.g., when template is selected)
+  useEffect(() => {
+    if (open) {
+      setCaption(initialCaption);
+    }
+  }, [open, initialCaption]);
 
   const handleSend = () => {
     onSend(caption);

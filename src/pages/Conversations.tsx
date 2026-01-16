@@ -878,20 +878,22 @@ export default function Conversations() {
       // Check for media patterns [IMAGE], [VIDEO], [AUDIO], [DOCUMENT] in content
       // This handles template messages with embedded media URLs
       if (content) {
-        const mediaPatternMatch = content.match(/^\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]?/i);
+        const mediaPatternMatch = content.match(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i);
         if (mediaPatternMatch) {
           const mediaType = mediaPatternMatch[1].toUpperCase();
-          // Extract text before the pattern if any
-          const textBefore = content.substring(0, content.search(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i)).trim();
+          // Extract text AFTER the media pattern (caption)
+          const afterPattern = content.replace(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/gi, "").trim();
+          // Show caption if exists, otherwise show media type
+          const caption = afterPattern ? afterPattern.slice(0, 40) : null;
           switch (mediaType) {
             case "IMAGE":
-              return textBefore ? `${textBefore.slice(0, 30)}... 📷` : (is_from_me ? "📷 Imagem enviada" : "📷 Imagem");
+              return caption ? `📷 ${caption}` : (is_from_me ? "📷 Imagem enviada" : "📷 Imagem");
             case "VIDEO":
-              return textBefore ? `${textBefore.slice(0, 30)}... 🎬` : (is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo");
+              return caption ? `🎬 ${caption}` : (is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo");
             case "AUDIO":
-              return textBefore ? `${textBefore.slice(0, 30)}... 🎤` : (is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio");
+              return caption ? `🎤 ${caption}` : (is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio");
             case "DOCUMENT":
-              return textBefore ? `${textBefore.slice(0, 30)}... 📄` : (is_from_me ? "📄 Documento enviado" : "📄 Documento");
+              return caption ? `📄 ${caption}` : (is_from_me ? "📄 Documento enviado" : "📄 Documento");
           }
         }
       }
@@ -1593,7 +1595,8 @@ export default function Conversations() {
   };
 
   const handleMediaPreviewSend = async (caption: string) => {
-    if (!mediaPreview.file) return;
+    // Support both file (local upload) and previewUrl (template media)
+    if (!mediaPreview.file && !mediaPreview.previewUrl) return;
     
     setIsSending(true);
     
@@ -1607,29 +1610,53 @@ export default function Conversations() {
         });
       }
 
-      // Convert file to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64 = result.split(',')[1];
-          resolve(base64);
+      let mediaBase64: string | undefined;
+      let mediaUrl: string | undefined;
+      let fileName: string;
+      let mimeType: string;
+
+      if (mediaPreview.file) {
+        // Local file - convert to base64
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(mediaPreview.file);
+        
+        mediaBase64 = await base64Promise;
+        fileName = mediaPreview.file.name;
+        mimeType = mediaPreview.file.type;
+      } else {
+        // Template media - use URL directly
+        mediaUrl = mediaPreview.previewUrl!;
+        // Extract filename from URL
+        const urlPath = new URL(mediaUrl).pathname;
+        fileName = urlPath.split('/').pop() || 'media';
+        // Infer mimeType from extension
+        const ext = fileName.split('.').pop()?.toLowerCase();
+        const mimeMap: Record<string, string> = {
+          jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+          mp4: "video/mp4", mov: "video/quicktime", avi: "video/x-msvideo", webm: "video/webm",
+          mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav",
+          pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(mediaPreview.file);
-      
-      const mediaBase64 = await base64Promise;
+        mimeType = mimeMap[ext || ''] || "application/octet-stream";
+      }
 
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
           action: "send_media",
           conversationId: selectedConversationId,
           mediaType: mediaPreview.mediaType,
-          mediaBase64,
-          fileName: mediaPreview.file.name,
+          ...(mediaBase64 ? { mediaBase64 } : { mediaUrl }),
+          fileName,
           caption,
-          mimeType: mediaPreview.file.type,
+          mimeType,
         },
       });
 
@@ -1647,7 +1674,7 @@ export default function Conversations() {
       
       toast({
         title: "Mídia enviada",
-        description: `${mediaPreview.file.name} enviado com sucesso!`,
+        description: `${fileName} enviado com sucesso!`,
       });
     } catch (error) {
       console.error("Erro ao enviar mídia:", error);
@@ -3433,8 +3460,37 @@ export default function Conversations() {
                       isOpen={showTemplatePopup}
                       templates={templates.filter(t => t.is_active)}
                       searchTerm={templateSearchTerm}
-                      onSelect={(template: Template) => {
-                        setMessageInput(template.content);
+                      onSelect={async (template: Template) => {
+                        // Check if template contains media pattern
+                        const mediaMatch = template.content.match(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i);
+                        
+                        if (mediaMatch && !isInternalMode) {
+                          const mediaType = mediaMatch[1].toUpperCase();
+                          const mediaUrl = mediaMatch[2];
+                          // Extract caption (text after the media pattern)
+                          const caption = template.content.replace(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/gi, "").trim();
+                          
+                          // Set caption in input
+                          setMessageInput(caption);
+                          
+                          // Determine media type for preview
+                          let previewMediaType: "image" | "video" | "audio" | "document" = "image";
+                          if (mediaType === "VIDEO") previewMediaType = "video";
+                          else if (mediaType === "AUDIO") previewMediaType = "audio";
+                          else if (mediaType === "DOCUMENT") previewMediaType = "document";
+                          
+                          // Open media preview with URL (create a fake file for the dialog)
+                          setMediaPreview({
+                            open: true,
+                            file: null,
+                            mediaType: previewMediaType,
+                            previewUrl: mediaUrl,
+                          });
+                        } else {
+                          // Regular text template
+                          setMessageInput(template.content);
+                        }
+                        
                         setShowTemplatePopup(false);
                         setTemplateSearchTerm("");
                         textareaRef.current?.focus();
@@ -3660,11 +3716,15 @@ export default function Conversations() {
       <MediaPreviewDialog
         open={mediaPreview.open}
         onClose={handleMediaPreviewClose}
-        onSend={handleMediaPreviewSend}
+        onSend={(caption) => {
+          handleMediaPreviewSend(caption);
+          setMessageInput(""); // Clear input after sending
+        }}
         file={mediaPreview.file}
         mediaType={mediaPreview.mediaType}
         previewUrl={mediaPreview.previewUrl}
         isSending={isSending}
+        initialCaption={messageInput}
       />
 
       {/* Archive Dialog */}
