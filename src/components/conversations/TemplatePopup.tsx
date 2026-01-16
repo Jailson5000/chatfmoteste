@@ -84,9 +84,9 @@ export function TemplatePopup({
           Templates rápidos • Use ↑↓ para navegar, Enter para selecionar
         </span>
       </div>
-      <ScrollArea className="max-h-80">
+      <ScrollArea className="h-auto max-h-[280px]">
         <div className="p-1">
-          {filteredTemplates.map((template, index) => (
+          {filteredTemplates.slice(0, Math.max(5, filteredTemplates.length)).map((template, index) => (
             <div
               key={template.id}
               onClick={() => onSelect(template)}
