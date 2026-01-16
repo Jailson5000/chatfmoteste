@@ -2395,6 +2395,21 @@ serve(async (req) => {
     // Determine which AI to use based on law_firm_settings
     let useOpenAI = false;
     let iaSettings: any = null;
+    let openaiModel = "gpt-4o-mini"; // Default model
+    
+    // Fetch global AI settings (model selection from Global Admin)
+    const { data: globalSettings } = await supabase
+      .from("system_settings")
+      .select("key, value")
+      .in("key", ["ai_openai_model"]);
+    
+    if (globalSettings) {
+      const modelSetting = globalSettings.find(s => s.key === "ai_openai_model");
+      if (modelSetting?.value && typeof modelSetting.value === "string") {
+        openaiModel = modelSetting.value;
+        console.log(`[AI Chat] Global OpenAI model configured: ${openaiModel}`);
+      }
+    }
     
     if (context?.lawFirmId) {
       const { data: settings } = await supabase
@@ -2414,7 +2429,7 @@ serve(async (req) => {
         // Exception: If ONLY IA do Site is active, use Lovable AI
         if (iaOpenAI && OPENAI_API_KEY) {
           useOpenAI = true;
-          console.log(`[AI Chat] Using OpenAI (openai_active=${iaOpenAI}, ia_site_active=${iaInternal})`);
+          console.log(`[AI Chat] Using OpenAI (openai_active=${iaOpenAI}, ia_site_active=${iaInternal}, model=${openaiModel})`);
         } else {
           console.log(`[AI Chat] Using Lovable AI (internal) - openai_active=${iaOpenAI}, ia_site_active=${iaInternal}`);
         }
@@ -3016,10 +3031,10 @@ ${servicesList}
     let aiProvider = "";
     
     if (useOpenAI && OPENAI_API_KEY) {
-      // Use OpenAI API
+      // Use OpenAI API with configured model from Global Admin
       aiProvider = "OpenAI";
-      console.log("[AI Chat] Calling OpenAI API (gpt-4o-mini) with tools:", allTools.length);
-      aiRequestBody.model = "gpt-4o-mini";
+      console.log(`[AI Chat] Calling OpenAI API (${openaiModel}) with tools:`, allTools.length);
+      aiRequestBody.model = openaiModel;
       response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
