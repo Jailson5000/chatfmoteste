@@ -1536,11 +1536,15 @@ export function MessageBubble({
 
     // Strip the WhatsApp placeholder used for AI audio messages, even when it comes
     // appended to a normal text message (common on mobile due to line wrapping).
-    const withoutPlaceholder = content
+    let processed = content
       .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
       .replace(/\r\n/g, "\n");
 
-    const normalized = withoutPlaceholder
+    // Remove media patterns [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
+    // These are already rendered as native media, so don't show the raw link
+    processed = processed.replace(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]?(https?:\/\/[^\s\n]+)/gi, "");
+
+    const normalized = processed
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
