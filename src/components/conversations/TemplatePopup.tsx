@@ -2,7 +2,46 @@ import { useState, useEffect, useRef } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Template } from '@/hooks/useTemplates';
-import { FileText } from 'lucide-react';
+import { FileText, Image, Video, Music, FileIcon } from 'lucide-react';
+
+// Helper to get a friendly preview of template content
+function getTemplatePreview(content: string): { icon: React.ReactNode; preview: string } {
+  const mediaMatch = content.match(/^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s);
+  
+  if (mediaMatch) {
+    const [, mediaType, , caption] = mediaMatch;
+    const cleanCaption = caption?.trim() || '';
+    
+    switch (mediaType) {
+      case 'IMAGE':
+        return { 
+          icon: <Image className="h-4 w-4 text-green-500" />, 
+          preview: cleanCaption || '📷 Imagem' 
+        };
+      case 'VIDEO':
+        return { 
+          icon: <Video className="h-4 w-4 text-blue-500" />, 
+          preview: cleanCaption || '🎬 Vídeo' 
+        };
+      case 'AUDIO':
+        return { 
+          icon: <Music className="h-4 w-4 text-purple-500" />, 
+          preview: cleanCaption || '🎵 Áudio' 
+        };
+      case 'DOCUMENT':
+        return { 
+          icon: <FileIcon className="h-4 w-4 text-orange-500" />, 
+          preview: cleanCaption || '📄 Documento' 
+        };
+    }
+  }
+  
+  // For regular text, just truncate
+  return { 
+    icon: <FileText className="h-4 w-4" />, 
+    preview: content.length > 80 ? content.substring(0, 80) + '...' : content 
+  };
+}
 
 interface TemplatePopupProps {
   isOpen: boolean;
@@ -86,31 +125,34 @@ export function TemplatePopup({
       </div>
       <ScrollArea className="h-auto max-h-[280px]">
         <div className="p-1">
-          {filteredTemplates.slice(0, Math.max(5, filteredTemplates.length)).map((template, index) => (
-            <div
-              key={template.id}
-              onClick={() => onSelect(template)}
-              className={cn(
-                "flex items-start gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors",
-                index === selectedIndex
-                  ? "bg-primary/10 text-primary"
-                  : "hover:bg-muted"
-              )}
-            >
-              <FileText className="h-4 w-4 mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{template.name}</span>
-                  <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                    /{template.shortcut}
-                  </span>
+          {filteredTemplates.slice(0, Math.max(5, filteredTemplates.length)).map((template, index) => {
+            const { icon, preview } = getTemplatePreview(template.content);
+            return (
+              <div
+                key={template.id}
+                onClick={() => onSelect(template)}
+                className={cn(
+                  "flex items-start gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors",
+                  index === selectedIndex
+                    ? "bg-primary/10 text-primary"
+                    : "hover:bg-muted"
+                )}
+              >
+                <div className="mt-0.5 flex-shrink-0">{icon}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{template.name}</span>
+                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
+                      /{template.shortcut}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {preview}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {template.content}
-                </p>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </ScrollArea>
     </div>
