@@ -660,12 +660,23 @@ serve(async (req) => {
         const status = qrData.state || qrData.status || qrData.instance?.state || "unknown";
         console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}`);
 
-        // Update instance status if connected
+        // Update instance status if connected and reassociate orphans
         if (status === "open" || status === "connected") {
           await supabaseClient
             .from("whatsapp_instances")
             .update({ status: "connected", updated_at: new Date().toISOString() })
             .eq("id", body.instanceId);
+          
+          // Reassociate orphan clients/conversations
+          console.log(`[Evolution API] Reassociating orphan records for instance: ${body.instanceId}`);
+          const { data: reassocResult, error: reassocError } = await supabaseClient
+            .rpc('reassociate_orphan_records', { _instance_id: body.instanceId });
+          
+          if (reassocError) {
+            console.error(`[Evolution API] Failed to reassociate orphans:`, reassocError);
+          } else if (reassocResult) {
+            console.log(`[Evolution API] Orphan reassociation result:`, reassocResult);
+          }
         }
 
         return new Response(
@@ -792,14 +803,17 @@ serve(async (req) => {
           console.log(`[Evolution API] Evolution delete failed (non-fatal):`, e);
         }
 
-        // Before deleting the instance, set clients' whatsapp_instance_id to NULL.
-        // This preserves the client data while unlinking them from the deleted instance.
-        // Note: conversations will also have whatsapp_instance_id set to NULL via FK cascade (ON DELETE SET NULL).
-        console.log(`[Evolution API] Unlinking clients from instance: ${body.instanceId}`);
+        // Before deleting the instance, set clients' whatsapp_instance_id to NULL
+        // but save the instance_id in last_whatsapp_instance_id for future reassociation.
+        // This preserves the client data while allowing them to be reassociated if the instance reconnects.
+        console.log(`[Evolution API] Unlinking clients from instance: ${body.instanceId} (saving reference)`);
         
         const { error: clientsUpdateError } = await supabaseClient
           .from("clients")
-          .update({ whatsapp_instance_id: null })
+          .update({ 
+            whatsapp_instance_id: null,
+            last_whatsapp_instance_id: body.instanceId 
+          })
           .eq("whatsapp_instance_id", body.instanceId)
           .eq("law_firm_id", lawFirmId);
         
@@ -807,7 +821,23 @@ serve(async (req) => {
           console.error(`[Evolution API] Failed to unlink clients:`, clientsUpdateError);
           // Non-fatal - try to continue with instance deletion
         } else {
-          console.log(`[Evolution API] Clients unlinked successfully`);
+          console.log(`[Evolution API] Clients unlinked with reference saved`);
+        }
+
+        // Also update conversations to save the reference
+        const { error: convsUpdateError } = await supabaseClient
+          .from("conversations")
+          .update({ 
+            whatsapp_instance_id: null,
+            last_whatsapp_instance_id: body.instanceId 
+          })
+          .eq("whatsapp_instance_id", body.instanceId)
+          .eq("law_firm_id", lawFirmId);
+        
+        if (convsUpdateError) {
+          console.error(`[Evolution API] Failed to unlink conversations:`, convsUpdateError);
+        } else {
+          console.log(`[Evolution API] Conversations unlinked with reference saved`);
         }
 
         // Delete from database
@@ -2121,12 +2151,23 @@ serve(async (req) => {
 
         const status = qrData.state || qrData.status || "unknown";
 
-        // Update instance status if connected
+        // Update instance status if connected and reassociate orphans
         if (dbInstanceId && (status === "open" || status === "connected")) {
           await supabaseClient
             .from("whatsapp_instances")
             .update({ status: "connected", updated_at: new Date().toISOString() })
             .eq("id", dbInstanceId);
+          
+          // Reassociate orphan clients/conversations
+          console.log(`[Evolution API] Reassociating orphan records for instance: ${dbInstanceId}`);
+          const { data: reassocResult, error: reassocError } = await supabaseClient
+            .rpc('reassociate_orphan_records', { _instance_id: dbInstanceId });
+          
+          if (reassocError) {
+            console.error(`[Evolution API] Failed to reassociate orphans:`, reassocError);
+          } else if (reassocResult) {
+            console.log(`[Evolution API] Orphan reassociation result:`, reassocResult);
+          }
         }
 
         return new Response(

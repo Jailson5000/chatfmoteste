@@ -3043,6 +3043,19 @@ serve(async (req) => {
           logDebug('ERROR', `Failed to update status`, { requestId, error: updateError });
         } else {
           logDebug('CONNECTION', `Updated instance status to ${dbStatus}`, { requestId });
+          
+          // If instance just connected, reassociate orphan clients/conversations
+          if (dbStatus === 'connected') {
+            logDebug('CONNECTION', `Reassociating orphan records for instance ${instance.id}`, { requestId });
+            const { data: reassocResult, error: reassocError } = await supabaseClient
+              .rpc('reassociate_orphan_records', { _instance_id: instance.id });
+            
+            if (reassocError) {
+              logDebug('ERROR', `Failed to reassociate orphans: ${reassocError.message}`, { requestId });
+            } else if (reassocResult) {
+              logDebug('CONNECTION', `Orphan reassociation result`, { requestId, ...reassocResult });
+            }
+          }
         }
         break;
       }

@@ -66,6 +66,7 @@ function mapRpcRowToConversation(row: any): ConversationWithLastMessage {
     department_id: row.department_id,
     client_id: row.client_id,
     whatsapp_instance_id: row.whatsapp_instance_id,
+    last_whatsapp_instance_id: row.last_whatsapp_instance_id,
     last_message_at: row.last_message_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
