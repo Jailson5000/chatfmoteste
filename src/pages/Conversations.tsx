@@ -2863,7 +2863,8 @@ export default function Conversations() {
                     </p>
                     <div className="flex items-center gap-1 mt-1 min-w-0">
                       <Inbox className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      {connectedInstances.length > 1 ? (
+                      {/* Show dropdown if: multiple instances exist OR current instance is disconnected/missing */}
+                      {(whatsappInstances.length > 1 || instanceDisconnectedInfo) ? (
                         <Select
                           value={selectedConversation.whatsapp_instance_id || ""}
                           onValueChange={async (value) => {
@@ -2911,7 +2912,7 @@ export default function Conversations() {
                             }
                           }}
                         >
-                          <SelectTrigger className="h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px]">
+                          <SelectTrigger className={`h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px] ${instanceDisconnectedInfo ? 'text-destructive' : ''}`}>
                             <SelectValue placeholder="Selecione um canal" />
                           </SelectTrigger>
                           <SelectContent>
@@ -2924,6 +2925,7 @@ export default function Conversations() {
                                     <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
                                     {inst.display_name || inst.instance_name}
                                     {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
+                                    {isConnected && <span className="text-green-500 text-[10px]">✓</span>}
                                   </span>
                                 </SelectItem>
                               );
