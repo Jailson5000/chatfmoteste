@@ -1060,6 +1060,7 @@ export type Database = {
           email: string | null
           id: string
           is_agenda_client: boolean | null
+          last_whatsapp_instance_id: string | null
           law_firm_id: string
           lgpd_consent: boolean
           lgpd_consent_date: string | null
@@ -1083,6 +1084,7 @@ export type Database = {
           email?: string | null
           id?: string
           is_agenda_client?: boolean | null
+          last_whatsapp_instance_id?: string | null
           law_firm_id: string
           lgpd_consent?: boolean
           lgpd_consent_date?: string | null
@@ -1106,6 +1108,7 @@ export type Database = {
           email?: string | null
           id?: string
           is_agenda_client?: boolean | null
+          last_whatsapp_instance_id?: string | null
           law_firm_id?: string
           lgpd_consent?: boolean
           lgpd_consent_date?: string | null
@@ -1136,6 +1139,13 @@ export type Database = {
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clients_last_whatsapp_instance_id_fkey"
+            columns: ["last_whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
             referencedColumns: ["id"]
           },
           {
@@ -1365,6 +1375,7 @@ export type Database = {
           internal_notes: string | null
           last_message_at: string | null
           last_summarized_at: string | null
+          last_whatsapp_instance_id: string | null
           law_firm_id: string
           n8n_last_response_at: string | null
           needs_human_handoff: boolean | null
@@ -1400,6 +1411,7 @@ export type Database = {
           internal_notes?: string | null
           last_message_at?: string | null
           last_summarized_at?: string | null
+          last_whatsapp_instance_id?: string | null
           law_firm_id: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
@@ -1435,6 +1447,7 @@ export type Database = {
           internal_notes?: string | null
           last_message_at?: string | null
           last_summarized_at?: string | null
+          last_whatsapp_instance_id?: string | null
           law_firm_id?: string
           n8n_last_response_at?: string | null
           needs_human_handoff?: boolean | null
@@ -1468,6 +1481,13 @@ export type Database = {
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_last_whatsapp_instance_id_fkey"
+            columns: ["last_whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
             referencedColumns: ["id"]
           },
           {
@@ -4117,6 +4137,10 @@ export type Database = {
         Returns: number
       }
       normalize_phone: { Args: { phone: string }; Returns: string }
+      reassociate_orphan_records: {
+        Args: { _instance_id: string }
+        Returns: Json
+      }
       toggle_admin_active: {
         Args: { _is_active: boolean; _target_user_id: string }
         Returns: Json

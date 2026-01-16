@@ -57,13 +57,13 @@ export function useClients() {
         .from("clients")
         .select(`
           *,
-          whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number),
+          whatsapp_instance:whatsapp_instances!clients_whatsapp_instance_id_fkey(id, instance_name, display_name, phone_number),
           assigned_profile:profiles!clients_assigned_to_profile_fkey(full_name),
           conversations(
             whatsapp_instance_id,
             created_at,
             last_message_at,
-            whatsapp_instance:whatsapp_instances(id, instance_name, display_name, phone_number)
+            whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(id, instance_name, display_name, phone_number)
           )
         `)
         .eq("law_firm_id", lawFirm.id)
