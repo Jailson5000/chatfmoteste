@@ -438,6 +438,77 @@ export function useWhatsAppInstances() {
       });
     },
   });
+
+  const logoutInstance = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Logging out instance:", instanceId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "logout_instance",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to disconnect instance");
+
+      return response.data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Instância desconectada",
+        description: "A conexão com o WhatsApp foi encerrada.",
+      });
+    },
+    onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Logout error:", error);
+      toast({
+        title: "Erro ao desconectar",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const restartInstance = useMutation({
+    mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
+      console.log("[useWhatsAppInstances] Restarting instance:", instanceId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
+        body: {
+          action: "restart_instance",
+          instanceId,
+        },
+      });
+
+      if (response.error) throw new Error(response.error.message);
+      if (!response.data?.success) throw new Error(response.data?.error || "Failed to restart instance");
+
+      return response.data;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      toast({
+        title: "Instância reiniciada",
+        description: "A conexão foi reiniciada com sucesso.",
+      });
+    },
+    onError: (error: Error) => {
+      console.error("[useWhatsAppInstances] Restart error:", error);
+      toast({
+        title: "Erro ao reiniciar",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const updateDefaultDepartment = useMutation({
     mutationFn: async ({ instanceId, departmentId }: { instanceId: string; departmentId: string | null }) => {
       const { error } = await supabase
@@ -631,6 +702,8 @@ export function useWhatsAppInstances() {
     setSettings,
     refreshStatus,
     refreshPhone,
+    logoutInstance,
+    restartInstance,
     updateDefaultDepartment,
     updateDefaultStatus,
     updateDefaultAssigned,

@@ -73,6 +73,8 @@ export default function Connections() {
     setSettings,
     refreshStatus,
     refreshPhone,
+    logoutInstance,
+    restartInstance,
     refetch,
     updateDefaultDepartment,
     updateDefaultStatus,
@@ -720,6 +722,8 @@ export default function Connections() {
               onRefreshStatus={() => refreshStatus.mutate(selectedInstance.id)}
               onRefreshPhone={() => refreshPhone.mutate(selectedInstance.id)}
               onConfigureWebhook={() => configureWebhook.mutate(selectedInstance.id)}
+              onLogout={() => logoutInstance.mutate(selectedInstance.id)}
+              onRestart={() => restartInstance.mutate(selectedInstance.id)}
               rejectCalls={rejectCalls[selectedInstance.id] ?? false}
               onToggleRejectCalls={async (enabled) => {
                 setRejectCalls((prev) => ({ ...prev, [selectedInstance.id]: enabled }));
@@ -745,6 +749,8 @@ export default function Connections() {
                 delete: deleteInstance.isPending,
                 webhook: configureWebhook.isPending,
                 settings: setSettings.isPending,
+                logout: logoutInstance.isPending,
+                restart: restartInstance.isPending,
               }}
             />
           )}

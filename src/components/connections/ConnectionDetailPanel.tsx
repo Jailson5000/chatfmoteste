@@ -59,6 +59,8 @@ interface ConnectionDetailPanelProps {
   onRefreshStatus: () => void;
   onRefreshPhone: () => void;
   onConfigureWebhook: () => void;
+  onLogout: () => void;
+  onRestart: () => void;
   rejectCalls: boolean;
   onToggleRejectCalls: (enabled: boolean) => void;
   onUpdateDefaultDepartment: (departmentId: string | null) => void;
@@ -71,6 +73,8 @@ interface ConnectionDetailPanelProps {
     delete: boolean;
     webhook: boolean;
     settings: boolean;
+    logout: boolean;
+    restart: boolean;
   };
 }
 
@@ -82,6 +86,8 @@ export function ConnectionDetailPanel({
   onRefreshStatus,
   onRefreshPhone,
   onConfigureWebhook,
+  onLogout,
+  onRestart,
   rejectCalls,
   onToggleRejectCalls,
   onUpdateDefaultDepartment,
@@ -573,10 +579,15 @@ export function ConnectionDetailPanel({
                 <Power className="h-5 w-5 text-muted-foreground" />
                 <div>
                   <p className="font-medium">Desconectar Instância</p>
-                  <p className="text-sm text-muted-foreground">Parar desconectar o WhatsApp</p>
+                  <p className="text-sm text-muted-foreground">Encerrar a conexão com o WhatsApp</p>
                 </div>
               </div>
-              <Button variant="outline" disabled={!isConnected}>
+              <Button 
+                variant="outline" 
+                onClick={onLogout}
+                disabled={!isConnected || isLoading.logout}
+              >
+                {isLoading.logout && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Desconectar
               </Button>
             </div>
@@ -592,8 +603,12 @@ export function ConnectionDetailPanel({
                   </p>
                 </div>
               </div>
-              <Button variant="outline" onClick={onConfigureWebhook} disabled={isLoading.webhook}>
-                {isLoading.webhook && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              <Button 
+                variant="outline" 
+                onClick={onRestart} 
+                disabled={isLoading.restart}
+              >
+                {isLoading.restart && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Reiniciar
               </Button>
             </div>

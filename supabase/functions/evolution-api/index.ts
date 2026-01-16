@@ -55,6 +55,9 @@ type EvolutionAction =
   | "send_media"
   | "get_media"
   | "delete_message" // Delete message for everyone on WhatsApp
+  // Tenant-level instance management
+  | "logout_instance" // Disconnect without deleting
+  | "restart_instance" // Restart connection
   // New centralized management endpoints
   | "global_create_instance"
   | "global_delete_instance"
@@ -789,6 +792,26 @@ serve(async (req) => {
           console.log(`[Evolution API] Evolution delete failed (non-fatal):`, e);
         }
 
+        // Before deleting the instance, we need to handle clients to avoid unique constraint violations.
+        // The unique index idx_clients_phone_norm_law_firm_no_instance only allows one client per phone+law_firm 
+        // when whatsapp_instance_id IS NULL. If the FK cascade sets whatsapp_instance_id to NULL, 
+        // it may conflict with existing clients that already have NULL instance.
+        // Solution: Delete clients that belong to this instance (their conversations will cascade delete too).
+        console.log(`[Evolution API] Cleaning up clients for instance: ${body.instanceId}`);
+        
+        const { error: clientsDeleteError } = await supabaseClient
+          .from("clients")
+          .delete()
+          .eq("whatsapp_instance_id", body.instanceId)
+          .eq("law_firm_id", lawFirmId);
+        
+        if (clientsDeleteError) {
+          console.error(`[Evolution API] Failed to delete clients:`, clientsDeleteError);
+          // Non-fatal - try to continue with instance deletion
+        } else {
+          console.log(`[Evolution API] Clients deleted successfully`);
+        }
+
         // Delete from database
         const { error: deleteError } = await supabaseClient
           .from("whatsapp_instances")
@@ -1050,6 +1073,104 @@ serve(async (req) => {
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
+      }
+
+      // =========================
+      // TENANT-LEVEL INSTANCE MANAGEMENT
+      // =========================
+      case "logout_instance": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        console.log(`[Evolution API] Logging out (disconnecting) instance: ${body.instanceId}`);
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        // Call Evolution API logout endpoint (best effort)
+        try {
+          const logoutResponse = await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
+            method: "DELETE",
+            headers: {
+              apikey: instance.api_key || "",
+              "Content-Type": "application/json",
+            },
+          });
+          console.log(`[Evolution API] Logout response: ${logoutResponse.status}`);
+        } catch (e) {
+          console.log(`[Evolution API] Logout API call failed (non-fatal):`, e);
+        }
+
+        // Update database status to disconnected
+        const { data: updatedInstance, error: updateError } = await supabaseClient
+          .from("whatsapp_instances")
+          .update({ 
+            status: "disconnected", 
+            updated_at: new Date().toISOString() 
+          })
+          .eq("id", body.instanceId)
+          .eq("law_firm_id", lawFirmId)
+          .select()
+          .single();
+
+        if (updateError) {
+          console.error(`[Evolution API] Failed to update instance status:`, updateError);
+        }
+
+        console.log(`[Evolution API] Instance disconnected successfully`);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: "Instance disconnected",
+          instance: updatedInstance 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "restart_instance": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        console.log(`[Evolution API] Restarting instance: ${body.instanceId}`);
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        // Call Evolution API restart endpoint
+        const restartResponse = await fetchWithTimeout(`${apiUrl}/instance/restart/${instance.instance_name}`, {
+          method: "PUT",
+          headers: {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          },
+        });
+
+        console.log(`[Evolution API] Restart response: ${restartResponse.status}`);
+
+        if (!restartResponse.ok) {
+          const errorText = await safeReadResponseText(restartResponse);
+          console.error(`[Evolution API] Restart failed:`, errorText);
+          throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
+        }
+
+        // Update database timestamp
+        await supabaseClient
+          .from("whatsapp_instances")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", body.instanceId)
+          .eq("law_firm_id", lawFirmId);
+
+        console.log(`[Evolution API] Instance restarted successfully`);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: "Instance restarted" 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // =========================
