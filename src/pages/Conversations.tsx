@@ -875,6 +875,27 @@ export default function Conversations() {
         return is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio";
       }
       
+      // Check for media patterns [IMAGE], [VIDEO], [AUDIO], [DOCUMENT] in content
+      // This handles template messages with embedded media URLs
+      if (content) {
+        const mediaPatternMatch = content.match(/^\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]?/i);
+        if (mediaPatternMatch) {
+          const mediaType = mediaPatternMatch[1].toUpperCase();
+          // Extract text before the pattern if any
+          const textBefore = content.substring(0, content.search(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i)).trim();
+          switch (mediaType) {
+            case "IMAGE":
+              return textBefore ? `${textBefore.slice(0, 30)}... 📷` : (is_from_me ? "📷 Imagem enviada" : "📷 Imagem");
+            case "VIDEO":
+              return textBefore ? `${textBefore.slice(0, 30)}... 🎬` : (is_from_me ? "🎬 Vídeo enviado" : "🎬 Vídeo");
+            case "AUDIO":
+              return textBefore ? `${textBefore.slice(0, 30)}... 🎤` : (is_from_me ? "🎤 Áudio enviado" : "🎤 Áudio");
+            case "DOCUMENT":
+              return textBefore ? `${textBefore.slice(0, 30)}... 📄` : (is_from_me ? "📄 Documento enviado" : "📄 Documento");
+          }
+        }
+      }
+      
       // Return content if available, otherwise show "Sem mensagens"
       return content?.trim() || "Sem mensagens";
     };

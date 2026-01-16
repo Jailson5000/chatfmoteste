@@ -161,11 +161,32 @@ export function KanbanCard({
   const messageLabel = getMessageTypeLabel(messageType);
   const isFromMe = conversation.last_message?.is_from_me;
   
-  // Get message preview
-  let messagePreview = conversation.last_message?.content || "Sem mensagens";
-  if (messageType && messageType !== "text" && !conversation.last_message?.content) {
-    messagePreview = messageLabel;
-  }
+  // Get message preview - clean up media patterns
+  const getCleanPreview = () => {
+    const rawContent = conversation.last_message?.content;
+    if (!rawContent) {
+      return messageType && messageType !== "text" ? messageLabel : "Sem mensagens";
+    }
+    
+    // Check for media patterns [IMAGE], [VIDEO], etc.
+    const mediaMatch = rawContent.match(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i);
+    if (mediaMatch) {
+      const type = mediaMatch[1].toUpperCase();
+      // Get text before the pattern
+      const textBefore = rawContent.substring(0, rawContent.search(/\[?(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i)).trim();
+      const mediaEmoji = type === "IMAGE" ? "📷 Imagem" : type === "VIDEO" ? "🎬 Vídeo" : type === "AUDIO" ? "🎤 Áudio" : "📄 Documento";
+      return textBefore ? `${textBefore.slice(0, 25)}... ${mediaEmoji.split(" ")[0]}` : mediaEmoji;
+    }
+    
+    // For typed media without content
+    if (messageType && messageType !== "text" && !rawContent.trim()) {
+      return messageLabel;
+    }
+    
+    return rawContent;
+  };
+  
+  const messagePreview = getCleanPreview();
 
   const unreadCount = conversation.unread_count || 0;
 
