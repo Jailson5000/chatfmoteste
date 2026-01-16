@@ -1842,6 +1842,9 @@ async function sendAIResponseToWhatsApp(
 ): Promise<boolean> {
   try {
     const AUDIO_PLACEHOLDER_RE = /\[\s*mensagem de [áa]udio\s*\]/gi;
+    // Regex to detect [IMAGE]url or [VIDEO]url patterns (used by templates)
+    const MEDIA_PATTERN_RE = /^\[(IMAGE|VIDEO)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s;
+    
     const sanitizeText = (value: string) =>
       value
         .replace(AUDIO_PLACEHOLDER_RE, '')
@@ -1861,6 +1864,115 @@ async function sendAIResponseToWhatsApp(
         conversationId: context.conversationId,
       });
       return false;
+    }
+    
+    // ========================================================================
+    // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url or [VIDEO]url
+    // If found, send as actual media instead of text
+    // ========================================================================
+    const mediaMatch = sanitizedResponse.match(MEDIA_PATTERN_RE);
+    if (mediaMatch) {
+      const mediaType = mediaMatch[1].toLowerCase(); // "image" or "video"
+      const mediaUrl = mediaMatch[2];
+      const caption = mediaMatch[3]?.trim() || "";
+      
+      logDebug('SEND_RESPONSE', `Detected media template pattern: ${mediaType}`, {
+        mediaUrl,
+        caption,
+        conversationId: context.conversationId,
+      });
+      
+      // Get instance details for API URL and key
+      const { data: instance } = await supabaseClient
+        .from('whatsapp_instances')
+        .select('api_url, api_key, instance_name')
+        .eq('id', context.instanceId)
+        .single();
+
+      if (!instance) {
+        logDebug('SEND_RESPONSE', 'Instance not found for media send', { instanceId: context.instanceId });
+        return false;
+      }
+
+      // Normalize API URL
+      const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
+      const targetNumber = (context.remoteJid || "").split("@")[0];
+      
+      if (!targetNumber) {
+        logDebug('SEND_RESPONSE', 'Invalid remoteJid for media send');
+        return false;
+      }
+      
+      // Apply delay before sending
+      const clientDelayMs = responseDelaySeconds * 1000;
+      await humanDelay(
+        DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
+        DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, 
+        '[AI_MEDIA_RESPONSE]'
+      );
+      
+      // Build media endpoint and payload
+      const endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+      const payload = {
+        number: targetNumber,
+        mediatype: mediaType,
+        mimetype: mediaType === "image" ? "image/jpeg" : "video/mp4",
+        caption: caption,
+        media: mediaUrl,
+      };
+      
+      logDebug('SEND_RESPONSE', 'Sending media via Evolution API', { endpoint, mediaType });
+      
+      const sendResponse = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': instance.api_key || '',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!sendResponse.ok) {
+        const errorText = await sendResponse.text();
+        logDebug('SEND_RESPONSE', 'Evolution API media send failed', {
+          status: sendResponse.status,
+          error: errorText,
+        });
+        return false;
+      }
+
+      const sendResult = await sendResponse.json();
+      const whatsappMessageId = sendResult?.key?.id;
+      
+      logDebug('SEND_RESPONSE', 'Media sent successfully', { whatsappMessageId });
+
+      // Save media message to database
+      await supabaseClient
+        .from('messages')
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: whatsappMessageId,
+          content: caption || `[${mediaType.toUpperCase()}]`,
+          message_type: mediaType,
+          media_url: mediaUrl,
+          is_from_me: true,
+          sender_type: 'system',
+          ai_generated: true,
+          ai_agent_id: context.automationId || null,
+          ai_agent_name: context.automationName || null,
+        });
+
+      // Update conversation last_message_at
+      await supabaseClient
+        .from('conversations')
+        .update({ 
+          last_message_at: new Date().toISOString(),
+          n8n_last_response_at: new Date().toISOString(),
+        })
+        .eq('id', context.conversationId);
+
+      logDebug('SEND_RESPONSE', 'Media response completed successfully');
+      return true;
     }
 
     // Get instance details for API URL and key
