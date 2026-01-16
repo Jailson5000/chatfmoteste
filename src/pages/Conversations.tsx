@@ -40,6 +40,8 @@ import {
   Sparkles,
   Volume2,
   Filter,
+  WifiOff,
+  ExternalLink,
 } from "lucide-react";
 import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -441,6 +443,38 @@ export default function Conversations() {
 
   // Show audio indicator if: voice is globally enabled AND conversation has audio mode active
   const showAudioIndicator = globalVoiceConfig?.enabled && conversationAudioEnabled;
+
+  // Check if the WhatsApp instance is disconnected or deleted
+  const instanceDisconnectedInfo = useMemo(() => {
+    if (!selectedConversation) return null;
+    
+    const instanceId = selectedConversation.whatsapp_instance_id;
+    
+    // If no instance ID, the instance was deleted (conversation has NULL whatsapp_instance_id)
+    if (!instanceId) {
+      return { disconnected: true, deleted: true, instanceName: null };
+    }
+    
+    // Find the instance and check its status
+    const instance = whatsappInstances.find(inst => inst.id === instanceId);
+    
+    // Instance not found in the list (might have been deleted)
+    if (!instance) {
+      return { disconnected: true, deleted: true, instanceName: null };
+    }
+    
+    // Instance exists but is not connected
+    if (instance.status !== "connected") {
+      return { 
+        disconnected: true, 
+        deleted: false, 
+        instanceName: instance.display_name || instance.instance_name,
+        instanceId: instance.id
+      };
+    }
+    
+    return null;
+  }, [selectedConversation, whatsappInstances]);
 
   // Merge messages with inline activities, sorted by timestamp
   type TimelineItem = 
@@ -3261,8 +3295,33 @@ export default function Conversations() {
             <div className={cn(
               "flex-shrink-0 p-4 border-t border-border bg-card",
               isPontualMode && "border-t-2 border-t-amber-500",
-              isInternalMode && "border-t-2 border-t-yellow-500 bg-yellow-50/50 dark:bg-yellow-900/10"
+              isInternalMode && "border-t-2 border-t-yellow-500 bg-yellow-50/50 dark:bg-yellow-900/10",
+              instanceDisconnectedInfo && "border-t-2 border-t-red-500"
             )}>
+              {/* WhatsApp Disconnected Banner */}
+              {instanceDisconnectedInfo && (
+                <div className="w-full mb-2 flex items-center justify-between bg-red-500/10 text-red-600 dark:text-red-400 px-3 py-2 rounded-md text-sm">
+                  <span className="flex items-center gap-2">
+                    <WifiOff className="h-4 w-4" />
+                    {instanceDisconnectedInfo.deleted 
+                      ? "WhatsApp sem conexão. A conexão foi excluída ou desvinculada."
+                      : `WhatsApp desconectado. Clique no botão para reconectar.`
+                    }
+                  </span>
+                  {!instanceDisconnectedInfo.deleted && (
+                    <Button 
+                      variant="default"
+                      size="sm" 
+                      className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
+                      onClick={() => window.open("/connections", "_blank")}
+                    >
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      Reconectar
+                    </Button>
+                  )}
+                </div>
+              )}
+
               {/* Pontual Mode Indicator */}
               {isPontualMode && (
                 <div className="w-full mb-2 flex items-center justify-between bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-md text-sm">
