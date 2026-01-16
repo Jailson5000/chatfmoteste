@@ -1842,8 +1842,8 @@ async function sendAIResponseToWhatsApp(
 ): Promise<boolean> {
   try {
     const AUDIO_PLACEHOLDER_RE = /\[\s*mensagem de [áa]udio\s*\]/gi;
-    // Regex to detect [IMAGE]url, [VIDEO]url, [AUDIO]url, or [DOCUMENT]url patterns (used by templates)
-    const MEDIA_PATTERN_RE = /^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s;
+    // Regex to detect [IMAGE]url, [VIDEO]url, [AUDIO]url, or [DOCUMENT]url patterns anywhere in the text
+    const MEDIA_PATTERN_RE = /\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i;
     
     const sanitizeText = (value: string) =>
       value
@@ -1868,17 +1868,28 @@ async function sendAIResponseToWhatsApp(
     
     // ========================================================================
     // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
-    // If found, send as actual media instead of text
+    // If found anywhere in the text, extract media, send it, and send remaining text separately
     // ========================================================================
     const mediaMatch = sanitizedResponse.match(MEDIA_PATTERN_RE);
     if (mediaMatch) {
+      const fullMatch = mediaMatch[0]; // e.g., "[IMAGE]https://..."
       const mediaTypeRaw = mediaMatch[1].toUpperCase(); // "IMAGE", "VIDEO", "AUDIO", "DOCUMENT"
       const mediaUrl = mediaMatch[2];
-      const caption = mediaMatch[3]?.trim() || "";
+      
+      // Extract text before and after the media pattern
+      const matchIndex = sanitizedResponse.indexOf(fullMatch);
+      const textBefore = sanitizedResponse.substring(0, matchIndex).trim();
+      const textAfter = sanitizedResponse.substring(matchIndex + fullMatch.length).trim();
+      
+      // The caption is the text after the media URL (usually on next line)
+      const caption = textAfter.split('\n')[0]?.trim() || "";
+      // Text to send separately (excluding the caption that goes with media)
+      const remainingTextAfterCaption = textAfter.split('\n').slice(1).join('\n').trim();
       
       logDebug('SEND_RESPONSE', `Detected media template pattern: ${mediaTypeRaw}`, {
         mediaUrl,
         caption,
+        textBefore,
         conversationId: context.conversationId,
       });
       
@@ -1905,6 +1916,48 @@ async function sendAIResponseToWhatsApp(
       
       // Apply delay before sending
       const clientDelayMs = responseDelaySeconds * 1000;
+      
+      // If there's text before the media pattern, send it first as a text message
+      if (textBefore) {
+        await humanDelay(
+          DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
+          DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, 
+          '[AI_TEXT_BEFORE_MEDIA]'
+        );
+        
+        const textUrl = `${apiUrl}/message/sendText/${instance.instance_name}`;
+        const textResponse = await fetch(textUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': instance.api_key || '',
+          },
+          body: JSON.stringify({ number: targetNumber, text: textBefore }),
+        });
+        
+        if (textResponse.ok) {
+          const textResult = await textResponse.json();
+          // Save text message to database
+          await supabaseClient
+            .from('messages')
+            .insert({
+              conversation_id: context.conversationId,
+              whatsapp_message_id: textResult?.key?.id,
+              content: textBefore,
+              message_type: 'text',
+              is_from_me: true,
+              sender_type: 'system',
+              ai_generated: true,
+              ai_agent_id: context.automationId || null,
+              ai_agent_name: context.automationName || null,
+            });
+        }
+        
+        // Small delay before sending media
+        await humanDelay(500, 1000, '[BEFORE_MEDIA]');
+      }
+      
+      // Now send the media
       await humanDelay(
         DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
         DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, 
@@ -2036,6 +2089,38 @@ async function sendAIResponseToWhatsApp(
           n8n_last_response_at: new Date().toISOString(),
         })
         .eq('id', context.conversationId);
+
+      // If there's remaining text after the caption, send it as a separate message
+      if (remainingTextAfterCaption) {
+        await humanDelay(500, 1000, '[AFTER_MEDIA_TEXT]');
+        
+        const textUrl = `${apiUrl}/message/sendText/${instance.instance_name}`;
+        const textResponse = await fetch(textUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': instance.api_key || '',
+          },
+          body: JSON.stringify({ number: targetNumber, text: remainingTextAfterCaption }),
+        });
+        
+        if (textResponse.ok) {
+          const textResult = await textResponse.json();
+          await supabaseClient
+            .from('messages')
+            .insert({
+              conversation_id: context.conversationId,
+              whatsapp_message_id: textResult?.key?.id,
+              content: remainingTextAfterCaption,
+              message_type: 'text',
+              is_from_me: true,
+              sender_type: 'system',
+              ai_generated: true,
+              ai_agent_id: context.automationId || null,
+              ai_agent_name: context.automationName || null,
+            });
+        }
+      }
 
       logDebug('SEND_RESPONSE', `${mediaTypeRaw} media response completed successfully`);
       return true;
