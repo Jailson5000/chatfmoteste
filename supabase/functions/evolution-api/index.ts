@@ -1173,66 +1173,103 @@ serve(async (req) => {
             // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
             // If found, send as media instead of text
             // ========================================================================
-            const MEDIA_PATTERN_RE = /\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i;
+            // Regex that captures media type and URL (URL ends at whitespace or end of string)
+            const MEDIA_PATTERN_RE = /\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n\]]+)/i;
             const messageContent = body.message || "";
             const mediaMatch = messageContent.match(MEDIA_PATTERN_RE);
+            
+            console.log(`[Evolution API] Checking for media pattern in message:`, { 
+              hasMatch: !!mediaMatch,
+              contentPreview: messageContent.substring(0, 100)
+            });
             
             if (mediaMatch) {
               // Media template detected - send as native media
               const fullMatch = mediaMatch[0];
-              const mediaTypeRaw = mediaMatch[1].toUpperCase();
-              const mediaUrl = mediaMatch[2];
+              const mediaTypeRaw = mediaMatch[1].toUpperCase() as 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT';
+              const mediaUrl = mediaMatch[2].trim();
               
               // Get text before and after the media pattern
               const matchIndex = messageContent.indexOf(fullMatch);
               const textBefore = messageContent.substring(0, matchIndex).trim();
               const textAfter = messageContent.substring(matchIndex + fullMatch.length).trim();
-              const caption = textAfter.split('\n')[0]?.trim() || '';
-              const remainingText = textAfter.split('\n').slice(1).join('\n').trim();
+              
+              // Caption is the first line after the media URL (or all remaining text if single line)
+              const captionLines = textAfter.split('\n');
+              const caption = captionLines[0]?.trim() || '';
+              const remainingText = captionLines.slice(1).join('\n').trim();
               
               console.log(`[Evolution API] Media template detected: ${mediaTypeRaw}`, { 
-                mediaUrl: mediaUrl.substring(0, 50) + '...', 
-                caption,
+                mediaUrl: mediaUrl.substring(0, 80),
+                caption: caption.substring(0, 50),
                 hasTextBefore: !!textBefore,
                 hasRemainingText: !!remainingText
               });
               
               // 1. Send text before (if any)
               if (textBefore) {
+                console.log(`[Evolution API] Sending text before media: "${textBefore.substring(0, 50)}..."`);
                 const beforePayload: Record<string, unknown> = { number: targetNumber, text: textBefore };
                 if (replyToWhatsAppMessageId) {
                   beforePayload.quoted = { key: { id: replyToWhatsAppMessageId } };
                 }
-                await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+                const beforeRes = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
                   method: "POST",
                   headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
                   body: JSON.stringify(beforePayload),
                 });
+                console.log(`[Evolution API] Text before sent, status: ${beforeRes.status}`);
               }
               
-              // 2. Send the media
+              // 2. Send the media using correct endpoint/payload for each type
               let mediaEndpoint = "";
               let mediaPayload: Record<string, unknown> = { number: targetNumber };
               
+              // Detect mimetype from URL extension when possible
+              const urlLower = mediaUrl.toLowerCase();
+              
               switch (mediaTypeRaw) {
-                case 'IMAGE':
+                case 'IMAGE': {
                   mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  mediaPayload = { ...mediaPayload, mediatype: "image", mimetype: "image/jpeg", caption, media: mediaUrl };
+                  let imageMime = "image/jpeg";
+                  if (urlLower.includes(".png")) imageMime = "image/png";
+                  else if (urlLower.includes(".gif")) imageMime = "image/gif";
+                  else if (urlLower.includes(".webp")) imageMime = "image/webp";
+                  mediaPayload = { ...mediaPayload, mediatype: "image", mimetype: imageMime, caption, media: mediaUrl };
                   break;
-                case 'VIDEO':
+                }
+                case 'VIDEO': {
                   mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  mediaPayload = { ...mediaPayload, mediatype: "video", mimetype: "video/mp4", caption, media: mediaUrl };
+                  let videoMime = "video/mp4";
+                  if (urlLower.includes(".webm")) videoMime = "video/webm";
+                  else if (urlLower.includes(".mov")) videoMime = "video/quicktime";
+                  mediaPayload = { ...mediaPayload, mediatype: "video", mimetype: videoMime, caption, media: mediaUrl };
                   break;
-                case 'AUDIO':
+                }
+                case 'AUDIO': {
+                  // WhatsApp audio uses a special endpoint
                   mediaEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
                   mediaPayload = { ...mediaPayload, audio: mediaUrl };
                   break;
-                case 'DOCUMENT':
+                }
+                case 'DOCUMENT': {
                   mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  const fileName = mediaUrl.split('/').pop()?.split('?')[0] || 'document';
-                  mediaPayload = { ...mediaPayload, mediatype: "document", mimetype: "application/octet-stream", fileName, media: mediaUrl };
+                  // Extract filename from URL
+                  const urlPath = mediaUrl.split('?')[0];
+                  const fileName = decodeURIComponent(urlPath.split('/').pop() || 'documento');
+                  // Try to detect mime from extension
+                  let docMime = "application/octet-stream";
+                  if (urlLower.includes(".pdf")) docMime = "application/pdf";
+                  else if (urlLower.includes(".doc")) docMime = "application/msword";
+                  else if (urlLower.includes(".docx")) docMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                  else if (urlLower.includes(".xls")) docMime = "application/vnd.ms-excel";
+                  else if (urlLower.includes(".xlsx")) docMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                  mediaPayload = { ...mediaPayload, mediatype: "document", mimetype: docMime, fileName, caption, media: mediaUrl };
                   break;
+                }
               }
+              
+              console.log(`[Evolution API] Sending ${mediaTypeRaw} to endpoint: ${mediaEndpoint}`);
               
               const mediaResponse = await fetch(mediaEndpoint, {
                 method: "POST",
@@ -1240,9 +1277,11 @@ serve(async (req) => {
                 body: JSON.stringify(mediaPayload),
               });
               
+              const mediaResponseText = await mediaResponse.text();
+              console.log(`[Evolution API] Media response status: ${mediaResponse.status}, body: ${mediaResponseText.substring(0, 200)}`);
+              
               if (!mediaResponse.ok) {
-                const errorText = await mediaResponse.text();
-                console.error(`[Evolution API] Media send failed:`, errorText);
+                console.error(`[Evolution API] Media send failed:`, mediaResponseText);
                 if (conversationId) {
                   await supabaseClient
                     .from("messages")
@@ -1252,13 +1291,18 @@ serve(async (req) => {
                 return;
               }
               
-              const mediaData = await mediaResponse.json();
-              const whatsappMessageId = mediaData.key?.id || mediaData.messageId || mediaData.id;
+              let mediaData;
+              try {
+                mediaData = JSON.parse(mediaResponseText);
+              } catch {
+                mediaData = {};
+              }
+              const whatsappMessageId = mediaData.key?.id || mediaData.messageId || mediaData.id || crypto.randomUUID();
               console.log(`[Evolution API] Media sent successfully, whatsapp_message_id: ${whatsappMessageId}`);
               
-              // Update the message with correct type and whatsapp_message_id
-              if (conversationId && whatsappMessageId) {
-                await supabaseClient
+              // Update the message with correct type, media_url and whatsapp_message_id
+              if (conversationId) {
+                const updateResult = await supabaseClient
                   .from("messages")
                   .update({ 
                     whatsapp_message_id: whatsappMessageId,
@@ -1268,10 +1312,13 @@ serve(async (req) => {
                     media_url: mediaUrl,
                   })
                   .eq("id", tempMessageId);
+                  
+                console.log(`[Evolution API] Message updated to ${mediaTypeRaw.toLowerCase()}, error:`, updateResult.error);
               }
               
               // 3. Send remaining text after media (if any)
               if (remainingText) {
+                console.log(`[Evolution API] Sending remaining text: "${remainingText.substring(0, 50)}..."`);
                 const afterPayload: Record<string, unknown> = { number: targetNumber, text: remainingText };
                 await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
                   method: "POST",

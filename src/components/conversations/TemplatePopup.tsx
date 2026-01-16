@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Template } from '@/hooks/useTemplates';
 import { FileText, Image, Video, Music, FileIcon } from 'lucide-react';
@@ -160,8 +159,8 @@ export function TemplatePopup({
           Digite para buscar mensagens rápidas ({filteredTemplates.length} mensagens)
         </span>
       </div>
-      <ScrollArea className="max-h-[400px]">
-        <div className="p-1">
+      <div className="max-h-[320px] overflow-y-auto">
+        <div className="p-1 pb-2">
           {filteredTemplates.map((template, index) => {
             const mediaInfo = getTemplateMediaInfo(template.content);
             const isSelected = index === selectedIndex;
@@ -225,7 +224,7 @@ export function TemplatePopup({
             );
           })}
         </div>
-      </ScrollArea>
+      </div>
       <div className="px-3 py-1.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
         Use ↑↓ para navegar, Enter para selecionar
       </div>
