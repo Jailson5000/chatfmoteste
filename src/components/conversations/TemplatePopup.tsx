@@ -6,32 +6,35 @@ import { FileText, Image, Video, Music, FileIcon } from 'lucide-react';
 
 // Helper to get a friendly preview of template content
 function getTemplatePreview(content: string): { icon: React.ReactNode; preview: string } {
-  const mediaMatch = content.match(/^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s);
+  // Match media pattern anywhere in the content (not just at start)
+  const mediaMatch = content.match(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i);
   
   if (mediaMatch) {
-    const [, mediaType, , caption] = mediaMatch;
-    const cleanCaption = caption?.trim() || '';
+    const mediaType = mediaMatch[1].toUpperCase();
+    // Get text after the URL (caption)
+    const afterUrl = content.substring(content.indexOf(mediaMatch[0]) + mediaMatch[0].length).trim();
+    const caption = afterUrl.split('\n')[0]?.trim() || '';
     
     switch (mediaType) {
       case 'IMAGE':
         return { 
           icon: <Image className="h-4 w-4 text-green-500" />, 
-          preview: cleanCaption || '📷 Imagem' 
+          preview: caption || '📷 Imagem' 
         };
       case 'VIDEO':
         return { 
           icon: <Video className="h-4 w-4 text-blue-500" />, 
-          preview: cleanCaption || '🎬 Vídeo' 
+          preview: caption || '🎬 Vídeo' 
         };
       case 'AUDIO':
         return { 
           icon: <Music className="h-4 w-4 text-purple-500" />, 
-          preview: cleanCaption || '🎵 Áudio' 
+          preview: caption || '🎵 Áudio' 
         };
       case 'DOCUMENT':
         return { 
           icon: <FileIcon className="h-4 w-4 text-orange-500" />, 
-          preview: cleanCaption || '📄 Documento' 
+          preview: caption || '📄 Documento' 
         };
     }
   }
@@ -123,9 +126,9 @@ export function TemplatePopup({
           Templates rápidos • Use ↑↓ para navegar, Enter para selecionar
         </span>
       </div>
-      <ScrollArea className="h-auto max-h-[280px]">
+      <ScrollArea className="max-h-[320px]">
         <div className="p-1">
-          {filteredTemplates.slice(0, Math.max(5, filteredTemplates.length)).map((template, index) => {
+          {filteredTemplates.map((template, index) => {
             const { icon, preview } = getTemplatePreview(template.content);
             return (
               <div
