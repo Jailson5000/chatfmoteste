@@ -1842,8 +1842,8 @@ async function sendAIResponseToWhatsApp(
 ): Promise<boolean> {
   try {
     const AUDIO_PLACEHOLDER_RE = /\[\s*mensagem de [áa]udio\s*\]/gi;
-    // Regex to detect [IMAGE]url or [VIDEO]url patterns (used by templates)
-    const MEDIA_PATTERN_RE = /^\[(IMAGE|VIDEO)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s;
+    // Regex to detect [IMAGE]url, [VIDEO]url, [AUDIO]url, or [DOCUMENT]url patterns (used by templates)
+    const MEDIA_PATTERN_RE = /^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)(?:\n(.*))?$/s;
     
     const sanitizeText = (value: string) =>
       value
@@ -1867,16 +1867,16 @@ async function sendAIResponseToWhatsApp(
     }
     
     // ========================================================================
-    // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url or [VIDEO]url
+    // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
     // If found, send as actual media instead of text
     // ========================================================================
     const mediaMatch = sanitizedResponse.match(MEDIA_PATTERN_RE);
     if (mediaMatch) {
-      const mediaType = mediaMatch[1].toLowerCase(); // "image" or "video"
+      const mediaTypeRaw = mediaMatch[1].toUpperCase(); // "IMAGE", "VIDEO", "AUDIO", "DOCUMENT"
       const mediaUrl = mediaMatch[2];
       const caption = mediaMatch[3]?.trim() || "";
       
-      logDebug('SEND_RESPONSE', `Detected media template pattern: ${mediaType}`, {
+      logDebug('SEND_RESPONSE', `Detected media template pattern: ${mediaTypeRaw}`, {
         mediaUrl,
         caption,
         conversationId: context.conversationId,
@@ -1911,17 +1911,82 @@ async function sendAIResponseToWhatsApp(
         '[AI_MEDIA_RESPONSE]'
       );
       
-      // Build media endpoint and payload
-      const endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-      const payload = {
-        number: targetNumber,
-        mediatype: mediaType,
-        mimetype: mediaType === "image" ? "image/jpeg" : "video/mp4",
-        caption: caption,
-        media: mediaUrl,
-      };
+      // Build endpoint and payload based on media type
+      let endpoint = "";
+      let payload: Record<string, unknown> = { number: targetNumber };
+      let dbMessageType = "";
+      let dbMimeType = "";
       
-      logDebug('SEND_RESPONSE', 'Sending media via Evolution API', { endpoint, mediaType });
+      switch (mediaTypeRaw) {
+        case "IMAGE":
+          endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+          dbMessageType = "image";
+          dbMimeType = "image/jpeg";
+          payload = {
+            ...payload,
+            mediatype: "image",
+            mimetype: "image/jpeg",
+            caption: caption,
+            media: mediaUrl,
+          };
+          break;
+          
+        case "VIDEO":
+          endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+          dbMessageType = "video";
+          dbMimeType = "video/mp4";
+          payload = {
+            ...payload,
+            mediatype: "video",
+            mimetype: "video/mp4",
+            caption: caption,
+            media: mediaUrl,
+          };
+          break;
+          
+        case "AUDIO":
+          endpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+          dbMessageType = "audio";
+          dbMimeType = "audio/mpeg";
+          payload = {
+            ...payload,
+            audio: mediaUrl,
+          };
+          break;
+          
+        case "DOCUMENT":
+          endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+          dbMessageType = "document";
+          // Try to infer mime type from URL extension
+          const urlLower = mediaUrl.toLowerCase();
+          if (urlLower.includes('.pdf')) {
+            dbMimeType = "application/pdf";
+          } else if (urlLower.includes('.doc') || urlLower.includes('.docx')) {
+            dbMimeType = "application/msword";
+          } else if (urlLower.includes('.xls') || urlLower.includes('.xlsx')) {
+            dbMimeType = "application/vnd.ms-excel";
+          } else {
+            dbMimeType = "application/octet-stream";
+          }
+          // Extract filename from URL
+          const urlParts = mediaUrl.split('/');
+          const fileName = urlParts[urlParts.length - 1].split('?')[0] || "document";
+          payload = {
+            ...payload,
+            mediatype: "document",
+            mimetype: dbMimeType,
+            caption: caption,
+            fileName: fileName,
+            media: mediaUrl,
+          };
+          break;
+          
+        default:
+          logDebug('SEND_RESPONSE', `Unknown media type: ${mediaTypeRaw}`);
+          return false;
+      }
+      
+      logDebug('SEND_RESPONSE', 'Sending media via Evolution API', { endpoint, mediaType: mediaTypeRaw });
       
       const sendResponse = await fetch(endpoint, {
         method: 'POST',
@@ -1944,7 +2009,7 @@ async function sendAIResponseToWhatsApp(
       const sendResult = await sendResponse.json();
       const whatsappMessageId = sendResult?.key?.id;
       
-      logDebug('SEND_RESPONSE', 'Media sent successfully', { whatsappMessageId });
+      logDebug('SEND_RESPONSE', 'Media sent successfully', { whatsappMessageId, mediaType: mediaTypeRaw });
 
       // Save media message to database
       await supabaseClient
@@ -1952,9 +2017,10 @@ async function sendAIResponseToWhatsApp(
         .insert({
           conversation_id: context.conversationId,
           whatsapp_message_id: whatsappMessageId,
-          content: caption || `[${mediaType.toUpperCase()}]`,
-          message_type: mediaType,
+          content: caption || `[${mediaTypeRaw}]`,
+          message_type: dbMessageType,
           media_url: mediaUrl,
+          media_mime_type: dbMimeType,
           is_from_me: true,
           sender_type: 'system',
           ai_generated: true,
@@ -1971,7 +2037,7 @@ async function sendAIResponseToWhatsApp(
         })
         .eq('id', context.conversationId);
 
-      logDebug('SEND_RESPONSE', 'Media response completed successfully');
+      logDebug('SEND_RESPONSE', `${mediaTypeRaw} media response completed successfully`);
       return true;
     }
 
