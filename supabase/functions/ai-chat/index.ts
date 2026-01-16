@@ -201,6 +201,29 @@ const CALENDAR_TOOLS = [
   }
 ];
 
+// Template sending tool definition
+const TEMPLATE_TOOL = {
+  type: "function",
+  function: {
+    name: "send_template",
+    description: "Envia um template/mensagem pré-configurada para o cliente. Use quando precisar enviar materiais, guias, imagens, vídeos ou documentos prontos.",
+    parameters: {
+      type: "object",
+      properties: {
+        template_name: {
+          type: "string",
+          description: "Nome ou atalho do template a ser enviado (ex: 'Avaliação', 'Baixar extratos', 'Link Youtube')"
+        },
+        additional_message: {
+          type: "string",
+          description: "Mensagem adicional opcional para acompanhar o template (opcional)"
+        }
+      },
+      required: ["template_name"]
+    }
+  }
+};
+
 // CRM/Internal actions tools definition for function calling
 const CRM_TOOLS = [
   {
@@ -522,11 +545,12 @@ function getCalendarTools(permissions: { read: boolean; create: boolean; edit: b
   return tools.filter(Boolean);
 }
 
-// Get all available tools (calendar + CRM + scheduling)
+// Get all available tools (calendar + CRM + scheduling + templates)
 function getAllAvailableTools(
   calendarPermissions: { read: boolean; create: boolean; edit: boolean; delete: boolean } | null,
   includeCrmTools: boolean = true,
-  includeSchedulingTools: boolean = false
+  includeSchedulingTools: boolean = false,
+  includeTemplateTools: boolean = true
 ) {
   const tools: any[] = [];
   
@@ -543,6 +567,11 @@ function getAllAvailableTools(
   // Always include CRM tools (they're tenant-scoped by design)
   if (includeCrmTools) {
     tools.push(...CRM_TOOLS);
+  }
+  
+  // Include template sending tool
+  if (includeTemplateTools) {
+    tools.push(TEMPLATE_TOOL);
   }
   
   return tools;
@@ -1057,6 +1086,90 @@ async function executeCrmTool(
   } catch (error) {
     console.error(`[AI Chat] CRM tool error:`, error);
     return JSON.stringify({ error: "Erro ao executar ação interna" });
+  }
+}
+
+// Execute template sending tool call
+async function executeTemplateTool(
+  supabase: any,
+  lawFirmId: string,
+  toolCall: { name: string; arguments: string }
+): Promise<string> {
+  try {
+    const args = JSON.parse(toolCall.arguments);
+    
+    console.log(`[AI Chat] Executing template tool: send_template`, args);
+    
+    const { template_name, additional_message } = args;
+    
+    if (!template_name) {
+      return JSON.stringify({ 
+        success: false, 
+        error: "Nome do template é obrigatório" 
+      });
+    }
+    
+    // Fetch all active templates for this law firm
+    const { data: templates, error } = await supabase
+      .from("templates")
+      .select("id, name, shortcut, content")
+      .eq("law_firm_id", lawFirmId)
+      .eq("is_active", true);
+    
+    if (error || !templates || templates.length === 0) {
+      return JSON.stringify({ 
+        success: false, 
+        error: "Nenhum template encontrado",
+        available_templates: []
+      });
+    }
+    
+    // Find the best matching template (case-insensitive, flexible matching)
+    const searchTerm = template_name.toLowerCase().trim();
+    const matchedTemplate = templates.find((t: any) => {
+      const name = t.name.toLowerCase();
+      const shortcut = (t.shortcut || "").toLowerCase();
+      
+      return (
+        name === searchTerm ||
+        shortcut === searchTerm ||
+        name.includes(searchTerm) ||
+        searchTerm.includes(name) ||
+        shortcut.includes(searchTerm)
+      );
+    });
+    
+    if (!matchedTemplate) {
+      const availableNames = templates.map((t: any) => t.name).join(", ");
+      return JSON.stringify({ 
+        success: false, 
+        error: `Template "${template_name}" não encontrado. Disponíveis: ${availableNames}`,
+        available_templates: templates.map((t: any) => ({ name: t.name, shortcut: t.shortcut }))
+      });
+    }
+    
+    console.log(`[AI Chat] ✅ Found template: "${matchedTemplate.name}" for search "${template_name}"`);
+    
+    // Build the response content
+    let responseContent = "";
+    
+    if (additional_message) {
+      responseContent = additional_message + "\n\n";
+    }
+    
+    responseContent += matchedTemplate.content || "";
+    
+    return JSON.stringify({
+      success: true,
+      template_name: matchedTemplate.name,
+      template_content: responseContent,
+      message: `Template "${matchedTemplate.name}" será enviado ao cliente`,
+      send_to_client: true
+    });
+    
+  } catch (error) {
+    console.error(`[AI Chat] Template tool error:`, error);
+    return JSON.stringify({ error: "Erro ao buscar template" });
   }
 }
 
@@ -2678,6 +2791,42 @@ REGRAS PARA USO DAS AÇÕES:
       
       messages.push({ role: "system", content: crmInstructions });
       console.log(`[AI Chat] Added CRM instructions with ${departments.length} depts, ${statuses.length} statuses, ${otherAgents.length} agents, ${teamMembers.length} members`);
+      
+      // Fetch available templates for this law firm
+      const { data: templatesData } = await supabase
+        .from("templates")
+        .select("name, shortcut, content")
+        .eq("law_firm_id", effectiveLawFirmIdForCalendar)
+        .eq("is_active", true);
+      
+      if (templatesData && templatesData.length > 0) {
+        const templatesList = templatesData.map((t: any) => {
+          const hasMedia = t.content?.match(/^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i);
+          const mediaType = hasMedia ? hasMedia[1].toLowerCase() : null;
+          const mediaLabel = mediaType === 'image' ? '📷' : mediaType === 'video' ? '🎬' : mediaType === 'audio' ? '🎤' : mediaType === 'document' ? '📄' : '📝';
+          return `  - ${mediaLabel} "${t.name}" (atalho: ${t.shortcut || 'N/A'})`;
+        }).join("\n");
+        
+        const templateInstructions = `\n\n📨 TEMPLATES DISPONÍVEIS (use send_template):
+Você pode enviar materiais pré-configurados para o cliente usando a função send_template.
+
+TEMPLATES DISPONÍVEIS:
+${templatesList}
+
+COMO USAR:
+- Quando o cliente pedir um arquivo, guia, imagem ou documento, use send_template
+- Informe o nome do template (ex: "Baixar extratos", "Avaliação")
+- Você pode adicionar uma mensagem personalizada junto com o template
+- O sistema enviará automaticamente o conteúdo do template (texto, imagem, vídeo, etc.)
+
+⚠️ IMPORTANTE:
+- NÃO diga apenas "vou enviar" sem usar a função send_template
+- SEMPRE use a função send_template para realmente enviar o material
+- Use o nome do template exato ou similar para encontrar o correto`;
+        
+        messages.push({ role: "system", content: templateInstructions });
+        console.log(`[AI Chat] Added ${templatesData.length} templates to instructions`);
+      }
     }
 
     // Add SCHEDULING instructions if agent has scheduling enabled
@@ -2940,6 +3089,7 @@ ${servicesList}
         const calendarToolNames = ["check_availability", "list_events", "create_event", "update_event", "delete_event"];
         const crmToolNames = ["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"];
         const schedulingToolNames = ["list_services", "get_available_slots", "book_appointment"];
+        const templateToolNames = ["send_template"];
         
         let result: string;
         
@@ -2973,6 +3123,12 @@ ${servicesList}
             effectiveLawFirmId!,
             conversationId,
             context?.clientId,
+            { name: toolName, arguments: toolArgs }
+          );
+        } else if (templateToolNames.includes(toolName)) {
+          result = await executeTemplateTool(
+            supabase,
+            effectiveLawFirmId!,
             { name: toolName, arguments: toolArgs }
           );
         } else {
@@ -3031,6 +3187,19 @@ ${servicesList}
         const finalData = await finalResponse.json();
         aiResponse = finalData.choices?.[0]?.message?.content || aiResponse;
         console.log(`[AI Chat] Final response after tool execution, length: ${aiResponse.length}`);
+      }
+      
+      // If a template was sent, append the template content to the response
+      const templateToolResult = toolCallsExecuted.find((tc: any) => tc.tool === "send_template");
+      if (templateToolResult?.result?.success && templateToolResult.result.template_content) {
+        console.log(`[AI Chat] Appending template content from "${templateToolResult.result.template_name}"`);
+        // If AI response is empty or just acknowledgement, use template content
+        // Otherwise append template after AI response
+        if (!aiResponse || aiResponse.length < 20) {
+          aiResponse = templateToolResult.result.template_content;
+        } else {
+          aiResponse = aiResponse + "\n\n" + templateToolResult.result.template_content;
+        }
       }
     }
 
