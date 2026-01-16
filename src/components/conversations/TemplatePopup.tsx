@@ -84,7 +84,7 @@ export function TemplatePopup({
           Templates rápidos • Use ↑↓ para navegar, Enter para selecionar
         </span>
       </div>
-      <ScrollArea className="max-h-64">
+      <ScrollArea className="max-h-80">
         <div className="p-1">
           {filteredTemplates.map((template, index) => (
             <div

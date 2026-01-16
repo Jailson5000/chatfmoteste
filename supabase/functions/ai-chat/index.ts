@@ -2485,6 +2485,41 @@ serve(async (req) => {
         systemPrompt = systemPrompt.replace(/@Nome do cliente/g, context.clientName);
         systemPrompt = systemPrompt.replace(/@cliente:Nome/g, context.clientName);
       }
+      
+      // ========================================================================
+      // PROCESS TEMPLATE MENTIONS: Replace @template:Name with actual content
+      // ========================================================================
+      const templateMentionPattern = /@template:([^\s@]+(?:\s+[^\s@]+)*?)(?=\s*[@\n]|$)/g;
+      const templateMatches = systemPrompt.matchAll(templateMentionPattern);
+      
+      for (const match of templateMatches) {
+        const fullMatch = match[0]; // @template:Nome do Template
+        const templateNameRaw = match[1].trim(); // Nome do Template
+        
+        // Try to find template by name or shortcut (case insensitive)
+        const { data: templateData } = await supabase
+          .from("templates")
+          .select("name, shortcut, content")
+          .eq("law_firm_id", agentLawFirmId)
+          .eq("is_active", true);
+        
+        if (templateData && templateData.length > 0) {
+          // Find best match by name or shortcut
+          const matchedTemplate = templateData.find(
+            (t: any) => 
+              t.name.toLowerCase() === templateNameRaw.toLowerCase() ||
+              t.shortcut.toLowerCase() === templateNameRaw.toLowerCase() ||
+              t.name.toLowerCase().startsWith(templateNameRaw.toLowerCase())
+          );
+          
+          if (matchedTemplate) {
+            systemPrompt = systemPrompt.replace(fullMatch, matchedTemplate.content || "");
+            console.log(`[AI Chat] ✅ Replaced template mention "${fullMatch}" with content from "${matchedTemplate.name}"`);
+          } else {
+            console.log(`[AI Chat] ⚠️ Template not found: "${templateNameRaw}"`);
+          }
+        }
+      }
     }
 
     // ========================================================================
