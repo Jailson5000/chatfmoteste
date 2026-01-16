@@ -792,24 +792,22 @@ serve(async (req) => {
           console.log(`[Evolution API] Evolution delete failed (non-fatal):`, e);
         }
 
-        // Before deleting the instance, we need to handle clients to avoid unique constraint violations.
-        // The unique index idx_clients_phone_norm_law_firm_no_instance only allows one client per phone+law_firm 
-        // when whatsapp_instance_id IS NULL. If the FK cascade sets whatsapp_instance_id to NULL, 
-        // it may conflict with existing clients that already have NULL instance.
-        // Solution: Delete clients that belong to this instance (their conversations will cascade delete too).
-        console.log(`[Evolution API] Cleaning up clients for instance: ${body.instanceId}`);
+        // Before deleting the instance, set clients' whatsapp_instance_id to NULL.
+        // This preserves the client data while unlinking them from the deleted instance.
+        // Note: conversations will also have whatsapp_instance_id set to NULL via FK cascade (ON DELETE SET NULL).
+        console.log(`[Evolution API] Unlinking clients from instance: ${body.instanceId}`);
         
-        const { error: clientsDeleteError } = await supabaseClient
+        const { error: clientsUpdateError } = await supabaseClient
           .from("clients")
-          .delete()
+          .update({ whatsapp_instance_id: null })
           .eq("whatsapp_instance_id", body.instanceId)
           .eq("law_firm_id", lawFirmId);
         
-        if (clientsDeleteError) {
-          console.error(`[Evolution API] Failed to delete clients:`, clientsDeleteError);
+        if (clientsUpdateError) {
+          console.error(`[Evolution API] Failed to unlink clients:`, clientsUpdateError);
           // Non-fatal - try to continue with instance deletion
         } else {
-          console.log(`[Evolution API] Clients deleted successfully`);
+          console.log(`[Evolution API] Clients unlinked successfully`);
         }
 
         // Delete from database
