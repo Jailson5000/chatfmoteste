@@ -1169,6 +1169,124 @@ serve(async (req) => {
         // Background task: send to Evolution API
         const backgroundSend = async () => {
           try {
+            // ========================================================================
+            // CHECK FOR MEDIA TEMPLATE PATTERN: [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
+            // If found, send as media instead of text
+            // ========================================================================
+            const MEDIA_PATTERN_RE = /\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i;
+            const messageContent = body.message || "";
+            const mediaMatch = messageContent.match(MEDIA_PATTERN_RE);
+            
+            if (mediaMatch) {
+              // Media template detected - send as native media
+              const fullMatch = mediaMatch[0];
+              const mediaTypeRaw = mediaMatch[1].toUpperCase();
+              const mediaUrl = mediaMatch[2];
+              
+              // Get text before and after the media pattern
+              const matchIndex = messageContent.indexOf(fullMatch);
+              const textBefore = messageContent.substring(0, matchIndex).trim();
+              const textAfter = messageContent.substring(matchIndex + fullMatch.length).trim();
+              const caption = textAfter.split('\n')[0]?.trim() || '';
+              const remainingText = textAfter.split('\n').slice(1).join('\n').trim();
+              
+              console.log(`[Evolution API] Media template detected: ${mediaTypeRaw}`, { 
+                mediaUrl: mediaUrl.substring(0, 50) + '...', 
+                caption,
+                hasTextBefore: !!textBefore,
+                hasRemainingText: !!remainingText
+              });
+              
+              // 1. Send text before (if any)
+              if (textBefore) {
+                const beforePayload: Record<string, unknown> = { number: targetNumber, text: textBefore };
+                if (replyToWhatsAppMessageId) {
+                  beforePayload.quoted = { key: { id: replyToWhatsAppMessageId } };
+                }
+                await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+                  method: "POST",
+                  headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                  body: JSON.stringify(beforePayload),
+                });
+              }
+              
+              // 2. Send the media
+              let mediaEndpoint = "";
+              let mediaPayload: Record<string, unknown> = { number: targetNumber };
+              
+              switch (mediaTypeRaw) {
+                case 'IMAGE':
+                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                  mediaPayload = { ...mediaPayload, mediatype: "image", mimetype: "image/jpeg", caption, media: mediaUrl };
+                  break;
+                case 'VIDEO':
+                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                  mediaPayload = { ...mediaPayload, mediatype: "video", mimetype: "video/mp4", caption, media: mediaUrl };
+                  break;
+                case 'AUDIO':
+                  mediaEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+                  mediaPayload = { ...mediaPayload, audio: mediaUrl };
+                  break;
+                case 'DOCUMENT':
+                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                  const fileName = mediaUrl.split('/').pop()?.split('?')[0] || 'document';
+                  mediaPayload = { ...mediaPayload, mediatype: "document", mimetype: "application/octet-stream", fileName, media: mediaUrl };
+                  break;
+              }
+              
+              const mediaResponse = await fetch(mediaEndpoint, {
+                method: "POST",
+                headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                body: JSON.stringify(mediaPayload),
+              });
+              
+              if (!mediaResponse.ok) {
+                const errorText = await mediaResponse.text();
+                console.error(`[Evolution API] Media send failed:`, errorText);
+                if (conversationId) {
+                  await supabaseClient
+                    .from("messages")
+                    .update({ status: "failed", content: `❌ Falha ao enviar mídia: ${caption || mediaTypeRaw}` })
+                    .eq("id", tempMessageId);
+                }
+                return;
+              }
+              
+              const mediaData = await mediaResponse.json();
+              const whatsappMessageId = mediaData.key?.id || mediaData.messageId || mediaData.id;
+              console.log(`[Evolution API] Media sent successfully, whatsapp_message_id: ${whatsappMessageId}`);
+              
+              // Update the message with correct type and whatsapp_message_id
+              if (conversationId && whatsappMessageId) {
+                await supabaseClient
+                  .from("messages")
+                  .update({ 
+                    whatsapp_message_id: whatsappMessageId,
+                    status: "sent",
+                    message_type: mediaTypeRaw.toLowerCase() as "image" | "video" | "audio" | "document",
+                    content: caption || `[${mediaTypeRaw}]`,
+                    media_url: mediaUrl,
+                  })
+                  .eq("id", tempMessageId);
+              }
+              
+              // 3. Send remaining text after media (if any)
+              if (remainingText) {
+                const afterPayload: Record<string, unknown> = { number: targetNumber, text: remainingText };
+                await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+                  method: "POST",
+                  headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                  body: JSON.stringify(afterPayload),
+                });
+              }
+              
+              return; // Done - media template was handled
+            }
+            
+            // ========================================================================
+            // REGULAR TEXT MESSAGE (no media pattern found)
+            // ========================================================================
+            
             // Build payload with optional quoted message for reply
             const sendPayload: Record<string, unknown> = {
               number: targetNumber,
