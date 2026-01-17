@@ -550,18 +550,22 @@ export function useMessagesWithPagination({
             }
 
             // Add new message and sort using stable ordering
-            // Priority: _clientOrder (for optimistic msgs) > created_at (for backend msgs)
+            // CRITICAL: Always use created_at as the primary sort key
+            // _clientOrder is only used to maintain relative order during optimistic update reconciliation
             const updated = [...prev, rawMsg];
             return updated.sort((a, b) => {
-              // If both have _clientOrder, use that for stable ordering
-              if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
-                return a._clientOrder - b._clientOrder;
+              const timeA = new Date(a.created_at).getTime();
+              const timeB = new Date(b.created_at).getTime();
+              
+              // If timestamps are identical (within 1 second), use _clientOrder for tie-breaking
+              if (Math.abs(timeA - timeB) < 1000) {
+                if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                  return a._clientOrder - b._clientOrder;
+                }
               }
-              // If only one has _clientOrder, that one should come after (it's newer/optimistic)
-              if (a._clientOrder !== undefined) return 1;
-              if (b._clientOrder !== undefined) return -1;
-              // Fallback to created_at for backend messages
-              return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+              
+              // Primary sort by created_at timestamp
+              return timeA - timeB;
             });
           });
 

@@ -1283,26 +1283,26 @@ export function KanbanChatPanel({
     
     // Sort with stable ordering: use _clientOrder for optimistic messages to prevent shuffle
     return items.sort((a, b) => {
-      // Get _clientOrder if it's a message (activities don't have it)
-      const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
-      const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
-      
-      // If both have _clientOrder, use that for stable ordering
-      if (aClientOrder !== undefined && bClientOrder !== undefined) {
-        return aClientOrder - bClientOrder;
-      }
-      
-      // If only one has _clientOrder, that one should come after (it's newer/optimistic)
-      if (aClientOrder !== undefined) return 1;
-      if (bClientOrder !== undefined) return -1;
-      
-      // Fallback to timestamp for backend messages and activities
+      // Get timestamps for primary sorting
       const aTime = a.type === 'message' 
         ? new Date(a.data.created_at).getTime() 
         : a.data.timestamp.getTime();
       const bTime = b.type === 'message' 
         ? new Date(b.data.created_at).getTime() 
         : b.data.timestamp.getTime();
+      
+      // If timestamps are within 1 second, use _clientOrder for tie-breaking
+      // This maintains stability during optimistic update reconciliation
+      if (Math.abs(aTime - bTime) < 1000) {
+        const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
+        const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
+        
+        if (aClientOrder !== undefined && bClientOrder !== undefined) {
+          return aClientOrder - bClientOrder;
+        }
+      }
+      
+      // Primary sort by timestamp
       return aTime - bTime;
     });
   }, [messages, inlineActivities]);
