@@ -48,13 +48,20 @@ import {
   Zap,
   Music,
   Sparkles,
+  Star,
+  CheckSquare,
+  Copy,
+  Heart,
+  Video,
+  StickyNote,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { MediaGalleryItem } from "./MediaGalleryItem";
 import { DecryptedMediaListItem } from "./DecryptedMediaListItem";
+import { toast } from "@/hooks/use-toast";
 
 interface Automation {
   id: string;
@@ -73,6 +80,21 @@ interface MediaItem {
   conversation_id: string;
 }
 
+interface StarredMessage {
+  id: string;
+  content: string | null;
+  created_at: string;
+  is_from_me: boolean;
+  sender_name: string | null;
+}
+
+interface InternalNote {
+  id: string;
+  content: string;
+  created_at: string;
+  sender_name: string | null;
+}
+
 interface ContactDetailsPanelProps {
   conversation: {
     id: string;
@@ -80,7 +102,6 @@ interface ContactDetailsPanelProps {
     contact_phone: string | null;
     current_handler: 'ai' | 'human';
     current_automation_id?: string | null;
-    // Joined automation data - use this for name display instead of lookup
     current_automation?: { id: string; name: string } | null;
     department_id: string | null;
     tags: string[] | null;
@@ -134,13 +155,23 @@ export function ContactDetailsPanel({
   onChangeTags,
 }: ContactDetailsPanelProps) {
   const queryClient = useQueryClient();
+  
+  // Main panel tab
+  const [mainTab, setMainTab] = useState<"info" | "favorites" | "media" | "tasks" | "docs" | "copy">("info");
+  
+  // Sub-tabs
+  const [favoritesSubTab, setFavoritesSubTab] = useState<"favorites" | "notes">("favorites");
+  const [mediaSubTab, setMediaSubTab] = useState<"images" | "videos" | "docs" | "cloud">("images");
+  
+  // State
   const [infoOpen, setInfoOpen] = useState(false);
   const [attendantPopoverOpen, setAttendantPopoverOpen] = useState(false);
   const [attendantSearch, setAttendantSearch] = useState("");
-  const [mediaTab, setMediaTab] = useState<"images" | "audio" | "docs" | "cloud">("images");
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [cloudFiles, setCloudFiles] = useState<Array<{ name: string; url: string; created_at: string }>>([]);
+  const [starredMessages, setStarredMessages] = useState<StarredMessage[]>([]);
+  const [internalNotes, setInternalNotes] = useState<InternalNote[]>([]);
   
   // Collapsible states for properties
   const [statusOpen, setStatusOpen] = useState(false);
@@ -148,11 +179,11 @@ export function ContactDetailsPanel({
   const [departmentOpen, setDepartmentOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
 
-  // Client tags state - synced with client_tags table
+  // Client tags state
   const [clientTagIds, setClientTagIds] = useState<string[]>([]);
   const clientId = conversation?.client?.id;
 
-  // Fetch client tags from client_tags table (same source as ContactStatusTags)
+  // Fetch client tags
   const fetchClientTags = useCallback(async (cId: string) => {
     const { data } = await supabase
       .from("client_tags")
@@ -161,7 +192,6 @@ export function ContactDetailsPanel({
     setClientTagIds((data || []).map((t) => t.tag_id));
   }, []);
 
-  // Sync client tags when conversation/client changes
   useEffect(() => {
     if (clientId) {
       fetchClientTags(clientId);
@@ -170,13 +200,65 @@ export function ContactDetailsPanel({
     }
   }, [clientId, fetchClientTags]);
 
-  // Fetch media items when conversation changes + realtime subscription
+  // Fetch starred messages
+  useEffect(() => {
+    if (!conversation?.id || mainTab !== "favorites") return;
+    
+    const fetchStarred = async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("id, content, created_at, is_from_me")
+        .eq("conversation_id", conversation.id)
+        .eq("is_starred", true)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      
+      if (data) {
+        setStarredMessages(data.map(m => ({
+          id: m.id,
+          content: m.content,
+          created_at: m.created_at,
+          is_from_me: m.is_from_me,
+          sender_name: null,
+        })));
+      }
+    };
+    
+    fetchStarred();
+  }, [conversation?.id, mainTab]);
+
+  // Fetch internal notes (messages with is_internal = true)
+  useEffect(() => {
+    if (!conversation?.id || mainTab !== "favorites") return;
+    
+    const fetchNotes = async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("id, content, created_at")
+        .eq("conversation_id", conversation.id)
+        .eq("is_internal", true)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      
+      if (data) {
+        setInternalNotes(data.map(n => ({
+          id: n.id,
+          content: n.content || "",
+          created_at: n.created_at,
+          sender_name: null,
+        })));
+      }
+    };
+    
+    fetchNotes();
+  }, [conversation?.id, mainTab]);
+
+  // Fetch media items
   useEffect(() => {
     if (!conversation?.id) return;
     
     const fetchMedia = async () => {
       setMediaLoading(true);
-      // Query by message_type (not requiring media_url) to include images pending media fetch
       const { data, error } = await supabase
         .from("messages")
         .select("id, media_url, media_mime_type, message_type, created_at, whatsapp_message_id, content, conversation_id")
@@ -193,7 +275,6 @@ export function ContactDetailsPanel({
     
     fetchMedia();
 
-    // Subscribe to new media messages in realtime
     const channel = supabase
       .channel(`media-updates-${conversation.id}`)
       .on(
@@ -206,12 +287,9 @@ export function ContactDetailsPanel({
         },
         (payload) => {
           const newMsg = payload.new as MediaItem;
-          // Only add if it's a media message
           if (newMsg.message_type && ["image", "video", "audio", "ptt", "document"].includes(newMsg.message_type)) {
             setMediaItems(prev => {
-              // Prevent duplicates
               if (prev.some(m => m.id === newMsg.id)) return prev;
-              // Add to the beginning (most recent first)
               return [newMsg, ...prev].slice(0, 50);
             });
           }
@@ -227,7 +305,6 @@ export function ContactDetailsPanel({
         },
         (payload) => {
           const updatedMsg = payload.new as MediaItem;
-          // Update existing media item if URL changed
           if (updatedMsg.message_type && ["image", "video", "audio", "ptt", "document"].includes(updatedMsg.message_type)) {
             setMediaItems(prev => prev.map(m => 
               m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m
@@ -242,9 +319,9 @@ export function ContactDetailsPanel({
     };
   }, [conversation?.id]);
 
-  // Fetch cloud files from storage
+  // Fetch cloud files
   useEffect(() => {
-    if (!conversation?.id || mediaTab !== "cloud") return;
+    if (!conversation?.id || mainTab !== "media" || mediaSubTab !== "cloud") return;
     
     const fetchCloudFiles = async () => {
       setMediaLoading(true);
@@ -265,7 +342,7 @@ export function ContactDetailsPanel({
     };
     
     fetchCloudFiles();
-  }, [conversation?.id, mediaTab]);
+  }, [conversation?.id, mainTab, mediaSubTab]);
 
   // Filter media by type
   const filteredMedia = useMemo(() => {
@@ -273,20 +350,20 @@ export function ContactDetailsPanel({
       const mimeType = item.media_mime_type?.toLowerCase() || "";
       const msgType = item.message_type?.toLowerCase() || "";
       
-      if (mediaTab === "images") {
+      if (mediaSubTab === "images") {
         return mimeType.includes("image") || msgType === "image";
       }
-      if (mediaTab === "audio") {
-        return mimeType.includes("audio") || msgType === "audio" || msgType === "ptt";
+      if (mediaSubTab === "videos") {
+        return mimeType.includes("video") || msgType === "video";
       }
-      if (mediaTab === "docs") {
+      if (mediaSubTab === "docs") {
         return mimeType.includes("pdf") || mimeType.includes("document") || 
                mimeType.includes("text") || mimeType.includes("application") ||
-               msgType === "document";
+               msgType === "document" || msgType === "audio" || msgType === "ptt";
       }
       return false;
     });
-  }, [mediaItems, mediaTab]);
+  }, [mediaItems, mediaSubTab]);
 
   // Get current status
   const currentStatus = useMemo(() => {
@@ -300,7 +377,7 @@ export function ContactDetailsPanel({
     return departments.find(d => d.id === conversation.department_id);
   }, [conversation?.department_id, departments]);
 
-  // Get current tags based on client_tags table (synced with header)
+  // Get current tags
   const conversationTags = useMemo(() => {
     return clientTagIds
       .map(tagId => tags.find(t => t.id === tagId))
@@ -331,14 +408,12 @@ export function ContactDetailsPanel({
     );
   }
 
-  // Handle tag toggle using client_tags table (same as ContactStatusTags)
   const handleTagToggle = async (tag: { id: string; name: string }) => {
     if (!clientId) return;
     
     const hasTag = clientTagIds.includes(tag.id);
     
     if (hasTag) {
-      // Remove tag
       await supabase
         .from("client_tags")
         .delete()
@@ -347,10 +422,8 @@ export function ContactDetailsPanel({
       
       setClientTagIds((prev) => prev.filter((id) => id !== tag.id));
     } else {
-      // Max 4 tags
       if (clientTagIds.length >= 4) return;
       
-      // Add tag
       await supabase.from("client_tags").insert({
         client_id: clientId,
         tag_id: tag.id,
@@ -359,7 +432,6 @@ export function ContactDetailsPanel({
       setClientTagIds((prev) => [...prev, tag.id]);
     }
     
-    // Invalidate queries to sync with header and sidebar
     queryClient.invalidateQueries({ queryKey: ["clients"] });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
@@ -376,6 +448,20 @@ export function ContactDetailsPanel({
     setDepartmentOpen(false);
   };
 
+  const handleCopyPhone = () => {
+    if (conversation.contact_phone) {
+      navigator.clipboard.writeText(conversation.contact_phone);
+      toast({ title: "Telefone copiado!" });
+    }
+  };
+
+  const handleCopyName = () => {
+    if (conversation.contact_name) {
+      navigator.clipboard.writeText(conversation.contact_name);
+      toast({ title: "Nome copiado!" });
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* Header */}
@@ -386,496 +472,723 @@ export function ContactDetailsPanel({
         </Button>
       </div>
 
+      {/* Main Icon Tabs */}
+      <div className="border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-around px-2 py-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "info" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("info")}
+          >
+            <User className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "favorites" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("favorites")}
+          >
+            <Star className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "media" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("media")}
+          >
+            <ImageIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "tasks" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("tasks")}
+          >
+            <CheckSquare className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "docs" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("docs")}
+          >
+            <FileText className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-10 w-10 rounded-lg",
+              mainTab === "copy" && "bg-primary/10 text-primary"
+            )}
+            onClick={() => setMainTab("copy")}
+          >
+            <Copy className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
+
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-4 space-y-4">
-          {/* Contact Card */}
-          <div className="text-center space-y-3">
-            <Avatar className="h-20 w-20 mx-auto">
-              <AvatarImage 
-                src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} 
-              />
-              <AvatarFallback className="bg-primary/10 text-primary text-xl font-medium">
-                {getInitials(conversation.contact_name)}
-              </AvatarFallback>
-            </Avatar>
-            
-            <div>
-              <div className="flex items-center justify-center gap-1">
-                <h4 className="font-semibold text-lg">
-                  {conversation.contact_name || conversation.contact_phone || "Sem nome"}
-                </h4>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6"
-                  onClick={onEditName}
-                >
-                  <Pencil className="h-3 w-3" />
-                </Button>
-              </div>
-              <p className="text-sm text-muted-foreground flex items-center justify-center gap-1 mt-1">
-                <Phone className="h-3 w-3" />
-                {conversation.contact_phone || "---"}
-              </p>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Atendimento Section */}
-          <div className="space-y-3">
-            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Atendimento
-            </h5>
-
-            {/* Handler/Attendant Selector */}
-            <div className="space-y-2">
-              <Popover open={attendantPopoverOpen} onOpenChange={setAttendantPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={attendantPopoverOpen}
-                    className="w-full justify-start h-auto py-2 px-3"
+        {/* Info Tab */}
+        {mainTab === "info" && (
+          <div className="p-4 space-y-4">
+            {/* Contact Card */}
+            <div className="text-center space-y-3">
+              <Avatar className="h-20 w-20 mx-auto">
+                <AvatarImage 
+                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} 
+                />
+                <AvatarFallback className="bg-primary/10 text-primary text-xl font-medium">
+                  {getInitials(conversation.contact_name)}
+                </AvatarFallback>
+              </Avatar>
+              
+              <div>
+                <div className="flex items-center justify-center gap-1">
+                  <h4 className="font-semibold text-lg">
+                    {conversation.contact_name || conversation.contact_phone || "Sem nome"}
+                  </h4>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-6 w-6"
+                    onClick={onEditName}
                   >
-                    <Users className="h-4 w-4 mr-2 text-muted-foreground flex-shrink-0" />
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {conversation.current_handler === "ai" ? (
-                        <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0 truncate">
-                          <Bot className="h-3 w-3 mr-1 flex-shrink-0" />
-                          <span className="truncate max-w-[120px]">
-                            {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
-                          </span>
-                        </Badge>
-                      ) : conversation.assigned_to ? (
-                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate">
-                          <User className="h-3 w-3 mr-1 flex-shrink-0" />
-                          <span className="truncate max-w-[120px]">
-                            {conversation.assigned_profile?.full_name || "Atendente"}
-                          </span>
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="bg-muted text-muted-foreground border-0 truncate">
-                          <User className="h-3 w-3 mr-1 flex-shrink-0" />
-                          <span className="truncate max-w-[120px]">Sem responsável</span>
-                        </Badge>
-                      )}
-                    </div>
-                    <span className="text-xs text-muted-foreground ml-1 flex-shrink-0">Buscar</span>
+                    <Pencil className="h-3 w-3" />
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[300px] p-0" align="start">
-                  <Command>
-                    <CommandInput 
-                      placeholder="Buscar responsável..." 
-                      value={attendantSearch}
-                      onValueChange={setAttendantSearch}
-                    />
-                    <CommandList>
-                      <CommandEmpty>Nenhum responsável encontrado.</CommandEmpty>
-                      
-                      {/* No Responsible Option */}
-                      <CommandGroup heading="Sem atribuição">
-                        <CommandItem
-                          value="nenhum"
-                          onSelect={() => {
-                            onTransferHandler("human", null, null);
-                            setAttendantPopoverOpen(false);
-                            setAttendantSearch("");
-                          }}
-                          className="flex items-center justify-between"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                              <User className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                            <div className="flex flex-col">
-                              <span>Nenhum</span>
-                              <span className="text-[10px] text-muted-foreground">Sem responsável atribuído</span>
-                            </div>
-                          </div>
-                          {conversation.current_handler === "human" && 
-                           !conversation.assigned_to && (
-                            <Check className="h-4 w-4 text-primary" />
-                          )}
-                        </CommandItem>
-                      </CommandGroup>
+                </div>
+                <p className="text-sm text-muted-foreground flex items-center justify-center gap-1 mt-1">
+                  <Phone className="h-3 w-3" />
+                  {conversation.contact_phone || "---"}
+                </p>
+              </div>
+            </div>
 
-                      {/* AI Agents Section */}
-                      {filteredAutomations.length > 0 && (
-                        <CommandGroup heading="Agentes IA">
-                          {filteredAutomations.map(automation => (
-                            <CommandItem
-                              key={automation.id}
-                              value={`ai-${automation.name}`}
-                              onSelect={() => {
-                                onTransferHandler("ai", null, automation.id);
-                                setAttendantPopoverOpen(false);
-                                setAttendantSearch("");
-                              }}
-                              className="flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                                  <Zap className="h-4 w-4 text-purple-600" />
-                                </div>
-                                <div className="flex flex-col">
-                                  <span>{automation.name}</span>
-                                  {automation.is_active && (
-                                    <span className="text-[10px] text-green-600">Ativo</span>
-                                  )}
-                                </div>
-                              </div>
-                              {conversation.current_handler === "ai" && 
-                               conversation.current_automation_id === automation.id && (
-                                <Check className="h-4 w-4 text-primary" />
-                              )}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      )}
+            <Separator />
 
-                      {/* Team Members Section */}
-                      <CommandGroup heading="Atendentes">
-                        {filteredMembers.map(member => (
+            {/* Atendimento Section */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Atendimento
+              </h5>
+
+              <div className="space-y-2">
+                <Popover open={attendantPopoverOpen} onOpenChange={setAttendantPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={attendantPopoverOpen}
+                      className="w-full justify-start h-auto py-2 px-3"
+                    >
+                      <Users className="h-4 w-4 mr-2 text-muted-foreground flex-shrink-0" />
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {conversation.current_handler === "ai" ? (
+                          <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-0 truncate">
+                            <Bot className="h-3 w-3 mr-1 flex-shrink-0" />
+                            <span className="truncate max-w-[120px]">
+                              {`IA · ${conversation.current_automation?.name || automations.find(a => a.id === conversation.current_automation_id)?.name || "Assistente"}`}
+                            </span>
+                          </Badge>
+                        ) : conversation.assigned_to ? (
+                          <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-0 truncate">
+                            <User className="h-3 w-3 mr-1 flex-shrink-0" />
+                            <span className="truncate max-w-[120px]">
+                              {conversation.assigned_profile?.full_name || "Atendente"}
+                            </span>
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-muted text-muted-foreground border-0 truncate">
+                            <User className="h-3 w-3 mr-1 flex-shrink-0" />
+                            <span className="truncate max-w-[120px]">Sem responsável</span>
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground ml-1 flex-shrink-0">Buscar</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[300px] p-0" align="start">
+                    <Command>
+                      <CommandInput 
+                        placeholder="Buscar responsável..." 
+                        value={attendantSearch}
+                        onValueChange={setAttendantSearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>Nenhum responsável encontrado.</CommandEmpty>
+                        
+                        <CommandGroup heading="Sem atribuição">
                           <CommandItem
-                            key={member.id}
-                            value={member.full_name}
+                            value="nenhum"
                             onSelect={() => {
-                              onTransferHandler("human", member.id);
+                              onTransferHandler("human", null, null);
                               setAttendantPopoverOpen(false);
                               setAttendantSearch("");
                             }}
                             className="flex items-center justify-between"
                           >
                             <div className="flex items-center gap-2">
-                              <Avatar className="h-8 w-8">
-                                <AvatarFallback className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700">
-                                  {getInitials(member.full_name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span>{member.full_name}</span>
+                              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                              <div className="flex flex-col">
+                                <span>Nenhum</span>
+                                <span className="text-[10px] text-muted-foreground">Sem responsável atribuído</span>
+                              </div>
                             </div>
                             {conversation.current_handler === "human" && 
-                             conversation.assigned_to === member.id && (
+                             !conversation.assigned_to && (
                               <Check className="h-4 w-4 text-primary" />
                             )}
                           </CommandItem>
-                        ))}
-                        {filteredMembers.length === 0 && (
-                          <div className="py-2 px-4 text-xs text-muted-foreground">
-                            Nenhum atendente cadastrado
-                          </div>
+                        </CommandGroup>
+
+                        {filteredAutomations.length > 0 && (
+                          <CommandGroup heading="Agentes IA">
+                            {filteredAutomations.map(automation => (
+                              <CommandItem
+                                key={automation.id}
+                                value={`ai-${automation.name}`}
+                                onSelect={() => {
+                                  onTransferHandler("ai", null, automation.id);
+                                  setAttendantPopoverOpen(false);
+                                  setAttendantSearch("");
+                                }}
+                                className="flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                                    <Zap className="h-4 w-4 text-purple-600" />
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span>{automation.name}</span>
+                                    {automation.is_active && (
+                                      <span className="text-[10px] text-green-600">Ativo</span>
+                                    )}
+                                  </div>
+                                </div>
+                                {conversation.current_handler === "ai" && 
+                                 conversation.current_automation_id === automation.id && (
+                                  <Check className="h-4 w-4 text-primary" />
+                                )}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
                         )}
-                      </CommandGroup>
-                    </CommandList>
-                    <div className="p-2 border-t text-xs text-muted-foreground">
-                      Use ↑↓ para navegar, ↵ para selecionar, Esc para fechar
-                    </div>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-          </div>
 
-          <Separator />
-
-          {/* Propriedades Section */}
-          <div className="space-y-3">
-            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Propriedades
-            </h5>
-
-            {/* Status - Collapsible accordion style with checkbox list */}
-            <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
-              <CollapsibleTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
-                >
-                  <div className="flex items-center gap-2.5 flex-shrink-0">
-                    <CircleDot className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Status</span>
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                    {currentStatus && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs truncate max-w-[100px]"
-                        style={{
-                          borderColor: currentStatus.color,
-                          backgroundColor: `${currentStatus.color}30`,
-                          color: currentStatus.color,
-                        }}
-                      >
-                        <span className="truncate">{currentStatus.name}</span>
-                      </Badge>
-                    )}
-                    <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", statusOpen && "rotate-180")} />
-                  </div>
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-1">
-                <ScrollArea className="max-h-48">
-                  <div className="space-y-0.5 pl-2">
-                    {statuses.map(status => {
-                      const isSelected = currentStatus?.id === status.id;
-                      return (
-                        <button
-                          key={status.id}
-                          onClick={() => handleStatusSelect(status.id)}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
-                            "hover:bg-muted/50",
-                            isSelected && "bg-muted/50"
+                        <CommandGroup heading="Atendentes">
+                          {filteredMembers.map(member => (
+                            <CommandItem
+                              key={member.id}
+                              value={member.full_name}
+                              onSelect={() => {
+                                onTransferHandler("human", member.id);
+                                setAttendantPopoverOpen(false);
+                                setAttendantSearch("");
+                              }}
+                              className="flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700">
+                                    {getInitials(member.full_name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span>{member.full_name}</span>
+                              </div>
+                              {conversation.current_handler === "human" && 
+                               conversation.assigned_to === member.id && (
+                                <Check className="h-4 w-4 text-primary" />
+                              )}
+                            </CommandItem>
+                          ))}
+                          {filteredMembers.length === 0 && (
+                            <div className="py-2 px-4 text-xs text-muted-foreground">
+                              Nenhum atendente cadastrado
+                            </div>
                           )}
-                        >
-                          <div 
-                            className={cn(
-                              "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
-                            )}
-                          >
-                            {isSelected && (
-                              <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
-                            )}
-                          </div>
-                          <span 
-                            className="text-sm truncate"
-                            style={{ color: status.color }}
-                          >
-                            {status.name}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {statuses.length === 0 && (
-                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum status cadastrado</span>
-                    )}
-                  </div>
-                </ScrollArea>
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* Tags - Collapsible accordion style with checkbox list */}
-            <Collapsible open={tagsOpen} onOpenChange={setTagsOpen}>
-              <CollapsibleTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 rounded-lg border border-transparent hover:border-border"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Tag className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Etiquetas</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {conversationTags.length > 0 && (
-                      <div className="flex gap-1 flex-wrap max-w-[150px]">
-                        {conversationTags.slice(0, 2).map(tag => (
-                          <Badge
-                            key={tag.id}
-                            variant="outline"
-                            className="text-[10px] px-1.5 py-0"
-                            style={{
-                              borderColor: tag.color,
-                              backgroundColor: `${tag.color}30`,
-                              color: tag.color,
-                            }}
-                          >
-                            {tag.name}
-                          </Badge>
-                        ))}
-                        {conversationTags.length > 2 && (
-                          <span className="text-[10px] text-muted-foreground">+{conversationTags.length - 2}</span>
-                        )}
+                        </CommandGroup>
+                      </CommandList>
+                      <div className="p-2 border-t text-xs text-muted-foreground">
+                        Use ↑↓ para navegar, ↵ para selecionar, Esc para fechar
                       </div>
-                    )}
-                    <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsOpen && "rotate-180")} />
-                  </div>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Propriedades Section */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Propriedades
+              </h5>
+
+              {/* Status */}
+              <Collapsible open={statusOpen} onOpenChange={setStatusOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
+                  >
+                    <div className="flex items-center gap-2.5 flex-shrink-0">
+                      <CircleDot className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Status</span>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
+                      {currentStatus && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs truncate max-w-[100px]"
+                          style={{
+                            borderColor: currentStatus.color,
+                            backgroundColor: `${currentStatus.color}30`,
+                            color: currentStatus.color,
+                          }}
+                        >
+                          <span className="truncate">{currentStatus.name}</span>
+                        </Badge>
+                      )}
+                      <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", statusOpen && "rotate-180")} />
+                    </div>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-1">
+                  <ScrollArea className="max-h-48">
+                    <div className="space-y-0.5 pl-2">
+                      {statuses.map(status => {
+                        const isSelected = currentStatus?.id === status.id;
+                        return (
+                          <button
+                            key={status.id}
+                            onClick={() => handleStatusSelect(status.id)}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                              "hover:bg-muted/50",
+                              isSelected && "bg-muted/50"
+                            )}
+                          >
+                            <div 
+                              className={cn(
+                                "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                                isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                              )}
+                            >
+                              {isSelected && (
+                                <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
+                              )}
+                            </div>
+                            <span 
+                              className="text-sm truncate"
+                              style={{ color: status.color }}
+                            >
+                              {status.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {statuses.length === 0 && (
+                        <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum status cadastrado</span>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CollapsibleContent>
+              </Collapsible>
+
+              {/* Tags */}
+              <Collapsible open={tagsOpen} onOpenChange={setTagsOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 rounded-lg border border-transparent hover:border-border"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Tag className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Etiquetas</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {conversationTags.length > 0 && (
+                        <div className="flex gap-1 flex-wrap max-w-[150px]">
+                          {conversationTags.slice(0, 2).map(tag => (
+                            <Badge
+                              key={tag.id}
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0"
+                              style={{
+                                borderColor: tag.color,
+                                backgroundColor: `${tag.color}30`,
+                                color: tag.color,
+                              }}
+                            >
+                              {tag.name}
+                            </Badge>
+                          ))}
+                          {conversationTags.length > 2 && (
+                            <span className="text-[10px] text-muted-foreground">+{conversationTags.length - 2}</span>
+                          )}
+                        </div>
+                      )}
+                      <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", tagsOpen && "rotate-180")} />
+                    </div>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-1">
+                  <ScrollArea className="max-h-48">
+                    <div className="space-y-0.5 pl-2">
+                      {tags.map(tag => {
+                        const isSelected = conversationTags.some(t => t.id === tag.id);
+                        const isDisabled = !isSelected && conversationTags.length >= 4;
+                        return (
+                          <button
+                            key={tag.id}
+                            onClick={() => !isDisabled && handleTagToggle(tag)}
+                            disabled={isDisabled}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                              "hover:bg-muted/50",
+                              isSelected && "bg-muted/50",
+                              isDisabled && "opacity-40 cursor-not-allowed"
+                            )}
+                          >
+                            <div 
+                              className={cn(
+                                "w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0",
+                                isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                              )}
+                            >
+                              {isSelected && (
+                                <Check className="h-3 w-3 text-primary-foreground" />
+                              )}
+                            </div>
+                            <span 
+                              className="text-sm truncate"
+                              style={{ color: tag.color }}
+                            >
+                              {tag.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {tags.length === 0 && (
+                        <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhuma etiqueta cadastrada</span>
+                      )}
+                    </div>
+                  </ScrollArea>
+                  {conversationTags.length >= 4 && (
+                    <p className="text-[10px] text-muted-foreground mt-1 px-3">Máximo de 4 etiquetas</p>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+
+              {/* Department */}
+              <Collapsible open={departmentOpen} onOpenChange={setDepartmentOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
+                  >
+                    <div className="flex items-center gap-2.5 flex-shrink-0">
+                      <Folder className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Departamento</span>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
+                      {currentDepartment && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs truncate max-w-[100px]"
+                          style={{
+                            borderColor: currentDepartment.color,
+                            backgroundColor: `${currentDepartment.color}30`,
+                            color: currentDepartment.color,
+                          }}
+                        >
+                          <span className="truncate">{currentDepartment.name}</span>
+                        </Badge>
+                      )}
+                      <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", departmentOpen && "rotate-180")} />
+                    </div>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-1">
+                  <ScrollArea className="max-h-[60vh]">
+                    <div className="space-y-0.5 pl-2">
+                      {departments.map(dept => {
+                        const isSelected = currentDepartment?.id === dept.id;
+                        return (
+                          <button
+                            key={dept.id}
+                            onClick={() => handleDepartmentSelect(dept.id)}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
+                              "hover:bg-muted/50",
+                              isSelected && "bg-muted/50"
+                            )}
+                          >
+                            <div 
+                              className={cn(
+                                "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                                isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                              )}
+                            >
+                              {isSelected && (
+                                <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
+                              )}
+                            </div>
+                            <span 
+                              className="text-sm truncate"
+                              style={{ color: dept.color }}
+                            >
+                              {dept.name}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {departments.length === 0 && (
+                        <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum departamento cadastrado</span>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+
+            {/* AI Summary Section */}
+            {conversation.ai_summary && (
+              <>
+                <Separator />
+                <div className="space-y-3">
+                  <Collapsible open={summaryOpen} onOpenChange={setSummaryOpen}>
+                    <CollapsibleTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">Resumo IA</span>
+                        </div>
+                        {summaryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2">
+                      <div className="bg-muted/50 rounded-lg p-3 text-sm leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+                        {conversation.ai_summary}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              </>
+            )}
+
+            <Separator />
+
+            {/* Ver mais - Info Section */}
+            <Collapsible open={infoOpen} onOpenChange={setInfoOpen}>
+              <CollapsibleTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  className="w-full justify-between h-9 px-2 text-muted-foreground"
+                >
+                  <span className="text-sm">Ver mais</span>
+                  {infoOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-1">
-                <ScrollArea className="max-h-48">
-                  <div className="space-y-0.5 pl-2">
-                    {tags.map(tag => {
-                      const isSelected = conversationTags.some(t => t.id === tag.id);
-                      const isDisabled = !isSelected && conversationTags.length >= 4;
-                      return (
-                        <button
-                          key={tag.id}
-                          onClick={() => !isDisabled && handleTagToggle(tag)}
-                          disabled={isDisabled}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
-                            "hover:bg-muted/50",
-                            isSelected && "bg-muted/50",
-                            isDisabled && "opacity-40 cursor-not-allowed"
-                          )}
-                        >
-                          <div 
-                            className={cn(
-                              "w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0",
-                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
-                            )}
-                          >
-                            {isSelected && (
-                              <Check className="h-3 w-3 text-primary-foreground" />
-                            )}
-                          </div>
-                          <span 
-                            className="text-sm truncate"
-                            style={{ color: tag.color }}
-                          >
-                            {tag.name}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {tags.length === 0 && (
-                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhuma etiqueta cadastrada</span>
-                    )}
+              <CollapsibleContent className="space-y-2 pt-2">
+                {conversation.client?.email && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Mail className="h-4 w-4 text-muted-foreground" />
+                    <span>{conversation.client.email}</span>
                   </div>
-                </ScrollArea>
-                {conversationTags.length >= 4 && (
-                  <p className="text-[10px] text-muted-foreground mt-1 px-3">Máximo de 4 etiquetas</p>
+                )}
+                
+                {conversation.client?.address && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">{conversation.client.address}</span>
+                  </div>
+                )}
+                
+                {conversation.client?.document && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span>{conversation.client.document}</span>
+                  </div>
+                )}
+                
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span>
+                    Criado {formatDistanceToNow(new Date(conversation.created_at), { addSuffix: true, locale: ptBR })}
+                  </span>
+                </div>
+                
+                {conversation.last_message_at && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    <span>
+                      Última msg {formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })}
+                    </span>
+                  </div>
+                )}
+
+                {conversation.whatsapp_instance && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Phone className="h-4 w-4 text-muted-foreground" />
+                    <span>
+                      {conversation.whatsapp_instance.display_name || conversation.whatsapp_instance.instance_name}
+                      {conversation.whatsapp_instance.phone_number && (
+                        <span className="text-muted-foreground ml-1">
+                          ({conversation.whatsapp_instance.phone_number.slice(-4)})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                {conversation.client?.notes && (
+                  <>
+                    <Separator className="my-2" />
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium">Observações</h4>
+                      <p className="text-sm text-muted-foreground">{conversation.client.notes}</p>
+                    </div>
+                  </>
                 )}
               </CollapsibleContent>
             </Collapsible>
-
-            {/* Department - Collapsible accordion style with checkbox list */}
-            <Collapsible open={departmentOpen} onOpenChange={setDepartmentOpen}>
-              <CollapsibleTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  className="w-full justify-between h-auto py-2.5 px-3 hover:bg-muted/50 overflow-hidden rounded-lg border border-transparent hover:border-border"
-                >
-                  <div className="flex items-center gap-2.5 flex-shrink-0">
-                    <Folder className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Departamento</span>
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
-                    {currentDepartment && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs truncate max-w-[100px]"
-                        style={{
-                          borderColor: currentDepartment.color,
-                          backgroundColor: `${currentDepartment.color}30`,
-                          color: currentDepartment.color,
-                        }}
-                      >
-                        <span className="truncate">{currentDepartment.name}</span>
-                      </Badge>
-                    )}
-                    <ChevronDown className={cn("h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform", departmentOpen && "rotate-180")} />
-                  </div>
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-1">
-                <ScrollArea className="max-h-[60vh]">
-                  <div className="space-y-0.5 pl-2">
-                    {departments.map(dept => {
-                      const isSelected = currentDepartment?.id === dept.id;
-                      return (
-                        <button
-                          key={dept.id}
-                          onClick={() => handleDepartmentSelect(dept.id)}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors",
-                            "hover:bg-muted/50",
-                            isSelected && "bg-muted/50"
-                          )}
-                        >
-                          <div 
-                            className={cn(
-                              "w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                              isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
-                            )}
-                          >
-                            {isSelected && (
-                              <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
-                            )}
-                          </div>
-                          <span 
-                            className="text-sm truncate"
-                            style={{ color: dept.color }}
-                          >
-                            {dept.name}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {departments.length === 0 && (
-                      <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum departamento cadastrado</span>
-                    )}
-                  </div>
-                </ScrollArea>
-              </CollapsibleContent>
-            </Collapsible>
           </div>
+        )}
 
-          {/* AI Summary Section */}
-          {conversation.ai_summary && (
-            <>
-              <Separator />
-              <div className="space-y-3">
-                <Collapsible open={summaryOpen} onOpenChange={setSummaryOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button 
-                      variant="ghost" 
-                      className="w-full justify-between h-auto py-2 px-2 hover:bg-muted/50"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">Resumo IA</span>
+        {/* Favorites/Notes Tab */}
+        {mainTab === "favorites" && (
+          <div className="p-4 space-y-4">
+            <Tabs value={favoritesSubTab} onValueChange={(v) => setFavoritesSubTab(v as "favorites" | "notes")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="favorites" className="text-sm">
+                  Favoritos
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="text-sm">
+                  Notas
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="favorites" className="mt-4">
+                {starredMessages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    <Heart className="h-12 w-12 mb-3 opacity-30" />
+                    <p className="text-sm font-medium">Nenhuma mensagem favorita</p>
+                    <p className="text-xs text-center mt-1 max-w-[200px]">
+                      Use "Favoritar mensagem" no menu de uma mensagem para adicionar aos favoritos
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {starredMessages.map(msg => (
+                      <div 
+                        key={msg.id}
+                        className={cn(
+                          "p-3 rounded-lg text-sm",
+                          msg.is_from_me ? "bg-primary/10" : "bg-muted/50"
+                        )}
+                      >
+                        <p className="text-xs text-muted-foreground mb-1 text-right">
+                          {msg.sender_name || (msg.is_from_me ? "Você" : conversation.contact_name)}
+                        </p>
+                        <p className="break-words">{msg.content || "[Mídia]"}</p>
+                        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                          <Copy className="h-3 w-3 cursor-pointer hover:text-foreground" onClick={() => {
+                            if (msg.content) {
+                              navigator.clipboard.writeText(msg.content);
+                              toast({ title: "Copiado!" });
+                            }
+                          }} />
+                          <span>{format(new Date(msg.created_at), "HH:mm:ss dd/MM", { locale: ptBR })}</span>
+                        </div>
                       </div>
-                      {summaryOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-2">
-                    <div className="bg-muted/50 rounded-lg p-3 text-sm leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
-                      {conversation.ai_summary}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              </div>
-            </>
-          )}
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="notes" className="mt-4">
+                {internalNotes.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    <StickyNote className="h-12 w-12 mb-3 opacity-30" />
+                    <p className="text-sm font-medium">Nenhuma nota interna</p>
+                    <p className="text-xs text-center mt-1 max-w-[200px]">
+                      As notas internas aparecem aqui
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {internalNotes.map(note => (
+                      <div 
+                        key={note.id}
+                        className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm"
+                      >
+                        <p className="text-xs text-yellow-600 dark:text-yellow-400 mb-1 text-right">
+                          {note.sender_name || "Sistema"}
+                        </p>
+                        <p className="break-words">{note.content}</p>
+                        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                          <Copy className="h-3 w-3 cursor-pointer hover:text-foreground" onClick={() => {
+                            navigator.clipboard.writeText(note.content);
+                            toast({ title: "Copiado!" });
+                          }} />
+                          <span>{format(new Date(note.created_at), "HH:mm:ss dd/MM", { locale: ptBR })}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
 
-          <Separator />
-
-          {/* Media Gallery Section */}
-          <div className="space-y-3">
-            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Mídias
-            </h5>
-            
-            <Tabs value={mediaTab} onValueChange={(v) => setMediaTab(v as "images" | "audio" | "docs" | "cloud")}>
+        {/* Media Tab */}
+        {mainTab === "media" && (
+          <div className="p-4 space-y-4">
+            <Tabs value={mediaSubTab} onValueChange={(v) => setMediaSubTab(v as "images" | "videos" | "docs" | "cloud")}>
               <TabsList className="grid w-full grid-cols-4 h-8">
                 <TabsTrigger value="images" className="text-xs h-7 gap-1 px-1">
-                  <ImageIcon className="h-3 w-3" />
                   Imagens
                 </TabsTrigger>
-                <TabsTrigger value="audio" className="text-xs h-7 gap-1 px-1">
-                  <Music className="h-3 w-3" />
-                  Áudio
+                <TabsTrigger value="videos" className="text-xs h-7 gap-1 px-1">
+                  Vídeos
                 </TabsTrigger>
                 <TabsTrigger value="docs" className="text-xs h-7 gap-1 px-1">
-                  <File className="h-3 w-3" />
                   Docs
                 </TabsTrigger>
                 <TabsTrigger value="cloud" className="text-xs h-7 gap-1 px-1">
-                  <Cloud className="h-3 w-3" />
                   Nuvem
                 </TabsTrigger>
               </TabsList>
               
-              <TabsContent value={mediaTab} className="mt-3">
+              <TabsContent value={mediaSubTab} className="mt-4">
                 {mediaLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
                   </div>
-                ) : mediaTab === "cloud" ? (
+                ) : mediaSubTab === "cloud" ? (
                   cloudFiles.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Cloud className="h-8 w-8 mb-2 opacity-50" />
@@ -904,19 +1217,19 @@ export function ContactDetailsPanel({
                   )
                 ) : filteredMedia.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    {mediaTab === "images" && <ImageIcon className="h-8 w-8 mb-2 opacity-50" />}
-                    {mediaTab === "audio" && <Music className="h-8 w-8 mb-2 opacity-50" />}
-                    {mediaTab === "docs" && <File className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaSubTab === "images" && <ImageIcon className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaSubTab === "videos" && <Video className="h-8 w-8 mb-2 opacity-50" />}
+                    {mediaSubTab === "docs" && <File className="h-8 w-8 mb-2 opacity-50" />}
                     <span className="text-sm">Nenhuma mídia encontrada</span>
                   </div>
                 ) : (
                   <div className={cn(
                     "gap-2",
-                    mediaTab === "images" ? "grid grid-cols-3" : "space-y-2"
+                    (mediaSubTab === "images" || mediaSubTab === "videos") ? "grid grid-cols-3" : "space-y-2"
                   )}>
                     {filteredMedia.map((item, index) => (
                       <div key={item.id}>
-                        {mediaTab === "images" ? (
+                        {(mediaSubTab === "images" || mediaSubTab === "videos") ? (
                           <MediaGalleryItem
                             mediaUrl={item.media_url}
                             whatsappMessageId={item.whatsapp_message_id}
@@ -931,7 +1244,7 @@ export function ContactDetailsPanel({
                           />
                         ) : (
                           <DecryptedMediaListItem
-                            kind={mediaTab === "audio" ? "audio" : "document"}
+                            kind="document"
                             mediaUrl={item.media_url}
                             mimeType={item.media_mime_type}
                             whatsappMessageId={item.whatsapp_message_id}
@@ -947,85 +1260,92 @@ export function ContactDetailsPanel({
               </TabsContent>
             </Tabs>
           </div>
+        )}
 
-          <Separator />
+        {/* Tasks Tab */}
+        {mainTab === "tasks" && (
+          <div className="p-4">
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <CheckSquare className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm font-medium">Em breve</p>
+              <p className="text-xs text-center mt-1 max-w-[200px]">
+                Funcionalidade de tarefas será implementada em breve
+              </p>
+            </div>
+          </div>
+        )}
 
-          {/* Ver mais - Info Section */}
-          <Collapsible open={infoOpen} onOpenChange={setInfoOpen}>
-            <CollapsibleTrigger asChild>
-              <Button 
-                variant="ghost" 
-                className="w-full justify-between h-9 px-2 text-muted-foreground"
+        {/* Docs Tab */}
+        {mainTab === "docs" && (
+          <div className="p-4">
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <FileText className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm font-medium">Em breve</p>
+              <p className="text-xs text-center mt-1 max-w-[200px]">
+                Funcionalidade de documentos será implementada em breve
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Copy Tab */}
+        {mainTab === "copy" && (
+          <div className="p-4 space-y-4">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Copiar informações
+            </h5>
+            
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={handleCopyPhone}
+                disabled={!conversation.contact_phone}
               >
-                <span className="text-sm">Ver mais</span>
-                {infoOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <Phone className="h-4 w-4 mr-2" />
+                Copiar telefone
               </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-2 pt-2">
-              {conversation.client?.email && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail className="h-4 w-4 text-muted-foreground" />
-                  <span>{conversation.client.email}</span>
-                </div>
-              )}
               
-              {conversation.client?.address && (
-                <div className="flex items-center gap-2 text-sm">
-                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                  <span className="truncate">{conversation.client.address}</span>
-                </div>
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={handleCopyName}
+                disabled={!conversation.contact_name}
+              >
+                <User className="h-4 w-4 mr-2" />
+                Copiar nome
+              </Button>
+              
+              {conversation.client?.email && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    navigator.clipboard.writeText(conversation.client!.email!);
+                    toast({ title: "E-mail copiado!" });
+                  }}
+                >
+                  <Mail className="h-4 w-4 mr-2" />
+                  Copiar e-mail
+                </Button>
               )}
               
               {conversation.client?.document && (
-                <div className="flex items-center gap-2 text-sm">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  <span>{conversation.client.document}</span>
-                </div>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    navigator.clipboard.writeText(conversation.client!.document!);
+                    toast({ title: "Documento copiado!" });
+                  }}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Copiar documento
+                </Button>
               )}
-              
-              <div className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span>
-                  Criado {formatDistanceToNow(new Date(conversation.created_at), { addSuffix: true, locale: ptBR })}
-                </span>
-              </div>
-              
-              {conversation.last_message_at && (
-                <div className="flex items-center gap-2 text-sm">
-                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                  <span>
-                    Última msg {formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })}
-                  </span>
-                </div>
-              )}
-
-              {conversation.whatsapp_instance && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone className="h-4 w-4 text-muted-foreground" />
-                  <span>
-                    {conversation.whatsapp_instance.display_name || conversation.whatsapp_instance.instance_name}
-                    {conversation.whatsapp_instance.phone_number && (
-                      <span className="text-muted-foreground ml-1">
-                        ({conversation.whatsapp_instance.phone_number.slice(-4)})
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-
-              {/* Notes */}
-              {conversation.client?.notes && (
-                <>
-                  <Separator className="my-2" />
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-medium">Observações</h4>
-                    <p className="text-sm text-muted-foreground">{conversation.client.notes}</p>
-                  </div>
-                </>
-              )}
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
+            </div>
+          </div>
+        )}
       </ScrollArea>
     </div>
   );
