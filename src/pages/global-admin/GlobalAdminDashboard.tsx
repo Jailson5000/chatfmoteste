@@ -31,7 +31,7 @@ import {
 import { CompanyUsageTable } from "@/components/global-admin/CompanyUsageTable";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-
+import { useRef, useState } from "react";
 // Mock data for charts
 const areaChartData = [
   { name: "Jul", empresas: 30, conexoes: 25 },
@@ -44,6 +44,8 @@ const areaChartData = [
 
 export default function GlobalAdminDashboard() {
   const { dashboardMetrics, isLoading } = useSystemMetrics();
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [filterByAlerts, setFilterByAlerts] = useState(false);
 
   // Fetch companies with alerts (80%+ usage)
   const { data: alertsData } = useQuery({
@@ -123,6 +125,12 @@ export default function GlobalAdminDashboard() {
       iconColor: alertsData?.critical ? "text-red-500" : "text-yellow-500",
       trend: alertsData?.critical ? "Ação necessária" : "Monitorando",
       trendUp: false,
+      onClick: () => {
+        setFilterByAlerts(true);
+        setTimeout(() => {
+          tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
+      },
     },
   ];
 
@@ -223,7 +231,8 @@ export default function GlobalAdminDashboard() {
         {statCards.map((stat, index) => (
           <div 
             key={index}
-            className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:border-white/10 transition-colors"
+            className={`p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:border-white/10 transition-colors ${stat.onClick ? 'cursor-pointer' : ''}`}
+            onClick={stat.onClick}
           >
             <div className="flex items-start justify-between mb-4">
               <span className="text-sm text-white/60">{stat.title}</span>
@@ -358,8 +367,11 @@ export default function GlobalAdminDashboard() {
       </div>
 
       {/* Companies Usage Table */}
-      <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-        <CompanyUsageTable />
+      <div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+        <CompanyUsageTable 
+          initialFilter={filterByAlerts ? "critical" : undefined}
+          onFilterChange={(filter) => setFilterByAlerts(filter === "critical" || filter === "warning")}
+        />
       </div>
     </div>
   );

@@ -96,8 +96,12 @@ interface CompanyWithStatus extends CompanyUsage {
   agents?: AgentWithConversations[];
 }
 
-type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled";
+type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled" | "critical" | "warning";
 
+interface CompanyUsageTableProps {
+  initialFilter?: StatusFilter;
+  onFilterChange?: (filter: StatusFilter) => void;
+}
 // Helper to calculate percentage
 const getPercentage = (current: number, max: number): number => {
   if (!max || max === 0) return 0;
@@ -194,15 +198,21 @@ function getCurrentBillingPeriod(): { start: Date; end: Date; label: string } {
   return { start, end, label };
 }
 
-export function CompanyUsageTable() {
+export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsageTableProps = {}) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialFilter || "all");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const { deleteCompany } = useCompanies();
   const billingPeriod = getCurrentBillingPeriod();
+
+  // Handle filter change
+  const handleFilterChange = (filter: StatusFilter) => {
+    setStatusFilter(filter);
+    onFilterChange?.(filter);
+  };
 
   // Fetch company usage data with agent details
   const { data: companies, isLoading } = useQuery({
@@ -303,11 +313,38 @@ export function CompanyUsageTable() {
     refetchInterval: 30000, // Refresh every 30s
   });
 
+  // Helper to check if company has alert
+  const getCompanyAlertLevel = (company: CompanyWithStatus): "ok" | "warning" | "critical" => {
+    const metrics = [
+      { current: company.current_users, max: company.effective_max_users },
+      { current: company.current_instances, max: company.effective_max_instances },
+      { current: company.current_agents, max: company.effective_max_agents },
+      { current: company.current_ai_conversations, max: company.effective_max_ai_conversations },
+      { current: company.current_tts_minutes, max: company.effective_max_tts_minutes },
+    ];
+
+    const hasCritical = metrics.some((m) => m.max > 0 && getPercentage(m.current, m.max) >= 100);
+    const hasWarning = metrics.some((m) => m.max > 0 && getPercentage(m.current, m.max) >= 80);
+
+    if (hasCritical) return "critical";
+    if (hasWarning) return "warning";
+    return "ok";
+  };
+
   // Filter and search
   const filteredCompanies = useMemo(() => {
     if (!companies) return [];
 
     return companies.filter((company) => {
+      // Alert level filter
+      if (statusFilter === "critical") {
+        return getCompanyAlertLevel(company) === "critical";
+      }
+      if (statusFilter === "warning") {
+        const level = getCompanyAlertLevel(company);
+        return level === "warning" || level === "critical";
+      }
+
       // Status filter
       if (statusFilter !== "all" && company.status !== statusFilter) {
         return false;
@@ -417,7 +454,7 @@ export function CompanyUsageTable() {
             className="pl-10 bg-white/5 border-white/10 text-white placeholder:text-white/40"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+        <Select value={statusFilter} onValueChange={(v) => handleFilterChange(v as StatusFilter)}>
           <SelectTrigger className="w-full sm:w-48 bg-white/5 border-white/10 text-white">
             <SelectValue placeholder="Filtrar por status" />
           </SelectTrigger>
@@ -428,6 +465,18 @@ export function CompanyUsageTable() {
             <SelectItem value="suspended" className="text-white hover:bg-white/10">Suspensas</SelectItem>
             <SelectItem value="blocked" className="text-white hover:bg-white/10">Bloqueadas</SelectItem>
             <SelectItem value="cancelled" className="text-white hover:bg-white/10">Canceladas</SelectItem>
+            <SelectItem value="critical" className="text-red-400 hover:bg-white/10">
+              <span className="flex items-center gap-2">
+                <AlertCircle className="h-3 w-3" />
+                Limite Crítico
+              </span>
+            </SelectItem>
+            <SelectItem value="warning" className="text-yellow-400 hover:bg-white/10">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="h-3 w-3" />
+                Alerta (80%+)
+              </span>
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
