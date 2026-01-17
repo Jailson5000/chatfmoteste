@@ -1544,18 +1544,14 @@ export default function Conversations() {
 
   // Add internal note referencing a specific message
   const handleAddNote = useCallback(async (messageId: string, originalContent: string) => {
-    if (!selectedConversationId || !lawFirm?.id) return;
+    if (!selectedConversationId) return;
 
     // Create a note that references the original message content
     const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
     
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error("Usuário não autenticado");
-
       const { error } = await supabase.from("messages").insert({
         conversation_id: selectedConversationId,
-        law_firm_id: lawFirm.id,
         content: noteContent,
         sender_type: "agent",
         is_from_me: true,
@@ -1581,7 +1577,7 @@ export default function Conversations() {
         variant: "destructive",
       });
     }
-  }, [selectedConversationId, lawFirm?.id, queryClient, toast]);
+  }, [selectedConversationId, queryClient, toast]);
 
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationId: string, fileName?: string) => {
