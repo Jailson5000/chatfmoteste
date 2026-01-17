@@ -460,6 +460,7 @@ export function ContactDetailsPanel({
       setClientTagIds((prev) => [...prev, tag.id]);
     }
     
+    queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };

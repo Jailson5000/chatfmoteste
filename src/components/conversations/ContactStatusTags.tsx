@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Tag as TagIcon, CheckCircle, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useClients } from "@/hooks/useClients";
 import { useCustomStatuses, CustomStatus } from "@/hooks/useCustomStatuses";
 import { useTags, Tag } from "@/hooks/useTags";
@@ -43,52 +43,28 @@ export function ContactStatusTags({
   const [isLinking, setIsLinking] = useState(false);
 
   // Find the linked client
-  const linkedClient = clients.find((c) => c.id === clientId);
+  const linkedClient = useMemo(
+    () => clients.find((c) => c.id === clientId),
+    [clients, clientId]
+  );
 
-  // Get client's current tags
-  const [clientTagIds, setClientTagIds] = useState<string[]>([]);
+  // Client tag IDs (single source of truth for header UI)
+  const { data: clientTagIds = [] } = useQuery({
+    queryKey: ["client_tags", clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
 
-  // Fetch client tags when clientId changes
-  const fetchClientTags = useCallback(async (cId: string) => {
-    const { data } = await supabase
-      .from("client_tags")
-      .select("tag_id")
-      .eq("client_id", cId);
-    setClientTagIds((data || []).map((t) => t.tag_id));
-  }, []);
+      const { data, error } = await supabase
+        .from("client_tags")
+        .select("tag_id")
+        .eq("client_id", clientId);
 
-  // Initial fetch and real-time subscription for client_tags
-  useEffect(() => {
-    if (!clientId) {
-      setClientTagIds([]);
-      return;
-    }
-    
-    // Initial fetch
-    fetchClientTags(clientId);
-    
-    // Real-time subscription for client_tags changes (syncs with ContactDetailsPanel)
-    const channel = supabase
-      .channel(`client_tags_sync_${clientId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'client_tags',
-          filter: `client_id=eq.${clientId}`,
-        },
-        () => {
-          // Refetch tags when any change occurs
-          fetchClientTags(clientId);
-        }
-      )
-      .subscribe();
-    
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clientId, fetchClientTags]);
+      if (error) throw error;
+      return (data || []).map((t) => t.tag_id);
+    },
+    enabled: !!clientId,
+    staleTime: 10_000,
+  });
 
   const handleStatusChange = async (statusId: string) => {
     if (!clientId) return;
@@ -139,9 +115,14 @@ export function ContactStatusTags({
       });
     }
 
-    setClientTagIds((prev) => [...prev, tagId]);
+    // Keep header UI in sync immediately
+    queryClient.setQueryData<string[]>(["client_tags", clientId], (prev) => {
+      const current = prev || [];
+      return current.includes(tagId) ? current : [...current, tagId];
+    });
+
+    queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
-    // Force immediate refetch of conversations to sync sidebar/kanban tags
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
@@ -166,9 +147,14 @@ export function ContactStatusTags({
       });
     }
 
-    setClientTagIds((prev) => prev.filter((id) => id !== tagId));
+    // Keep header UI in sync immediately
+    queryClient.setQueryData<string[]>(["client_tags", clientId], (prev) => {
+      const current = prev || [];
+      return current.filter((id) => id !== tagId);
+    });
+
+    queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
-    // Force immediate refetch of conversations to sync sidebar/kanban tags
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
