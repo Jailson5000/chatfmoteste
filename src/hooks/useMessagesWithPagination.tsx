@@ -71,6 +71,10 @@ export function useMessagesWithPagination({
   const restoringScrollRef = useRef(false);
   const oldestTimestampRef = useRef<string | null>(null);
   const lastLoadTimeRef = useRef(0);
+  
+  // CRITICAL: Monotonic counter for stable message ordering
+  // This ensures messages maintain their insertion order even when timestamps are identical
+  const clientOrderCounterRef = useRef(0);
 
   // Scroll anchoring for prepend (anchor-based, not scrollHeight-based)
   const pendingRestoreRef = useRef<{
@@ -433,10 +437,21 @@ export function useMessagesWithPagination({
             // CRITICAL: System messages should bypass all deduplication and be added immediately
             if (rawMsg.sender_type === 'system') {
               console.log("[useMessagesWithPagination] Adding system message immediately:", rawMsg.id);
-              const updated = [...prev, rawMsg];
-              return updated.sort((a, b) => 
-                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
+              const newOrder = ++clientOrderCounterRef.current;
+              const msgWithOrder = { ...rawMsg, _clientOrder: newOrder };
+              const updated = [...prev, msgWithOrder];
+              return updated.sort((a, b) => {
+                const timeA = new Date(a.created_at).getTime();
+                const timeB = new Date(b.created_at).getTime();
+                if (Math.abs(timeA - timeB) < 1000) {
+                  if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                    return a._clientOrder - b._clientOrder;
+                  }
+                  if (a._clientOrder !== undefined) return -1;
+                  if (b._clientOrder !== undefined) return 1;
+                }
+                return timeA - timeB;
+              });
             }
 
             // Prefer replacing optimistic messages by WhatsApp message id (most reliable)
@@ -552,17 +567,26 @@ export function useMessagesWithPagination({
 
             // Add new message and sort using stable ordering
             // CRITICAL: Always use created_at as the primary sort key
-            // _clientOrder is only used to maintain relative order during optimistic update reconciliation
-            const updated = [...prev, rawMsg];
+            // Assign a monotonic _clientOrder to ensure stable tie-breaking
+            const newOrder = ++clientOrderCounterRef.current;
+            const msgWithOrder = { 
+              ...rawMsg, 
+              _clientOrder: rawMsg._clientOrder ?? newOrder 
+            };
+            const updated = [...prev, msgWithOrder];
             return updated.sort((a, b) => {
               const timeA = new Date(a.created_at).getTime();
               const timeB = new Date(b.created_at).getTime();
               
               // If timestamps are identical (within 1 second), use _clientOrder for tie-breaking
               if (Math.abs(timeA - timeB) < 1000) {
+                // If both have _clientOrder, use it for stable sorting
                 if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
                   return a._clientOrder - b._clientOrder;
                 }
+                // If only one has it, prefer the one with _clientOrder to come first (it was added earlier)
+                if (a._clientOrder !== undefined) return -1;
+                if (b._clientOrder !== undefined) return 1;
               }
               
               // Primary sort by created_at timestamp
