@@ -1292,7 +1292,7 @@ export function KanbanChatPanel({
 
     const noteContent = `📝 ${noteText}`;
     
-    const { error } = await supabase.from("messages").insert({
+    const { data: insertedNote, error } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       content: noteContent,
       sender_type: "agent",
@@ -1300,18 +1300,30 @@ export function KanbanChatPanel({
       is_internal: true,
       ai_generated: false,
       reply_to_message_id: noteTargetMessage.id,
-    });
+    }).select().single();
 
     if (error) throw error;
+
+    // Find the original message being replied to for the reply_to data
+    const originalMessage = messages.find(m => m.id === noteTargetMessage.id);
+
+    // Add the new note to local state for immediate UI feedback
+    if (insertedNote) {
+      setMessages(prev => [...prev, {
+        ...insertedNote,
+        reply_to: originalMessage ? {
+          id: originalMessage.id,
+          content: originalMessage.content,
+          is_from_me: originalMessage.is_from_me,
+        } : null,
+      }]);
+    }
 
     toast({
       title: "Nota adicionada",
       description: "A nota interna foi criada com sucesso.",
     });
-
-    // Refresh messages by triggering state update
-    setMessages(prev => [...prev]);
-  }, [conversationId, noteTargetMessage, toast, setMessages]);
+  }, [conversationId, noteTargetMessage, toast, messages, setMessages]);
 
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, fileName?: string) => {
