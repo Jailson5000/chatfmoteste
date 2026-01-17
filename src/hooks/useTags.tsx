@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "./useLawFirm";
@@ -32,6 +33,31 @@ export function useTags() {
     },
     enabled: !!lawFirm?.id,
   });
+
+  // Real-time subscription for tags table
+  useEffect(() => {
+    if (!lawFirm?.id) return;
+
+    const channel = supabase
+      .channel(`tags-realtime-${lawFirm.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tags',
+          filter: `law_firm_id=eq.${lawFirm.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["tags", lawFirm.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [lawFirm?.id, queryClient]);
 
   const createTag = useMutation({
     mutationFn: async (tag: { name: string; color: string }) => {
