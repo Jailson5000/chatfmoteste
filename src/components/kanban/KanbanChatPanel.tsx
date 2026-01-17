@@ -1214,6 +1214,89 @@ export function KanbanChatPanel({
     }
   }, [conversationId, toast]);
 
+  // Send reaction to a message via WhatsApp
+  const handleReactToMessage = useCallback(async (
+    messageId: string, 
+    whatsappMessageId: string, 
+    remoteJid: string, 
+    emoji: string
+  ) => {
+    if (!conversationId) return;
+
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_reaction",
+          conversationId,
+          whatsappMessageId,
+          remoteJid,
+          reaction: emoji,
+        },
+      });
+
+      if (response.error || !response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar reação");
+      }
+
+      toast({
+        title: `Reação ${emoji} enviada`,
+      });
+    } catch (error) {
+      console.error("Error sending reaction:", error);
+      toast({
+        title: "Erro ao reagir",
+        description: error instanceof Error ? error.message : "Falha ao enviar reação",
+        variant: "destructive",
+      });
+    }
+  }, [conversationId, toast]);
+
+  // Add internal note referencing a specific message
+  const handleAddNote = useCallback(async (messageId: string, originalContent: string) => {
+    if (!conversationId) return;
+
+    const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
+    
+    try {
+      // First get the conversation to find law_firm_id
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("law_firm_id")
+        .eq("id", conversationId)
+        .single();
+      
+      if (!conv?.law_firm_id) throw new Error("Conversa não encontrada");
+
+      const { error } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        law_firm_id: conv.law_firm_id,
+        content: noteContent,
+        sender_type: "agent",
+        is_from_me: true,
+        is_internal: true,
+        ai_generated: false,
+        reply_to_message_id: messageId,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Nota adicionada",
+        description: "A nota interna foi criada com sucesso.",
+      });
+
+      // Refresh messages by triggering state update
+      setMessages(prev => [...prev]);
+    } catch (error) {
+      console.error("Error adding note:", error);
+      toast({
+        title: "Erro ao adicionar nota",
+        description: error instanceof Error ? error.message : "Falha ao criar nota",
+        variant: "destructive",
+      });
+    }
+  }, [conversationId, toast, setMessages]);
+
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, fileName?: string) => {
     try {
@@ -2484,6 +2567,8 @@ export function KanbanChatPanel({
                       onToggleStar={handleToggleStar}
                       onDelete={handleDeleteMessage}
                       onDownloadMedia={handleDownloadMedia}
+                      onReact={handleReactToMessage}
+                      onAddNote={handleAddNote}
                     />
                   </div>
                 </React.Fragment>

@@ -1503,6 +1503,84 @@ export default function Conversations() {
     }
   }, [selectedConversationId, toast]);
 
+  // Send reaction to a message via WhatsApp
+  const handleReactToMessage = useCallback(async (
+    messageId: string, 
+    whatsappMessageId: string, 
+    remoteJid: string, 
+    emoji: string
+  ) => {
+    if (!selectedConversationId) return;
+
+    try {
+      const response = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_reaction",
+          conversationId: selectedConversationId,
+          whatsappMessageId,
+          remoteJid,
+          reaction: emoji,
+        },
+      });
+
+      if (response.error || !response.data?.success) {
+        throw new Error(response.data?.error || "Falha ao enviar reação");
+      }
+
+      toast({
+        title: `Reação ${emoji} enviada`,
+      });
+    } catch (error) {
+      console.error("Error sending reaction:", error);
+      toast({
+        title: "Erro ao reagir",
+        description: error instanceof Error ? error.message : "Falha ao enviar reação",
+        variant: "destructive",
+      });
+    }
+  }, [selectedConversationId, toast]);
+
+  // Add internal note referencing a specific message
+  const handleAddNote = useCallback(async (messageId: string, originalContent: string) => {
+    if (!selectedConversationId || !lawFirm?.id) return;
+
+    // Create a note that references the original message content
+    const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
+    
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error("Usuário não autenticado");
+
+      const { error } = await supabase.from("messages").insert({
+        conversation_id: selectedConversationId,
+        law_firm_id: lawFirm.id,
+        content: noteContent,
+        sender_type: "agent",
+        is_from_me: true,
+        is_internal: true, // This makes it an internal note
+        ai_generated: false,
+        reply_to_message_id: messageId, // Link to the original message
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Nota adicionada",
+        description: "A nota interna foi criada com sucesso.",
+      });
+
+      // Refresh messages to show the new note
+      await queryClient.invalidateQueries({ queryKey: ["messages", selectedConversationId] });
+    } catch (error) {
+      console.error("Error adding note:", error);
+      toast({
+        title: "Erro ao adicionar nota",
+        description: error instanceof Error ? error.message : "Falha ao criar nota",
+        variant: "destructive",
+      });
+    }
+  }, [selectedConversationId, lawFirm?.id, queryClient, toast]);
+
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationId: string, fileName?: string) => {
     try {
@@ -2454,6 +2532,8 @@ export default function Conversations() {
                                   onToggleStar={handleToggleStar}
                                   onDelete={handleDeleteMessage}
                                   onDownloadMedia={handleDownloadMedia}
+                                  onReact={handleReactToMessage}
+                                  onAddNote={handleAddNote}
                                 />
                               )}
                             </React.Fragment>

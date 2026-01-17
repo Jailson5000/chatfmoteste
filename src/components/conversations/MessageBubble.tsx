@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown, Star, Trash2, MoreVertical } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown, Star, Trash2, MoreVertical, Smile, StickyNote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
 import { useState, useRef, ReactNode, useEffect, useCallback, memo, useReducer } from "react";
@@ -13,10 +13,16 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { ImageViewerDialog } from "./ImageViewerDialog";
 
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "error" | "failed";
+
+// Common emoji reactions for WhatsApp
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 interface MessageBubbleProps {
   id: string;
@@ -49,6 +55,8 @@ interface MessageBubbleProps {
   onToggleStar?: (messageId: string, isStarred: boolean) => void;
   onDelete?: (messageId: string, whatsappMessageId: string, remoteJid: string) => void;
   onDownloadMedia?: (whatsappMessageId: string, conversationId: string, fileName?: string) => void;
+  onReact?: (messageId: string, whatsappMessageId: string, remoteJid: string, emoji: string) => void;
+  onAddNote?: (messageId: string, content: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
 }
@@ -1363,6 +1371,8 @@ export function MessageBubble({
   onToggleStar,
   onDelete,
   onDownloadMedia,
+  onReact,
+  onAddNote,
   highlightText,
   isHighlighted = false,
 }: MessageBubbleProps) {
@@ -1597,12 +1607,37 @@ export function MessageBubble({
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44 z-50 bg-popover">
+          <DropdownMenuContent align="end" className="w-48 z-50 bg-popover">
             {onReply && (
               <DropdownMenuItem onClick={() => onReply(id)}>
                 <Reply className="h-4 w-4 mr-2" />
-                Responder
+                Responder mensagem
               </DropdownMenuItem>
+            )}
+            {/* React with emoji - only for messages with whatsappMessageId */}
+            {whatsappMessageId && remoteJid && onReact && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Smile className="h-4 w-4 mr-2" />
+                  Reagir à mensagem
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="p-2 bg-popover">
+                  <div className="flex gap-1">
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => {
+                          onReact(id, whatsappMessageId, remoteJid, emoji);
+                          setMenuOpen(false);
+                        }}
+                        className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             )}
             {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
               <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
@@ -1613,7 +1648,14 @@ export function MessageBubble({
             {onToggleStar && (
               <DropdownMenuItem onClick={() => onToggleStar(id, !isStarred)}>
                 <Star className={cn("h-4 w-4 mr-2", isStarred && "fill-yellow-500 text-yellow-500")} />
-                {isStarred ? "Remover favorito" : "Favoritar"}
+                {isStarred ? "Remover favorito" : "Favoritar mensagem"}
+              </DropdownMenuItem>
+            )}
+            {/* Add internal note */}
+            {onAddNote && content && (
+              <DropdownMenuItem onClick={() => onAddNote(id, content)}>
+                <StickyNote className="h-4 w-4 mr-2" />
+                Adicionar nota
               </DropdownMenuItem>
             )}
             {whatsappMessageId && remoteJid && onDelete && (
@@ -1624,7 +1666,7 @@ export function MessageBubble({
                   className="text-destructive focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
-                  Apagar
+                  Apagar mensagem
                 </DropdownMenuItem>
               </>
             )}
@@ -1782,12 +1824,37 @@ export function MessageBubble({
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44 z-50 bg-popover">
+          <DropdownMenuContent align="start" className="w-48 z-50 bg-popover">
             {onReply && (
               <DropdownMenuItem onClick={() => onReply(id)}>
                 <Reply className="h-4 w-4 mr-2" />
-                Responder
+                Responder mensagem
               </DropdownMenuItem>
+            )}
+            {/* React with emoji - for incoming messages */}
+            {whatsappMessageId && remoteJid && onReact && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Smile className="h-4 w-4 mr-2" />
+                  Reagir à mensagem
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="p-2 bg-popover">
+                  <div className="flex gap-1">
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => {
+                          onReact(id, whatsappMessageId, remoteJid, emoji);
+                          setMenuOpen(false);
+                        }}
+                        className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
             )}
             {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
               <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
@@ -1798,7 +1865,14 @@ export function MessageBubble({
             {onToggleStar && (
               <DropdownMenuItem onClick={() => onToggleStar(id, !isStarred)}>
                 <Star className={cn("h-4 w-4 mr-2", isStarred && "fill-yellow-500 text-yellow-500")} />
-                {isStarred ? "Remover favorito" : "Favoritar"}
+                {isStarred ? "Remover favorito" : "Favoritar mensagem"}
+              </DropdownMenuItem>
+            )}
+            {/* Add internal note */}
+            {onAddNote && content && (
+              <DropdownMenuItem onClick={() => onAddNote(id, content)}>
+                <StickyNote className="h-4 w-4 mr-2" />
+                Adicionar nota
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

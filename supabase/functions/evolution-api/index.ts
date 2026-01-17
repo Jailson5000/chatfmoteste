@@ -55,6 +55,7 @@ type EvolutionAction =
   | "send_media"
   | "get_media"
   | "delete_message" // Delete message for everyone on WhatsApp
+  | "send_reaction" // Send emoji reaction to a message
   // Tenant-level instance management
   | "logout_instance" // Disconnect without deleting
   | "restart_instance" // Restart connection
@@ -96,6 +97,8 @@ interface EvolutionRequest {
   mimeType?: string; // Real MIME type of the file (e.g., "image/png", "application/pdf")
   // For get_media
   whatsappMessageId?: string;
+  // For send_reaction
+  reaction?: string; // Emoji to react with (e.g., "👍", "❤️") or empty string to remove
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -2648,6 +2651,87 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             message: "Message deleted successfully",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "send_reaction": {
+        // Send emoji reaction to a WhatsApp message
+        if (!body.conversationId) {
+          throw new Error("conversationId is required for send_reaction");
+        }
+        if (!body.whatsappMessageId) {
+          throw new Error("whatsappMessageId is required for send_reaction");
+        }
+        if (!body.remoteJid) {
+          throw new Error("remoteJid is required for send_reaction");
+        }
+        if (body.reaction === undefined) {
+          throw new Error("reaction is required for send_reaction (emoji or empty string to remove)");
+        }
+
+        // Get conversation with instance
+        const { data: reactionConversation, error: reactionConvError } =
+          await supabaseClient
+            .from("conversations")
+            .select("*, whatsapp_instances!inner(*)")
+            .eq("id", body.conversationId)
+            .single();
+
+        if (reactionConvError || !reactionConversation) {
+          throw new Error(
+            `Conversation not found: ${reactionConvError?.message}`
+          );
+        }
+
+        const reactionInstance = reactionConversation.whatsapp_instances;
+        if (!reactionInstance) {
+          throw new Error("No WhatsApp instance associated with conversation");
+        }
+
+        // Use instance's api_url and api_key
+        const reactionApiUrl = normalizeUrl(reactionInstance.api_url || "");
+        const reactionApiKey = reactionInstance.api_key || "";
+
+        if (!reactionApiUrl || !reactionApiKey) {
+          throw new Error("Evolution API not configured for this instance");
+        }
+
+        // Call Evolution API to send reaction
+        const reactionResponse = await fetchWithTimeout(
+          `${reactionApiUrl}/message/sendReaction/${reactionInstance.instance_name}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: reactionApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              key: {
+                remoteJid: body.remoteJid,
+                fromMe: false, // Reactions are typically on received messages
+                id: body.whatsappMessageId,
+              },
+              reaction: body.reaction, // Emoji or empty string to remove
+            }),
+          },
+          DEFAULT_TIMEOUT_MS
+        );
+
+        if (!reactionResponse.ok) {
+          const errorText = await safeReadResponseText(reactionResponse);
+          console.error("[send_reaction] Evolution API error:", errorText);
+          throw new Error(
+            `Failed to send reaction: ${simplifyEvolutionError(reactionResponse.status, errorText)}`
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: "Reaction sent successfully",
+            reaction: body.reaction,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
