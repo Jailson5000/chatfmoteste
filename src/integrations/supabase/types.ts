@@ -2352,6 +2352,7 @@ export type Database = {
           media_mime_type: string | null
           media_url: string | null
           message_type: string
+          my_reaction: string | null
           read_at: string | null
           reply_to_message_id: string | null
           revoked_at: string | null
@@ -2377,6 +2378,7 @@ export type Database = {
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
+          my_reaction?: string | null
           read_at?: string | null
           reply_to_message_id?: string | null
           revoked_at?: string | null
@@ -2402,6 +2404,7 @@ export type Database = {
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
+          my_reaction?: string | null
           read_at?: string | null
           reply_to_message_id?: string | null
           revoked_at?: string | null

@@ -1514,9 +1514,20 @@ export default function Conversations() {
     whatsappMessageId: string, 
     remoteJid: string, 
     emoji: string,
-    isFromMe: boolean
+    isFromMe: boolean,
+    currentReaction?: string | null
   ) => {
     if (!selectedConversationId) return;
+
+    // Block if trying to react with the same emoji
+    if (currentReaction === emoji) {
+      toast({
+        title: "Mesma reação",
+        description: "Escolha uma reação diferente para substituir a atual.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       const response = await supabase.functions.invoke("evolution-api", {
@@ -1534,6 +1545,17 @@ export default function Conversations() {
         throw new Error(response.data?.error || "Falha ao enviar reação");
       }
 
+      // Save reaction to database
+      await supabase
+        .from("messages")
+        .update({ my_reaction: emoji })
+        .eq("id", messageId);
+
+      // Update local state for immediate UI feedback
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId ? { ...msg, my_reaction: emoji } : msg
+      ));
+
       toast({
         title: `Reação ${emoji} enviada`,
       });
@@ -1545,7 +1567,7 @@ export default function Conversations() {
         variant: "destructive",
       });
     }
-  }, [selectedConversationId, toast]);
+  }, [selectedConversationId, toast, setMessages]);
 
   // Open add note dialog for a specific message
   const handleOpenNoteDialog = useCallback((messageId: string, originalContent: string) => {
@@ -2525,6 +2547,7 @@ export default function Conversations() {
                                   aiAgentName={item.data.ai_agent_name}
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
+                                  myReaction={item.data.my_reaction}
                                   onReply={handleReply}
                                   onScrollToMessage={scrollToMessage}
                                   onRetry={handleRetryMessage}
@@ -3395,12 +3418,15 @@ export default function Conversations() {
                                   aiAgentName={item.data.ai_agent_name}
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
+                                  myReaction={item.data.my_reaction}
                                   onReply={handleReply}
                                   onScrollToMessage={scrollToMessage}
                                   onRetry={handleRetryMessage}
                                   onToggleStar={handleToggleStar}
                                   onDelete={handleDeleteMessage}
                                   onDownloadMedia={handleDownloadMedia}
+                                  onReact={handleReactToMessage}
+                                  onAddNote={handleOpenNoteDialog}
                                   highlightText={messageSearchQuery ? (text) => highlightText(text, messageSearchQuery) : undefined}
                                   isHighlighted={highlightedMessageId === item.data.id}
                                 />

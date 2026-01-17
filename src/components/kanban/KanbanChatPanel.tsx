@@ -1225,9 +1225,20 @@ export function KanbanChatPanel({
     whatsappMessageId: string, 
     remoteJid: string, 
     emoji: string,
-    isFromMe: boolean
+    isFromMe: boolean,
+    currentReaction?: string | null
   ) => {
     if (!conversationId) return;
+
+    // Block if trying to react with the same emoji
+    if (currentReaction === emoji) {
+      toast({
+        title: "Mesma reação",
+        description: "Escolha uma reação diferente para substituir a atual.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       const response = await supabase.functions.invoke("evolution-api", {
@@ -1245,6 +1256,17 @@ export function KanbanChatPanel({
         throw new Error(response.data?.error || "Falha ao enviar reação");
       }
 
+      // Save reaction to database
+      await supabase
+        .from("messages")
+        .update({ my_reaction: emoji })
+        .eq("id", messageId);
+
+      // Update local state for immediate UI feedback
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId ? { ...msg, my_reaction: emoji } : msg
+      ));
+
       toast({
         title: `Reação ${emoji} enviada`,
       });
@@ -1256,7 +1278,7 @@ export function KanbanChatPanel({
         variant: "destructive",
       });
     }
-  }, [conversationId, toast]);
+  }, [conversationId, toast, setMessages]);
 
   // Open add note dialog for a specific message
   const handleOpenNoteDialog = useCallback((messageId: string, originalContent: string) => {
@@ -2556,6 +2578,7 @@ export function KanbanChatPanel({
                       aiAgentName={msg.ai_agent_name}
                       isRevoked={msg.is_revoked}
                       isStarred={msg.is_starred}
+                      myReaction={msg.my_reaction}
                       onReply={handleReply}
                       onScrollToMessage={scrollToMessage}
                       onToggleStar={handleToggleStar}
