@@ -99,6 +99,7 @@ interface EvolutionRequest {
   whatsappMessageId?: string;
   // For send_reaction
   reaction?: string; // Emoji to react with (e.g., "👍", "❤️") or empty string to remove
+  isFromMe?: boolean; // Whether the message being reacted to was sent by us
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -2710,7 +2711,7 @@ serve(async (req) => {
             body: JSON.stringify({
               key: {
                 remoteJid: body.remoteJid,
-                fromMe: false, // Reactions are typically on received messages
+                fromMe: body.isFromMe ?? false, // Whether reacting to own message or received message
                 id: body.whatsappMessageId,
               },
               reaction: body.reaction, // Emoji or empty string to remove

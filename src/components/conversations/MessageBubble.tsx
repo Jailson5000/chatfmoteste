@@ -55,7 +55,7 @@ interface MessageBubbleProps {
   onToggleStar?: (messageId: string, isStarred: boolean) => void;
   onDelete?: (messageId: string, whatsappMessageId: string, remoteJid: string) => void;
   onDownloadMedia?: (whatsappMessageId: string, conversationId: string, fileName?: string) => void;
-  onReact?: (messageId: string, whatsappMessageId: string, remoteJid: string, emoji: string) => void;
+  onReact?: (messageId: string, whatsappMessageId: string, remoteJid: string, emoji: string, isFromMe: boolean) => void;
   onAddNote?: (messageId: string, content: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
@@ -1627,7 +1627,7 @@ export function MessageBubble({
                       <button
                         key={emoji}
                         onClick={() => {
-                          onReact(id, whatsappMessageId, remoteJid, emoji);
+                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe);
                           setMenuOpen(false);
                         }}
                         className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"
@@ -1844,7 +1844,7 @@ export function MessageBubble({
                       <button
                         key={emoji}
                         onClick={() => {
-                          onReact(id, whatsappMessageId, remoteJid, emoji);
+                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe);
                           setMenuOpen(false);
                         }}
                         className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"

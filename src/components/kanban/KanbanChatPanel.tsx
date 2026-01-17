@@ -1219,7 +1219,8 @@ export function KanbanChatPanel({
     messageId: string, 
     whatsappMessageId: string, 
     remoteJid: string, 
-    emoji: string
+    emoji: string,
+    isFromMe: boolean
   ) => {
     if (!conversationId) return;
 
@@ -1231,6 +1232,7 @@ export function KanbanChatPanel({
           whatsappMessageId,
           remoteJid,
           reaction: emoji,
+          isFromMe,
         },
       });
 

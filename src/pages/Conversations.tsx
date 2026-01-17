@@ -1508,7 +1508,8 @@ export default function Conversations() {
     messageId: string, 
     whatsappMessageId: string, 
     remoteJid: string, 
-    emoji: string
+    emoji: string,
+    isFromMe: boolean
   ) => {
     if (!selectedConversationId) return;
 
@@ -1520,6 +1521,7 @@ export default function Conversations() {
           whatsappMessageId,
           remoteJid,
           reaction: emoji,
+          isFromMe,
         },
       });
 
