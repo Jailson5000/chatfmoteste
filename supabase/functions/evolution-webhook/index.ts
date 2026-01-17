@@ -1855,23 +1855,58 @@ async function sendAIResponseToWhatsApp(
 
     // Deduplicate paragraphs - remove repeated content from AI responses
     // This prevents the AI from sending duplicate messages when it hallucinates repetitions
+    // Uses Jaccard similarity to detect semantically similar paragraphs (not just exact matches)
     const deduplicateParagraphs = (text: string): string => {
       const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0);
-      const seen = new Set<string>();
       const unique: string[] = [];
       
-      for (const p of paragraphs) {
-        // Normalize for comparison (lowercase, remove extra spaces)
-        const normalized = p.toLowerCase().replace(/\s+/g, ' ').trim();
+      // Extract significant words from a paragraph (for Jaccard comparison)
+      const extractWords = (text: string): Set<string> => {
+        // Remove punctuation, lowercase, split by spaces
+        const words = text.toLowerCase()
+          .replace(/[^\w\sàáâãéêíóôõúüç]/g, ' ')
+          .split(/\s+/)
+          .filter(w => w.length > 3); // Only words with 4+ chars (ignore "the", "and", etc.)
+        return new Set(words);
+      };
+      
+      // Calculate Jaccard similarity between two word sets
+      const jaccardSimilarity = (setA: Set<string>, setB: Set<string>): number => {
+        if (setA.size === 0 && setB.size === 0) return 1;
+        if (setA.size === 0 || setB.size === 0) return 0;
         
-        // Only add if we haven't seen this paragraph (or very similar)
-        if (!seen.has(normalized)) {
-          seen.add(normalized);
+        const intersection = new Set([...setA].filter(x => setB.has(x)));
+        const union = new Set([...setA, ...setB]);
+        return intersection.size / union.size;
+      };
+      
+      // Store word sets for each unique paragraph
+      const seenWordSets: Set<string>[] = [];
+      
+      for (const p of paragraphs) {
+        const normalized = p.toLowerCase().replace(/\s+/g, ' ').trim();
+        const words = extractWords(p);
+        
+        // Check if this paragraph is similar to any we've already seen
+        let isDuplicate = false;
+        
+        for (const seenWords of seenWordSets) {
+          const similarity = jaccardSimilarity(words, seenWords);
+          
+          // If similarity > 70%, consider it a duplicate
+          if (similarity > 0.7) {
+            isDuplicate = true;
+            logDebug('DEDUPE', 'Removed similar paragraph (Jaccard similarity)', {
+              duplicate: p.substring(0, 100),
+              similarity: (similarity * 100).toFixed(1) + '%',
+            });
+            break;
+          }
+        }
+        
+        if (!isDuplicate) {
           unique.push(p);
-        } else {
-          logDebug('DEDUPE', 'Removed duplicate paragraph from AI response', {
-            duplicate: p.substring(0, 100),
-          });
+          seenWordSets.push(words);
         }
       }
       
