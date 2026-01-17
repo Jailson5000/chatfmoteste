@@ -1260,18 +1260,8 @@ export function KanbanChatPanel({
     const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
     
     try {
-      // First get the conversation to find law_firm_id
-      const { data: conv } = await supabase
-        .from("conversations")
-        .select("law_firm_id")
-        .eq("id", conversationId)
-        .single();
-      
-      if (!conv?.law_firm_id) throw new Error("Conversa não encontrada");
-
       const { error } = await supabase.from("messages").insert({
         conversation_id: conversationId,
-        law_firm_id: conv.law_firm_id,
         content: noteContent,
         sender_type: "agent",
         is_from_me: true,

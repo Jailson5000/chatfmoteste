@@ -2672,11 +2672,11 @@ serve(async (req) => {
           throw new Error("reaction is required for send_reaction (emoji or empty string to remove)");
         }
 
-        // Get conversation with instance
+        // Get conversation with instance - specify FK to avoid ambiguity
         const { data: reactionConversation, error: reactionConvError } =
           await supabaseClient
             .from("conversations")
-            .select("*, whatsapp_instances!inner(*)")
+            .select("*, whatsapp_instances!conversations_whatsapp_instance_id_fkey(*)")
             .eq("id", body.conversationId)
             .single();
 
