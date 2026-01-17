@@ -483,7 +483,7 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
 
       {/* Table */}
       <div className="rounded-xl border border-white/10 overflow-hidden">
-        <ScrollArea className="max-h-[600px]">
+        <ScrollArea className="max-h-[calc(100vh-300px)]">
           <Table>
             <TableHeader className="bg-white/5 sticky top-0">
               <TableRow className="border-white/10 hover:bg-transparent">
@@ -789,6 +789,8 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
               )}
             </TableBody>
           </Table>
+          {/* Extra padding for expanded last row */}
+          <div className="h-32" />
         </ScrollArea>
       </div>
 
