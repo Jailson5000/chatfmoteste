@@ -44,6 +44,7 @@ interface MessageBubbleProps {
   aiAgentName?: string | null; // Name of the AI agent that sent this message
   isRevoked?: boolean; // Indicates if the message was deleted by sender
   isStarred?: boolean; // Indicates if message is favorited
+  myReaction?: string | null; // Emoji reaction sent by the user on this message
   replyTo?: {
     id: string;
     content: string | null;
@@ -55,7 +56,7 @@ interface MessageBubbleProps {
   onToggleStar?: (messageId: string, isStarred: boolean) => void;
   onDelete?: (messageId: string, whatsappMessageId: string, remoteJid: string) => void;
   onDownloadMedia?: (whatsappMessageId: string, conversationId: string, fileName?: string) => void;
-  onReact?: (messageId: string, whatsappMessageId: string, remoteJid: string, emoji: string, isFromMe: boolean) => void;
+  onReact?: (messageId: string, whatsappMessageId: string, remoteJid: string, emoji: string, isFromMe: boolean, currentReaction?: string | null) => void;
   onAddNote?: (messageId: string, content: string) => void;
   highlightText?: (text: string) => ReactNode;
   isHighlighted?: boolean;
@@ -1365,6 +1366,7 @@ export function MessageBubble({
   aiAgentName,
   isRevoked = false,
   isStarred = false,
+  myReaction,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -1619,15 +1621,15 @@ export function MessageBubble({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Smile className="h-4 w-4 mr-2" />
-                  Reagir à mensagem
+                  {myReaction ? `Alterar reação (${myReaction})` : "Reagir à mensagem"}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="p-2 bg-popover">
                   <div className="flex gap-1">
-                    {REACTION_EMOJIS.map((emoji) => (
+                    {REACTION_EMOJIS.filter(emoji => emoji !== myReaction).map((emoji) => (
                       <button
                         key={emoji}
                         onClick={() => {
-                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe);
+                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe, myReaction);
                           setMenuOpen(false);
                         }}
                         className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"
@@ -1795,6 +1797,12 @@ export function MessageBubble({
                   : "text-green-700/80 dark:text-green-300/80"
               : "text-muted-foreground"
         )}>
+          {/* Reaction indicator */}
+          {myReaction && (
+            <span className="text-sm" title="Sua reação">
+              {myReaction}
+            </span>
+          )}
           {/* Star indicator for favorited messages */}
           {isStarred && (
             <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
@@ -1836,15 +1844,15 @@ export function MessageBubble({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Smile className="h-4 w-4 mr-2" />
-                  Reagir à mensagem
+                  {myReaction ? `Alterar reação (${myReaction})` : "Reagir à mensagem"}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="p-2 bg-popover">
                   <div className="flex gap-1">
-                    {REACTION_EMOJIS.map((emoji) => (
+                    {REACTION_EMOJIS.filter(emoji => emoji !== myReaction).map((emoji) => (
                       <button
                         key={emoji}
                         onClick={() => {
-                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe);
+                          onReact(id, whatsappMessageId, remoteJid, emoji, isFromMe, myReaction);
                           setMenuOpen(false);
                         }}
                         className="text-xl hover:scale-125 transition-transform p-1 rounded hover:bg-muted"
