@@ -42,6 +42,8 @@ import {
   Filter,
   WifiOff,
   ExternalLink,
+  Check,
+  X,
 } from "lucide-react";
 import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -380,6 +382,10 @@ export default function Conversations() {
   
   // User profile for signature
   const [userProfile, setUserProfile] = useState<{ full_name: string; job_title: string | null } | null>(null);
+  
+  // Inline name editing state (header)
+  const [isEditingNameInline, setIsEditingNameInline] = useState(false);
+  const [inlineEditingName, setInlineEditingName] = useState("");
   
   // Internal file upload refs
   const internalFileInputRef = useRef<HTMLInputElement>(null);
@@ -1822,10 +1828,47 @@ export default function Conversations() {
         }
         
         setEditNameDialogOpen(false);
+        setIsEditingNameInline(false);
       } catch (error) {
         console.error("Erro ao atualizar nome:", error);
       }
     }
+  };
+
+  const handleUpdateNameInline = async (name: string) => {
+    if (selectedConversation && name.trim()) {
+      try {
+        await updateConversation.mutateAsync({
+          id: selectedConversation.id,
+          contact_name: name.trim(),
+        });
+        
+        if (selectedConversation.client_id) {
+          await updateClient.mutateAsync({
+            id: selectedConversation.client_id,
+            name: name.trim(),
+          });
+        }
+        
+        setIsEditingNameInline(false);
+        toast({ title: "Nome atualizado!" });
+      } catch (error) {
+        console.error("Erro ao atualizar nome:", error);
+        toast({ title: "Erro ao salvar nome", variant: "destructive" });
+      }
+    }
+  };
+
+  const handleStartInlineEdit = () => {
+    if (selectedConversation) {
+      setInlineEditingName(selectedConversation.contact_name || selectedConversation.contact_phone || "");
+      setIsEditingNameInline(true);
+    }
+  };
+
+  const handleCancelInlineEdit = () => {
+    setIsEditingNameInline(false);
+    setInlineEditingName("");
   };
 
   const handleTransferHandler = (handler: "ai" | "human", assignedTo?: string | null, automationId?: string | null) => {
@@ -2850,12 +2893,36 @@ export default function Conversations() {
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
-                      <p className="font-medium truncate">
-                        {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
-                      </p>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={openEditName}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
+                      {isEditingNameInline ? (
+                        <>
+                          <input
+                            type="text"
+                            value={inlineEditingName}
+                            onChange={(e) => setInlineEditingName(e.target.value)}
+                            className="bg-transparent border-b border-primary font-medium focus:outline-none max-w-[180px]"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleUpdateNameInline(inlineEditingName);
+                              if (e.key === 'Escape') handleCancelInlineEdit();
+                            }}
+                            onBlur={() => handleUpdateNameInline(inlineEditingName)}
+                          />
+                          <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={() => handleUpdateNameInline(inlineEditingName)}>
+                            <Check className="h-3 w-3 text-green-600" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={handleCancelInlineEdit}>
+                            <X className="h-3 w-3 text-red-600" />
+                          </Button>
+                        </>
+                      ) : (
+                        <p 
+                          className="font-medium truncate cursor-pointer hover:text-primary transition-colors"
+                          onClick={handleStartInlineEdit}
+                          title="Clique para editar"
+                        >
+                          {selectedConversation.contact_name || selectedConversation.contact_phone || "Sem nome"}
+                        </p>
+                      )}
                     </div>
                     <p className="text-sm text-muted-foreground flex items-center gap-1 min-w-0">
                       <Phone className="h-3 w-3 flex-shrink-0" />
@@ -3693,6 +3760,7 @@ export default function Conversations() {
                 automations={automations.map(a => ({ id: a.id, name: a.name, is_active: a.is_active }))}
                 onClose={() => setShowDetailsPanel(false)}
                 onEditName={openEditName}
+                onSaveName={handleUpdateNameInline}
                 onTransferHandler={handleTransferHandler}
                 onChangeDepartment={handleChangeDepartment}
                 onChangeStatus={handleChangeStatus}

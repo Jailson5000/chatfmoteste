@@ -127,6 +127,7 @@ interface ContactDetailsPanelProps {
   automations: Automation[];
   onClose: () => void;
   onEditName: () => void;
+  onSaveName?: (name: string) => Promise<void>;
   onTransferHandler: (handler: 'ai' | 'human', assignedTo?: string | null, automationId?: string | null) => void;
   onChangeDepartment: (deptId: string | null) => void;
   onChangeStatus?: (statusId: string | null) => void;
@@ -149,6 +150,7 @@ export function ContactDetailsPanel({
   automations,
   onClose,
   onEditName,
+  onSaveName,
   onTransferHandler,
   onChangeDepartment,
   onChangeStatus,
@@ -158,6 +160,10 @@ export function ContactDetailsPanel({
   
   // Main panel tab
   const [mainTab, setMainTab] = useState<"info" | "favorites" | "media" | "tasks" | "docs" | "copy">("info");
+  
+  // Inline name editing state
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
   
   // Sub-tabs
   const [favoritesSubTab, setFavoritesSubTab] = useState<"favorites" | "notes">("favorites");
@@ -462,6 +468,32 @@ export function ContactDetailsPanel({
     }
   };
 
+  const handleStartEditName = () => {
+    setEditedName(conversation.contact_name || conversation.contact_phone || "");
+    setIsEditingName(true);
+  };
+
+  const handleSaveInlineName = async () => {
+    if (editedName.trim() && onSaveName) {
+      try {
+        await onSaveName(editedName.trim());
+        setIsEditingName(false);
+        toast({ title: "Nome atualizado!" });
+      } catch (error) {
+        toast({ title: "Erro ao salvar nome", variant: "destructive" });
+      }
+    } else if (editedName.trim()) {
+      // Fallback to old method
+      onEditName();
+      setIsEditingName(false);
+    }
+  };
+
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName("");
+  };
+
   return (
     <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* Header */}
@@ -560,19 +592,48 @@ export function ContactDetailsPanel({
               </Avatar>
               
               <div>
-                <div className="flex items-center justify-center gap-1">
-                  <h4 className="font-semibold text-lg">
-                    {conversation.contact_name || conversation.contact_phone || "Sem nome"}
-                  </h4>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-6 w-6"
-                    onClick={onEditName}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                </div>
+                {isEditingName ? (
+                  <div className="flex items-center justify-center gap-1">
+                    <input
+                      type="text"
+                      value={editedName}
+                      onChange={(e) => setEditedName(e.target.value)}
+                      className="bg-transparent border-b border-primary text-center font-semibold text-lg focus:outline-none max-w-[200px]"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveInlineName();
+                        if (e.key === 'Escape') handleCancelEditName();
+                      }}
+                      onBlur={handleSaveInlineName}
+                    />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6"
+                      onClick={handleSaveInlineName}
+                    >
+                      <Check className="h-3 w-3 text-green-600" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6"
+                      onClick={handleCancelEditName}
+                    >
+                      <X className="h-3 w-3 text-red-600" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-1">
+                    <h4 
+                      className="font-semibold text-lg cursor-pointer hover:text-primary transition-colors"
+                      onClick={handleStartEditName}
+                      title="Clique para editar"
+                    >
+                      {conversation.contact_name || conversation.contact_phone || "Sem nome"}
+                    </h4>
+                  </div>
+                )}
                 <p className="text-sm text-muted-foreground flex items-center justify-center gap-1 mt-1">
                   <Phone className="h-3 w-3" />
                   {conversation.contact_phone || "---"}
