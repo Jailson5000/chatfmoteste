@@ -1106,9 +1106,10 @@ export function KanbanChatPanel({
     return () => window.clearTimeout(t);
   }, [messages, bumpDeliveryRender]);
 
-  // Edit name state
-  const [editNameOpen, setEditNameOpen] = useState(false);
+  // Inline edit name state
+  const [isEditingNameInline, setIsEditingNameInline] = useState(false);
   const [editingName, setEditingName] = useState(contactName || "");
+  const nameInputRef = useRef<HTMLInputElement>(null);
   
   // Status selector state
   const [statusOpen, setStatusOpen] = useState(false);
@@ -1903,8 +1904,25 @@ export function KanbanChatPanel({
     onClose();
   };
 
-  const handleSaveName = async () => {
-    if (!editingName.trim()) return;
+  // Start inline name editing
+  const handleStartInlineEdit = () => {
+    setEditingName(contactName || "");
+    setIsEditingNameInline(true);
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  };
+
+  // Cancel inline editing
+  const handleCancelInlineEdit = () => {
+    setIsEditingNameInline(false);
+    setEditingName(contactName || "");
+  };
+
+  // Save inline name
+  const handleSaveInlineName = async () => {
+    if (!editingName.trim()) {
+      handleCancelInlineEdit();
+      return;
+    }
     
     try {
       // Update conversation contact_name
@@ -1922,7 +1940,7 @@ export function KanbanChatPanel({
       }
       
       toast({ title: "Nome atualizado" });
-      setEditNameOpen(false);
+      setIsEditingNameInline(false);
     } catch (error) {
       toast({
         title: "Erro ao atualizar nome",
@@ -2067,18 +2085,57 @@ export function KanbanChatPanel({
             </Avatar>
             <div>
               <div className="flex items-center gap-1">
-                <h3 className="font-semibold">{contactName || contactPhone}</h3>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6"
-                  onClick={() => {
-                    setEditingName(contactName || "");
-                    setEditNameOpen(true);
-                  }}
-                >
-                  <Pencil className="h-3 w-3" />
-                </Button>
+                {isEditingNameInline ? (
+                  <>
+                    <Input
+                      ref={nameInputRef}
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveInlineName();
+                        if (e.key === "Escape") handleCancelInlineEdit();
+                      }}
+                      onBlur={handleSaveInlineName}
+                      className="h-7 w-40 text-sm font-semibold"
+                      autoFocus
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={handleSaveInlineName}
+                    >
+                      <Check className="h-3 w-3 text-green-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleCancelInlineEdit}
+                    >
+                      <X className="h-3 w-3 text-red-500" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <h3 
+                      className="font-semibold cursor-pointer hover:text-primary transition-colors"
+                      onClick={handleStartInlineEdit}
+                      title="Clique para editar"
+                    >
+                      {contactName || contactPhone}
+                    </h3>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6"
+                      onClick={handleStartInlineEdit}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">{contactPhone}</p>
             </div>
@@ -2735,34 +2792,7 @@ export function KanbanChatPanel({
         </div>
       </div>
 
-      {/* Edit Name Dialog */}
-      <Dialog open={editNameOpen} onOpenChange={setEditNameOpen}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle>Editar nome do contato</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <Input
-              value={editingName}
-              onChange={(e) => setEditingName(e.target.value)}
-              placeholder="Nome do contato"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleSaveName();
-                }
-              }}
-            />
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditNameOpen(false)}>
-                Cancelar
-              </Button>
-              <Button onClick={handleSaveName}>
-                Salvar
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Inline name editing is now done in header - dialog removed */}
 
       {/* Archive Dialog */}
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
