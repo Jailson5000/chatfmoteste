@@ -53,6 +53,7 @@ import { DashboardAdvancedFilters } from "@/components/dashboard/DashboardAdvanc
 import { MessageMetricsCards } from "@/components/dashboard/MessageMetricsCards";
 import { AttendantPerformanceTable } from "@/components/dashboard/AttendantPerformanceTable";
 import { MessageVolumeChart } from "@/components/dashboard/MessageVolumeChart";
+import { ConversationOriginCard } from "@/components/dashboard/ConversationOriginCard";
 import { DateRange } from "react-day-picker";
 import { getStateFromPhone } from "@/lib/dddToState";
 
@@ -521,26 +522,7 @@ export default function Dashboard() {
       {/* Three Column Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Origem das Conversas */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <BarChart3 className="h-4 w-4" />
-              Origem das conversas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center justify-center h-48">
-            <MessageSquare className="h-12 w-12 text-muted-foreground/30 mb-4" />
-            <p className="text-center text-muted-foreground text-sm">
-              Origem das Conversas
-            </p>
-            <p className="text-center text-muted-foreground text-xs mt-2">
-              Identifique quais canais e campanhas estão gerando mais conversas para otimizar sua estratégia.
-            </p>
-            <Button variant="link" size="sm" className="mt-2">
-              Saiba mais sobre Métricas ↗
-            </Button>
-          </CardContent>
-        </Card>
+        <ConversationOriginCard filters={dashboardFilters} />
 
         {/* Funil por Status */}
         <Card>
