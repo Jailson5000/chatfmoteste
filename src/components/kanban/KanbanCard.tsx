@@ -265,8 +265,9 @@ export function KanbanCard({
       )}
 
       {/* Footer: Tags, Instance, Handler */}
-      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center gap-2">
+        {/* Left: Tags + Instance (compact) */}
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0">
           {/* Tags icon with tooltip */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -302,17 +303,17 @@ export function KanbanCard({
           </div>
         </div>
 
-        {/* Handler */}
-        <div className="flex items-center gap-1">
+        {/* Handler (takes remaining space, aligns right) */}
+        <div className="flex items-center gap-1 ml-auto min-w-0">
           {isAI ? (
-            <Bot className="h-3 w-3 text-purple-500" />
+            <Bot className="h-3 w-3 text-purple-500 flex-shrink-0" />
           ) : hasAssignment ? (
-            <User className="h-3 w-3 text-success" />
+            <User className="h-3 w-3 text-success flex-shrink-0" />
           ) : (
-            <User className="h-3 w-3 text-amber-500" />
+            <User className="h-3 w-3 text-amber-500 flex-shrink-0" />
           )}
           <span className={cn(
-            "text-[10px] truncate max-w-[80px]",
+            "text-[10px] truncate",
             isAI ? "text-purple-500" : hasAssignment ? "text-success" : "text-amber-500"
           )}>
             {handlerName}
