@@ -62,6 +62,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { MediaGalleryItem } from "./MediaGalleryItem";
 import { DecryptedMediaListItem } from "./DecryptedMediaListItem";
 import { toast } from "@/hooks/use-toast";
+import { useClientActions } from "@/hooks/useClientActions";
 
 interface Automation {
   id: string;
@@ -158,6 +159,12 @@ export function ContactDetailsPanel({
 }: ContactDetailsPanelProps) {
   const queryClient = useQueryClient();
   
+  // Client ID for actions
+  const clientId = conversation?.client?.id;
+  
+  // Hook for creating client actions (activity log)
+  const { createAction } = useClientActions(clientId);
+  
   // Main panel tab
   const [mainTab, setMainTab] = useState<"info" | "favorites" | "media" | "tasks" | "docs" | "copy">("info");
   
@@ -187,7 +194,6 @@ export function ContactDetailsPanel({
 
   // Client tags state
   const [clientTagIds, setClientTagIds] = useState<string[]>([]);
-  const clientId = conversation?.client?.id;
 
   // Fetch client tags
   const fetchClientTags = useCallback(async (cId: string) => {
@@ -426,6 +432,14 @@ export function ContactDetailsPanel({
         .eq("client_id", clientId)
         .eq("tag_id", tag.id);
       
+      // Log tag removal action for chat activity
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_remove",
+        from_value: tag.name,
+        description: `removeu a tag ${tag.name}`,
+      });
+      
       setClientTagIds((prev) => prev.filter((id) => id !== tag.id));
     } else {
       if (clientTagIds.length >= 4) return;
@@ -433,6 +447,14 @@ export function ContactDetailsPanel({
       await supabase.from("client_tags").insert({
         client_id: clientId,
         tag_id: tag.id,
+      });
+      
+      // Log tag addition action for chat activity
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_add",
+        to_value: tag.name,
+        description: `adicionou a tag ${tag.name}`,
       });
       
       setClientTagIds((prev) => [...prev, tag.id]);
@@ -444,7 +466,27 @@ export function ContactDetailsPanel({
 
   const handleStatusSelect = (statusId: string) => {
     const isSelected = currentStatus?.id === statusId;
-    onChangeStatus?.(isSelected ? null : statusId);
+    const newStatusId = isSelected ? null : statusId;
+    
+    // Get status names for logging
+    const fromStatusName = currentStatus?.name || "Sem status";
+    const toStatus = statuses.find(s => s.id === statusId);
+    const toStatusName = isSelected ? "Sem status" : (toStatus?.name || "Desconhecido");
+    
+    // Call parent handler to update status
+    onChangeStatus?.(newStatusId);
+    
+    // Log status change action for chat activity
+    if (clientId && fromStatusName !== toStatusName) {
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "status_change",
+        from_value: fromStatusName,
+        to_value: toStatusName,
+        description: `alterou o status de ${fromStatusName} para ${toStatusName}`,
+      });
+    }
+    
     setStatusOpen(false);
   };
 
