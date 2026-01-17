@@ -508,26 +508,41 @@ export default function Conversations() {
     // Sort with stable ordering: use _clientOrder for optimistic messages to prevent shuffle
     return items.sort((a, b) => {
       // Get timestamps for primary sorting
-      const aTime = a.type === 'message' 
-        ? new Date(a.data.created_at).getTime() 
+      const aTime = a.type === 'message'
+        ? new Date(a.data.created_at).getTime()
         : a.data.timestamp.getTime();
-      const bTime = b.type === 'message' 
-        ? new Date(b.data.created_at).getTime() 
+      const bTime = b.type === 'message'
+        ? new Date(b.data.created_at).getTime()
         : b.data.timestamp.getTime();
-      
+
+      const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
+      const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
+
+      // Deterministic tiebreak key (prevents visual reordering when comparator returns 0)
+      const aKey = a.type === 'message'
+        ? ((a.data as PaginatedMessage)._clientTempId || a.data.id)
+        : `activity_${(a.data as any).id}`;
+      const bKey = b.type === 'message'
+        ? ((b.data as PaginatedMessage)._clientTempId || b.data.id)
+        : `activity_${(b.data as any).id}`;
+
+      const diff = aTime - bTime;
+
       // If timestamps are within 1 second, use _clientOrder for tie-breaking
       // This maintains stability during optimistic update reconciliation
-      if (Math.abs(aTime - bTime) < 1000) {
-        const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
-        const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
-        
+      if (Math.abs(diff) < 1000) {
         if (aClientOrder !== undefined && bClientOrder !== undefined) {
           return aClientOrder - bClientOrder;
         }
+        // If only one has _clientOrder, keep it stable (it was inserted with a defined order)
+        if (aClientOrder !== undefined) return -1;
+        if (bClientOrder !== undefined) return 1;
+
+        return aKey.localeCompare(bKey);
       }
-      
-      // Primary sort by timestamp
-      return aTime - bTime;
+
+      // Primary sort by timestamp; deterministic fallback by key
+      return diff !== 0 ? diff : aKey.localeCompare(bKey);
     });
   }, [messages, inlineActivities]);
 
