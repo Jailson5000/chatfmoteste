@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import {
   MessageSquare,
   Users,
@@ -29,6 +29,8 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
 import { useClients } from "@/hooks/useClients";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
+import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
+import { useDashboardMetrics, type DateFilter, type DashboardFilters } from "@/hooks/useDashboardMetrics";
 import {
   AreaChart,
   Area,
@@ -47,10 +49,12 @@ import {
 import { startOfDay, subDays, startOfMonth, isAfter, parseISO, format, subHours, isBefore, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
+import { DashboardAdvancedFilters } from "@/components/dashboard/DashboardAdvancedFilters";
+import { MessageMetricsCards } from "@/components/dashboard/MessageMetricsCards";
+import { AttendantPerformanceTable } from "@/components/dashboard/AttendantPerformanceTable";
+import { MessageVolumeChart } from "@/components/dashboard/MessageVolumeChart";
 import { DateRange } from "react-day-picker";
 import { getStateFromPhone } from "@/lib/dddToState";
-
-type DateFilter = "today" | "7days" | "30days" | "month" | "all" | "custom";
 
 const CHART_COLORS = [
   "#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6",
@@ -60,10 +64,34 @@ const CHART_COLORS = [
 export default function Dashboard() {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
+  const [selectedAttendants, setSelectedAttendants] = useState<string[]>([]);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
+  const [selectedConnections, setSelectedConnections] = useState<string[]>([]);
+  
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { clients, isLoading: clientsLoading } = useClients();
   const { members: teamMembers } = useTeamMembers();
+  const { instances: connections } = useWhatsAppInstances();
+
+  // Build filters object for metrics hook
+  const dashboardFilters: DashboardFilters = useMemo(() => ({
+    dateFilter,
+    customDateRange,
+    attendantIds: selectedAttendants,
+    departmentIds: selectedDepartments,
+    statusIds: [],
+    connectionIds: selectedConnections,
+  }), [dateFilter, customDateRange, selectedAttendants, selectedDepartments, selectedConnections]);
+
+  // Use the new metrics hook
+  const { messageMetrics, attendantMetrics, timeSeriesData, isLoading: metricsLoading, refetch: refetchMetrics } = useDashboardMetrics(dashboardFilters);
+
+  const handleClearAllFilters = useCallback(() => {
+    setSelectedAttendants([]);
+    setSelectedDepartments([]);
+    setSelectedConnections([]);
+  }, []);
 
   // Filter clients by date
   const filteredClients = useMemo(() => {
@@ -336,39 +364,61 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
-      {/* Header with Global Filter */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Visão geral dos seus clientes e métricas</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={dateFilter} onValueChange={(v) => {
-            setDateFilter(v as DateFilter);
-            if (v !== 'custom') {
-              setCustomDateRange(undefined);
-            }
-          }}>
-            <SelectTrigger className="w-40 h-9">
-              <SelectValue placeholder="Período" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Hoje</SelectItem>
-              <SelectItem value="7days">Últimos 7 dias</SelectItem>
-              <SelectItem value="30days">Últimos 30 dias</SelectItem>
-              <SelectItem value="month">Este mês</SelectItem>
-              <SelectItem value="all">Todo período</SelectItem>
-              <SelectItem value="custom">Personalizado</SelectItem>
-            </SelectContent>
-          </Select>
-          {dateFilter === 'custom' && (
-            <DateRangePicker
-              dateRange={customDateRange}
-              onDateRangeChange={setCustomDateRange}
+      {/* Header with Filters */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+            <p className="text-sm text-muted-foreground">Visão geral dos seus clientes e métricas</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={dateFilter} onValueChange={(v) => {
+              setDateFilter(v as DateFilter);
+              if (v !== 'custom') {
+                setCustomDateRange(undefined);
+              }
+            }}>
+              <SelectTrigger className="w-40 h-9">
+                <SelectValue placeholder="Período" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Hoje</SelectItem>
+                <SelectItem value="7days">Últimos 7 dias</SelectItem>
+                <SelectItem value="30days">Últimos 30 dias</SelectItem>
+                <SelectItem value="month">Este mês</SelectItem>
+                <SelectItem value="all">Todo período</SelectItem>
+                <SelectItem value="custom">Personalizado</SelectItem>
+              </SelectContent>
+            </Select>
+            {dateFilter === 'custom' && (
+              <DateRangePicker
+                dateRange={customDateRange}
+                onDateRangeChange={setCustomDateRange}
+              />
+            )}
+            <DashboardAdvancedFilters
+              teamMembers={teamMembers.map(m => ({ id: m.id, full_name: m.full_name || "", avatar_url: m.avatar_url }))}
+              departments={departments.map(d => ({ id: d.id, name: d.name, color: d.color }))}
+              connections={connections.map(c => ({ id: c.id, name: c.display_name || c.instance_name }))}
+              selectedAttendants={selectedAttendants}
+              selectedDepartments={selectedDepartments}
+              selectedConnections={selectedConnections}
+              onAttendantsChange={setSelectedAttendants}
+              onDepartmentsChange={setSelectedDepartments}
+              onConnectionsChange={setSelectedConnections}
+              onClearAll={handleClearAllFilters}
+              onRefresh={refetchMetrics}
+              isLoading={metricsLoading}
             />
-          )}
+          </div>
         </div>
       </div>
+
+      {/* Message Metrics Cards */}
+      <MessageMetricsCards metrics={messageMetrics} isLoading={metricsLoading} />
+
+      {/* Message Volume Chart */}
+      <MessageVolumeChart data={timeSeriesData} isLoading={metricsLoading} />
 
       {/* Status Cards Row */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -692,56 +742,11 @@ export default function Dashboard() {
 
       {/* Bottom Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Análise de Responsáveis */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4" />
-              Análise de responsáveis
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {teamActivity.length > 0 ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 text-xs text-muted-foreground border-b pb-2">
-                  <span>Responsável</span>
-                  <span className="text-center">Conversas</span>
-                  <span className="text-right">Última Atividade</span>
-                </div>
-                {teamActivity.map((member) => (
-                  <div key={member.name} className="grid grid-cols-3 items-center">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium">
-                        {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <span className="text-sm truncate">{member.name}</span>
-                    </div>
-                    <div className="flex items-center justify-center gap-2">
-                      <Badge variant="default" className="text-xs">
-                        {member.conversations}
-                      </Badge>
-                      <Badge variant="secondary" className="text-xs">
-                        {member.resolved}
-                      </Badge>
-                    </div>
-                    <div className="text-right text-xs text-muted-foreground flex items-center justify-end gap-1">
-                      <Clock className="h-3 w-3" />
-                      {member.lastActivity}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="h-48 flex flex-col items-center justify-center text-muted-foreground">
-                <BarChart3 className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                <p className="text-sm font-medium">Métricas reais em breve</p>
-                <p className="text-xs text-center mt-2 max-w-48">
-                  Estatísticas detalhadas de cada membro da equipe serão exibidas aqui.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Desempenho por Atendente - New component with real data */}
+        <AttendantPerformanceTable 
+          attendants={attendantMetrics} 
+          isLoading={metricsLoading} 
+        />
 
         {/* Departamentos */}
         <Card>
