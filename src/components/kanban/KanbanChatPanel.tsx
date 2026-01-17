@@ -1393,41 +1393,35 @@ export function KanbanChatPanel({
       items.push({ type: 'activity', data: activity });
     });
     
-    // Sort with stable ordering: use _clientOrder for optimistic messages to prevent shuffle
+    // Sort com ordem estável e determinística.
+    // Regra: ordenar por timestamp; só usar _clientOrder (ou chave) quando o timestamp for EXATAMENTE igual.
+    // Isso evita "embaralhar" quando mensagens chegam muito rápido (mesmo segundo) e um item ainda não tem _clientOrder.
     return items.sort((a, b) => {
-      // Get timestamps for primary sorting
-      const aTime = a.type === 'message'
+      const aTime = a.type === "message"
         ? new Date(a.data.created_at).getTime()
         : a.data.timestamp.getTime();
-      const bTime = b.type === 'message'
+      const bTime = b.type === "message"
         ? new Date(b.data.created_at).getTime()
         : b.data.timestamp.getTime();
 
-      const aClientOrder = a.type === 'message' ? (a.data as PaginatedMessage)._clientOrder : undefined;
-      const bClientOrder = b.type === 'message' ? (b.data as PaginatedMessage)._clientOrder : undefined;
+      const diff = aTime - bTime;
+      if (diff !== 0) return diff;
 
-      // Deterministic tiebreak key (prevents visual reordering when comparator returns 0)
-      const aKey = a.type === 'message'
+      const aClientOrder = a.type === "message" ? (a.data as PaginatedMessage)._clientOrder : undefined;
+      const bClientOrder = b.type === "message" ? (b.data as PaginatedMessage)._clientOrder : undefined;
+
+      if (aClientOrder !== undefined && bClientOrder !== undefined) {
+        return aClientOrder - bClientOrder;
+      }
+
+      const aKey = a.type === "message"
         ? ((a.data as PaginatedMessage)._clientTempId || a.data.id)
         : `activity_${(a.data as any).id}`;
-      const bKey = b.type === 'message'
+      const bKey = b.type === "message"
         ? ((b.data as PaginatedMessage)._clientTempId || b.data.id)
         : `activity_${(b.data as any).id}`;
 
-      const diff = aTime - bTime;
-
-      // If timestamps are within 1 second, use _clientOrder for tie-breaking
-      if (Math.abs(diff) < 1000) {
-        if (aClientOrder !== undefined && bClientOrder !== undefined) {
-          return aClientOrder - bClientOrder;
-        }
-        if (aClientOrder !== undefined) return -1;
-        if (bClientOrder !== undefined) return 1;
-
-        return aKey.localeCompare(bKey);
-      }
-
-      return diff !== 0 ? diff : aKey.localeCompare(bKey);
+      return String(aKey).localeCompare(String(bKey));
     });
   }, [messages, inlineActivities]);
 

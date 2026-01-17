@@ -443,14 +443,16 @@ export function useMessagesWithPagination({
               return updated.sort((a, b) => {
                 const timeA = new Date(a.created_at).getTime();
                 const timeB = new Date(b.created_at).getTime();
-                if (Math.abs(timeA - timeB) < 1000) {
-                  if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
-                    return a._clientOrder - b._clientOrder;
-                  }
-                  if (a._clientOrder !== undefined) return -1;
-                  if (b._clientOrder !== undefined) return 1;
+                const diff = timeA - timeB;
+                if (diff !== 0) return diff;
+
+                if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                  return a._clientOrder - b._clientOrder;
                 }
-                return timeA - timeB;
+
+                const keyA = (a as any)._clientTempId || a.id;
+                const keyB = (b as any)._clientTempId || b.id;
+                return String(keyA).localeCompare(String(keyB));
               });
             }
 
@@ -577,20 +579,16 @@ export function useMessagesWithPagination({
             return updated.sort((a, b) => {
               const timeA = new Date(a.created_at).getTime();
               const timeB = new Date(b.created_at).getTime();
-              
-              // If timestamps are identical (within 1 second), use _clientOrder for tie-breaking
-              if (Math.abs(timeA - timeB) < 1000) {
-                // If both have _clientOrder, use it for stable sorting
-                if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
-                  return a._clientOrder - b._clientOrder;
-                }
-                // If only one has it, prefer the one with _clientOrder to come first (it was added earlier)
-                if (a._clientOrder !== undefined) return -1;
-                if (b._clientOrder !== undefined) return 1;
+              const diff = timeA - timeB;
+              if (diff !== 0) return diff;
+
+              if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                return a._clientOrder - b._clientOrder;
               }
-              
-              // Primary sort by created_at timestamp
-              return timeA - timeB;
+
+              const keyA = (a as any)._clientTempId || a.id;
+              const keyB = (b as any)._clientTempId || b.id;
+              return String(keyA).localeCompare(String(keyB));
             });
           });
 
