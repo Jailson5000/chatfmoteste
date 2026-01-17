@@ -465,13 +465,23 @@ export function useMessagesWithPagination({
               if (sameWhatsappIndex !== -1) {
                 const updated = [...prev];
                 const prevMsg = updated[sameWhatsappIndex];
+
+                const shouldFreezeCreatedAt =
+                  prevMsg.is_from_me === true &&
+                  (!!prevMsg._clientTempId ||
+                    (typeof prevMsg.whatsapp_message_id === "string" &&
+                      prevMsg.whatsapp_message_id.startsWith("temp_")));
+
                 // Revoke old blob URL if present
                 if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
                   try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
                 }
+
                 updated[sameWhatsappIndex] = {
                   ...prevMsg,
                   ...rawMsg,
+                  // CRITICAL: preserve client timestamp for optimistic messages to prevent visual shuffle
+                  created_at: shouldFreezeCreatedAt ? prevMsg.created_at : rawMsg.created_at,
                   status: "sent",
                   // Keep local preview URL if backend hasn't stored a URL yet
                   media_url: rawMsg.media_url ?? prevMsg.media_url,
@@ -499,13 +509,23 @@ export function useMessagesWithPagination({
               if (optimisticMediaIndex !== -1) {
                 const updated = [...prev];
                 const prevMsg = updated[optimisticMediaIndex];
+
+                const shouldFreezeCreatedAt =
+                  prevMsg.is_from_me === true &&
+                  (!!prevMsg._clientTempId ||
+                    (typeof prevMsg.whatsapp_message_id === "string" &&
+                      prevMsg.whatsapp_message_id.startsWith("temp_")));
+
                 // Revoke the old blob URL to free memory
                 if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
                   try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
                 }
+
                 updated[optimisticMediaIndex] = {
                   ...prevMsg,
                   ...rawMsg,
+                  // CRITICAL: preserve client timestamp for optimistic messages to prevent visual shuffle
+                  created_at: shouldFreezeCreatedAt ? prevMsg.created_at : rawMsg.created_at,
                   status: "sent",
                   // CRITICAL: Preserve client-side ordering fields to prevent visual shuffle
                   _clientOrder: prevMsg._clientOrder,
@@ -526,13 +546,23 @@ export function useMessagesWithPagination({
             if (optimisticIndex !== -1) {
               const updated = [...prev];
               const prevMsg = updated[optimisticIndex];
+
+              const shouldFreezeCreatedAt =
+                prevMsg.is_from_me === true &&
+                (!!prevMsg._clientTempId ||
+                  (typeof prevMsg.whatsapp_message_id === "string" &&
+                    prevMsg.whatsapp_message_id.startsWith("temp_")));
+
               // Revoke old blob URL if present
               if (prevMsg.media_url && isBlobUrl(prevMsg.media_url)) {
                 try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
               }
+
               updated[optimisticIndex] = {
                 ...prevMsg,
                 ...rawMsg,
+                // CRITICAL: preserve client timestamp for optimistic messages to prevent visual shuffle
+                created_at: shouldFreezeCreatedAt ? prevMsg.created_at : rawMsg.created_at,
                 status: "sent",
                 media_url: rawMsg.media_url ?? prevMsg.media_url,
                 media_mime_type: rawMsg.media_mime_type ?? prevMsg.media_mime_type,
