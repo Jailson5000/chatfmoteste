@@ -484,12 +484,50 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const request: CalendarActionRequest = await req.json();
-    const { action, law_firm_id, conversation_id, client_id, agent_id, event_data, query } = request;
+    // SECURITY: Authenticate user
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    console.log(`[google-calendar-actions] Action: ${action}, LawFirm: ${law_firm_id}`);
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user }, error: authError } = await userClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid authentication" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // SECURITY: Get user's law_firm_id from profile (NOT from request body)
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("law_firm_id")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.law_firm_id) {
+      return new Response(
+        JSON.stringify({ success: false, error: "User not associated with any company" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const law_firm_id = profile.law_firm_id; // VALIDATED law_firm_id
+
+    const request: CalendarActionRequest = await req.json();
+    const { action, conversation_id, client_id, agent_id, event_data, query } = request;
+
+    console.log(`[google-calendar-actions] Action: ${action}, LawFirm: ${law_firm_id}, User: ${user.email}`);
 
     // Get integration and check permissions
     const { data: integration, error: intError } = await supabase
