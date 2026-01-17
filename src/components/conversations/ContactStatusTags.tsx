@@ -7,18 +7,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useClients } from "@/hooks/useClients";
-import { useCustomStatuses, CustomStatus } from "@/hooks/useCustomStatuses";
-import { useTags, Tag } from "@/hooks/useTags";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useTags } from "@/hooks/useTags";
 import { useClientActions } from "@/hooks/useClientActions";
 
 interface ContactStatusTagsProps {

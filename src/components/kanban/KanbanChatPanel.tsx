@@ -16,6 +16,8 @@ import { InlineActivityBadge, ActivityItem } from "@/components/conversations/In
 import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
 import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
+import { useClientActions } from "@/hooks/useClientActions";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
@@ -1026,14 +1028,36 @@ export function KanbanChatPanel({
 }: KanbanChatPanelProps) {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { transferHandler, updateConversation, updateConversationDepartment, updateConversationTags } = useConversations();
+  const queryClient = useQueryClient();
+  const { transferHandler, updateConversation, updateConversationDepartment } = useConversations();
   const { updateClientStatus, updateClient } = useClients();
+  
+  // Hook for creating client actions (activity log) - same as ContactDetailsPanel
+  const { createAction } = useClientActions(clientId || undefined);
   
   // Message queue to ensure messages are sent in strict order
   const { enqueue: enqueueMessage } = useMessageQueue();
   
   // Get inline activities for this conversation
   const { activities: inlineActivities } = useInlineActivities(conversationId, clientId || null);
+  
+  // Client tag IDs (single source of truth - same query as ContactStatusTags)
+  const { data: clientTagIds = [] } = useQuery({
+    queryKey: ["client_tags", clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+
+      const { data, error } = await supabase
+        .from("client_tags")
+        .select("tag_id")
+        .eq("client_id", clientId);
+
+      if (error) throw error;
+      return (data || []).map((t) => t.tag_id);
+    },
+    enabled: !!clientId,
+    staleTime: 10_000,
+  });
 
   // Use backend name (source of truth) with fallback to local lookup
   const resolvedAutomationName = currentAutomationName 
@@ -1370,9 +1394,9 @@ export function KanbanChatPanel({
   // Get current department
   const currentDepartment = departments.find(d => d.id === departmentId);
   
-  // Get current tags
-  const currentTags = (conversationTags || [])
-    .map(tagName => tags.find(t => t.name === tagName || t.id === tagName))
+  // Get current tags from client_tags query (single source of truth)
+  const currentTags = clientTagIds
+    .map(tagId => tags.find(t => t.id === tagId))
     .filter(Boolean) as TagItem[];
     
   // Merge messages with inline activities, sorted by timestamp
@@ -2066,7 +2090,7 @@ export function KanbanChatPanel({
     }
   };
 
-  const handleStatusChange = (statusId: string) => {
+  const handleStatusChange = async (statusId: string) => {
     if (!clientId) {
       toast({
         title: "Sem cliente vinculado",
@@ -2076,33 +2100,96 @@ export function KanbanChatPanel({
       return;
     }
     
+    // Get status names for logging
+    const fromStatusName = currentStatusObj?.name || "Sem status";
+    const toStatus = customStatuses.find(s => s.id === statusId);
     const newStatusId = currentStatusObj?.id === statusId ? null : statusId;
+    const toStatusName = newStatusId === null ? "Sem status" : (toStatus?.name || "Desconhecido");
+    
     updateClientStatus.mutate({ clientId, statusId: newStatusId }, {
       onSuccess: () => {
+        // Log status change action for chat activity
+        if (fromStatusName !== toStatusName) {
+          createAction.mutate({
+            client_id: clientId,
+            action_type: "status_change",
+            from_value: fromStatusName,
+            to_value: toStatusName,
+            description: `alterou o status de ${fromStatusName} para ${toStatusName}`,
+          });
+        }
         toast({ title: "Status atualizado" });
         setStatusOpen(false);
       },
     });
   };
 
-  const handleTagToggle = (tag: TagItem) => {
-    const currentTagNames = conversationTags || [];
-    const hasTag = currentTagNames.includes(tag.name);
+  const handleTagToggle = async (tag: TagItem) => {
+    if (!clientId) {
+      toast({
+        title: "Sem cliente vinculado",
+        description: "Esta conversa não tem um cliente vinculado.",
+        variant: "destructive",
+      });
+      return;
+    }
     
-    let newTags: string[];
+    const hasTag = clientTagIds.includes(tag.id);
+    
     if (hasTag) {
-      newTags = currentTagNames.filter(t => t !== tag.name);
+      // Remove tag from client_tags table
+      await supabase
+        .from("client_tags")
+        .delete()
+        .eq("client_id", clientId)
+        .eq("tag_id", tag.id);
+      
+      // Log tag removal action for chat activity
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_remove",
+        from_value: tag.name,
+        description: `removeu a tag ${tag.name}`,
+      });
+      
+      // Optimistic update
+      queryClient.setQueryData<string[]>(["client_tags", clientId], (prev) => {
+        const current = prev || [];
+        return current.filter((id) => id !== tag.id);
+      });
     } else {
-      if (currentTagNames.length >= 4) {
+      if (clientTagIds.length >= 4) {
         toast({ title: "Máximo de 4 tags" });
         return;
       }
-      newTags = [...currentTagNames, tag.name];
+      
+      // Add tag to client_tags table
+      await supabase.from("client_tags").insert({
+        client_id: clientId,
+        tag_id: tag.id,
+      });
+      
+      // Log tag addition action for chat activity
+      createAction.mutate({
+        client_id: clientId,
+        action_type: "tag_add",
+        to_value: tag.name,
+        description: `adicionou a tag ${tag.name}`,
+      });
+      
+      // Optimistic update
+      queryClient.setQueryData<string[]>(["client_tags", clientId], (prev) => {
+        const current = prev || [];
+        return current.includes(tag.id) ? current : [...current, tag.id];
+      });
     }
     
-    updateConversationTags.mutate({ conversationId, tags: newTags }, {
-      onSuccess: () => toast({ title: "Tags atualizadas" }),
-    });
+    // Invalidate queries to sync all components
+    queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
+    queryClient.invalidateQueries({ queryKey: ["clients"] });
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    
+    toast({ title: "Tags atualizadas" });
   };
 
   const handleDepartmentChange = (deptId: string) => {
