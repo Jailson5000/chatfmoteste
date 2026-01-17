@@ -56,6 +56,7 @@ import {
   Reply
 } from "lucide-react";
 import { ReplyPreview, QuotedMessage } from "@/components/conversations/ReplyPreview";
+import { AddNoteDialog } from "@/components/conversations/AddNoteDialog";
 import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { getCachedAudio, setCachedAudio, cleanupOldCache } from "@/lib/audioCache";
 import { format } from "date-fns";
@@ -1131,6 +1132,10 @@ export function KanbanChatPanel({
   const [archiveNextResponsible, setArchiveNextResponsible] = useState<string | null>(null);
   const [archiveNextResponsibleType, setArchiveNextResponsibleType] = useState<"human" | "ai" | null>(null);
 
+  // Add note dialog state
+  const [addNoteDialogOpen, setAddNoteDialogOpen] = useState(false);
+  const [noteTargetMessage, setNoteTargetMessage] = useState<{ id: string; content: string } | null>(null);
+
   // Reply state
   const [replyToMessage, setReplyToMessage] = useState<PaginatedMessage | null>(null);
 
@@ -1253,41 +1258,38 @@ export function KanbanChatPanel({
     }
   }, [conversationId, toast]);
 
-  // Add internal note referencing a specific message
-  const handleAddNote = useCallback(async (messageId: string, originalContent: string) => {
-    if (!conversationId) return;
+  // Open add note dialog for a specific message
+  const handleOpenNoteDialog = useCallback((messageId: string, originalContent: string) => {
+    setNoteTargetMessage({ id: messageId, content: originalContent });
+    setAddNoteDialogOpen(true);
+  }, []);
 
-    const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
+  // Save internal note (called from dialog)
+  const handleSaveNote = useCallback(async (noteText: string) => {
+    if (!conversationId || !noteTargetMessage) return;
+
+    const noteContent = `📝 ${noteText}`;
     
-    try {
-      const { error } = await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        content: noteContent,
-        sender_type: "agent",
-        is_from_me: true,
-        is_internal: true,
-        ai_generated: false,
-        reply_to_message_id: messageId,
-      });
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      content: noteContent,
+      sender_type: "agent",
+      is_from_me: true,
+      is_internal: true,
+      ai_generated: false,
+      reply_to_message_id: noteTargetMessage.id,
+    });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      toast({
-        title: "Nota adicionada",
-        description: "A nota interna foi criada com sucesso.",
-      });
+    toast({
+      title: "Nota adicionada",
+      description: "A nota interna foi criada com sucesso.",
+    });
 
-      // Refresh messages by triggering state update
-      setMessages(prev => [...prev]);
-    } catch (error) {
-      console.error("Error adding note:", error);
-      toast({
-        title: "Erro ao adicionar nota",
-        description: error instanceof Error ? error.message : "Falha ao criar nota",
-        variant: "destructive",
-      });
-    }
-  }, [conversationId, toast, setMessages]);
+    // Refresh messages by triggering state update
+    setMessages(prev => [...prev]);
+  }, [conversationId, noteTargetMessage, toast, setMessages]);
 
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, fileName?: string) => {
@@ -2560,7 +2562,7 @@ export function KanbanChatPanel({
                       onDelete={handleDeleteMessage}
                       onDownloadMedia={handleDownloadMedia}
                       onReact={handleReactToMessage}
-                      onAddNote={handleAddNote}
+                      onAddNote={handleOpenNoteDialog}
                     />
                   </div>
                 </React.Fragment>
@@ -3018,6 +3020,14 @@ export function KanbanChatPanel({
         mediaType={mediaPreview.mediaType}
         previewUrl={mediaPreview.previewUrl}
         isSending={isSending}
+      />
+
+      {/* Add Note Dialog */}
+      <AddNoteDialog
+        open={addNoteDialogOpen}
+        onOpenChange={setAddNoteDialogOpen}
+        originalMessageContent={noteTargetMessage?.content || ""}
+        onSave={handleSaveNote}
       />
     </div>
   );

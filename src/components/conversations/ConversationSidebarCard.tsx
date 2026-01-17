@@ -257,7 +257,7 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
           </TooltipProvider>
         </div>
 
-        <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-1 min-w-0 flex-1 ml-auto overflow-hidden">
           {isAI ? (
             <Bot className="h-2.5 w-2.5 text-purple-500 flex-shrink-0" />
           ) : isUnassigned || !hasAssigned ? (
@@ -267,7 +267,7 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
           )}
           <span
             className={cn(
-              "text-[9px] truncate max-w-[80px]",
+              "text-[9px] truncate",
               isAI ? "text-purple-500" : (isUnassigned || !hasAssigned) ? "text-amber-500" : "text-success"
             )}
             title={handlerLabel}

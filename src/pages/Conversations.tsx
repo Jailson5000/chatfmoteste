@@ -107,6 +107,7 @@ import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPa
 import { ConversationSidebarCard } from "@/components/conversations/ConversationSidebarCard";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { AudioModeIndicator } from "@/components/conversations/AudioModeIndicator";
+import { AddNoteDialog } from "@/components/conversations/AddNoteDialog";
 import { useConversations } from "@/hooks/useConversations";
 import { useConversationCounts } from "@/hooks/useConversationCounts";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
@@ -374,6 +375,10 @@ export default function Conversations() {
   const [handlerFilterOpen, setHandlerFilterOpen] = useState(false);
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const [departmentFilterOpen, setDepartmentFilterOpen] = useState(false);
+  
+  // Add note dialog state
+  const [addNoteDialogOpen, setAddNoteDialogOpen] = useState(false);
+  const [noteTargetMessage, setNoteTargetMessage] = useState<{ id: string; content: string } | null>(null);
   
   // Summary generation state
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
@@ -1542,42 +1547,38 @@ export default function Conversations() {
     }
   }, [selectedConversationId, toast]);
 
-  // Add internal note referencing a specific message
-  const handleAddNote = useCallback(async (messageId: string, originalContent: string) => {
-    if (!selectedConversationId) return;
+  // Open add note dialog for a specific message
+  const handleOpenNoteDialog = useCallback((messageId: string, originalContent: string) => {
+    setNoteTargetMessage({ id: messageId, content: originalContent });
+    setAddNoteDialogOpen(true);
+  }, []);
 
-    // Create a note that references the original message content
-    const noteContent = `📝 Nota sobre: "${originalContent.slice(0, 100)}${originalContent.length > 100 ? '...' : ''}"`;
+  // Save internal note (called from dialog)
+  const handleSaveNote = useCallback(async (noteText: string) => {
+    if (!selectedConversationId || !noteTargetMessage) return;
+
+    const noteContent = `📝 ${noteText}`;
     
-    try {
-      const { error } = await supabase.from("messages").insert({
-        conversation_id: selectedConversationId,
-        content: noteContent,
-        sender_type: "agent",
-        is_from_me: true,
-        is_internal: true, // This makes it an internal note
-        ai_generated: false,
-        reply_to_message_id: messageId, // Link to the original message
-      });
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: selectedConversationId,
+      content: noteContent,
+      sender_type: "agent",
+      is_from_me: true,
+      is_internal: true,
+      ai_generated: false,
+      reply_to_message_id: noteTargetMessage.id,
+    });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      toast({
-        title: "Nota adicionada",
-        description: "A nota interna foi criada com sucesso.",
-      });
+    toast({
+      title: "Nota adicionada",
+      description: "A nota interna foi criada com sucesso.",
+    });
 
-      // Refresh messages to show the new note
-      await queryClient.invalidateQueries({ queryKey: ["messages", selectedConversationId] });
-    } catch (error) {
-      console.error("Error adding note:", error);
-      toast({
-        title: "Erro ao adicionar nota",
-        description: error instanceof Error ? error.message : "Falha ao criar nota",
-        variant: "destructive",
-      });
-    }
-  }, [selectedConversationId, queryClient, toast]);
+    // Refresh messages to show the new note
+    await queryClient.invalidateQueries({ queryKey: ["messages", selectedConversationId] });
+  }, [selectedConversationId, noteTargetMessage, queryClient, toast]);
 
   // Download media from a message
   const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationId: string, fileName?: string) => {
@@ -2531,7 +2532,7 @@ export default function Conversations() {
                                   onDelete={handleDeleteMessage}
                                   onDownloadMedia={handleDownloadMedia}
                                   onReact={handleReactToMessage}
-                                  onAddNote={handleAddNote}
+                                  onAddNote={handleOpenNoteDialog}
                                 />
                               )}
                             </React.Fragment>
@@ -4119,6 +4120,14 @@ export default function Conversations() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Add Note Dialog */}
+      <AddNoteDialog
+        open={addNoteDialogOpen}
+        onOpenChange={setAddNoteDialogOpen}
+        originalMessageContent={noteTargetMessage?.content || ""}
+        onSave={handleSaveNote}
+      />
 
     </div>
     </TooltipProvider>
