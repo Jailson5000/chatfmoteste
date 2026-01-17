@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Tag as TagIcon, CheckCircle, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,31 +43,52 @@ export function ContactStatusTags({
   const [isLinking, setIsLinking] = useState(false);
 
   // Find the linked client
-  const linkedClient = useMemo(
-    () => clients.find((c) => c.id === clientId),
-    [clients, clientId]
-  );
+  const linkedClient = clients.find((c) => c.id === clientId);
 
   // Get client's current tags
   const [clientTagIds, setClientTagIds] = useState<string[]>([]);
 
   // Fetch client tags when clientId changes
-  const fetchClientTags = async (cId: string) => {
+  const fetchClientTags = useCallback(async (cId: string) => {
     const { data } = await supabase
       .from("client_tags")
       .select("tag_id")
       .eq("client_id", cId);
     setClientTagIds((data || []).map((t) => t.tag_id));
-  };
+  }, []);
 
-  // Initial fetch
-  useMemo(() => {
-    if (clientId) {
-      fetchClientTags(clientId);
-    } else {
+  // Initial fetch and real-time subscription for client_tags
+  useEffect(() => {
+    if (!clientId) {
       setClientTagIds([]);
+      return;
     }
-  }, [clientId]);
+    
+    // Initial fetch
+    fetchClientTags(clientId);
+    
+    // Real-time subscription for client_tags changes (syncs with ContactDetailsPanel)
+    const channel = supabase
+      .channel(`client_tags_sync_${clientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'client_tags',
+          filter: `client_id=eq.${clientId}`,
+        },
+        () => {
+          // Refetch tags when any change occurs
+          fetchClientTags(clientId);
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [clientId, fetchClientTags]);
 
   const handleStatusChange = async (statusId: string) => {
     if (!clientId) return;
