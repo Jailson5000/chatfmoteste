@@ -1893,8 +1893,8 @@ async function sendAIResponseToWhatsApp(
         for (const seenWords of seenWordSets) {
           const similarity = jaccardSimilarity(words, seenWords);
           
-          // If similarity > 70%, consider it a duplicate
-          if (similarity > 0.7) {
+          // If similarity > 95%, consider it a duplicate
+          if (similarity > 0.95) {
             isDuplicate = true;
             logDebug('DEDUPE', 'Removed similar paragraph (Jaccard similarity)', {
               duplicate: p.substring(0, 100),
