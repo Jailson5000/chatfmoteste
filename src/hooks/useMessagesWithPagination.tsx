@@ -652,9 +652,21 @@ export function useMessagesWithPagination({
               try { URL.revokeObjectURL(prevMsg.media_url); } catch {}
             }
             
+            // IMPORTANT: Avoid visual "shuffle" when the backend updates a message.
+            // For optimistic outgoing messages, we must NEVER let backend `created_at` overwrite
+            // the client timestamp used for ordering; otherwise rapid sends can swap positions.
+            const shouldFreezeCreatedAt =
+              prevMsg.is_from_me === true &&
+              (!!prevMsg._clientTempId ||
+                (typeof prevMsg.whatsapp_message_id === "string" &&
+                  prevMsg.whatsapp_message_id.startsWith("temp_")));
+
             updated[targetIndex] = {
               ...prevMsg,
               ...updatedMsg,
+              created_at: shouldFreezeCreatedAt
+                ? prevMsg.created_at
+                : (updatedMsg.created_at ?? prevMsg.created_at),
               status: updatedMsg.status ?? prevMsg.status ?? "sent",
               delivered_at: updatedMsg.delivered_at ?? prevMsg.delivered_at,
               read_at: updatedMsg.read_at ?? prevMsg.read_at,
@@ -663,6 +675,9 @@ export function useMessagesWithPagination({
               media_mime_type: updatedMsg.media_mime_type ?? prevMsg.media_mime_type,
               // Preserve reply_to
               reply_to: prevMsg.reply_to ?? updatedMsg.reply_to,
+              // CRITICAL: Preserve client-side ordering fields
+              _clientOrder: prevMsg._clientOrder,
+              _clientTempId: prevMsg._clientTempId,
             };
             
             return updated;
