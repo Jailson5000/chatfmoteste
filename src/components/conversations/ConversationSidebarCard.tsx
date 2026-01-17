@@ -205,8 +205,9 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
       )}
 
       {/* Footer */}
-      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center justify-between gap-1">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center gap-2">
+        {/* Left: Tags + Instance (compact) */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
           {/* Tags icon with tooltip */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -257,17 +258,18 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
           </TooltipProvider>
         </div>
 
-        <div className="flex items-center gap-1 min-w-0 flex-1 ml-auto overflow-hidden">
+        {/* Handler (takes remaining space, aligns right) */}
+        <div className="flex items-center gap-1 ml-auto min-w-0">
           {isAI ? (
-            <Bot className="h-2.5 w-2.5 text-purple-500 flex-shrink-0" />
+            <Bot className="h-3 w-3 text-purple-500 flex-shrink-0" />
           ) : isUnassigned || !hasAssigned ? (
-            <UserX className="h-2.5 w-2.5 text-amber-500 flex-shrink-0" />
+            <UserX className="h-3 w-3 text-amber-500 flex-shrink-0" />
           ) : (
-            <User className="h-2.5 w-2.5 text-success flex-shrink-0" />
+            <User className="h-3 w-3 text-success flex-shrink-0" />
           )}
           <span
             className={cn(
-              "text-[9px] truncate",
+              "text-[10px] truncate",
               isAI ? "text-purple-500" : (isUnassigned || !hasAssigned) ? "text-amber-500" : "text-success"
             )}
             title={handlerLabel}
