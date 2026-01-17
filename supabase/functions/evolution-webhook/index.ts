@@ -1853,7 +1853,32 @@ async function sendAIResponseToWhatsApp(
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 
-    const sanitizedResponse = sanitizeText(aiResponse);
+    // Deduplicate paragraphs - remove repeated content from AI responses
+    // This prevents the AI from sending duplicate messages when it hallucinates repetitions
+    const deduplicateParagraphs = (text: string): string => {
+      const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0);
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      
+      for (const p of paragraphs) {
+        // Normalize for comparison (lowercase, remove extra spaces)
+        const normalized = p.toLowerCase().replace(/\s+/g, ' ').trim();
+        
+        // Only add if we haven't seen this paragraph (or very similar)
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          unique.push(p);
+        } else {
+          logDebug('DEDUPE', 'Removed duplicate paragraph from AI response', {
+            duplicate: p.substring(0, 100),
+          });
+        }
+      }
+      
+      return unique.join('\n\n');
+    };
+
+    const sanitizedResponse = deduplicateParagraphs(sanitizeText(aiResponse));
 
     logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', {
       conversationId: context.conversationId,
