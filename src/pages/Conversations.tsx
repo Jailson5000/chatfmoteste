@@ -1245,11 +1245,22 @@ export default function Conversations() {
       } else {
         // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
         const conversationOrigin = conversation.origin?.toUpperCase();
-        const isNonWhatsAppConversation = conversationOrigin && ['WIDGET', 'TRAY', 'SITE', 'WEB'].includes(conversationOrigin);
+        const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+        const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+
+        // Log for debugging channel routing
+        console.log('[MessageSend] Channel routing:', {
+          conversationId,
+          origin: conversationOrigin,
+          isNonWhatsApp: isNonWhatsAppConversation,
+          hasWhatsAppInstance: !!conversation.whatsapp_instance_id,
+        });
 
         // For Widget/Tray/Site conversations: save to DB directly (no WhatsApp sending)
-        // The message will be visible in the panel and the widget will fetch it via polling
+        // The message will be visible in the panel and the widget will fetch it via polling/realtime
         if (isNonWhatsAppConversation) {
+          console.log('[MessageSend] Widget/Site channel - saving directly to DB');
+          
           // Transfer to human if needed
           const shouldTransfer = !wasPontualMode && (
             conversation.current_handler === "ai" || 
@@ -1266,7 +1277,8 @@ export default function Conversations() {
           }
           
           // Save message directly to database for widget/tray conversations
-          const { error } = await supabase
+          // NEVER call Evolution API for these channels
+          const { error: insertError } = await supabase
             .from("messages")
             .insert({
               conversation_id: conversationId,
@@ -1278,7 +1290,10 @@ export default function Conversations() {
               is_pontual: wasPontualMode,
             });
           
-          if (error) throw error;
+          if (insertError) {
+            console.error('[MessageSend] Widget insert error:', insertError);
+            throw new Error('Falha ao salvar mensagem');
+          }
           
           // Update conversation last_message_at
           await supabase
@@ -1294,8 +1309,12 @@ export default function Conversations() {
           setMessages(prev => prev.map(m => 
             m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
           ));
+          
+          console.log('[MessageSend] Widget message saved successfully');
         } else {
           // WhatsApp message - send via Evolution API
+          console.log('[MessageSend] WhatsApp channel - sending via Evolution API');
+          
           // If NOT in pontual mode: auto-assign to current user
           // If in pontual mode: send to WhatsApp but DON'T transfer from AI
           const shouldTransfer = !wasPontualMode && (
@@ -1326,11 +1345,19 @@ export default function Conversations() {
             },
           });
 
+          // Check for wrong channel error (defense in depth)
+          if (response.data?.errorCode === 'WRONG_CHANNEL') {
+            console.error('[MessageSend] Backend blocked wrong channel:', response.data);
+            throw new Error(`Canal incorreto: Use o chat do ${response.data.channel || 'site'}`);
+          }
+
           if (response.error) {
+            console.error('[MessageSend] Evolution API error:', response.error);
             throw new Error(response.error.message || "Falha ao enviar mensagem");
           }
 
           if (!response.data?.success) {
+            console.error('[MessageSend] Evolution API failed:', response.data);
             throw new Error(response.data?.error || "Falha ao enviar mensagem");
           }
 
@@ -1340,6 +1367,8 @@ export default function Conversations() {
               ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
               : m
           ));
+          
+          console.log('[MessageSend] WhatsApp message sent successfully');
         }
       }
     }).catch((error) => {
