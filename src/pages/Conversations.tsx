@@ -1029,6 +1029,9 @@ export default function Conversations() {
         department: conv.department || null,
         aiAgentName,
         scheduledFollowUps: followUpsByConversation[conv.id] || 0,
+        // Channel/Origin info for Tray vs WhatsApp differentiation
+        origin: conv.origin || null,
+        originMetadata: conv.origin_metadata || null,
       };
     });
   }, [conversations, tags, automations, followUpsByConversation]);
@@ -1240,51 +1243,104 @@ export default function Conversations() {
           m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
         ));
       } else {
-        // Normal message OR Pontual message - send to WhatsApp
-        // If NOT in pontual mode: auto-assign to current user
-        // If in pontual mode: send to WhatsApp but DON'T transfer from AI
-        const shouldTransfer = !wasPontualMode && (
-          conversation.current_handler === "ai" || 
-          !conversation.assigned_to ||
-          (conversation.assigned_to !== user?.id)
-        );
-        
-        if (shouldTransfer) {
-          await transferHandler.mutateAsync({
-            conversationId: conversationId,
-            handlerType: "human",
-            assignedTo: user?.id,
+        // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+        const conversationOrigin = conversation.origin?.toUpperCase();
+        const isNonWhatsAppConversation = conversationOrigin && ['WIDGET', 'TRAY', 'SITE', 'WEB'].includes(conversationOrigin);
+
+        // For Widget/Tray/Site conversations: save to DB directly (no WhatsApp sending)
+        // The message will be visible in the panel and the widget will fetch it via polling
+        if (isNonWhatsAppConversation) {
+          // Transfer to human if needed
+          const shouldTransfer = !wasPontualMode && (
+            conversation.current_handler === "ai" || 
+            !conversation.assigned_to ||
+            (conversation.assigned_to !== user?.id)
+          );
+          
+          if (shouldTransfer) {
+            await transferHandler.mutateAsync({
+              conversationId: conversationId,
+              handlerType: "human",
+              assignedTo: user?.id,
+            });
+          }
+          
+          // Save message directly to database for widget/tray conversations
+          const { error } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              content: messageToSend,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+              is_pontual: wasPontualMode,
+            });
+          
+          if (error) throw error;
+          
+          // Update conversation last_message_at
+          await supabase
+            .from("conversations")
+            .update({ 
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+            })
+            .eq("id", conversationId);
+          
+          // Update temp message to saved
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
+          ));
+        } else {
+          // WhatsApp message - send via Evolution API
+          // If NOT in pontual mode: auto-assign to current user
+          // If in pontual mode: send to WhatsApp but DON'T transfer from AI
+          const shouldTransfer = !wasPontualMode && (
+            conversation.current_handler === "ai" || 
+            !conversation.assigned_to ||
+            (conversation.assigned_to !== user?.id)
+          );
+          
+          if (shouldTransfer) {
+            await transferHandler.mutateAsync({
+              conversationId: conversationId,
+              handlerType: "human",
+              assignedTo: user?.id,
+            });
+          }
+          
+          // Use async send for <1s response
+          const replyWhatsAppId = replyMessage?.whatsapp_message_id || null;
+          
+          const response = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "send_message_async",
+              conversationId: conversationId,
+              message: messageToSend,
+              replyToWhatsAppMessageId: replyWhatsAppId,
+              replyToMessageId: replyMessage?.id || null,
+              isPontual: wasPontualMode, // Mark as pontual intervention
+            },
           });
-        }
-        
-        // Use async send for <1s response
-        const replyWhatsAppId = replyMessage?.whatsapp_message_id || null;
-        
-        const response = await supabase.functions.invoke("evolution-api", {
-          body: {
-            action: "send_message_async",
-            conversationId: conversationId,
-            message: messageToSend,
-            replyToWhatsAppMessageId: replyWhatsAppId,
-            replyToMessageId: replyMessage?.id || null,
-            isPontual: wasPontualMode, // Mark as pontual intervention
-          },
-        });
 
-        if (response.error) {
-          throw new Error(response.error.message || "Falha ao enviar mensagem");
-        }
+          if (response.error) {
+            throw new Error(response.error.message || "Falha ao enviar mensagem");
+          }
 
-        if (!response.data?.success) {
-          throw new Error(response.data?.error || "Falha ao enviar mensagem");
-        }
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          }
 
-        // Update to "sent" - message is now queued
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
-            : m
-        ));
+          // Update to "sent" - message is now queued
+          setMessages(prev => prev.map(m => 
+            m.id === tempId 
+              ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus }
+              : m
+          ));
+        }
       }
     }).catch((error) => {
       console.error("Erro ao enviar mensagem:", error);

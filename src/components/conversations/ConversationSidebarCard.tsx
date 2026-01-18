@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
+import { Bot, Folder, Globe, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -22,6 +22,9 @@ export interface ConversationSidebarCardConversation {
   department: { name: string; color: string } | null;
   aiAgentName: string;
   scheduledFollowUps?: number;
+  // New fields for channel differentiation
+  origin?: string | null;
+  originMetadata?: unknown;
 }
 
 function getInitials(name: string): string {
@@ -57,17 +60,48 @@ function formatBrazilianPhone(phone: string): string {
   return phone;
 }
 
-/** Returns connection identifier info: last 4 digits of phone_number, or instance_name abbreviation */
-function getConnectionInfo(phone: string | null, instanceName: string | null): { label: string; isPhone: boolean } {
+/** 
+ * Returns connection/channel info based on conversation origin
+ * For WhatsApp: shows last 4 digits of phone
+ * For Widget/Tray/Site: shows "Site" label
+ */
+function getConnectionInfo(
+  phone: string | null, 
+  instanceName: string | null,
+  origin?: string | null
+): { label: string; isPhone: boolean; isWidget: boolean; tooltipText: string } {
+  const upperOrigin = origin?.toUpperCase();
+  
+  // Non-WhatsApp origins (Widget, Tray, Site, Web)
+  if (upperOrigin === 'WIDGET' || upperOrigin === 'TRAY' || upperOrigin === 'SITE' || upperOrigin === 'WEB') {
+    return { 
+      label: "Site", 
+      isPhone: false, 
+      isWidget: true,
+      tooltipText: `Canal: ${upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin}`
+    };
+  }
+  
+  // WhatsApp origin (default)
   const digits = (phone || "").replace(/\D/g, "");
   if (digits.length >= 4) {
-    return { label: `•••${digits.slice(-4)}`, isPhone: true };
+    return { 
+      label: `•••${digits.slice(-4)}`, 
+      isPhone: true, 
+      isWidget: false,
+      tooltipText: instanceName || "WhatsApp"
+    };
   }
   // Fallback to instance name (first 6 chars or full name if shorter)
   if (instanceName) {
-    return { label: instanceName.length > 6 ? instanceName.slice(0, 6) : instanceName, isPhone: false };
+    return { 
+      label: instanceName.length > 6 ? instanceName.slice(0, 6) : instanceName, 
+      isPhone: false, 
+      isWidget: false,
+      tooltipText: instanceName
+    };
   }
-  return { label: "----", isPhone: false };
+  return { label: "----", isPhone: false, isWidget: false, tooltipText: "Canal não identificado" };
 }
 
 interface ConversationSidebarCardProps {
@@ -95,7 +129,7 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
     handlerLabel = conversation.assignedTo!;
   }
 
-  const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance);
+  const connectionInfo = getConnectionInfo(conversation.whatsappPhone, conversation.whatsappInstance, conversation.origin);
 
   return (
     <button
@@ -240,8 +274,13 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
-                  {connectionInfo.isPhone ? (
+                <div className={cn(
+                  "flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors",
+                  connectionInfo.isWidget && "text-blue-500"
+                )}>
+                  {connectionInfo.isWidget ? (
+                    <Globe className="h-3 w-3" />
+                  ) : connectionInfo.isPhone ? (
                     <Phone className="h-3 w-3" />
                   ) : (
                     <Smartphone className="h-3 w-3" />
@@ -251,7 +290,7 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
               </TooltipTrigger>
               <TooltipContent side="top">
                 <span className="text-xs">
-                  {conversation.whatsappInstance || "Instância não definida"}
+                  {connectionInfo.tooltipText}
                 </span>
               </TooltipContent>
             </Tooltip>
