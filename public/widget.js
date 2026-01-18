@@ -161,51 +161,82 @@
 
   // Fetch new messages from server (polling)
   const fetchNewMessages = async () => {
-    if (!conversationId || !lawFirmId) return;
+    if (!conversationId || !lawFirmId) {
+      console.log('[MiauChat] Polling skipped - no conversationId or lawFirmId');
+      return;
+    }
     
     try {
       // Query messages from the conversation
-      const response = await fetch(
-        `https://jiragtersejnarxruqyd.supabase.co/rest/v1/messages?conversation_id=eq.${conversationId}&order=created_at.asc&select=id,content,sender_type,is_from_me,created_at`,
-        {
-          headers: {
-            'apikey': SUPABASE_ANON_KEY
-          }
-        }
-      );
+      const url = `https://jiragtersejnarxruqyd.supabase.co/rest/v1/messages?conversation_id=eq.${conversationId}&order=created_at.asc&select=id,content,sender_type,is_from_me,created_at,message_type`;
       
-      if (!response.ok) return;
+      const response = await fetch(url, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY
+        }
+      });
+      
+      if (!response.ok) {
+        console.warn('[MiauChat] Polling failed:', response.status);
+        return;
+      }
       
       const serverMessages = await response.json();
       if (!serverMessages || serverMessages.length === 0) return;
       
-      // Check for new messages from attendant (is_from_me = true means from business/attendant)
+      console.log('[MiauChat] Polling fetched', serverMessages.length, 'messages');
+      
+      // Check for new messages from attendant/system (is_from_me = true means from business/attendant/bot)
       const newMessages = [];
       serverMessages.forEach(msg => {
-        // Skip user messages (we already have them)
-        if (msg.sender_type === 'client' || !msg.is_from_me) return;
+        // Skip if no content
+        if (!msg.content) return;
         
-        // Check if we already have this message
+        // Check if we already have this message by serverId
         const existingMsg = messages.find(m => m.serverId === msg.id);
-        if (!existingMsg && msg.content) {
+        if (existingMsg) return;
+        
+        // Messages FROM the business (attendant/bot/system) have is_from_me = true
+        // Messages FROM the client have is_from_me = false OR sender_type = 'client'
+        if (msg.is_from_me === true) {
+          // This is a message from attendant/bot/system
           newMessages.push({
             role: 'assistant',
             content: msg.content,
             serverId: msg.id,
             timestamp: msg.created_at
           });
+        } else if (msg.sender_type === 'client' || msg.is_from_me === false) {
+          // This is a user message - check if we have it
+          const existingUserMsg = messages.find(m => 
+            m.role === 'user' && m.content === msg.content
+          );
+          if (!existingUserMsg) {
+            // We don't have this user message locally (maybe from another session)
+            newMessages.push({
+              role: 'user',
+              content: msg.content,
+              serverId: msg.id,
+              timestamp: msg.created_at
+            });
+          }
         }
       });
       
       if (newMessages.length > 0) {
         // Add new messages to our list
         messages.push(...newMessages);
+        // Sort by timestamp
+        messages.sort((a, b) => {
+          if (!a.timestamp || !b.timestamp) return 0;
+          return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        });
         saveConversation();
         renderMessages();
-        console.log('[MiauChat] Received', newMessages.length, 'new messages from attendant');
+        console.log('[MiauChat] Added', newMessages.length, 'new messages from polling');
       }
     } catch (error) {
-      console.error('[MiauChat] Failed to fetch new messages:', error);
+      console.error('[MiauChat] Polling error:', error);
     }
   };
 
@@ -979,9 +1010,13 @@
 
   // Send message
   const sendMessage = async (inputText) => {
-    if (!inputText.trim() || isLoading || !lawFirmId || !isIdentified) return;
+    if (!inputText || !inputText.trim() || isLoading || !lawFirmId || !isIdentified) {
+      console.log('[MiauChat] sendMessage blocked:', { inputText: !!inputText, isLoading, lawFirmId: !!lawFirmId, isIdentified });
+      return;
+    }
 
-    const userMessage = { role: 'user', content: inputText.trim() };
+    const trimmedMessage = inputText.trim();
+    const userMessage = { role: 'user', content: trimmedMessage };
     messages.push(userMessage);
     renderMessages();
     saveConversation();
@@ -996,6 +1031,9 @@
       const referrer = GLOBAL_CONFIG.referrer || document.referrer;
       const device = GLOBAL_CONFIG.device || (/Mobile|Android|iPhone/i.test(navigator.userAgent) ? 'mobile' : 'desktop');
 
+      const sessionId = conversationId || `widget_${WIDGET_KEY}_${visitorId}`;
+      console.log('[MiauChat] Sending message:', { sessionId, message: trimmedMessage });
+
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
@@ -1003,18 +1041,16 @@
           'apikey': SUPABASE_ANON_KEY
         },
         body: JSON.stringify({
-          conversationId: conversationId || `widget_${WIDGET_KEY}_${visitorId}`,
-          message: inputText.trim(),
+          conversationId: sessionId,
+          message: trimmedMessage,
           source: SOURCE,
           context: {
             lawFirmId,
             widgetKey: WIDGET_KEY,
             visitorId,
-            // Client identification
             clientName: clientInfo.name,
             clientPhone: clientInfo.phone,
             clientEmail: clientInfo.email,
-            // Page context
             pageUrl,
             pageTitle,
             referrer,
@@ -1025,60 +1061,70 @@
         })
       });
 
-      const contentType = response.headers.get('content-type');
+      console.log('[MiauChat] Response status:', response.status, response.ok);
 
-      // Só exibir erro quando !response.ok (4xx/5xx)
+      // Only show error for actual HTTP errors (4xx/5xx)
       if (!response.ok) {
-        const errorBodyText = await response.text();
-        console.error('[MiauChat] HTTP error details:', {
-          status: response.status,
-          ok: response.ok,
-          contentType,
-          bodyText: errorBodyText
-        });
+        let errorDetail = '';
+        try {
+          errorDetail = await response.text();
+        } catch (e) {}
+        console.error('[MiauChat] HTTP error:', response.status, errorDetail);
         throw new Error(`Erro HTTP ${response.status}`);
       }
 
-      // Ler body como texto primeiro
-      const bodyText = await response.text();
-      let data = null;
+      // Read body as text first
+      let responseBody = '';
+      try {
+        responseBody = await response.text();
+      } catch (e) {
+        console.warn('[MiauChat] Could not read response body');
+      }
+      
+      console.log('[MiauChat] Response body:', responseBody);
 
-      if (bodyText) {
+      // Parse JSON if possible
+      let data = null;
+      if (responseBody) {
         try {
-          data = JSON.parse(bodyText);
+          data = JSON.parse(responseBody);
         } catch (e) {
-          console.warn('[MiauChat] JSON inválido, mas response OK (continuando). Body:', bodyText);
+          console.warn('[MiauChat] Could not parse JSON, but response OK');
         }
       }
 
-      // Se o backend retornou erro explícito em JSON, tratar como erro
-      if (data?.error) {
+      // Check for explicit error in JSON response
+      if (data && data.error) {
+        console.error('[MiauChat] Backend error:', data.error);
         throw new Error(data.error);
       }
 
-      // Se veio conversationId, salvar
+      // Save conversationId if returned
       const newConversationId = data?.conversationId || data?.conversation_id;
       if (newConversationId) {
         conversationId = newConversationId;
+        console.log('[MiauChat] Conversation ID set:', conversationId);
         saveConversation();
       }
 
-      // Renderizar resposta do bot se existir
-      let botResponse =
-        data?.setupMessage ||
-        data?.response ||
-        data?.message ||
-        data?.assistantMessage ||
-        data?.reply;
+      // Check for bot response in various fields
+      let botResponse = null;
+      if (data) {
+        botResponse = data.setupMessage || data.response || data.message || data.assistantMessage || data.reply;
+      }
 
       if (botResponse && typeof botResponse === 'object') {
         botResponse = botResponse.content || botResponse.text || botResponse.message || '';
       }
 
       if (typeof botResponse === 'string' && botResponse.trim()) {
-        messages.push({ role: 'assistant', content: botResponse });
+        messages.push({ role: 'assistant', content: botResponse.trim() });
+        console.log('[MiauChat] Bot response added:', botResponse);
         saveConversation();
       }
+
+      // Success - message was sent
+      console.log('[MiauChat] Message sent successfully');
 
     } catch (error) {
       console.error('[MiauChat] Send error:', error);
