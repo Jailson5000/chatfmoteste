@@ -2558,7 +2558,7 @@ serve(async (req) => {
             current_handler: automationId ? "ai" : "human",
             current_automation_id: automationId || null,
             department_id: traySettings?.default_department_id || null,
-            status: "open",
+            status: traySettings?.default_status_id ? undefined : "novo_contato", // Use valid enum value
           })
           .select("id")
           .single();
