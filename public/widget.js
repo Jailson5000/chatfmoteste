@@ -712,10 +712,10 @@
   };
 
   // Send message
-  const sendMessage = async (text) => {
-    if (!text.trim() || isLoading || !lawFirmId || !isIdentified) return;
+  const sendMessage = async (inputText) => {
+    if (!inputText.trim() || isLoading || !lawFirmId || !isIdentified) return;
 
-    const userMessage = { role: 'user', content: text.trim() };
+    const userMessage = { role: 'user', content: inputText.trim() };
     messages.push(userMessage);
     renderMessages();
     saveConversation();
@@ -738,7 +738,7 @@
         },
         body: JSON.stringify({
           conversationId: conversationId || `widget_${WIDGET_KEY}_${visitorId}`,
-          message: text.trim(),
+          message: inputText.trim(),
           source: SOURCE,
           context: {
             lawFirmId,
@@ -759,46 +759,69 @@
         })
       });
 
-      // REGRA DE OURO: Se response.ok, NUNCA mostrar erro
+      const contentType = response.headers.get('content-type');
+
+      // Só exibir erro quando !response.ok (4xx/5xx)
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[MiauChat] HTTP error:', response.status, errorText);
+        const errorBodyText = await response.text();
+        // Logs obrigatórios para diagnóstico
+        console.error('[MiauChat] HTTP error details:', {
+          status: response.status,
+          ok: response.ok,
+          contentType,
+          bodyText: errorBodyText
+        });
         throw new Error(`Erro HTTP ${response.status}`);
       }
 
       // Ler body como texto primeiro
-      const text = await response.text();
+      const bodyText = await response.text();
       let data = null;
-      
-      if (text) {
+
+      if (bodyText) {
         try {
-          data = JSON.parse(text);
+          data = JSON.parse(bodyText);
         } catch (e) {
-          console.warn('[MiauChat] JSON parse warning (response OK, continuing):', text.substring(0, 100));
+          console.warn('[MiauChat] JSON inválido, mas response OK (continuando). Body:', bodyText);
           // Response OK mas JSON inválido - NÃO é erro, apenas continua
         }
       }
 
-      // Se veio conversationId, salvar
-      if (data?.conversationId) {
-        conversationId = data.conversationId;
+      // Se o backend retornou erro explícito em JSON, tratar como erro
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      // Se veio conversationId, salvar (aceitar formatos)
+      const newConversationId = data?.conversationId || data?.conversation_id;
+      if (newConversationId) {
+        conversationId = newConversationId;
       }
 
       // Renderizar resposta do bot se existir (aceitar múltiplos formatos)
-      const botResponse = data?.response || data?.setupMessage || data?.message || data?.reply || data?.assistantMessage;
-      if (botResponse) {
+      let botResponse =
+        data?.setupMessage ||
+        data?.response ||
+        data?.message ||
+        data?.assistantMessage ||
+        data?.reply;
+
+      // Normalizar quando o backend retorna objetos (ex: reply: { content: "..." })
+      if (botResponse && typeof botResponse === 'object') {
+        botResponse = botResponse.content || botResponse.text || botResponse.message || '';
+      }
+
+      if (typeof botResponse === 'string' && botResponse.trim()) {
         messages.push({ role: 'assistant', content: botResponse });
         saveConversation();
       }
       // Se NÃO veio resposta do bot, está tudo OK - apenas aguarda humano
-      // NÃO lançar erro aqui!
-      
+
     } catch (error) {
       console.error('[MiauChat] Send error:', error);
-      // Só adiciona mensagem de erro se realmente houve erro de rede/HTTP
-      messages.push({ 
-        role: 'system', 
-        content: 'Desculpe, ocorreu um erro. Tente novamente.' 
+      messages.push({
+        role: 'system',
+        content: 'Desculpe, ocorreu um erro. Tente novamente.'
       });
     } finally {
       isLoading = false;
