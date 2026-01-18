@@ -113,14 +113,18 @@ export function useTrayIntegration() {
 
         if (error) throw error;
 
-        // Log audit
-        await supabase.from("tray_chat_audit_logs").insert({
-          law_firm_id: profile.law_firm_id,
-          integration_id: integration.id,
-          action: enabled ? "ENABLED" : "DISABLED",
-          performed_by: user?.id,
-          metadata: {},
-        });
+        // Log audit (ignore errors - audit is not critical)
+        try {
+          await supabase.from("tray_chat_audit_logs").insert({
+            law_firm_id: profile.law_firm_id,
+            integration_id: integration.id,
+            action: enabled ? "ENABLED" : "DISABLED",
+            performed_by: user?.id,
+            metadata: {},
+          });
+        } catch (auditError) {
+          console.warn("Failed to log audit (non-critical):", auditError);
+        }
 
         return data;
       } else {
@@ -139,14 +143,18 @@ export function useTrayIntegration() {
 
         if (error) throw error;
 
-        // Log audit
-        await supabase.from("tray_chat_audit_logs").insert({
-          law_firm_id: profile.law_firm_id,
-          integration_id: data.id,
-          action: "CREATED",
-          performed_by: user?.id,
-          metadata: {},
-        });
+        // Log audit (ignore errors - audit is not critical)
+        try {
+          await supabase.from("tray_chat_audit_logs").insert({
+            law_firm_id: profile.law_firm_id,
+            integration_id: data.id,
+            action: "CREATED",
+            performed_by: user?.id,
+            metadata: {},
+          });
+        } catch (auditError) {
+          console.warn("Failed to log audit (non-critical):", auditError);
+        }
 
         return data;
       }
