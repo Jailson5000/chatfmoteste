@@ -24,6 +24,7 @@
   // Get widget key from either method
   const WIDGET_KEY = GLOBAL_CONFIG.tenant || SCRIPT_TAG?.getAttribute('data-widget-key');
   const API_URL = GLOBAL_CONFIG.apiUrl || SCRIPT_TAG?.getAttribute('data-api-url') || 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/ai-chat';
+  const POLL_URL = GLOBAL_CONFIG.pollUrl || SCRIPT_TAG?.getAttribute('data-poll-url') || 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/widget-messages';
   const POSITION = GLOBAL_CONFIG.position || SCRIPT_TAG?.getAttribute('data-position') || 'bottom-right';
   const PRIMARY_COLOR = GLOBAL_CONFIG.color || SCRIPT_TAG?.getAttribute('data-color') || '#4CAF50';
   const SOURCE = GLOBAL_CONFIG.source || 'WIDGET';
@@ -162,78 +163,68 @@
   // Fetch new messages from server (polling)
   const fetchNewMessages = async () => {
     if (!conversationId || !lawFirmId) {
-      console.log('[MiauChat] Polling skipped - no conversationId or lawFirmId');
       return;
     }
-    
+
     try {
-      // Query messages from the conversation
-      const url = `https://jiragtersejnarxruqyd.supabase.co/rest/v1/messages?conversation_id=eq.${conversationId}&order=created_at.asc&select=id,content,sender_type,is_from_me,created_at,message_type`;
-      
+      // Use last server timestamp as cursor
+      const lastTs = messages
+        .map((m) => m.timestamp)
+        .filter(Boolean)
+        .sort()
+        .slice(-1)[0];
+
+      const url = `${POLL_URL}?widgetKey=${encodeURIComponent(WIDGET_KEY)}&conversationId=${encodeURIComponent(conversationId)}${lastTs ? `&after=${encodeURIComponent(lastTs)}` : ''}`;
+
       const response = await fetch(url, {
         headers: {
-          'apikey': SUPABASE_ANON_KEY
+          'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
         console.warn('[MiauChat] Polling failed:', response.status);
         return;
       }
-      
-      const serverMessages = await response.json();
-      if (!serverMessages || serverMessages.length === 0) return;
-      
-      console.log('[MiauChat] Polling fetched', serverMessages.length, 'messages');
-      
-      // Check for new messages from attendant/system (is_from_me = true means from business/attendant/bot)
+
+      const payload = await response.json();
+      const serverMessages = payload?.messages || [];
+      if (!serverMessages.length) return;
+
       const newMessages = [];
-      serverMessages.forEach(msg => {
-        // Skip if no content
-        if (!msg.content) return;
-        
-        // Check if we already have this message by serverId
-        const existingMsg = messages.find(m => m.serverId === msg.id);
-        if (existingMsg) return;
-        
-        // Messages FROM the business (attendant/bot/system) have is_from_me = true
-        // Messages FROM the client have is_from_me = false OR sender_type = 'client'
+      serverMessages.forEach((msg) => {
+        if (!msg?.id || !msg?.content) return;
+        const already = messages.find((m) => m.serverId === msg.id);
+        if (already) return;
+
+        // is_from_me = true => business/attendant/system
         if (msg.is_from_me === true) {
-          // This is a message from attendant/bot/system
           newMessages.push({
             role: 'assistant',
             content: msg.content,
             serverId: msg.id,
             timestamp: msg.created_at
           });
-        } else if (msg.sender_type === 'client' || msg.is_from_me === false) {
-          // This is a user message - check if we have it
-          const existingUserMsg = messages.find(m => 
-            m.role === 'user' && m.content === msg.content
-          );
-          if (!existingUserMsg) {
-            // We don't have this user message locally (maybe from another session)
-            newMessages.push({
-              role: 'user',
-              content: msg.content,
-              serverId: msg.id,
-              timestamp: msg.created_at
-            });
-          }
+          return;
         }
+
+        // client message
+        newMessages.push({
+          role: 'user',
+          content: msg.content,
+          serverId: msg.id,
+          timestamp: msg.created_at
+        });
       });
-      
-      if (newMessages.length > 0) {
-        // Add new messages to our list
+
+      if (newMessages.length) {
         messages.push(...newMessages);
-        // Sort by timestamp
         messages.sort((a, b) => {
           if (!a.timestamp || !b.timestamp) return 0;
           return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
         });
         saveConversation();
         renderMessages();
-        console.log('[MiauChat] Added', newMessages.length, 'new messages from polling');
       }
     } catch (error) {
       console.error('[MiauChat] Polling error:', error);
