@@ -456,8 +456,15 @@ export default function Conversations() {
   const showAudioIndicator = globalVoiceConfig?.enabled && conversationAudioEnabled;
 
   // Check if the WhatsApp instance is disconnected or deleted
+  // IMPORTANT: Skip this check for non-WhatsApp conversations (Widget, Site, etc.)
   const instanceDisconnectedInfo = useMemo(() => {
     if (!selectedConversation) return null;
+    
+    // Skip connection check for widget/site conversations (they don't use WhatsApp)
+    const origin = selectedConversation.origin?.toUpperCase();
+    if (origin === 'WIDGET' || origin === 'SITE' || origin === 'WEB' || origin === 'TRAY') {
+      return null; // Not a WhatsApp conversation - no connection check needed
+    }
     
     const instanceId = selectedConversation.whatsapp_instance_id;
     

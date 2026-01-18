@@ -2629,7 +2629,42 @@ serve(async (req) => {
     let agentLawFirmId: string | null = null;
 
     // automationId is REQUIRED for proper agent behavior
+    // For widget conversations without default automation, return a helpful message
     if (!automationId) {
+      // If this is a widget conversation without automation, provide a fallback message
+      if (isWidgetConversation && conversationId) {
+        console.log(`[${errorRef}] Widget conversation without automation - returning setup message`);
+        
+        // Save the user message to the conversation
+        await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          content: message, // Use the message from request body
+          sender: "client",
+          sender_type: "client",
+          status: "delivered"
+        });
+        
+        // Create a system response message
+        const systemMessage = "Olá! Obrigado por entrar em contato. Nossa equipe irá atendê-lo em breve. Por favor, aguarde.";
+        await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          content: systemMessage,
+          sender: "system",
+          sender_type: "system",
+          status: "delivered"
+        });
+        
+        return new Response(
+          JSON.stringify({ 
+            response: systemMessage,
+            conversationId,
+            messageId: null,
+            status: "awaiting_agent"
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
       console.error(`[${errorRef}] automationId is required for proper AI behavior`);
       return new Response(
         JSON.stringify({ error: "AI agent configuration required", ref: errorRef }),
