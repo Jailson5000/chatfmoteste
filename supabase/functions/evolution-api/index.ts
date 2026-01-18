@@ -1272,13 +1272,29 @@ serve(async (req) => {
         }
 
         // CRITICAL: Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
-        // These conversations MUST NOT be sent via WhatsApp
+        // These conversations MUST NOT be sent via WhatsApp - this is a defense-in-depth check
+        // The frontend should never call this function for non-WhatsApp conversations
         const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
         const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin.toUpperCase());
 
         if (isNonWhatsAppConversation) {
-          console.error(`[Evolution API] Blocked: Attempting to send WhatsApp message for ${conversationOrigin} conversation`);
-          throw new Error(`Esta conversa é do canal ${conversationOrigin}. Mensagens devem ser enviadas pelo canal correto, não via WhatsApp.`);
+          console.error(`[Evolution API] BLOCKED: Frontend incorrectly called Evolution API for ${conversationOrigin} conversation`, {
+            conversationId,
+            origin: conversationOrigin,
+            lawFirmId,
+            message: body.message?.substring(0, 50),
+          });
+          
+          // Return error without saving anything - frontend should handle this via Widget route
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: `Canal incorreto: Esta conversa é do ${conversationOrigin}. Use o canal correto.`,
+              errorCode: 'WRONG_CHANNEL',
+              channel: conversationOrigin,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
         }
 
         // Fallback: old WhatsApp conversations may not have whatsapp_instance_id set.
