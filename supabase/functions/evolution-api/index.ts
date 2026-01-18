@@ -571,6 +571,34 @@ serve(async (req) => {
         const createData = await createResponse.json();
         console.log(`[Evolution API] Create instance response:`, JSON.stringify(createData));
 
+        // Auto-configure settings to ignore groups by default
+        try {
+          const settingsPayload = {
+            groupsIgnore: true,
+            alwaysOnline: false,
+            readMessages: false,
+            readStatus: false,
+            syncFullHistory: false,
+          };
+          
+          const settingsResponse = await fetchWithTimeout(`${apiUrl}/settings/set/${body.instanceName}`, {
+            method: "POST",
+            headers: {
+              apikey: apiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(settingsPayload),
+          });
+          
+          if (settingsResponse.ok) {
+            console.log(`[Evolution API] Auto-configured groupsIgnore=true for instance ${body.instanceName}`);
+          } else {
+            console.warn(`[Evolution API] Failed to auto-configure settings for ${body.instanceName}:`, await safeReadResponseText(settingsResponse));
+          }
+        } catch (settingsError) {
+          console.warn(`[Evolution API] Error auto-configuring settings:`, settingsError);
+        }
+
         // Extract QR code from response - handle various formats
         let qrCode: string | null = null;
         if (createData.qrcode?.base64) {
@@ -2010,6 +2038,34 @@ serve(async (req) => {
 
         const createData = await createResponse.json();
         console.log(`[Evolution API] GLOBAL Create instance response:`, JSON.stringify(createData));
+
+        // Auto-configure settings to ignore groups by default
+        try {
+          const settingsPayload = {
+            groupsIgnore: true,
+            alwaysOnline: false,
+            readMessages: false,
+            readStatus: false,
+            syncFullHistory: false,
+          };
+          
+          const settingsResponse = await fetchWithTimeout(`${apiUrl}/settings/set/${body.instanceName}`, {
+            method: "POST",
+            headers: {
+              apikey: globalApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(settingsPayload),
+          });
+          
+          if (settingsResponse.ok) {
+            console.log(`[Evolution API] GLOBAL Auto-configured groupsIgnore=true for instance ${body.instanceName}`);
+          } else {
+            console.warn(`[Evolution API] GLOBAL Failed to auto-configure settings for ${body.instanceName}:`, await safeReadResponseText(settingsResponse));
+          }
+        } catch (settingsError) {
+          console.warn(`[Evolution API] GLOBAL Error auto-configuring settings:`, settingsError);
+        }
 
         let qrCode: string | null = null;
         if (createData.qrcode?.base64) {
