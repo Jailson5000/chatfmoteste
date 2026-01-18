@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.tray-commerce-webhook]
 verify_jwt = false
+
+[functions.widget-messages]
+verify_jwt = false
