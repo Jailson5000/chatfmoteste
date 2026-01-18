@@ -72,7 +72,7 @@ export function MediaPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md fixed left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%] z-[100]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {mediaType === "image" && "Enviar imagem"}
