@@ -2638,9 +2638,10 @@ serve(async (req) => {
         // Save the user message to the conversation
         await supabase.from("messages").insert({
           conversation_id: conversationId,
-          content: message, // Use the message from request body
-          sender: "client",
+          content: message,
           sender_type: "client",
+          is_from_me: false,
+          message_type: "text",
           status: "delivered"
         });
         
@@ -2649,8 +2650,9 @@ serve(async (req) => {
         await supabase.from("messages").insert({
           conversation_id: conversationId,
           content: systemMessage,
-          sender: "system",
           sender_type: "system",
+          is_from_me: true,
+          message_type: "text",
           status: "delivered"
         });
         
