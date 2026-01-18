@@ -2385,37 +2385,77 @@ serve(async (req) => {
 
     // Get Tray/Widget Chat integration settings if source is web/TRAY/WIDGET
     let traySettings: any = null;
+    let validatedLawFirmId: string | null = null;
+    
     if ((source === 'web' || source === 'TRAY' || source === 'WIDGET') && context?.lawFirmId) {
-      const { data: trayIntegration } = await supabase
-        .from("tray_chat_integrations")
-        .select("default_automation_id, default_department_id, default_status_id, is_active")
-        .eq("law_firm_id", context.lawFirmId)
-        .eq("is_active", true)
-        .maybeSingle();
-      
-      if (trayIntegration) {
-        traySettings = trayIntegration;
-        console.log(`[AI Chat] Loaded Tray/Widget settings for law_firm ${context.lawFirmId}:`, {
+      // SECURITY: For widget requests, validate lawFirmId matches the widget_key
+      // This prevents attackers from sending a fake lawFirmId
+      if (isWidgetConversation && (context as any).widgetKey) {
+        const { data: widgetValidation } = await supabase
+          .from("tray_chat_integrations")
+          .select("law_firm_id, default_automation_id, default_department_id, default_status_id, is_active")
+          .eq("widget_key", (context as any).widgetKey)
+          .eq("is_active", true)
+          .maybeSingle();
+        
+        if (!widgetValidation) {
+          console.error(`[${errorRef}] Widget key not found or inactive: ${(context as any).widgetKey}`);
+          return new Response(
+            JSON.stringify({ error: "Widget configuration not found", ref: errorRef }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        // CRITICAL: Override lawFirmId with the validated one from widget_key
+        // This ensures tenant isolation even if someone tries to spoof lawFirmId
+        if (widgetValidation.law_firm_id !== context.lawFirmId) {
+          console.warn(`[AI Chat] LawFirmId mismatch - using validated: ${widgetValidation.law_firm_id} instead of provided: ${context.lawFirmId}`);
+        }
+        validatedLawFirmId = widgetValidation.law_firm_id;
+        traySettings = widgetValidation;
+        
+        console.log(`[AI Chat] Widget validated for law_firm ${validatedLawFirmId}:`, {
           default_automation_id: traySettings.default_automation_id,
           default_department_id: traySettings.default_department_id,
           default_status_id: traySettings.default_status_id
         });
+      } else {
+        // Non-widget requests - use provided lawFirmId
+        const { data: trayIntegration } = await supabase
+          .from("tray_chat_integrations")
+          .select("default_automation_id, default_department_id, default_status_id, is_active")
+          .eq("law_firm_id", context.lawFirmId)
+          .eq("is_active", true)
+          .maybeSingle();
         
-        // Use Tray's default automation if no automationId was provided
-        if (!automationId && traySettings.default_automation_id) {
-          automationId = traySettings.default_automation_id;
-          console.log(`[AI Chat] Using Tray/Widget default automation: ${automationId}`);
+        if (trayIntegration) {
+          traySettings = trayIntegration;
+          validatedLawFirmId = context.lawFirmId;
+          console.log(`[AI Chat] Loaded Tray settings for law_firm ${context.lawFirmId}:`, {
+            default_automation_id: traySettings.default_automation_id,
+            default_department_id: traySettings.default_department_id,
+            default_status_id: traySettings.default_status_id
+          });
         }
       }
+      
+      // Use Tray's default automation if no automationId was provided
+      if (!automationId && traySettings?.default_automation_id) {
+        automationId = traySettings.default_automation_id;
+        console.log(`[AI Chat] Using Tray/Widget default automation: ${automationId}`);
+      }
     }
+    
+    // Store validated lawFirmId for widget (will be used later alongside agentLawFirmId)
 
     // For widget conversations, create or find existing conversation
-    if (isWidgetConversation && context?.lawFirmId) {
+    // CRITICAL: Use validatedLawFirmId (from widget_key validation) for tenant isolation
+    if (isWidgetConversation && validatedLawFirmId) {
       // Look for existing conversation with this widget session ID
       const { data: existingConv } = await supabase
         .from("conversations")
         .select("id")
-        .eq("law_firm_id", context.lawFirmId)
+        .eq("law_firm_id", validatedLawFirmId)
         .eq("origin", "WIDGET")
         .eq("remote_jid", widgetSessionId)
         .maybeSingle();
@@ -2424,22 +2464,23 @@ serve(async (req) => {
         conversationId = existingConv.id;
         console.log(`[AI Chat] Found existing widget conversation: ${conversationId}`);
       } else {
-        // Create new conversation for widget
+        // Create new conversation for widget with VALIDATED law_firm_id
         const { data: newConv, error: convError } = await supabase
           .from("conversations")
           .insert({
-            law_firm_id: context.lawFirmId,
+            law_firm_id: validatedLawFirmId, // SECURITY: Use validated ID, not from context
             remote_jid: widgetSessionId,
-            contact_name: context.clientName || "Visitante Web",
-            contact_phone: context.clientPhone || null,
+            contact_name: context?.clientName || "Visitante Web",
+            contact_phone: context?.clientPhone || null,
             origin: "WIDGET",
             origin_metadata: {
               widget_session: widgetSessionId,
-              page_url: (context as any).pageUrl || null,
-              page_title: (context as any).pageTitle || null,
-              referrer: (context as any).referrer || null,
-              device: (context as any).device || null,
-              user_agent: (context as any).userAgent || null,
+              widget_key: (context as any)?.widgetKey || null,
+              page_url: (context as any)?.pageUrl || null,
+              page_title: (context as any)?.pageTitle || null,
+              referrer: (context as any)?.referrer || null,
+              device: (context as any)?.device || null,
+              user_agent: (context as any)?.userAgent || null,
             },
             current_handler: automationId ? "ai" : "human",
             current_automation_id: automationId || null,
@@ -2458,7 +2499,7 @@ serve(async (req) => {
         }
 
         conversationId = newConv.id;
-        console.log(`[AI Chat] Created new widget conversation: ${conversationId}`);
+        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}`);
       }
     }
 
