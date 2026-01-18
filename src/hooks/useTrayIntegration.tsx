@@ -27,17 +27,14 @@ interface TrayIntegration {
 
 // Generate snippet code from widget key
 function generateSnippetCode(widgetKey: string): string {
-  return `<!-- MiauChat Widget - Tray Commerce -->
+  return `<!-- MiauChat Widget -->
 <script>
   window.MiauChat = {
     tenant: "${widgetKey}",
-    source: "TRAY",
-    pageUrl: window.location.href,
-    referrer: document.referrer,
-    device: /Mobile|Android|iPhone/i.test(navigator.userAgent) ? "mobile" : "desktop"
+    source: "TRAY"
   };
 </script>
-<script async src="https://miauchat.com.br/widget.js"></script>`;
+<script async src="https://chatfmoteste.lovable.app/widget.js"></script>`;
 }
 
 export function useTrayIntegration() {
