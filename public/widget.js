@@ -759,22 +759,43 @@
         })
       });
 
+      // REGRA DE OURO: Se response.ok, NUNCA mostrar erro
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errorText = await response.text();
+        console.error('[MiauChat] HTTP error:', response.status, errorText);
+        throw new Error(`Erro HTTP ${response.status}`);
       }
 
-      const data = await response.json();
+      // Ler body como texto primeiro
+      const text = await response.text();
+      let data = null;
       
-      if (data.success) {
-        conversationId = data.conversationId;
-        const assistantMessage = { role: 'assistant', content: data.response };
-        messages.push(assistantMessage);
-        saveConversation();
-      } else {
-        throw new Error(data.error || 'Erro ao processar mensagem');
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.warn('[MiauChat] JSON parse warning (response OK, continuing):', text.substring(0, 100));
+          // Response OK mas JSON inválido - NÃO é erro, apenas continua
+        }
       }
+
+      // Se veio conversationId, salvar
+      if (data?.conversationId) {
+        conversationId = data.conversationId;
+      }
+
+      // Renderizar resposta do bot se existir (aceitar múltiplos formatos)
+      const botResponse = data?.response || data?.setupMessage || data?.message || data?.reply || data?.assistantMessage;
+      if (botResponse) {
+        messages.push({ role: 'assistant', content: botResponse });
+        saveConversation();
+      }
+      // Se NÃO veio resposta do bot, está tudo OK - apenas aguarda humano
+      // NÃO lançar erro aqui!
+      
     } catch (error) {
       console.error('[MiauChat] Send error:', error);
+      // Só adiciona mensagem de erro se realmente houve erro de rede/HTTP
       messages.push({ 
         role: 'system', 
         content: 'Desculpe, ocorreu um erro. Tente novamente.' 
