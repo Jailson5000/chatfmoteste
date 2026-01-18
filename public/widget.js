@@ -1,5 +1,5 @@
 /**
- * MiauChat Widget
+ * MiauChat Widget v1.1
  * Widget de chat embarcável para sites externos
  * 
  * Uso (Método 1 - window.MiauChat):
