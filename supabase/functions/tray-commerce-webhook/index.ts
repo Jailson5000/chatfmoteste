@@ -16,6 +16,53 @@ interface TrayWebhookPayload {
   data?: Record<string, unknown>;
 }
 
+// Validate webhook secret from query param or header
+function validateWebhookSecret(
+  req: Request,
+  connection: Record<string, unknown> | null
+): Response | null {
+  if (!connection) {
+    console.warn("[TRAY_WEBHOOK] Connection not found");
+    return new Response(
+      JSON.stringify({ error: "Connection not found" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const webhookSecret = connection.webhook_secret as string | undefined;
+  
+  // If no secret configured, fail closed (security)
+  if (!webhookSecret) {
+    console.error("[TRAY_WEBHOOK] No webhook_secret configured for connection");
+    return new Response(
+      JSON.stringify({ error: "Webhook not configured" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Check secret from query param or header
+  const url = new URL(req.url);
+  const providedSecret = 
+    url.searchParams.get("secret") || 
+    url.searchParams.get("token") ||
+    req.headers.get("x-tray-webhook-secret") ||
+    req.headers.get("x-webhook-secret");
+
+  if (providedSecret !== webhookSecret) {
+    console.warn("[TRAY_WEBHOOK] Invalid webhook secret provided", {
+      hasSecret: !!providedSecret,
+      connectionId: connection.id,
+    });
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  console.log("[TRAY_WEBHOOK] ✅ Webhook secret validated", { connectionId: connection.id });
+  return null; // Valid
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -40,15 +87,21 @@ Deno.serve(async (req) => {
       connectionId = pathParts[2];
     }
 
-    // Try to get connection
+    // Try to get connection (include webhook_secret)
     let connection: Record<string, unknown> | null = null;
     if (connectionId) {
       const { data } = await supabase
         .from("tray_commerce_connections")
-        .select("*")
+        .select("*, webhook_secret")
         .eq("id", connectionId)
         .maybeSingle();
       connection = data;
+    }
+
+    // SECURITY: Validate webhook secret BEFORE processing
+    const authError = validateWebhookSecret(req, connection);
+    if (authError) {
+      return authError;
     }
 
     // Parse webhook payload
@@ -64,7 +117,7 @@ Deno.serve(async (req) => {
 
     const eventType = payload.scopeName || payload.scope_name || payload.act || "unknown";
     
-    console.log("Received Tray webhook:", {
+    console.log("[TRAY_WEBHOOK] Received event:", {
       connectionId,
       eventType,
       sellerId: payload.seller_id,
@@ -89,7 +142,7 @@ Deno.serve(async (req) => {
 
     // If connection is not active, just log and return
     if (!connection || !connection.is_active) {
-      console.log("Connection not found or inactive, webhook logged but not processed");
+      console.log("[TRAY_WEBHOOK] Connection inactive, webhook logged but not processed");
       return new Response(JSON.stringify({ received: true, processed: false }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
