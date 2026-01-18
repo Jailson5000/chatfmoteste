@@ -2451,10 +2451,15 @@ serve(async (req) => {
     // For widget conversations, create or find existing conversation
     // CRITICAL: Use validatedLawFirmId (from widget_key validation) for tenant isolation
     if (isWidgetConversation && validatedLawFirmId) {
+      // Extract client info from context
+      const clientName = context?.clientName || "Visitante Web";
+      const clientPhone = context?.clientPhone || null;
+      const clientEmail = (context as any)?.clientEmail || null;
+      
       // Look for existing conversation with this widget session ID
       const { data: existingConv } = await supabase
         .from("conversations")
-        .select("id")
+        .select("id, client_id")
         .eq("law_firm_id", validatedLawFirmId)
         .eq("origin", "WIDGET")
         .eq("remote_jid", widgetSessionId)
@@ -2463,19 +2468,87 @@ serve(async (req) => {
       if (existingConv) {
         conversationId = existingConv.id;
         console.log(`[AI Chat] Found existing widget conversation: ${conversationId}`);
+        
+        // Update contact info if provided and changed
+        if (clientName && clientName !== "Visitante Web") {
+          await supabase
+            .from("conversations")
+            .update({ contact_name: clientName, contact_phone: clientPhone })
+            .eq("id", conversationId);
+          
+          // Update client record if exists
+          if (existingConv.client_id) {
+            await supabase
+              .from("clients")
+              .update({ 
+                name: clientName,
+                phone: clientPhone || undefined,
+                email: clientEmail || undefined
+              })
+              .eq("id", existingConv.client_id);
+          }
+        }
       } else {
+        // First, try to find or create a client record
+        let clientId: string | null = null;
+        
+        if (clientPhone) {
+          // Look for existing client with same phone in this tenant
+          const { data: existingClient } = await supabase
+            .from("clients")
+            .select("id")
+            .eq("law_firm_id", validatedLawFirmId)
+            .eq("phone", clientPhone)
+            .maybeSingle();
+          
+          if (existingClient) {
+            clientId = existingClient.id;
+            // Update client info
+            await supabase
+              .from("clients")
+              .update({ 
+                name: clientName,
+                email: clientEmail || undefined
+              })
+              .eq("id", clientId);
+            console.log(`[AI Chat] Found existing client: ${clientId}`);
+          } else {
+            // Create new client
+            const { data: newClient, error: clientError } = await supabase
+              .from("clients")
+              .insert({
+                law_firm_id: validatedLawFirmId,
+                name: clientName,
+                phone: clientPhone,
+                email: clientEmail || null,
+                notes: `Origem: Widget do site`,
+                department_id: traySettings?.default_department_id || null,
+                custom_status_id: traySettings?.default_status_id || null,
+              })
+              .select("id")
+              .single();
+            
+            if (!clientError && newClient) {
+              clientId = newClient.id;
+              console.log(`[AI Chat] Created new client: ${clientId}`);
+            }
+          }
+        }
+        
         // Create new conversation for widget with VALIDATED law_firm_id
         const { data: newConv, error: convError } = await supabase
           .from("conversations")
           .insert({
             law_firm_id: validatedLawFirmId, // SECURITY: Use validated ID, not from context
             remote_jid: widgetSessionId,
-            contact_name: context?.clientName || "Visitante Web",
-            contact_phone: context?.clientPhone || null,
+            contact_name: clientName,
+            contact_phone: clientPhone,
+            client_id: clientId,
             origin: "WIDGET",
             origin_metadata: {
               widget_session: widgetSessionId,
               widget_key: (context as any)?.widgetKey || null,
+              client_email: clientEmail,
               page_url: (context as any)?.pageUrl || null,
               page_title: (context as any)?.pageTitle || null,
               referrer: (context as any)?.referrer || null,
@@ -2499,7 +2572,7 @@ serve(async (req) => {
         }
 
         conversationId = newConv.id;
-        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}`);
+        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}, client: ${clientId}`);
       }
     }
 
