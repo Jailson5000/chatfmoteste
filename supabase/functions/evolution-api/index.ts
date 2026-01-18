@@ -1250,12 +1250,13 @@ serve(async (req) => {
         let targetRemoteJid = body.remoteJid;
         let conversationId = body.conversationId;
         let instanceId = body.instanceId;
+        let conversationOrigin: string | null = null;
 
-        // If we have a conversationId, get the remoteJid and instanceId from it
+        // If we have a conversationId, get the remoteJid, instanceId, and ORIGIN from it
         if (conversationId && !targetRemoteJid) {
           const { data: conversation, error: convError } = await supabaseClient
             .from("conversations")
-            .select("remote_jid, whatsapp_instance_id")
+            .select("remote_jid, whatsapp_instance_id, origin")
             .eq("id", conversationId)
             .eq("law_firm_id", lawFirmId)
             .single();
@@ -1267,11 +1268,23 @@ serve(async (req) => {
 
           targetRemoteJid = conversation.remote_jid;
           instanceId = conversation.whatsapp_instance_id;
+          conversationOrigin = conversation.origin;
         }
 
-        // Fallback: old conversations may not have whatsapp_instance_id set.
+        // CRITICAL: Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+        // These conversations MUST NOT be sent via WhatsApp
+        const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+        const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin.toUpperCase());
+
+        if (isNonWhatsAppConversation) {
+          console.error(`[Evolution API] Blocked: Attempting to send WhatsApp message for ${conversationOrigin} conversation`);
+          throw new Error(`Esta conversa é do canal ${conversationOrigin}. Mensagens devem ser enviadas pelo canal correto, não via WhatsApp.`);
+        }
+
+        // Fallback: old WhatsApp conversations may not have whatsapp_instance_id set.
+        // ONLY apply this fallback for WhatsApp conversations (origin is null or 'WHATSAPP')
         // If there's a connected instance for the law firm, use it and persist back to the conversation.
-        if (!instanceId && conversationId) {
+        if (!instanceId && conversationId && !isNonWhatsAppConversation) {
           const { data: fallbackInstance } = await supabaseClient
             .from("whatsapp_instances")
             .select("id")
