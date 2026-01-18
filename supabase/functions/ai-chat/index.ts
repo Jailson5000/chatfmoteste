@@ -10,7 +10,8 @@ const corsHeaders = {
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_CONTEXT_STRING_LENGTH = 255;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api'];
+const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api', 'WIDGET'];
+const WIDGET_ID_REGEX = /^widget_[a-zA-Z0-9_-]{10,100}$/;
 
 // Prompt injection detection patterns
 const INJECTION_PATTERNS = [
@@ -41,6 +42,12 @@ function generateErrorRef(): string {
 function isValidUUID(str: string | undefined | null): boolean {
   if (!str) return false;
   return UUID_REGEX.test(str);
+}
+
+// Helper to check if it's a widget conversation ID
+function isWidgetId(str: string | undefined | null): boolean {
+  if (!str) return false;
+  return WIDGET_ID_REGEX.test(str);
 }
 
 // Detect potential prompt injection attempts
@@ -2272,7 +2279,7 @@ serve(async (req) => {
 
     let { conversationId, message, automationId, source, context }: ChatRequest = requestBody;
 
-    // Validate required fields
+    // Validate required fields - conversationId can be widget ID or UUID
     if (!conversationId || !message) {
       console.error(`[${errorRef}] Missing required fields`);
       return new Response(
@@ -2281,13 +2288,23 @@ serve(async (req) => {
       );
     }
 
-    // Validate conversationId UUID format
+    // Track if this is a widget conversation (needs special handling)
+    let isWidgetConversation = false;
+    let widgetSessionId = '';
+
+    // Validate conversationId - accept UUID or widget format (widget_KEY_visitorID)
     if (!isValidUUID(conversationId)) {
-      console.error(`[${errorRef}] Invalid conversationId format`);
-      return new Response(
-        JSON.stringify({ error: "Invalid request format", ref: errorRef }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (isWidgetId(conversationId)) {
+        isWidgetConversation = true;
+        widgetSessionId = conversationId;
+        console.log(`[AI Chat] Widget conversation detected: ${widgetSessionId}`);
+      } else {
+        console.error(`[${errorRef}] Invalid conversationId format`);
+        return new Response(
+          JSON.stringify({ error: "Invalid request format", ref: errorRef }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Validate message (string and length)
@@ -2366,9 +2383,9 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get Tray Chat integration settings if source is web/TRAY
+    // Get Tray/Widget Chat integration settings if source is web/TRAY/WIDGET
     let traySettings: any = null;
-    if ((source === 'web' || source === 'TRAY') && context?.lawFirmId) {
+    if ((source === 'web' || source === 'TRAY' || source === 'WIDGET') && context?.lawFirmId) {
       const { data: trayIntegration } = await supabase
         .from("tray_chat_integrations")
         .select("default_automation_id, default_department_id, default_status_id, is_active")
@@ -2378,7 +2395,7 @@ serve(async (req) => {
       
       if (trayIntegration) {
         traySettings = trayIntegration;
-        console.log(`[AI Chat] Loaded Tray settings for law_firm ${context.lawFirmId}:`, {
+        console.log(`[AI Chat] Loaded Tray/Widget settings for law_firm ${context.lawFirmId}:`, {
           default_automation_id: traySettings.default_automation_id,
           default_department_id: traySettings.default_department_id,
           default_status_id: traySettings.default_status_id
@@ -2387,8 +2404,61 @@ serve(async (req) => {
         // Use Tray's default automation if no automationId was provided
         if (!automationId && traySettings.default_automation_id) {
           automationId = traySettings.default_automation_id;
-          console.log(`[AI Chat] Using Tray default automation: ${automationId}`);
+          console.log(`[AI Chat] Using Tray/Widget default automation: ${automationId}`);
         }
+      }
+    }
+
+    // For widget conversations, create or find existing conversation
+    if (isWidgetConversation && context?.lawFirmId) {
+      // Look for existing conversation with this widget session ID
+      const { data: existingConv } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("law_firm_id", context.lawFirmId)
+        .eq("origin", "WIDGET")
+        .eq("remote_jid", widgetSessionId)
+        .maybeSingle();
+
+      if (existingConv) {
+        conversationId = existingConv.id;
+        console.log(`[AI Chat] Found existing widget conversation: ${conversationId}`);
+      } else {
+        // Create new conversation for widget
+        const { data: newConv, error: convError } = await supabase
+          .from("conversations")
+          .insert({
+            law_firm_id: context.lawFirmId,
+            remote_jid: widgetSessionId,
+            contact_name: context.clientName || "Visitante Web",
+            contact_phone: context.clientPhone || null,
+            origin: "WIDGET",
+            origin_metadata: {
+              widget_session: widgetSessionId,
+              page_url: (context as any).pageUrl || null,
+              page_title: (context as any).pageTitle || null,
+              referrer: (context as any).referrer || null,
+              device: (context as any).device || null,
+              user_agent: (context as any).userAgent || null,
+            },
+            current_handler: automationId ? "ai" : "human",
+            current_automation_id: automationId || null,
+            department_id: traySettings?.default_department_id || null,
+            status: "open",
+          })
+          .select("id")
+          .single();
+
+        if (convError || !newConv) {
+          console.error(`[${errorRef}] Failed to create widget conversation:`, convError);
+          return new Response(
+            JSON.stringify({ error: "Failed to create conversation", ref: errorRef }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        conversationId = newConv.id;
+        console.log(`[AI Chat] Created new widget conversation: ${conversationId}`);
       }
     }
 
@@ -2404,7 +2474,7 @@ serve(async (req) => {
       .in("key", ["ai_openai_model"]);
     
     if (globalSettings) {
-      const modelSetting = globalSettings.find(s => s.key === "ai_openai_model");
+      const modelSetting = globalSettings.find((s: any) => s.key === "ai_openai_model");
       if (modelSetting?.value && typeof modelSetting.value === "string") {
         openaiModel = modelSetting.value;
         console.log(`[AI Chat] Global OpenAI model configured: ${openaiModel}`);
