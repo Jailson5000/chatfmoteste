@@ -42,7 +42,7 @@ export function useTrayIntegration() {
   const queryClient = useQueryClient();
 
   const { data: integration, isLoading } = useQuery({
-    queryKey: ["tray-integration"],
+    queryKey: ["tray-integration", user?.id],
     queryFn: async () => {
       const { data: profile } = await supabase
         .from("profiles")
@@ -75,7 +75,7 @@ export function useTrayIntegration() {
         snippet_code: generateSnippetCode(integrationData.widget_key),
       };
     },
-    enabled: !!user,
+    enabled: !!user?.id,
   });
 
   const toggleMutation = useMutation({
@@ -157,12 +157,8 @@ export function useTrayIntegration() {
       }
     },
     onSuccess: (_, enabled) => {
-      queryClient.invalidateQueries({ queryKey: ["tray-integration"] });
+      queryClient.invalidateQueries({ queryKey: ["tray-integration", user?.id] });
       toast.success(enabled ? "Integração Tray ativada!" : "Integração Tray desativada");
-    },
-    onError: (error) => {
-      console.error("Error toggling Tray integration:", error);
-      toast.error("Erro ao alterar integração Tray");
     },
   });
 
@@ -188,12 +184,8 @@ export function useTrayIntegration() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tray-integration"] });
+      queryClient.invalidateQueries({ queryKey: ["tray-integration", user?.id] });
       toast.success("Configuração atualizada!");
-    },
-    onError: (error) => {
-      console.error("Error updating Tray settings:", error);
-      toast.error("Erro ao atualizar configuração");
     },
   });
 
