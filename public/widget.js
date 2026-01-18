@@ -1,7 +1,9 @@
 /**
- * MiauChat Widget v1.2
+ * MiauChat Widget v2.0
  * Widget de chat embarcável para sites externos
- * Agora com formulário de pré-chat para identificação do cliente
+ * - Design estilo JivoChat
+ * - Widget arrastável
+ * - Polling para receber mensagens do atendente
  * 
  * Uso (Método 1 - window.MiauChat):
  * <script>
@@ -23,7 +25,7 @@
   const WIDGET_KEY = GLOBAL_CONFIG.tenant || SCRIPT_TAG?.getAttribute('data-widget-key');
   const API_URL = GLOBAL_CONFIG.apiUrl || SCRIPT_TAG?.getAttribute('data-api-url') || 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/ai-chat';
   const POSITION = GLOBAL_CONFIG.position || SCRIPT_TAG?.getAttribute('data-position') || 'bottom-right';
-  const PRIMARY_COLOR = GLOBAL_CONFIG.color || SCRIPT_TAG?.getAttribute('data-color') || '#6366f1';
+  const PRIMARY_COLOR = GLOBAL_CONFIG.color || SCRIPT_TAG?.getAttribute('data-color') || '#4CAF50';
   const SOURCE = GLOBAL_CONFIG.source || 'WIDGET';
 
   if (!WIDGET_KEY) {
@@ -47,6 +49,13 @@
   let welcomeMessage = 'Olá! Como posso ajudar você hoje?';
   let offlineMessage = 'No momento não estamos disponíveis. Deixe sua mensagem que retornaremos em breve.';
   let widgetColor = PRIMARY_COLOR;
+  let lastMessageCount = 0;
+  let pollingInterval = null;
+  
+  // Drag state
+  let isDragging = false;
+  let dragOffset = { x: 0, y: 0 };
+  let panelPosition = null;
   
   // Client identification state
   let clientInfo = {
@@ -100,6 +109,7 @@
         const data = JSON.parse(saved);
         conversationId = data.conversationId;
         messages = data.messages || [];
+        lastMessageCount = messages.length;
         return true;
       } catch (e) {
         console.error('[MiauChat] Failed to load conversation:', e);
@@ -149,6 +159,72 @@
     }
   };
 
+  // Fetch new messages from server (polling)
+  const fetchNewMessages = async () => {
+    if (!conversationId || !lawFirmId) return;
+    
+    try {
+      // Query messages from the conversation
+      const response = await fetch(
+        `https://jiragtersejnarxruqyd.supabase.co/rest/v1/messages?conversation_id=eq.${conversationId}&order=created_at.asc&select=id,content,sender_type,is_from_me,created_at`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY
+          }
+        }
+      );
+      
+      if (!response.ok) return;
+      
+      const serverMessages = await response.json();
+      if (!serverMessages || serverMessages.length === 0) return;
+      
+      // Check for new messages from attendant (is_from_me = true means from business/attendant)
+      const newMessages = [];
+      serverMessages.forEach(msg => {
+        // Skip user messages (we already have them)
+        if (msg.sender_type === 'client' || !msg.is_from_me) return;
+        
+        // Check if we already have this message
+        const existingMsg = messages.find(m => m.serverId === msg.id);
+        if (!existingMsg && msg.content) {
+          newMessages.push({
+            role: 'assistant',
+            content: msg.content,
+            serverId: msg.id,
+            timestamp: msg.created_at
+          });
+        }
+      });
+      
+      if (newMessages.length > 0) {
+        // Add new messages to our list
+        messages.push(...newMessages);
+        saveConversation();
+        renderMessages();
+        console.log('[MiauChat] Received', newMessages.length, 'new messages from attendant');
+      }
+    } catch (error) {
+      console.error('[MiauChat] Failed to fetch new messages:', error);
+    }
+  };
+
+  // Start polling for new messages
+  const startPolling = () => {
+    if (pollingInterval) return;
+    pollingInterval = setInterval(fetchNewMessages, 5000); // Poll every 5 seconds
+    console.log('[MiauChat] Polling started');
+  };
+
+  // Stop polling
+  const stopPolling = () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      pollingInterval = null;
+      console.log('[MiauChat] Polling stopped');
+    }
+  };
+
   // Format phone number for display
   const formatPhone = (value) => {
     const numbers = value.replace(/\D/g, '');
@@ -168,50 +244,103 @@
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       }
       
-      .miauchat-widget-button {
+      /* Floating bubble with tooltip */
+      .miauchat-widget-bubble {
         position: fixed;
         ${POSITION.includes('bottom') ? 'bottom: 20px;' : 'top: 20px;'}
         ${POSITION.includes('right') ? 'right: 20px;' : 'left: 20px;'}
-        width: 60px;
-        height: 60px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 999999;
+        cursor: pointer;
+        ${POSITION.includes('right') ? 'flex-direction: row-reverse;' : 'flex-direction: row;'}
+      }
+      
+      .miauchat-bubble-icon {
+        width: 56px;
+        height: 56px;
         border-radius: 50%;
         background: ${widgetColor};
         border: none;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         display: flex;
         align-items: center;
         justify-content: center;
         transition: transform 0.2s, box-shadow 0.2s;
-        z-index: 999999;
+        flex-shrink: 0;
       }
       
-      .miauchat-widget-button:hover {
+      .miauchat-bubble-icon:hover {
         transform: scale(1.05);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
       }
       
-      .miauchat-widget-button svg {
-        width: 28px;
-        height: 28px;
+      .miauchat-bubble-icon svg {
+        width: 26px;
+        height: 26px;
         fill: white;
       }
       
+      .miauchat-bubble-tooltip {
+        background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
+        color: white;
+        padding: 10px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        animation: miauchat-pulse 2s ease-in-out infinite;
+      }
+      
+      .miauchat-bubble-tooltip::after {
+        content: '';
+        position: absolute;
+        ${POSITION.includes('right') ? 'right: -6px;' : 'left: -6px;'}
+        top: 50%;
+        transform: translateY(-50%);
+        border: 6px solid transparent;
+        ${POSITION.includes('right') ? 'border-left-color: #2c3e50;' : 'border-right-color: #2c3e50;'}
+      }
+      
+      .miauchat-online-dot {
+        width: 8px;
+        height: 8px;
+        background: #4CAF50;
+        border-radius: 50%;
+        animation: miauchat-glow 1.5s ease-in-out infinite;
+      }
+      
+      @keyframes miauchat-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+      }
+      
+      @keyframes miauchat-glow {
+        0%, 100% { box-shadow: 0 0 4px #4CAF50; }
+        50% { box-shadow: 0 0 8px #4CAF50, 0 0 12px #4CAF50; }
+      }
+      
+      /* Panel - JivoChat style */
       .miauchat-widget-panel {
         position: fixed;
         ${POSITION.includes('bottom') ? 'bottom: 90px;' : 'top: 90px;'}
         ${POSITION.includes('right') ? 'right: 20px;' : 'left: 20px;'}
-        width: 380px;
+        width: 370px;
         max-width: calc(100vw - 40px);
-        height: 520px;
-        max-height: calc(100vh - 120px);
         background: white;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        border-radius: 12px;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
         display: none;
         flex-direction: column;
         overflow: hidden;
         z-index: 999999;
+        max-height: calc(100vh - 120px);
       }
       
       .miauchat-widget-panel.open {
@@ -219,45 +348,68 @@
         animation: miauchat-slide-in 0.3s ease;
       }
       
+      .miauchat-widget-panel.dragging {
+        transition: none;
+        user-select: none;
+      }
+      
       @keyframes miauchat-slide-in {
         from {
           opacity: 0;
-          transform: translateY(20px);
+          transform: translateY(20px) scale(0.95);
         }
         to {
           opacity: 1;
-          transform: translateY(0);
+          transform: translateY(0) scale(1);
         }
       }
       
+      /* Header with drag handle */
       .miauchat-header {
         background: ${widgetColor};
         color: white;
-        padding: 16px 20px;
+        padding: 14px 16px;
         display: flex;
         align-items: center;
         justify-content: space-between;
+        cursor: move;
+        user-select: none;
+      }
+      
+      .miauchat-header-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
       
       .miauchat-header-title {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 600;
         display: flex;
         align-items: center;
         gap: 8px;
       }
       
-      .miauchat-header-title svg {
-        width: 24px;
-        height: 24px;
-        fill: white;
+      .miauchat-header-subtitle {
+        font-size: 12px;
+        opacity: 0.9;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      
+      .miauchat-status-dot {
+        width: 8px;
+        height: 8px;
+        background: #90EE90;
+        border-radius: 50%;
       }
       
       .miauchat-close-btn {
         background: rgba(255, 255, 255, 0.2);
         border: none;
-        width: 32px;
-        height: 32px;
+        width: 28px;
+        height: 28px;
         border-radius: 50%;
         cursor: pointer;
         display: flex;
@@ -271,53 +423,54 @@
       }
       
       .miauchat-close-btn svg {
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
         fill: white;
+      }
+      
+      /* Branding bar */
+      .miauchat-branding {
+        background: #f5f5f5;
+        padding: 8px 16px;
+        font-size: 11px;
+        color: #888;
+        text-align: center;
+        border-bottom: 1px solid #eee;
+      }
+      
+      .miauchat-branding a {
+        color: ${widgetColor};
+        text-decoration: none;
+        font-weight: 500;
       }
       
       /* Pre-chat form styles */
       .miauchat-prechat {
         flex: 1;
-        padding: 24px 20px;
+        padding: 20px 16px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        background: #f8f9fa;
+        gap: 12px;
+        background: white;
         overflow-y: auto;
-      }
-      
-      .miauchat-prechat-title {
-        font-size: 18px;
-        font-weight: 600;
-        color: #1f2937;
-        text-align: center;
-        margin-bottom: 8px;
-      }
-      
-      .miauchat-prechat-subtitle {
-        font-size: 14px;
-        color: #6b7280;
-        text-align: center;
-        margin-bottom: 16px;
       }
       
       .miauchat-form-group {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 4px;
       }
       
       .miauchat-form-label {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
-        color: #374151;
+        color: #666;
       }
       
       .miauchat-form-input {
-        padding: 12px 14px;
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
         font-size: 14px;
         outline: none;
         transition: border-color 0.2s, box-shadow 0.2s;
@@ -325,63 +478,68 @@
       
       .miauchat-form-input:focus {
         border-color: ${widgetColor};
-        box-shadow: 0 0 0 3px ${widgetColor}20;
+        box-shadow: 0 0 0 2px ${widgetColor}20;
       }
       
       .miauchat-form-input::placeholder {
-        color: #9ca3af;
+        color: #aaa;
       }
       
       .miauchat-form-input.error {
         border-color: #ef4444;
       }
       
-      .miauchat-form-error {
-        font-size: 12px;
-        color: #ef4444;
-        margin-top: 2px;
-      }
-      
       .miauchat-start-btn {
-        padding: 14px 24px;
+        padding: 12px 20px;
         background: ${widgetColor};
         color: white;
         border: none;
-        border-radius: 8px;
-        font-size: 15px;
+        border-radius: 6px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
-        transition: opacity 0.2s, transform 0.2s;
+        transition: opacity 0.2s;
         margin-top: 8px;
       }
       
       .miauchat-start-btn:hover {
         opacity: 0.9;
-        transform: translateY(-1px);
       }
       
       .miauchat-start-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-        transform: none;
       }
       
+      /* Waiting message */
+      .miauchat-waiting {
+        background: #f9f9f9;
+        padding: 16px;
+        text-align: center;
+        font-size: 13px;
+        color: #666;
+        line-height: 1.5;
+      }
+      
+      /* Messages area */
       .miauchat-messages {
         flex: 1;
         overflow-y: auto;
         padding: 16px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        background: #f8f9fa;
+        gap: 10px;
+        background: #f9f9f9;
+        min-height: 200px;
+        max-height: 320px;
       }
       
       .miauchat-message {
         max-width: 85%;
-        padding: 12px 16px;
-        border-radius: 16px;
+        padding: 10px 14px;
+        border-radius: 12px;
         font-size: 14px;
-        line-height: 1.5;
+        line-height: 1.4;
         word-wrap: break-word;
       }
       
@@ -395,34 +553,34 @@
       .miauchat-message.assistant {
         align-self: flex-start;
         background: white;
-        color: #1f2937;
+        color: #333;
         border-bottom-left-radius: 4px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
       }
       
       .miauchat-message.system {
         align-self: center;
-        background: #e5e7eb;
-        color: #6b7280;
-        font-size: 13px;
+        background: #fff3cd;
+        color: #856404;
+        font-size: 12px;
         padding: 8px 12px;
       }
       
       .miauchat-typing {
         display: flex;
         gap: 4px;
-        padding: 12px 16px;
+        padding: 10px 14px;
         background: white;
-        border-radius: 16px;
+        border-radius: 12px;
         border-bottom-left-radius: 4px;
         align-self: flex-start;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
       }
       
       .miauchat-typing span {
-        width: 8px;
-        height: 8px;
-        background: #9ca3af;
+        width: 6px;
+        height: 6px;
+        background: #aaa;
         border-radius: 50%;
         animation: miauchat-bounce 1.4s ease-in-out infinite;
       }
@@ -433,22 +591,24 @@
       
       @keyframes miauchat-bounce {
         0%, 60%, 100% { transform: translateY(0); }
-        30% { transform: translateY(-4px); }
+        30% { transform: translateY(-3px); }
       }
       
+      /* Input area */
       .miauchat-input-area {
-        padding: 12px 16px;
+        padding: 12px;
         background: white;
-        border-top: 1px solid #e5e7eb;
+        border-top: 1px solid #eee;
         display: flex;
         gap: 8px;
+        align-items: center;
       }
       
       .miauchat-input {
         flex: 1;
-        border: 1px solid #e5e7eb;
-        border-radius: 24px;
-        padding: 10px 16px;
+        border: 1px solid #ddd;
+        border-radius: 20px;
+        padding: 10px 14px;
         font-size: 14px;
         outline: none;
         transition: border-color 0.2s;
@@ -459,12 +619,12 @@
       }
       
       .miauchat-input::placeholder {
-        color: #9ca3af;
+        color: #aaa;
       }
       
       .miauchat-send-btn {
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         background: ${widgetColor};
         border: none;
@@ -472,49 +632,46 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: opacity 0.2s;
+        transition: opacity 0.2s, transform 0.2s;
+        flex-shrink: 0;
+      }
+      
+      .miauchat-send-btn:hover {
+        transform: scale(1.05);
       }
       
       .miauchat-send-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+        transform: none;
       }
       
       .miauchat-send-btn svg {
-        width: 18px;
-        height: 18px;
+        width: 16px;
+        height: 16px;
         fill: white;
-      }
-      
-      .miauchat-powered {
-        text-align: center;
-        padding: 8px;
-        font-size: 11px;
-        color: #9ca3af;
-        background: #f8f9fa;
-      }
-      
-      .miauchat-powered a {
-        color: ${widgetColor};
-        text-decoration: none;
       }
       
       .miauchat-hidden {
         display: none !important;
       }
       
+      /* Mobile styles */
       @media (max-width: 480px) {
         .miauchat-widget-panel {
           width: calc(100vw - 20px);
-          height: calc(100vh - 100px);
+          max-height: calc(100vh - 100px);
           ${POSITION.includes('right') ? 'right: 10px;' : 'left: 10px;'}
           ${POSITION.includes('bottom') ? 'bottom: 80px;' : 'top: 80px;'}
-          border-radius: 12px;
         }
         
-        .miauchat-widget-button {
+        .miauchat-widget-bubble {
           ${POSITION.includes('right') ? 'right: 10px;' : 'left: 10px;'}
           ${POSITION.includes('bottom') ? 'bottom: 10px;' : 'top: 10px;'}
+        }
+        
+        .miauchat-bubble-tooltip {
+          display: none;
         }
       }
     `;
@@ -527,19 +684,28 @@
     container.className = 'miauchat-widget-container';
     container.id = 'miauchat-container';
     container.innerHTML = `
-      <button class="miauchat-widget-button" id="miauchat-toggle" aria-label="Abrir chat">
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-        </svg>
-      </button>
+      <!-- Floating bubble with tooltip -->
+      <div class="miauchat-widget-bubble" id="miauchat-toggle">
+        <div class="miauchat-bubble-tooltip">
+          <span class="miauchat-online-dot"></span>
+          Fale conosco, estamos online!
+        </div>
+        <div class="miauchat-bubble-icon">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+          </svg>
+        </div>
+      </div>
       
+      <!-- Chat Panel -->
       <div class="miauchat-widget-panel" id="miauchat-panel">
-        <div class="miauchat-header">
-          <div class="miauchat-header-title">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-            </svg>
-            Chat
+        <div class="miauchat-header" id="miauchat-drag-handle">
+          <div class="miauchat-header-content">
+            <div class="miauchat-header-title">Digite a sua mensagem!</div>
+            <div class="miauchat-header-subtitle">
+              <span class="miauchat-status-dot"></span>
+              Os operadores estão online!
+            </div>
           </div>
           <button class="miauchat-close-btn" id="miauchat-close" aria-label="Fechar chat">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -548,50 +714,155 @@
           </button>
         </div>
         
+        <div class="miauchat-branding">
+          Chat desenvolvido por <a href="https://miauchat.com.br" target="_blank" rel="noopener">MiauChat</a>
+        </div>
+        
         <!-- Pre-chat form -->
         <div class="miauchat-prechat" id="miauchat-prechat">
-          <div class="miauchat-prechat-title">👋 Olá!</div>
-          <div class="miauchat-prechat-subtitle">Para iniciar o atendimento, por favor preencha seus dados:</div>
-          
           <div class="miauchat-form-group">
-            <label class="miauchat-form-label">Nome *</label>
-            <input type="text" class="miauchat-form-input" id="miauchat-name" placeholder="Seu nome completo" required />
+            <label class="miauchat-form-label">Telefone</label>
+            <input type="tel" class="miauchat-form-input" id="miauchat-phone" placeholder="+55 (00) 00000-0000" required />
           </div>
           
           <div class="miauchat-form-group">
-            <label class="miauchat-form-label">Telefone *</label>
-            <input type="tel" class="miauchat-form-input" id="miauchat-phone" placeholder="(00) 00000-0000" required />
+            <label class="miauchat-form-label">E-mail*</label>
+            <input type="email" class="miauchat-form-input" id="miauchat-email" placeholder="seu@email.com" required />
           </div>
           
           <div class="miauchat-form-group">
-            <label class="miauchat-form-label">E-mail</label>
-            <input type="email" class="miauchat-form-input" id="miauchat-email" placeholder="seu@email.com" />
+            <label class="miauchat-form-label">Nome</label>
+            <input type="text" class="miauchat-form-input" id="miauchat-name" placeholder="Seu nome" />
           </div>
           
           <button class="miauchat-start-btn" id="miauchat-start-chat">
-            Iniciar Conversa
+            Enviar
           </button>
+          
+          <div class="miauchat-waiting">
+            Por favor, aguarde. Todos os operadores estão ocupados no momento, mas logo alguém estará disponível para te atender.
+          </div>
         </div>
         
         <!-- Chat area (hidden initially) -->
         <div class="miauchat-messages miauchat-hidden" id="miauchat-messages"></div>
         
         <div class="miauchat-input-area miauchat-hidden" id="miauchat-input-area">
-          <input type="text" class="miauchat-input" id="miauchat-input" placeholder="Digite sua mensagem..." />
+          <input type="text" class="miauchat-input" id="miauchat-input" placeholder="Digite aqui" />
           <button class="miauchat-send-btn" id="miauchat-send" aria-label="Enviar">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
           </button>
         </div>
-        
-        <div class="miauchat-powered">
-          Powered by <a href="https://miauchat.com.br" target="_blank" rel="noopener">MiauChat</a>
-        </div>
       </div>
     `;
     document.body.appendChild(container);
     return container;
+  };
+
+  // Setup drag functionality
+  const setupDrag = () => {
+    const panel = document.getElementById('miauchat-panel');
+    const handle = document.getElementById('miauchat-drag-handle');
+    
+    if (!panel || !handle) return;
+    
+    const onMouseDown = (e) => {
+      // Ignore if clicking close button
+      if (e.target.closest('.miauchat-close-btn')) return;
+      
+      isDragging = true;
+      panel.classList.add('dragging');
+      
+      const rect = panel.getBoundingClientRect();
+      dragOffset = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+      
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    };
+    
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+      
+      const x = e.clientX - dragOffset.x;
+      const y = e.clientY - dragOffset.y;
+      
+      // Constrain to viewport
+      const maxX = window.innerWidth - panel.offsetWidth - 10;
+      const maxY = window.innerHeight - panel.offsetHeight - 10;
+      
+      panelPosition = {
+        x: Math.max(10, Math.min(x, maxX)),
+        y: Math.max(10, Math.min(y, maxY))
+      };
+      
+      panel.style.left = panelPosition.x + 'px';
+      panel.style.top = panelPosition.y + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    };
+    
+    const onMouseUp = () => {
+      isDragging = false;
+      panel.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    
+    // Touch support for mobile
+    const onTouchStart = (e) => {
+      if (e.target.closest('.miauchat-close-btn')) return;
+      
+      isDragging = true;
+      panel.classList.add('dragging');
+      
+      const touch = e.touches[0];
+      const rect = panel.getBoundingClientRect();
+      dragOffset = {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top
+      };
+      
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+    };
+    
+    const onTouchMove = (e) => {
+      if (!isDragging) return;
+      e.preventDefault();
+      
+      const touch = e.touches[0];
+      const x = touch.clientX - dragOffset.x;
+      const y = touch.clientY - dragOffset.y;
+      
+      const maxX = window.innerWidth - panel.offsetWidth - 10;
+      const maxY = window.innerHeight - panel.offsetHeight - 10;
+      
+      panelPosition = {
+        x: Math.max(10, Math.min(x, maxX)),
+        y: Math.max(10, Math.min(y, maxY))
+      };
+      
+      panel.style.left = panelPosition.x + 'px';
+      panel.style.top = panelPosition.y + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    };
+    
+    const onTouchEnd = () => {
+      isDragging = false;
+      panel.classList.remove('dragging');
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+    };
+    
+    handle.addEventListener('mousedown', onMouseDown);
+    handle.addEventListener('touchstart', onTouchStart);
   };
 
   // Show chat view (hide prechat form)
@@ -603,6 +874,9 @@
     if (prechat) prechat.classList.add('miauchat-hidden');
     if (messagesArea) messagesArea.classList.remove('miauchat-hidden');
     if (inputArea) inputArea.classList.remove('miauchat-hidden');
+    
+    // Start polling when chat view is shown
+    startPolling();
   };
 
   // Show prechat form (hide chat)
@@ -618,22 +892,14 @@
 
   // Validate form
   const validateForm = () => {
-    const nameInput = document.getElementById('miauchat-name');
     const phoneInput = document.getElementById('miauchat-phone');
     const emailInput = document.getElementById('miauchat-email');
     
     let isValid = true;
     
     // Clear previous errors
-    nameInput.classList.remove('error');
     phoneInput.classList.remove('error');
     emailInput.classList.remove('error');
-    
-    // Validate name (required)
-    if (!nameInput.value.trim()) {
-      nameInput.classList.add('error');
-      isValid = false;
-    }
     
     // Validate phone (required, min 10 digits)
     const phoneDigits = phoneInput.value.replace(/\D/g, '');
@@ -642,8 +908,8 @@
       isValid = false;
     }
     
-    // Validate email (optional, but if provided must be valid)
-    if (emailInput.value.trim() && !emailInput.value.includes('@')) {
+    // Validate email (required)
+    if (!emailInput.value.trim() || !emailInput.value.includes('@')) {
       emailInput.classList.add('error');
       isValid = false;
     }
@@ -663,7 +929,7 @@
     
     // Save client info
     clientInfo = {
-      name: nameInput.value.trim(),
+      name: nameInput.value.trim() || 'Visitante',
       phone: phoneInput.value.replace(/\D/g, ''),
       email: emailInput.value.trim()
     };
@@ -764,7 +1030,6 @@
       // Só exibir erro quando !response.ok (4xx/5xx)
       if (!response.ok) {
         const errorBodyText = await response.text();
-        // Logs obrigatórios para diagnóstico
         console.error('[MiauChat] HTTP error details:', {
           status: response.status,
           ok: response.ok,
@@ -783,7 +1048,6 @@
           data = JSON.parse(bodyText);
         } catch (e) {
           console.warn('[MiauChat] JSON inválido, mas response OK (continuando). Body:', bodyText);
-          // Response OK mas JSON inválido - NÃO é erro, apenas continua
         }
       }
 
@@ -792,13 +1056,14 @@
         throw new Error(data.error);
       }
 
-      // Se veio conversationId, salvar (aceitar formatos)
+      // Se veio conversationId, salvar
       const newConversationId = data?.conversationId || data?.conversation_id;
       if (newConversationId) {
         conversationId = newConversationId;
+        saveConversation();
       }
 
-      // Renderizar resposta do bot se existir (aceitar múltiplos formatos)
+      // Renderizar resposta do bot se existir
       let botResponse =
         data?.setupMessage ||
         data?.response ||
@@ -806,7 +1071,6 @@
         data?.assistantMessage ||
         data?.reply;
 
-      // Normalizar quando o backend retorna objetos (ex: reply: { content: "..." })
       if (botResponse && typeof botResponse === 'object') {
         botResponse = botResponse.content || botResponse.text || botResponse.message || '';
       }
@@ -815,7 +1079,6 @@
         messages.push({ role: 'assistant', content: botResponse });
         saveConversation();
       }
-      // Se NÃO veio resposta do bot, está tudo OK - apenas aguarda humano
 
     } catch (error) {
       console.error('[MiauChat] Send error:', error);
@@ -833,11 +1096,20 @@
   const togglePanel = () => {
     isOpen = !isOpen;
     const panel = document.getElementById('miauchat-panel');
+    const bubble = document.getElementById('miauchat-toggle');
+    
     if (panel) {
       panel.classList.toggle('open', isOpen);
       
+      // Reset position when opening
+      if (isOpen && !panelPosition) {
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.right = '';
+        panel.style.bottom = '';
+      }
+      
       if (isOpen) {
-        // Check if already identified
         if (isIdentified) {
           showChatView();
           if (messages.length === 0) {
@@ -848,7 +1120,14 @@
         } else {
           showPrechatView();
         }
+      } else {
+        stopPolling();
       }
+    }
+    
+    // Hide/show bubble
+    if (bubble) {
+      bubble.style.display = isOpen ? 'none' : 'flex';
     }
   };
 
@@ -868,6 +1147,7 @@
     createWidget();
     loadClientInfo();
     loadConversation();
+    setupDrag();
 
     // Event listeners
     document.getElementById('miauchat-toggle')?.addEventListener('click', togglePanel);
