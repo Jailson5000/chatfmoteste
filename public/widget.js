@@ -1,6 +1,7 @@
 /**
- * MiauChat Widget v1.1
+ * MiauChat Widget v1.2
  * Widget de chat embarcável para sites externos
+ * Agora com formulário de pré-chat para identificação do cliente
  * 
  * Uso (Método 1 - window.MiauChat):
  * <script>
@@ -46,6 +47,14 @@
   let welcomeMessage = 'Olá! Como posso ajudar você hoje?';
   let offlineMessage = 'No momento não estamos disponíveis. Deixe sua mensagem que retornaremos em breve.';
   let widgetColor = PRIMARY_COLOR;
+  
+  // Client identification state
+  let clientInfo = {
+    name: '',
+    phone: '',
+    email: ''
+  };
+  let isIdentified = false;
 
   // API Key for Supabase
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppcmFndGVyc2VqbmFyeHJ1cXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzI2MTUsImV4cCI6MjA4MjAwODYxNX0.pt4s9pS-Isi-Y3uRQG68njQIX1QytgIP5cnpEv_wr_M';
@@ -58,6 +67,29 @@
       localStorage.setItem('miauchat_visitor_id', visitorId);
     }
     return visitorId;
+  };
+
+  // Load client info from localStorage
+  const loadClientInfo = () => {
+    const saved = localStorage.getItem(`miauchat_client_${WIDGET_KEY}`);
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        if (data.name && data.phone) {
+          clientInfo = data;
+          isIdentified = true;
+          return true;
+        }
+      } catch (e) {
+        console.error('[MiauChat] Failed to load client info:', e);
+      }
+    }
+    return false;
+  };
+
+  // Save client info to localStorage
+  const saveClientInfo = () => {
+    localStorage.setItem(`miauchat_client_${WIDGET_KEY}`, JSON.stringify(clientInfo));
   };
 
   // Load conversation from localStorage
@@ -115,6 +147,15 @@
       console.error('[MiauChat] Failed to fetch config:', error);
       return false;
     }
+  };
+
+  // Format phone number for display
+  const formatPhone = (value) => {
+    const numbers = value.replace(/\D/g, '');
+    if (numbers.length <= 2) return numbers;
+    if (numbers.length <= 7) return `(${numbers.slice(0, 2)}) ${numbers.slice(2)}`;
+    if (numbers.length <= 11) return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7)}`;
+    return `(${numbers.slice(0, 2)}) ${numbers.slice(2, 7)}-${numbers.slice(7, 11)}`;
   };
 
   // Create styles
@@ -233,6 +274,96 @@
         width: 16px;
         height: 16px;
         fill: white;
+      }
+      
+      /* Pre-chat form styles */
+      .miauchat-prechat {
+        flex: 1;
+        padding: 24px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        background: #f8f9fa;
+        overflow-y: auto;
+      }
+      
+      .miauchat-prechat-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1f2937;
+        text-align: center;
+        margin-bottom: 8px;
+      }
+      
+      .miauchat-prechat-subtitle {
+        font-size: 14px;
+        color: #6b7280;
+        text-align: center;
+        margin-bottom: 16px;
+      }
+      
+      .miauchat-form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      
+      .miauchat-form-label {
+        font-size: 13px;
+        font-weight: 500;
+        color: #374151;
+      }
+      
+      .miauchat-form-input {
+        padding: 12px 14px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+      
+      .miauchat-form-input:focus {
+        border-color: ${widgetColor};
+        box-shadow: 0 0 0 3px ${widgetColor}20;
+      }
+      
+      .miauchat-form-input::placeholder {
+        color: #9ca3af;
+      }
+      
+      .miauchat-form-input.error {
+        border-color: #ef4444;
+      }
+      
+      .miauchat-form-error {
+        font-size: 12px;
+        color: #ef4444;
+        margin-top: 2px;
+      }
+      
+      .miauchat-start-btn {
+        padding: 14px 24px;
+        background: ${widgetColor};
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s, transform 0.2s;
+        margin-top: 8px;
+      }
+      
+      .miauchat-start-btn:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+      }
+      
+      .miauchat-start-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
       }
       
       .miauchat-messages {
@@ -368,6 +499,10 @@
         text-decoration: none;
       }
       
+      .miauchat-hidden {
+        display: none !important;
+      }
+      
       @media (max-width: 480px) {
         .miauchat-widget-panel {
           width: calc(100vw - 20px);
@@ -413,9 +548,35 @@
           </button>
         </div>
         
-        <div class="miauchat-messages" id="miauchat-messages"></div>
+        <!-- Pre-chat form -->
+        <div class="miauchat-prechat" id="miauchat-prechat">
+          <div class="miauchat-prechat-title">👋 Olá!</div>
+          <div class="miauchat-prechat-subtitle">Para iniciar o atendimento, por favor preencha seus dados:</div>
+          
+          <div class="miauchat-form-group">
+            <label class="miauchat-form-label">Nome *</label>
+            <input type="text" class="miauchat-form-input" id="miauchat-name" placeholder="Seu nome completo" required />
+          </div>
+          
+          <div class="miauchat-form-group">
+            <label class="miauchat-form-label">Telefone *</label>
+            <input type="tel" class="miauchat-form-input" id="miauchat-phone" placeholder="(00) 00000-0000" required />
+          </div>
+          
+          <div class="miauchat-form-group">
+            <label class="miauchat-form-label">E-mail</label>
+            <input type="email" class="miauchat-form-input" id="miauchat-email" placeholder="seu@email.com" />
+          </div>
+          
+          <button class="miauchat-start-btn" id="miauchat-start-chat">
+            Iniciar Conversa
+          </button>
+        </div>
         
-        <div class="miauchat-input-area">
+        <!-- Chat area (hidden initially) -->
+        <div class="miauchat-messages miauchat-hidden" id="miauchat-messages"></div>
+        
+        <div class="miauchat-input-area miauchat-hidden" id="miauchat-input-area">
           <input type="text" class="miauchat-input" id="miauchat-input" placeholder="Digite sua mensagem..." />
           <button class="miauchat-send-btn" id="miauchat-send" aria-label="Enviar">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -431,6 +592,99 @@
     `;
     document.body.appendChild(container);
     return container;
+  };
+
+  // Show chat view (hide prechat form)
+  const showChatView = () => {
+    const prechat = document.getElementById('miauchat-prechat');
+    const messagesArea = document.getElementById('miauchat-messages');
+    const inputArea = document.getElementById('miauchat-input-area');
+    
+    if (prechat) prechat.classList.add('miauchat-hidden');
+    if (messagesArea) messagesArea.classList.remove('miauchat-hidden');
+    if (inputArea) inputArea.classList.remove('miauchat-hidden');
+  };
+
+  // Show prechat form (hide chat)
+  const showPrechatView = () => {
+    const prechat = document.getElementById('miauchat-prechat');
+    const messagesArea = document.getElementById('miauchat-messages');
+    const inputArea = document.getElementById('miauchat-input-area');
+    
+    if (prechat) prechat.classList.remove('miauchat-hidden');
+    if (messagesArea) messagesArea.classList.add('miauchat-hidden');
+    if (inputArea) inputArea.classList.add('miauchat-hidden');
+  };
+
+  // Validate form
+  const validateForm = () => {
+    const nameInput = document.getElementById('miauchat-name');
+    const phoneInput = document.getElementById('miauchat-phone');
+    const emailInput = document.getElementById('miauchat-email');
+    
+    let isValid = true;
+    
+    // Clear previous errors
+    nameInput.classList.remove('error');
+    phoneInput.classList.remove('error');
+    emailInput.classList.remove('error');
+    
+    // Validate name (required)
+    if (!nameInput.value.trim()) {
+      nameInput.classList.add('error');
+      isValid = false;
+    }
+    
+    // Validate phone (required, min 10 digits)
+    const phoneDigits = phoneInput.value.replace(/\D/g, '');
+    if (phoneDigits.length < 10) {
+      phoneInput.classList.add('error');
+      isValid = false;
+    }
+    
+    // Validate email (optional, but if provided must be valid)
+    if (emailInput.value.trim() && !emailInput.value.includes('@')) {
+      emailInput.classList.add('error');
+      isValid = false;
+    }
+    
+    return isValid;
+  };
+
+  // Handle start chat button
+  const handleStartChat = () => {
+    if (!validateForm()) {
+      return;
+    }
+    
+    const nameInput = document.getElementById('miauchat-name');
+    const phoneInput = document.getElementById('miauchat-phone');
+    const emailInput = document.getElementById('miauchat-email');
+    
+    // Save client info
+    clientInfo = {
+      name: nameInput.value.trim(),
+      phone: phoneInput.value.replace(/\D/g, ''),
+      email: emailInput.value.trim()
+    };
+    isIdentified = true;
+    saveClientInfo();
+    
+    // Switch to chat view
+    showChatView();
+    
+    // Add welcome message
+    if (messages.length === 0) {
+      messages.push({ role: 'assistant', content: welcomeMessage });
+      renderMessages();
+      saveConversation();
+    }
+    
+    // Focus input
+    const input = document.getElementById('miauchat-input');
+    if (input) input.focus();
+    
+    console.log('[MiauChat] Client identified:', clientInfo.name, clientInfo.phone);
   };
 
   // Render messages
@@ -459,7 +713,7 @@
 
   // Send message
   const sendMessage = async (text) => {
-    if (!text.trim() || isLoading || !lawFirmId) return;
+    if (!text.trim() || isLoading || !lawFirmId || !isIdentified) return;
 
     const userMessage = { role: 'user', content: text.trim() };
     messages.push(userMessage);
@@ -490,6 +744,11 @@
             lawFirmId,
             widgetKey: WIDGET_KEY,
             visitorId,
+            // Client identification
+            clientName: clientInfo.name,
+            clientPhone: clientInfo.phone,
+            clientEmail: clientInfo.email,
+            // Page context
             pageUrl,
             pageTitle,
             referrer,
@@ -532,11 +791,19 @@
     const panel = document.getElementById('miauchat-panel');
     if (panel) {
       panel.classList.toggle('open', isOpen);
-      if (isOpen && messages.length === 0) {
-        // Add welcome message
-        messages.push({ role: 'assistant', content: welcomeMessage });
-        renderMessages();
-        saveConversation();
+      
+      if (isOpen) {
+        // Check if already identified
+        if (isIdentified) {
+          showChatView();
+          if (messages.length === 0) {
+            messages.push({ role: 'assistant', content: welcomeMessage });
+            renderMessages();
+            saveConversation();
+          }
+        } else {
+          showPrechatView();
+        }
       }
     }
   };
@@ -555,12 +822,34 @@
     
     createStyles();
     createWidget();
+    loadClientInfo();
     loadConversation();
 
     // Event listeners
     document.getElementById('miauchat-toggle')?.addEventListener('click', togglePanel);
     document.getElementById('miauchat-close')?.addEventListener('click', togglePanel);
     
+    // Start chat button
+    document.getElementById('miauchat-start-chat')?.addEventListener('click', handleStartChat);
+    
+    // Phone input formatting
+    const phoneInput = document.getElementById('miauchat-phone');
+    phoneInput?.addEventListener('input', (e) => {
+      e.target.value = formatPhone(e.target.value);
+    });
+    
+    // Allow Enter to submit form
+    const formInputs = document.querySelectorAll('#miauchat-prechat .miauchat-form-input');
+    formInputs.forEach(input => {
+      input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleStartChat();
+        }
+      });
+    });
+    
+    // Chat input and send button
     const input = document.getElementById('miauchat-input');
     const sendBtn = document.getElementById('miauchat-send');
     
