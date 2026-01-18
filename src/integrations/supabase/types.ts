@@ -3338,6 +3338,7 @@ export type Database = {
           token_expires_at: string | null
           tray_store_id: string | null
           updated_at: string
+          webhook_secret: string | null
         }
         Insert: {
           access_token?: string | null
@@ -3365,6 +3366,7 @@ export type Database = {
           token_expires_at?: string | null
           tray_store_id?: string | null
           updated_at?: string
+          webhook_secret?: string | null
         }
         Update: {
           access_token?: string | null
@@ -3392,6 +3394,7 @@ export type Database = {
           token_expires_at?: string | null
           tray_store_id?: string | null
           updated_at?: string
+          webhook_secret?: string | null
         }
         Relationships: [
           {
