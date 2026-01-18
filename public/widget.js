@@ -1,24 +1,41 @@
 /**
- * MiauChat Tray Widget
- * Widget de chat embarcável para sites Tray
+ * MiauChat Widget
+ * Widget de chat embarcável para sites externos
  * 
- * Uso:
- * <script src="https://seu-dominio.com/widget.js" data-widget-key="SUA_WIDGET_KEY"></script>
+ * Uso (Método 1 - window.MiauChat):
+ * <script>
+ *   window.MiauChat = { tenant: "SUA_WIDGET_KEY" };
+ * </script>
+ * <script async src="https://miauchat.com.br/widget.js"></script>
+ * 
+ * Uso (Método 2 - data attributes):
+ * <script src="https://miauchat.com.br/widget.js" data-widget-key="SUA_WIDGET_KEY"></script>
  */
 (function() {
   'use strict';
 
-  // Configuration
+  // Configuration - support both methods
   const SCRIPT_TAG = document.currentScript;
-  const WIDGET_KEY = SCRIPT_TAG?.getAttribute('data-widget-key');
-  const API_URL = SCRIPT_TAG?.getAttribute('data-api-url') || 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/ai-chat';
-  const POSITION = SCRIPT_TAG?.getAttribute('data-position') || 'bottom-right';
-  const PRIMARY_COLOR = SCRIPT_TAG?.getAttribute('data-color') || '#8B5CF6';
+  const GLOBAL_CONFIG = window.MiauChat || {};
+  
+  // Get widget key from either method
+  const WIDGET_KEY = GLOBAL_CONFIG.tenant || SCRIPT_TAG?.getAttribute('data-widget-key');
+  const API_URL = GLOBAL_CONFIG.apiUrl || SCRIPT_TAG?.getAttribute('data-api-url') || 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/ai-chat';
+  const POSITION = GLOBAL_CONFIG.position || SCRIPT_TAG?.getAttribute('data-position') || 'bottom-right';
+  const PRIMARY_COLOR = GLOBAL_CONFIG.color || SCRIPT_TAG?.getAttribute('data-color') || '#6366f1';
+  const SOURCE = GLOBAL_CONFIG.source || 'WIDGET';
 
   if (!WIDGET_KEY) {
-    console.error('[MiauChat] Widget key is required. Add data-widget-key attribute to script tag.');
+    console.error('[MiauChat] Widget key is required. Set window.MiauChat.tenant or add data-widget-key attribute.');
     return;
   }
+
+  // Prevent duplicate initialization
+  if (window.MiauChatInitialized) {
+    console.warn('[MiauChat] Widget already initialized');
+    return;
+  }
+  window.MiauChatInitialized = true;
 
   // State
   let isOpen = false;
@@ -28,6 +45,10 @@
   let messages = [];
   let welcomeMessage = 'Olá! Como posso ajudar você hoje?';
   let offlineMessage = 'No momento não estamos disponíveis. Deixe sua mensagem que retornaremos em breve.';
+  let widgetColor = PRIMARY_COLOR;
+
+  // API Key for Supabase
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppcmFndGVyc2VqbmFyeHJ1cXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzI2MTUsImV4cCI6MjA4MjAwODYxNX0.pt4s9pS-Isi-Y3uRQG68njQIX1QytgIP5cnpEv_wr_M';
 
   // Generate unique visitor ID
   const getVisitorId = () => {
@@ -67,11 +88,14 @@
   // Fetch widget configuration
   const fetchConfig = async () => {
     try {
-      const response = await fetch(`https://jiragtersejnarxruqyd.supabase.co/rest/v1/tray_chat_integrations?widget_key=eq.${WIDGET_KEY}&is_active=eq.true&select=law_firm_id,welcome_message,offline_message,widget_color,widget_position`, {
-        headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppcmFndGVyc2VqbmFyeHJ1cXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzI2MTUsImV4cCI6MjA4MjAwODYxNX0.pt4s9pS-Isi-Y3uRQG68njQIX1QytgIP5cnpEv_wr_M'
+      const response = await fetch(
+        `https://jiragtersejnarxruqyd.supabase.co/rest/v1/tray_chat_integrations?widget_key=eq.${WIDGET_KEY}&is_active=eq.true&select=law_firm_id,welcome_message,offline_message,widget_color,widget_position`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY
+          }
         }
-      });
+      );
       
       if (!response.ok) throw new Error('Failed to fetch config');
       
@@ -81,9 +105,10 @@
         lawFirmId = config.law_firm_id;
         if (config.welcome_message) welcomeMessage = config.welcome_message;
         if (config.offline_message) offlineMessage = config.offline_message;
+        if (config.widget_color) widgetColor = config.widget_color;
         return true;
       } else {
-        console.error('[MiauChat] Widget not found or inactive');
+        console.error('[MiauChat] Widget not found or inactive. Key:', WIDGET_KEY);
         return false;
       }
     } catch (error) {
@@ -95,6 +120,7 @@
   // Create styles
   const createStyles = () => {
     const style = document.createElement('style');
+    style.id = 'miauchat-styles';
     style.textContent = `
       .miauchat-widget-container * {
         box-sizing: border-box;
@@ -108,7 +134,7 @@
         width: 60px;
         height: 60px;
         border-radius: 50%;
-        background: ${PRIMARY_COLOR};
+        background: ${widgetColor};
         border: none;
         cursor: pointer;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -164,7 +190,7 @@
       }
       
       .miauchat-header {
-        background: ${PRIMARY_COLOR};
+        background: ${widgetColor};
         color: white;
         padding: 16px 20px;
         display: flex;
@@ -230,7 +256,7 @@
       
       .miauchat-message.user {
         align-self: flex-end;
-        background: ${PRIMARY_COLOR};
+        background: ${widgetColor};
         color: white;
         border-bottom-right-radius: 4px;
       }
@@ -298,7 +324,7 @@
       }
       
       .miauchat-input:focus {
-        border-color: ${PRIMARY_COLOR};
+        border-color: ${widgetColor};
       }
       
       .miauchat-input::placeholder {
@@ -309,7 +335,7 @@
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        background: ${PRIMARY_COLOR};
+        background: ${widgetColor};
         border: none;
         cursor: pointer;
         display: flex;
@@ -338,7 +364,7 @@
       }
       
       .miauchat-powered a {
-        color: ${PRIMARY_COLOR};
+        color: ${widgetColor};
         text-decoration: none;
       }
       
@@ -364,6 +390,7 @@
   const createWidget = () => {
     const container = document.createElement('div');
     container.className = 'miauchat-widget-container';
+    container.id = 'miauchat-container';
     container.innerHTML = `
       <button class="miauchat-widget-button" id="miauchat-toggle" aria-label="Abrir chat">
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -375,7 +402,7 @@
         <div class="miauchat-header">
           <div class="miauchat-header-title">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
             </svg>
             Chat
           </div>
@@ -444,25 +471,29 @@
 
     try {
       const visitorId = getVisitorId();
-      const pageUrl = window.location.href;
+      const pageUrl = GLOBAL_CONFIG.pageUrl || window.location.href;
       const pageTitle = document.title;
+      const referrer = GLOBAL_CONFIG.referrer || document.referrer;
+      const device = GLOBAL_CONFIG.device || (/Mobile|Android|iPhone/i.test(navigator.userAgent) ? 'mobile' : 'desktop');
 
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppcmFndGVyc2VqbmFyeHJ1cXlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MzI2MTUsImV4cCI6MjA4MjAwODYxNX0.pt4s9pS-Isi-Y3uRQG68njQIX1QytgIP5cnpEv_wr_M'
+          'apikey': SUPABASE_ANON_KEY
         },
         body: JSON.stringify({
-          conversationId: conversationId || `tray_${WIDGET_KEY}_${visitorId}`,
+          conversationId: conversationId || `widget_${WIDGET_KEY}_${visitorId}`,
           message: text.trim(),
-          source: 'TRAY',
+          source: SOURCE,
           context: {
             lawFirmId,
             widgetKey: WIDGET_KEY,
             visitorId,
             pageUrl,
             pageTitle,
+            referrer,
+            device,
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString()
           }
@@ -512,12 +543,16 @@
 
   // Initialize
   const init = async () => {
+    console.log('[MiauChat] Initializing with key:', WIDGET_KEY);
+    
     const configLoaded = await fetchConfig();
     if (!configLoaded) {
-      console.error('[MiauChat] Failed to initialize widget');
+      console.error('[MiauChat] Failed to initialize widget - config not loaded');
       return;
     }
 
+    console.log('[MiauChat] Config loaded, creating widget...');
+    
     createStyles();
     createWidget();
     loadConversation();
@@ -547,7 +582,6 @@
     // Track first use
     if (!localStorage.getItem(`miauchat_first_use_${WIDGET_KEY}`)) {
       localStorage.setItem(`miauchat_first_use_${WIDGET_KEY}`, Date.now().toString());
-      // Could send analytics here
     }
 
     console.log('[MiauChat] Widget initialized successfully');
