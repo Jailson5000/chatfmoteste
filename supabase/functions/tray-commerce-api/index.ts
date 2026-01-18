@@ -988,67 +988,72 @@ Deno.serve(async (req) => {
     const pathParts = url.pathname.split("/").filter(Boolean);
     const method = req.method;
 
+    // Remove function name from path if present
+    const basePath = pathParts[0] === "tray-commerce-api" ? pathParts.slice(1) : pathParts;
+    
+    console.log("Request path:", url.pathname, "Method:", method, "Parts:", JSON.stringify(basePath));
+
     // Route handling
-    // GET /tray-commerce-api/connections
-    if (method === "GET" && pathParts.length === 1) {
+    // GET /tray-commerce-api - list connections
+    if (method === "GET" && basePath.length === 0) {
       const result = await handleListConnections(supabase, lawFirmId);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/connect
-    if (method === "POST" && pathParts[1] === "connect") {
+    if (method === "POST" && basePath[0] === "connect") {
       const body = await req.json();
       const result = await handleConnect(supabase, lawFirmId, user.id, body);
       return createCorsResponse(result, result.success ? 201 : 400, req);
     }
 
     // Connection-specific routes
-    const connectionId = pathParts[1];
+    const connectionId = basePath[0];
     if (!connectionId) {
       return createCorsResponse({ error: "Missing connection ID" }, 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/disconnect
-    if (method === "POST" && pathParts[2] === "disconnect") {
+    if (method === "POST" && basePath[1] === "disconnect") {
       const result = await handleDisconnect(supabase, lawFirmId, connectionId, user.id);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/toggle
-    if (method === "POST" && pathParts[2] === "toggle") {
+    if (method === "POST" && basePath[1] === "toggle") {
       const body = await req.json();
       const result = await handleToggle(supabase, lawFirmId, connectionId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // PUT /tray-commerce-api/:connectionId/settings
-    if (method === "PUT" && pathParts[2] === "settings") {
+    if (method === "PUT" && basePath[1] === "settings") {
       const body = await req.json();
       const result = await handleUpdateSettings(supabase, lawFirmId, connectionId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/sync/products
-    if (method === "POST" && pathParts[2] === "sync" && pathParts[3] === "products") {
+    if (method === "POST" && basePath[1] === "sync" && basePath[2] === "products") {
       const result = await handleSyncProducts(supabase, lawFirmId, connectionId);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/sync/orders
-    if (method === "POST" && pathParts[2] === "sync" && pathParts[3] === "orders") {
+    if (method === "POST" && basePath[1] === "sync" && basePath[2] === "orders") {
       const status = url.searchParams.get("status") || undefined;
       const result = await handleSyncOrders(supabase, lawFirmId, connectionId, status);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/sync/coupons
-    if (method === "POST" && pathParts[2] === "sync" && pathParts[3] === "coupons") {
+    if (method === "POST" && basePath[1] === "sync" && basePath[2] === "coupons") {
       const result = await handleSyncCoupons(supabase, lawFirmId, connectionId);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // GET /tray-commerce-api/:connectionId/products
-    if (method === "GET" && pathParts[2] === "products") {
+    if (method === "GET" && basePath[1] === "products") {
       const page = parseInt(url.searchParams.get("page") || "1");
       const limit = parseInt(url.searchParams.get("limit") || "50");
       const result = await handleGetProducts(supabase, lawFirmId, connectionId, page, limit);
@@ -1056,7 +1061,7 @@ Deno.serve(async (req) => {
     }
 
     // GET /tray-commerce-api/:connectionId/orders
-    if (method === "GET" && pathParts[2] === "orders") {
+    if (method === "GET" && basePath[1] === "orders") {
       const status = url.searchParams.get("status") || undefined;
       const page = parseInt(url.searchParams.get("page") || "1");
       const limit = parseInt(url.searchParams.get("limit") || "50");
@@ -1065,35 +1070,35 @@ Deno.serve(async (req) => {
     }
 
     // GET /tray-commerce-api/:connectionId/coupons
-    if (method === "GET" && pathParts[2] === "coupons") {
+    if (method === "GET" && basePath[1] === "coupons") {
       const result = await handleGetCoupons(supabase, lawFirmId, connectionId);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // PUT /tray-commerce-api/:connectionId/orders/:trayOrderId/status
-    if (method === "PUT" && pathParts[2] === "orders" && pathParts[4] === "status") {
-      const trayOrderId = pathParts[3];
+    if (method === "PUT" && basePath[1] === "orders" && basePath[3] === "status") {
+      const trayOrderId = basePath[2];
       const body = await req.json();
       const result = await handleUpdateOrderStatus(supabase, lawFirmId, connectionId, trayOrderId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // PUT /tray-commerce-api/:connectionId/products/:trayProductId/stock
-    if (method === "PUT" && pathParts[2] === "products" && pathParts[4] === "stock") {
-      const trayProductId = pathParts[3];
+    if (method === "PUT" && basePath[1] === "products" && basePath[3] === "stock") {
+      const trayProductId = basePath[2];
       const body = await req.json();
       const result = await handleUpdateProductStock(supabase, lawFirmId, connectionId, trayProductId, user.id, body);
       return createCorsResponse(result, result.success ? 200 : 400, req);
     }
 
     // POST /tray-commerce-api/:connectionId/coupons
-    if (method === "POST" && pathParts[2] === "coupons") {
+    if (method === "POST" && basePath[1] === "coupons") {
       const body = await req.json();
       const result = await handleCreateCoupon(supabase, lawFirmId, connectionId, user.id, body);
       return createCorsResponse(result, result.success ? 201 : 400, req);
     }
 
-    return createCorsResponse({ error: "Not found" }, 404, req);
+    return createCorsResponse({ error: "Not found", path: basePath }, 404, req);
   } catch (error) {
     console.error("Tray Commerce API error:", error);
     return createCorsResponse(

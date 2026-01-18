@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.process-birthday-messages]
 verify_jwt = false
+
+[functions.tray-commerce-api]
+verify_jwt = false
+
+[functions.tray-commerce-webhook]
+verify_jwt = false
