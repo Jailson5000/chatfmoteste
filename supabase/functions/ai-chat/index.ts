@@ -1939,7 +1939,21 @@ async function executeTemplateTool(
     if (isValidUUID(conversationId) && (finalContent || finalMediaUrl)) {
       const messageType = finalMediaUrl ? 'media' : 'text';
       
+      // Convert media type to MIME type for database column
+      let mediaMimeType: string | null = null;
+      if (finalMediaUrl && finalMediaType) {
+        const ext = finalMediaUrl.split('.').pop()?.toLowerCase() || '';
+        if (finalMediaType === 'image') {
+          mediaMimeType = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        } else if (finalMediaType === 'video') {
+          mediaMimeType = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : 'video/mp4';
+        } else if (finalMediaType === 'document') {
+          mediaMimeType = 'application/pdf';
+        }
+      }
+      
       // Save template content as AI message
+      // Note: DB uses media_mime_type, not media_type
       const { data: savedMsg, error: saveError } = await supabase.from("messages").insert({
         conversation_id: conversationId,
         content: finalContent || '',
@@ -1947,14 +1961,9 @@ async function executeTemplateTool(
         is_from_me: true,
         message_type: messageType,
         media_url: finalMediaUrl,
-        media_type: finalMediaType,
+        media_mime_type: mediaMimeType,
         status: "delivered",
-        ai_generated: true,
-        metadata: { 
-          template_id: matchedTemplate.id, 
-          template_name: matchedTemplate.name,
-          image_extracted: !matchedTemplate.media_url && !!finalMediaUrl
-        }
+        ai_generated: true
       }).select("id").single();
       
       if (saveError) {
