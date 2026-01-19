@@ -113,7 +113,7 @@ export function TrayChatIntegration() {
             <TrayIcon />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-medium text-sm">Chat no Site</h3>
+                <h3 className="font-medium text-sm">Chat Web</h3>
                 {isEnabled && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 border border-green-500/20">
                     Ativo
@@ -246,7 +246,7 @@ export function TrayChatIntegration() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <TrayIcon />
-              Código do Chat Widget
+              Código do Chat Web
             </DialogTitle>
             <DialogDescription>
               Cole este código no HEAD ou FOOTER do seu site.
