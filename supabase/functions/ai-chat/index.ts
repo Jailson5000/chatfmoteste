@@ -3036,7 +3036,13 @@ serve(async (req) => {
 
     // Split AI response into paragraphs for better readability (like WhatsApp)
     // This prevents sending one large block of text
-    const splitIntoParagraphs = (text: string): string[] => {
+    // NOTE: Only fragment for WhatsApp sources - Widget sources should receive single messages
+    // to avoid duplication issues with polling sync
+    const splitIntoParagraphs = (text: string, shouldFragment: boolean): string[] => {
+      if (!shouldFragment) {
+        return [text.trim()];
+      }
+      
       // Split by double newlines or paragraph breaks
       const paragraphs = text
         .split(/\n\n+/)
@@ -3051,8 +3057,13 @@ serve(async (req) => {
       return paragraphs;
     };
 
-    const messageParts = splitIntoParagraphs(aiResponse);
-    console.log(`[AI Chat] Split response into ${messageParts.length} parts`);
+    // Determine if we should fragment - only for WhatsApp, not for Widget/web sources
+    const sourceUpper = (source || '').toUpperCase();
+    const isWebSource = ['WIDGET', 'TRAY', 'SITE', 'WEB'].includes(sourceUpper);
+    const shouldFragment = !isWebSource;
+    
+    const messageParts = splitIntoParagraphs(aiResponse, shouldFragment);
+    console.log(`[AI Chat] Split response into ${messageParts.length} parts (fragment=${shouldFragment}, source=${sourceUpper})`);
 
     // Save messages to database if we have a valid conversation
     if (isValidUUID(conversationId)) {
