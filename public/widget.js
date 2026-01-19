@@ -754,10 +754,10 @@
       }
       
       .miauchat-message.user {
-        background: #111111;
+        background: #22C55E;
         color: #ffffff;
         border-bottom-right-radius: 4px;
-        border: 1px solid #DC2626;
+        border: none;
       }
       
       .miauchat-message.assistant {
