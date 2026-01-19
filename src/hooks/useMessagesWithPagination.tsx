@@ -419,6 +419,9 @@ export function useMessagesWithPagination({
         async (payload) => {
           const rawMsg = payload.new as PaginatedMessage;
           
+          // Debug: Log ALL messages to verify realtime is working
+          console.log("[useMessagesWithPagination] INSERT received:", rawMsg.id, rawMsg.sender_type, rawMsg.is_from_me, rawMsg.content?.substring(0, 30));
+          
           // Debug: Log system messages to verify realtime is working
           if (rawMsg.sender_type === 'system') {
             console.log("[useMessagesWithPagination] System message received via Realtime:", rawMsg.id, rawMsg.content?.substring(0, 50));
