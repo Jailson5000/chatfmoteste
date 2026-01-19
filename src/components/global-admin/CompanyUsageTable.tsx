@@ -246,30 +246,22 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
         .from("automations")
         .select("id, name, is_active, law_firm_id");
 
-      // Fetch conversation counts per agent (conversations with AI messages)
-      // We count conversations that have AI-generated messages this month
-      const currentMonth = new Date();
-      const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+      // Fetch agent conversation counts from usage_records
+      // This is the authoritative source for billing
+      const billingPeriod = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
       
-      const { data: conversationsData } = await supabase
-        .from("conversations")
-        .select("id, law_firm_id")
-        .gte("created_at", startOfMonth);
+      const { data: usageByAgent } = await supabase
+        .from("usage_records")
+        .select("metadata")
+        .eq("usage_type", "ai_conversation")
+        .eq("billing_period", billingPeriod);
 
-      const { data: aiMessagesData } = await supabase
-        .from("messages")
-        .select("conversation_id")
-        .eq("ai_generated", true)
-        .gte("created_at", startOfMonth);
-
-      // Create a set of conversation IDs that have AI messages
-      const conversationsWithAI = new Set(aiMessagesData?.map(m => m.conversation_id) || []);
-
-      // Count AI conversations per law_firm
-      const aiConversationsPerLawFirm: Record<string, number> = {};
-      conversationsData?.forEach(conv => {
-        if (conversationsWithAI.has(conv.id)) {
-          aiConversationsPerLawFirm[conv.law_firm_id] = (aiConversationsPerLawFirm[conv.law_firm_id] || 0) + 1;
+      // Build a map of agent_id -> conversation count
+      const agentConversationCounts: Record<string, number> = {};
+      usageByAgent?.forEach(record => {
+        const agentId = (record.metadata as any)?.automation_id;
+        if (agentId) {
+          agentConversationCounts[agentId] = (agentConversationCounts[agentId] || 0) + 1;
         }
       });
 
@@ -278,26 +270,15 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
         const company = companyData?.find((c) => c.id === usage.company_id);
         const lawFirm = lawFirmData?.find((lf) => lf.id === usage.law_firm_id);
         
-        // Get agents for this company with conversation counts
+        // Get agents for this company with real conversation counts from usage_records
         const companyAgents = (agentsData || [])
           .filter(a => a.law_firm_id === usage.law_firm_id)
           .map(agent => ({
             id: agent.id,
             name: agent.name,
             is_active: agent.is_active,
-            // For now, distribute conversations evenly among active agents
-            // In a real scenario, we'd track which agent handled which conversation
-            conversations_count: 0, // Will be calculated below
+            conversations_count: agentConversationCounts[agent.id] || 0,
           }));
-
-        // Distribute AI conversations among agents (simplified)
-        const totalAIConversations = aiConversationsPerLawFirm[usage.law_firm_id] || 0;
-        const activeAgents = companyAgents.filter(a => a.is_active);
-        if (activeAgents.length > 0 && totalAIConversations > 0) {
-          // For simplicity, assign all conversations to the first active agent
-          // In a real implementation, you'd track this in the database
-          activeAgents[0].conversations_count = totalAIConversations;
-        }
 
         return {
           ...usage,
@@ -310,7 +291,8 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
 
       return merged;
     },
-    refetchInterval: 30000, // Refresh every 30s
+    staleTime: 1000 * 60, // Consider data stale after 1 minute
+    refetchInterval: 1000 * 60 * 2, // Refresh every 2 minutes
   });
 
   // Helper to check if company has alert
