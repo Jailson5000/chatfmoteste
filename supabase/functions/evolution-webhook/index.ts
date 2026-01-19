@@ -1779,19 +1779,16 @@ async function sendTextFallbackWithWarning(
 
     if (sendResponse.ok) {
       const sendResult = await sendResponse.json();
+      // NOTE: ai-chat already saved the message - just update with WhatsApp ID
       await supabaseClient
         .from('messages')
-        .insert({
-          conversation_id: context.conversationId,
-          whatsapp_message_id: sendResult?.key?.id,
-          content: part,
-          message_type: 'text',
-          is_from_me: true,
-          sender_type: 'system',
-          ai_generated: true,
-          ai_agent_id: context.automationId || null,
-          ai_agent_name: context.automationName || null,
-        });
+        .update({ whatsapp_message_id: sendResult?.key?.id })
+        .eq('conversation_id', context.conversationId)
+        .eq('content', part)
+        .eq('ai_generated', true)
+        .is('whatsapp_message_id', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
     }
   }
 
@@ -2476,23 +2473,23 @@ async function sendAIResponseToWhatsApp(
         whatsappMessageId: lastWhatsappMessageId,
       });
 
-      // Save each message part to the database
-      const { error: saveError } = await supabaseClient
+      // NOTE: We do NOT save messages here because ai-chat already saves them to the database
+      // This prevents duplicate messages. We only need to update with the WhatsApp message ID.
+      // UPDATE the message with the whatsapp_message_id for proper ACK tracking
+      const { error: updateError } = await supabaseClient
         .from('messages')
-        .insert({
-          conversation_id: context.conversationId,
-          whatsapp_message_id: lastWhatsappMessageId,
-          content: part,
-          message_type: 'text',
-          is_from_me: true,
-          sender_type: 'system',
-          ai_generated: true,
-          ai_agent_id: context.automationId || null,
-          ai_agent_name: context.automationName || null,
-        });
+        .update({ whatsapp_message_id: lastWhatsappMessageId })
+        .eq('conversation_id', context.conversationId)
+        .eq('content', part)
+        .eq('ai_generated', true)
+        .is('whatsapp_message_id', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      if (saveError) {
-        logDebug('SEND_RESPONSE', `Failed to save message part ${i + 1} to DB`, { error: saveError });
+      if (updateError) {
+        logDebug('SEND_RESPONSE', `Failed to update message with WhatsApp ID`, { error: updateError });
+      } else {
+        logDebug('SEND_RESPONSE', `Updated message with WhatsApp ID: ${lastWhatsappMessageId}`);
       }
     }
 
@@ -3105,8 +3102,40 @@ serve(async (req) => {
         } else {
           logDebug('CONNECTION', `Updated instance status to ${dbStatus}`, { requestId });
           
-          // If instance just connected, reassociate orphan clients/conversations
+          // If instance just connected, configure settings and reassociate orphan clients/conversations
           if (dbStatus === 'connected') {
+            // CRITICAL: Auto-configure groupsIgnore to prevent AI from responding in groups
+            // This is a defense-in-depth measure in case the setting was not applied during creation
+            try {
+              const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
+              const settingsPayload = {
+                groupsIgnore: true,
+                alwaysOnline: false,
+                readMessages: false,
+                readStatus: false,
+                syncFullHistory: false,
+              };
+              
+              const settingsResponse = await fetch(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                method: 'POST',
+                headers: {
+                  'apikey': instance.api_key || '',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(settingsPayload),
+              });
+              
+              if (settingsResponse.ok) {
+                logDebug('CONNECTION', `✅ Auto-configured groupsIgnore=true for instance ${instance.instance_name}`, { requestId });
+              } else {
+                const settingsError = await settingsResponse.text();
+                logDebug('CONNECTION', `⚠️ Failed to configure groupsIgnore for ${instance.instance_name}: ${settingsError}`, { requestId });
+              }
+            } catch (settingsErr) {
+              logDebug('CONNECTION', `⚠️ Error configuring groupsIgnore (non-fatal): ${settingsErr}`, { requestId });
+            }
+            
+            // Reassociate orphan records
             logDebug('CONNECTION', `Reassociating orphan records for instance ${instance.id}`, { requestId });
             const { data: reassocResult, error: reassocError } = await supabaseClient
               .rpc('reassociate_orphan_records', { _instance_id: instance.id });
