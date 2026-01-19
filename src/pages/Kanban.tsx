@@ -565,6 +565,7 @@ export default function Kanban() {
             clientStatus={selectedConversation.client?.custom_status_id}
             conversationTags={selectedConversation.tags}
             departmentId={selectedConversation.department_id}
+            origin={selectedConversation.origin}
             customStatuses={customStatuses}
             tags={tags}
             departments={departments}
