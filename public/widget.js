@@ -242,11 +242,14 @@
         // is_from_me = true => business/attendant/system
         if (msg.is_from_me === true) {
           // Skip if we already have a local assistant message with exact same content (dedup)
+          // Check for messages without serverId OR with temporary pending serverId
           const alreadyByContent = messages.find(
-            (m) => m.role === 'assistant' && !m.serverId && m.content === msg.content
+            (m) => m.role === 'assistant' && 
+                   (!m.serverId || m.serverId.startsWith('pending_')) && 
+                   m.content === msg.content
           );
           if (alreadyByContent) {
-            // Update local message with server ID instead of adding duplicate
+            // Update local message with real server ID instead of adding duplicate
             alreadyByContent.serverId = msg.id;
             alreadyByContent.timestamp = msg.created_at;
             hasUpdatedMessages = true;
@@ -1212,8 +1215,14 @@
         botResponse = botResponse.content || botResponse.text || botResponse.message || '';
       }
 
+      // Only add bot response locally if we got one - mark with serverId placeholder to avoid duplication by polling
       if (typeof botResponse === 'string' && botResponse.trim()) {
-        messages.push({ role: 'assistant', content: botResponse.trim() });
+        // Mark this message so polling won't add it again
+        messages.push({ 
+          role: 'assistant', 
+          content: botResponse.trim(),
+          serverId: `pending_${Date.now()}` // Temporary ID to prevent polling duplication
+        });
         console.log('[MiauChat] Bot response added:', botResponse);
         saveConversation();
       }
