@@ -19,10 +19,12 @@ interface TrayIntegration {
   deactivated_at: string | null;
   deactivated_by: string | null;
   first_use_at: string | null;
-  // New default settings
+  // Default settings
   default_department_id: string | null;
   default_status_id: string | null;
   default_automation_id: string | null;
+  default_handler_type: string | null;
+  default_human_agent_id: string | null;
 }
 
 // Generate snippet code from widget key
@@ -31,7 +33,7 @@ function generateSnippetCode(widgetKey: string): string {
 <script>
   window.MiauChat = {
     tenant: "${widgetKey}",
-    source: "TRAY"
+    source: "WIDGET"
   };
 </script>
 <script async src="https://chatfmoteste.lovable.app/widget.js"></script>`;
@@ -65,7 +67,7 @@ export function useTrayIntegration() {
 
       if (!data) return null;
 
-      // Cast to include new columns (since types might not be updated yet)
+      // Cast to include new columns
       const integrationData = data as TrayIntegration;
 
       // Add snippet_code dynamically
@@ -110,7 +112,7 @@ export function useTrayIntegration() {
 
         if (error) throw error;
 
-        // Log audit (ignore errors - audit is not critical)
+        // Log audit (ignore errors)
         try {
           await supabase.from("tray_chat_audit_logs").insert({
             law_firm_id: profile.law_firm_id,
@@ -125,7 +127,7 @@ export function useTrayIntegration() {
 
         return data;
       } else {
-        // Create new
+        // Create new - default to human handler
         const { data, error } = await supabase
           .from("tray_chat_integrations")
           .insert({
@@ -134,13 +136,14 @@ export function useTrayIntegration() {
             widget_key: widgetKey,
             activated_at: enabled ? new Date().toISOString() : null,
             activated_by: enabled ? user?.id : null,
+            default_handler_type: 'human',
           })
           .select()
           .single();
 
         if (error) throw error;
 
-        // Log audit (ignore errors - audit is not critical)
+        // Log audit
         try {
           await supabase.from("tray_chat_audit_logs").insert({
             law_firm_id: profile.law_firm_id,
@@ -158,7 +161,7 @@ export function useTrayIntegration() {
     },
     onSuccess: (_, enabled) => {
       queryClient.invalidateQueries({ queryKey: ["tray-integration", user?.id] });
-      toast.success(enabled ? "Integração Tray ativada!" : "Integração Tray desativada");
+      toast.success(enabled ? "Chat do site ativado!" : "Chat do site desativado");
     },
   });
 
@@ -168,6 +171,8 @@ export function useTrayIntegration() {
       default_department_id?: string | null;
       default_status_id?: string | null;
       default_automation_id?: string | null;
+      default_handler_type?: string | null;
+      default_human_agent_id?: string | null;
     }) => {
       if (!integration?.id) {
         throw new Error("Integration not found");
@@ -186,6 +191,10 @@ export function useTrayIntegration() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tray-integration", user?.id] });
       toast.success("Configuração atualizada!");
+    },
+    onError: (error) => {
+      console.error("Error updating settings:", error);
+      toast.error("Erro ao atualizar configuração");
     },
   });
 

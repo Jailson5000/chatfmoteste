@@ -3165,6 +3165,8 @@ export type Database = {
           deactivated_by: string | null
           default_automation_id: string | null
           default_department_id: string | null
+          default_handler_type: string | null
+          default_human_agent_id: string | null
           default_status_id: string | null
           first_use_at: string | null
           id: string
@@ -3185,6 +3187,8 @@ export type Database = {
           deactivated_by?: string | null
           default_automation_id?: string | null
           default_department_id?: string | null
+          default_handler_type?: string | null
+          default_human_agent_id?: string | null
           default_status_id?: string | null
           first_use_at?: string | null
           id?: string
@@ -3205,6 +3209,8 @@ export type Database = {
           deactivated_by?: string | null
           default_automation_id?: string | null
           default_department_id?: string | null
+          default_handler_type?: string | null
+          default_human_agent_id?: string | null
           default_status_id?: string | null
           first_use_at?: string | null
           id?: string
@@ -3230,6 +3236,13 @@ export type Database = {
             columns: ["default_department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tray_chat_integrations_default_human_agent_id_fkey"
+            columns: ["default_human_agent_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
