@@ -49,7 +49,7 @@
   let messages = [];
   let welcomeMessage = 'Olá! Como posso ajudar você hoje?';
   let offlineMessage = 'No momento não estamos disponíveis. Deixe sua mensagem que retornaremos em breve.';
-  let widgetColor = '#25D366'; // WhatsApp green default
+  let widgetColor = '#DC2626'; // Red as default
   let lastMessageCount = 0;
   let pollingInterval = null;
   let unreadCount = 0;
@@ -370,10 +370,10 @@
         width: 60px;
         height: 60px;
         border-radius: 50%;
-        background: ${widgetColor};
-        border: none;
+        background: #111111;
+        border: 3px solid #DC2626;
         cursor: pointer;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -384,13 +384,13 @@
       
       .miauchat-bubble-icon:hover {
         transform: scale(1.05);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
       }
       
       .miauchat-bubble-icon svg {
         width: 28px;
         height: 28px;
-        fill: white;
+        fill: #ffffff;
       }
       
       .miauchat-unread-badge {
@@ -413,14 +413,15 @@
       }
       
       .miauchat-bubble-tooltip {
-        background: linear-gradient(135deg, ${widgetColor} 0%, ${widgetColor}dd 100%);
-        color: white;
+        background: linear-gradient(135deg, #111111 0%, #1a1a1a 100%);
+        color: #ffffff;
         padding: 12px 18px;
         border-radius: 24px;
         font-size: 14px;
         font-weight: 500;
         white-space: nowrap;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        border: 2px solid #DC2626;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -435,14 +436,14 @@
       .miauchat-online-dot {
         width: 10px;
         height: 10px;
-        background: #4ade80;
+        background: #DC2626;
         border-radius: 50%;
         animation: miauchat-glow 1.5s ease-in-out infinite;
       }
       
       @keyframes miauchat-glow {
-        0%, 100% { box-shadow: 0 0 4px #4ade80; }
-        50% { box-shadow: 0 0 10px #4ade80, 0 0 16px #4ade80; }
+        0%, 100% { box-shadow: 0 0 4px #DC2626; }
+        50% { box-shadow: 0 0 10px #DC2626, 0 0 16px #DC2626; }
       }
       
       /* Panel - Modern design */
@@ -485,14 +486,15 @@
       
       /* Header with drag handle */
       .miauchat-header {
-        background: linear-gradient(135deg, ${widgetColor} 0%, ${widgetColor}dd 100%);
-        color: white;
+        background: linear-gradient(135deg, #111111 0%, #1a1a1a 100%);
+        color: #ffffff;
         padding: 16px 18px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         cursor: move;
         user-select: none;
+        border-bottom: 3px solid #DC2626;
       }
       
       .miauchat-header-content {
@@ -520,9 +522,9 @@
       .miauchat-status-dot {
         width: 8px;
         height: 8px;
-        background: #4ade80;
+        background: #DC2626;
         border-radius: 50%;
-        box-shadow: 0 0 6px #4ade80;
+        box-shadow: 0 0 6px #DC2626;
       }
       
       .miauchat-close-btn {
@@ -559,7 +561,7 @@
       }
       
       .miauchat-branding a {
-        color: ${widgetColor};
+        color: #DC2626;
         text-decoration: none;
         font-weight: 600;
       }
@@ -598,8 +600,8 @@
       }
       
       .miauchat-form-input:focus {
-        border-color: ${widgetColor};
-        box-shadow: 0 0 0 3px ${widgetColor}20;
+        border-color: #DC2626;
+        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.2);
         background: white;
       }
       
@@ -614,8 +616,8 @@
       
       .miauchat-start-btn {
         padding: 14px 24px;
-        background: ${widgetColor};
-        color: white;
+        background: #DC2626;
+        color: #ffffff;
         border: none;
         border-radius: 10px;
         font-size: 15px;
@@ -711,13 +713,13 @@
         align-items: center;
         gap: 4px;
         padding: 3px 10px;
-        background: #e8f5e9;
-        border: 1px solid #c8e6c9;
+        background: #111111;
+        border: 1px solid #DC2626;
         border-radius: 4px;
         font-size: 12px;
         font-weight: 600;
-        color: #2e7d32;
-        margin-left: 40px;
+        color: #ffffff;
+        margin-left: 0;
       }
       
       /* Message row with avatar */
@@ -731,23 +733,15 @@
         flex-direction: row-reverse;
       }
       
-      /* Attendant avatar */
+      /* Attendant avatar - hidden to avoid duplication */
       .miauchat-avatar {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        background: linear-gradient(135deg, ${widgetColor}20 0%, ${widgetColor}40 100%);
-        border: 2px solid ${widgetColor};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
+        display: none;
       }
       
       .miauchat-avatar svg {
         width: 16px;
         height: 16px;
-        fill: ${widgetColor};
+        fill: #DC2626;
       }
       
       .miauchat-message {
@@ -760,9 +754,10 @@
       }
       
       .miauchat-message.user {
-        background: ${widgetColor};
-        color: white;
+        background: #111111;
+        color: #ffffff;
         border-bottom-right-radius: 4px;
+        border: 1px solid #DC2626;
       }
       
       .miauchat-message.assistant {
@@ -786,7 +781,7 @@
       .miauchat-timestamp {
         font-size: 11px;
         color: #94a3b8;
-        margin-left: 40px;
+        margin-left: 0;
         margin-top: 2px;
       }
       
@@ -851,8 +846,8 @@
       }
       
       .miauchat-input:focus {
-        border-color: ${widgetColor};
-        box-shadow: 0 0 0 3px ${widgetColor}15;
+        border-color: #DC2626;
+        box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
         background: white;
       }
       
@@ -864,7 +859,7 @@
         width: 44px;
         height: 44px;
         border-radius: 50%;
-        background: ${widgetColor};
+        background: #DC2626;
         border: none;
         cursor: pointer;
         display: flex;
