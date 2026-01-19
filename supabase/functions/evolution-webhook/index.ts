@@ -3158,6 +3158,31 @@ serve(async (req) => {
         const phoneNumber = remoteJid.split('@')[0];
         const isFromMe = data.key.fromMe;
 
+        // ========================================
+        // CRITICAL: BLOCK ALL GROUP MESSAGES
+        // Groups have @g.us suffix, individuals have @s.whatsapp.net
+        // This prevents AI from responding in groups and creating group conversations
+        // ========================================
+        const isGroupMessage = remoteJid.includes('@g.us') || remoteJid.includes('@broadcast');
+        if (isGroupMessage) {
+          logDebug('MESSAGE', `🚫 IGNORING GROUP/BROADCAST MESSAGE - Groups are blocked`, { 
+            requestId, 
+            remoteJid,
+            isGroup: remoteJid.includes('@g.us'),
+            isBroadcast: remoteJid.includes('@broadcast'),
+            instanceName: instance?.instance_name 
+          });
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              action: 'ignored',
+              reason: 'group_message_blocked',
+              message: 'Messages from groups and broadcasts are not processed'
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         logDebug('MESSAGE', `Processing message`, { requestId, phoneNumber, isFromMe });
 
         // Get or create conversation
