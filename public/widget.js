@@ -230,14 +230,29 @@
 
       const newMessages = [];
       let hasNewFromAgent = false;
+      let hasUpdatedMessages = false;
       
       serverMessages.forEach((msg) => {
         if (!msg?.id || !msg?.content) return;
-        const already = messages.find((m) => m.serverId === msg.id);
-        if (already) return;
+        
+        // Skip if we already have this message by server ID
+        const alreadyByServerId = messages.find((m) => m.serverId === msg.id);
+        if (alreadyByServerId) return;
 
         // is_from_me = true => business/attendant/system
         if (msg.is_from_me === true) {
+          // Skip if we already have a local assistant message with exact same content (dedup)
+          const alreadyByContent = messages.find(
+            (m) => m.role === 'assistant' && !m.serverId && m.content === msg.content
+          );
+          if (alreadyByContent) {
+            // Update local message with server ID instead of adding duplicate
+            alreadyByContent.serverId = msg.id;
+            alreadyByContent.timestamp = msg.created_at;
+            hasUpdatedMessages = true;
+            return;
+          }
+          
           newMessages.push({
             role: 'assistant',
             content: msg.content,
@@ -248,7 +263,18 @@
           return;
         }
 
-        // client message
+        // client message - skip if we already have it locally (user just sent it)
+        const alreadyByUserContent = messages.find(
+          (m) => m.role === 'user' && !m.serverId && m.content === msg.content
+        );
+        if (alreadyByUserContent) {
+          // Update local message with server ID instead of adding duplicate
+          alreadyByUserContent.serverId = msg.id;
+          alreadyByUserContent.timestamp = msg.created_at;
+          hasUpdatedMessages = true;
+          return;
+        }
+        
         newMessages.push({
           role: 'user',
           content: msg.content,
@@ -257,8 +283,10 @@
         });
       });
 
-      if (newMessages.length) {
-        messages.push(...newMessages);
+      if (newMessages.length || hasUpdatedMessages) {
+        if (newMessages.length) {
+          messages.push(...newMessages);
+        }
         messages.sort((a, b) => {
           if (!a.timestamp || !b.timestamp) return 0;
           return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
@@ -266,7 +294,7 @@
         saveConversation();
         renderMessages();
         
-        // Alert for new agent messages when minimized
+        // Alert for new agent messages when minimized (only for truly new messages)
         if (hasNewFromAgent && !isOpen) {
           unreadCount += newMessages.filter(m => m.role === 'assistant').length;
           updateUnreadBadge();

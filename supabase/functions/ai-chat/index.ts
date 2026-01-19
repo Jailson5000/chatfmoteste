@@ -2250,9 +2250,10 @@ serve(async (req) => {
       const clientEmail = (context as any)?.clientEmail || null;
       
       // Look for existing conversation with this widget session ID
+      // CRITICAL: Include current_handler and current_automation_id to respect transfers made in the panel
       const { data: existingConv } = await supabase
         .from("conversations")
-        .select("id, client_id")
+        .select("id, client_id, current_handler, current_automation_id")
         .eq("law_firm_id", validatedLawFirmId)
         .eq("origin", "WIDGET")
         .eq("remote_jid", widgetSessionId)
@@ -2260,7 +2261,14 @@ serve(async (req) => {
 
       if (existingConv) {
         conversationId = existingConv.id;
-        console.log(`[AI Chat] Found existing widget conversation: ${conversationId}`);
+        console.log(`[AI Chat] Found existing widget conversation: ${conversationId}, current_handler: ${existingConv.current_handler}, current_automation_id: ${existingConv.current_automation_id}`);
+        
+        // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
+        // This overrides the widget defaults when handler is 'ai' and automation is set
+        if (existingConv.current_handler === 'ai' && existingConv.current_automation_id) {
+          automationId = existingConv.current_automation_id;
+          console.log(`[AI Chat] Using conversation's current AI automation (from panel transfer): ${automationId}`);
+        }
         
         // Update contact info if provided and changed
         if (clientName && clientName !== "Visitante Web") {
