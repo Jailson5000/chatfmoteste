@@ -36,7 +36,7 @@ function generateSnippetCode(widgetKey: string): string {
     source: "WIDGET"
   };
 </script>
-<script async src="https://chatfmoteste.lovable.app/widget.js"></script>`;
+<script async src="https://widget.miauchat.com.br/widget.js"></script>`;
 }
 
 export function useTrayIntegration() {
