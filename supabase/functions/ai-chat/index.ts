@@ -2275,6 +2275,38 @@ serve(async (req) => {
             `[AI Chat] Widget conversation found by UUID: ${convById.id}, current_handler: ${convById.current_handler}, current_automation_id: ${convById.current_automation_id}`
           );
 
+          // CRITICAL FIX: If handler is 'human', STOP AI from responding entirely
+          // A human agent has taken over this conversation
+          if (convById.current_handler === "human") {
+            console.log(`[AI Chat] ⛔ Conversation is in HUMAN mode (handler=human) - AI will NOT respond`);
+            
+            // Save the client message so it appears in the chat
+            await supabase.from("messages").insert({
+              conversation_id: conversationId,
+              content: message,
+              sender_type: "client",
+              is_from_me: false,
+              message_type: "text",
+              status: "delivered"
+            });
+            
+            // Update conversation last_message_at
+            await supabase
+              .from("conversations")
+              .update({ last_message_at: new Date().toISOString() })
+              .eq("id", conversationId);
+            
+            return new Response(
+              JSON.stringify({ 
+                conversationId,
+                messageId: null,
+                status: "awaiting_human_agent",
+                handler: "human"
+              }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
           // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
           if (convById.current_handler === "ai") {
             if (convById.current_automation_id) {
@@ -2335,6 +2367,38 @@ serve(async (req) => {
           console.log(
             `[AI Chat] Found existing widget conversation (by remote_jid): ${conversationId}, current_handler: ${existingConv.current_handler}, current_automation_id: ${existingConv.current_automation_id}`
           );
+
+          // CRITICAL FIX: If handler is 'human', STOP AI from responding entirely
+          // A human agent has taken over this conversation
+          if (existingConv.current_handler === "human") {
+            console.log(`[AI Chat] ⛔ Conversation is in HUMAN mode (handler=human) - AI will NOT respond`);
+            
+            // Save the client message so it appears in the chat
+            await supabase.from("messages").insert({
+              conversation_id: conversationId,
+              content: message,
+              sender_type: "client",
+              is_from_me: false,
+              message_type: "text",
+              status: "delivered"
+            });
+            
+            // Update conversation last_message_at
+            await supabase
+              .from("conversations")
+              .update({ last_message_at: new Date().toISOString() })
+              .eq("id", conversationId);
+            
+            return new Response(
+              JSON.stringify({ 
+                conversationId,
+                messageId: null,
+                status: "awaiting_human_agent",
+                handler: "human"
+              }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
 
           // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
           // This overrides the widget defaults when handler is 'ai' and automation is set

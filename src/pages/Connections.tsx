@@ -481,8 +481,10 @@ export default function Connections() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {trayIntegration.default_automation_id ? (
-                      (() => {
+                    {(() => {
+                      const handlerType = trayIntegration.default_handler_type;
+                      
+                      if (handlerType === 'ai' && trayIntegration.default_automation_id) {
                         const agent = automations.find(a => a.id === trayIntegration.default_automation_id);
                         return agent ? (
                           <div className="flex items-center gap-2">
@@ -491,10 +493,25 @@ export default function Connections() {
                             <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">IA</Badge>
                           </div>
                         ) : <span className="text-muted-foreground">—</span>;
-                      })()
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                      } else if (handlerType === 'human' && trayIntegration.default_human_agent_id) {
+                        const member = teamMembers.find(m => m.id === trayIntegration.default_human_agent_id);
+                        return member ? (
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-5 w-5">
+                              <AvatarImage src={member.avatar_url || undefined} />
+                              <AvatarFallback className="text-[8px]">
+                                {member.full_name?.substring(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm">{member.full_name}</span>
+                          </div>
+                        ) : <span className="text-muted-foreground">Nenhum</span>;
+                      } else if (handlerType === 'human') {
+                        return <span className="text-muted-foreground">Nenhum (Humano)</span>;
+                      } else {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-muted-foreground">
                     {trayIntegration.activated_at 
@@ -899,33 +916,110 @@ export default function Connections() {
                   </Select>
                 </div>
 
-                {/* Agente IA Responsável */}
+                {/* Tipo de Atendimento */}
                 <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Agente IA Responsável</label>
+                  <label className="text-sm text-muted-foreground">Tipo de Atendimento</label>
                   <Select
-                    value={trayIntegration?.default_automation_id || "none"}
+                    value={trayIntegration?.default_handler_type || "human"}
                     onValueChange={(value) => {
-                      updateTraySettings({ 
-                        default_automation_id: value === "none" ? null : value 
-                      });
+                      // When switching handler type, clear the corresponding assignment
+                      if (value === 'human') {
+                        updateTraySettings({ 
+                          default_handler_type: value,
+                          default_automation_id: null
+                        });
+                      } else {
+                        updateTraySettings({ 
+                          default_handler_type: value,
+                          default_human_agent_id: null
+                        });
+                      }
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione um agente IA..." />
+                      <SelectValue placeholder="Selecione o tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {automations.filter(a => a.is_active).map((agent) => (
-                        <SelectItem key={agent.id} value={agent.id}>
-                          <div className="flex items-center gap-2">
-                            <Bot className="h-3 w-3 text-blue-500" />
-                            {agent.name}
-                          </div>
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="human">
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3 w-3 text-green-500" />
+                          Atendente Humano
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="ai">
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-3 w-3 text-blue-500" />
+                          Agente IA
+                        </div>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Agente IA Responsável - só mostra se tipo for IA */}
+                {trayIntegration?.default_handler_type === 'ai' && (
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Agente IA</label>
+                    <Select
+                      value={trayIntegration?.default_automation_id || "none"}
+                      onValueChange={(value) => {
+                        updateTraySettings({ 
+                          default_automation_id: value === "none" ? null : value 
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um agente IA..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum</SelectItem>
+                        {automations.filter(a => a.is_active).map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            <div className="flex items-center gap-2">
+                              <Bot className="h-3 w-3 text-blue-500" />
+                              {agent.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Atendente Humano Responsável - só mostra se tipo for Humano */}
+                {trayIntegration?.default_handler_type === 'human' && (
+                  <div className="space-y-2">
+                    <label className="text-sm text-muted-foreground">Atendente Responsável</label>
+                    <Select
+                      value={trayIntegration?.default_human_agent_id || "none"}
+                      onValueChange={(value) => {
+                        updateTraySettings({ 
+                          default_human_agent_id: value === "none" ? null : value 
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um atendente..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum (Fila)</SelectItem>
+                        {teamMembers.map((member) => (
+                          <SelectItem key={member.id} value={member.id}>
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-4 w-4">
+                                <AvatarImage src={member.avatar_url || undefined} />
+                                <AvatarFallback className="text-[8px]">
+                                  {member.full_name?.substring(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              {member.full_name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             </div>
 
