@@ -85,6 +85,7 @@ interface ChatRequest {
     clientId?: string;
     lawFirmId?: string;
     audioRequested?: boolean;
+    widgetKey?: string;
   };
 }
 
@@ -1001,32 +1002,29 @@ async function executeCrmTool(
               to_agent_id: targetMember.id,
               to_agent_name: targetMember.full_name,
               transfer_type: "human",
-              reason: args.reason || `Transferência para atendente ${targetMember.full_name}`
+              reason: args.reason || `Transferência para ${targetMember.full_name}`
             });
           
-          // Return success with notification preference
           if (notifyOnTransfer) {
             return JSON.stringify({ 
               success: true, 
-              message: `Conversa transferida para ${targetMember.full_name}. Por favor, informe ao cliente que ele será atendido por um de nossos especialistas.`,
+              message: `Conversa transferida para ${targetMember.full_name}. Informe ao cliente que ${targetMember.full_name} dará continuidade ao atendimento.`,
               notify_client: true
             });
           } else {
             return JSON.stringify({ 
               success: true, 
-              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para ${targetMember.full_name}. Continue o atendimento normalmente sem mencionar a transferência.`,
+              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para ${targetMember.full_name}. Continue a conversa normalmente, ${targetMember.full_name} irá assumir.`,
               notify_client: false
             });
           }
-          
         } else if (args.responsible_type === "ai") {
           // Find AI agent by name
           const { data: agents } = await supabase
             .from("automations")
             .select("id, name")
             .eq("law_firm_id", lawFirmId)
-            .eq("is_active", true)
-            .neq("id", automationId); // Exclude current agent
+            .eq("is_active", true);
           
           const targetAgent = agents?.find((a: any) => 
             a.name.toLowerCase().includes(args.responsible_name.toLowerCase()) ||
@@ -1037,11 +1035,11 @@ async function executeCrmTool(
             const availableAgents = agents?.map((a: any) => a.name).join(", ") || "nenhum";
             return JSON.stringify({ 
               success: false, 
-              error: `Agente de IA "${args.responsible_name}" não encontrado. Disponíveis: ${availableAgents}` 
+              error: `Agente IA "${args.responsible_name}" não encontrado. Disponíveis: ${availableAgents}` 
             });
           }
           
-          // Update conversation to use new AI agent
+          // Update conversation to new AI agent
           await supabase
             .from("conversations")
             .update({ 
@@ -1065,122 +1063,26 @@ async function executeCrmTool(
               reason: args.reason || `Transferência para IA ${targetAgent.name}`
             });
           
-          // Return success with notification preference
-          if (notifyOnTransfer) {
-            return JSON.stringify({ 
-              success: true, 
-              message: `Conversa transferida para o agente de IA ${targetAgent.name}. O novo agente continuará o atendimento.`,
-              notify_client: true
-            });
-          } else {
-            return JSON.stringify({ 
-              success: true, 
-              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para o agente ${targetAgent.name}. Continue normalmente sem mencionar a transferência.`,
-              notify_client: false
-            });
-          }
+          return JSON.stringify({ 
+            success: true, 
+            message: `[TRANSFERÊNCIA PARA OUTRO AGENTE IA] O agente ${targetAgent.name} irá continuar o atendimento. Você pode encerrar sua resposta aqui.`,
+            notify_client: false
+          });
         }
         
-        return JSON.stringify({ 
-          success: false, 
-          error: "Tipo de responsável inválido. Use 'human' ou 'ai'" 
-        });
+        return JSON.stringify({ success: false, error: "Tipo de responsável inválido" });
       }
       
       default:
-        return JSON.stringify({ error: `Ação desconhecida: ${toolCall.name}` });
+        return JSON.stringify({ success: false, error: `Ferramenta desconhecida: ${toolCall.name}` });
     }
   } catch (error) {
     console.error(`[AI Chat] CRM tool error:`, error);
-    return JSON.stringify({ error: "Erro ao executar ação interna" });
+    return JSON.stringify({ error: "Erro ao executar ação do CRM" });
   }
 }
 
-// Execute template sending tool call
-async function executeTemplateTool(
-  supabase: any,
-  lawFirmId: string,
-  toolCall: { name: string; arguments: string }
-): Promise<string> {
-  try {
-    const args = JSON.parse(toolCall.arguments);
-    
-    console.log(`[AI Chat] Executing template tool: send_template`, args);
-    
-    const { template_name, additional_message } = args;
-    
-    if (!template_name) {
-      return JSON.stringify({ 
-        success: false, 
-        error: "Nome do template é obrigatório" 
-      });
-    }
-    
-    // Fetch all active templates for this law firm
-    const { data: templates, error } = await supabase
-      .from("templates")
-      .select("id, name, shortcut, content")
-      .eq("law_firm_id", lawFirmId)
-      .eq("is_active", true);
-    
-    if (error || !templates || templates.length === 0) {
-      return JSON.stringify({ 
-        success: false, 
-        error: "Nenhum template encontrado",
-        available_templates: []
-      });
-    }
-    
-    // Find the best matching template (case-insensitive, flexible matching)
-    const searchTerm = template_name.toLowerCase().trim();
-    const matchedTemplate = templates.find((t: any) => {
-      const name = t.name.toLowerCase();
-      const shortcut = (t.shortcut || "").toLowerCase();
-      
-      return (
-        name === searchTerm ||
-        shortcut === searchTerm ||
-        name.includes(searchTerm) ||
-        searchTerm.includes(name) ||
-        shortcut.includes(searchTerm)
-      );
-    });
-    
-    if (!matchedTemplate) {
-      const availableNames = templates.map((t: any) => t.name).join(", ");
-      return JSON.stringify({ 
-        success: false, 
-        error: `Template "${template_name}" não encontrado. Disponíveis: ${availableNames}`,
-        available_templates: templates.map((t: any) => ({ name: t.name, shortcut: t.shortcut }))
-      });
-    }
-    
-    console.log(`[AI Chat] ✅ Found template: "${matchedTemplate.name}" for search "${template_name}"`);
-    
-    // Build the response content
-    let responseContent = "";
-    
-    if (additional_message) {
-      responseContent = additional_message + "\n\n";
-    }
-    
-    responseContent += matchedTemplate.content || "";
-    
-    return JSON.stringify({
-      success: true,
-      template_name: matchedTemplate.name,
-      template_content: responseContent,
-      message: `Template "${matchedTemplate.name}" será enviado ao cliente`,
-      send_to_client: true
-    });
-    
-  } catch (error) {
-    console.error(`[AI Chat] Template tool error:`, error);
-    return JSON.stringify({ error: "Erro ao buscar template" });
-  }
-}
-
-// Execute scheduling tool call (for intelligent appointment system)
+// Execute scheduling tool call
 async function executeSchedulingTool(
   supabase: any,
   supabaseUrl: string,
@@ -1192,205 +1094,158 @@ async function executeSchedulingTool(
 ): Promise<string> {
   try {
     const args = JSON.parse(toolCall.arguments);
-    console.log(`[AI Chat] Executing scheduling tool: ${toolCall.name}`, args);
-
+    
+    console.log(`[Scheduling] Executing tool: ${toolCall.name}`, args);
+    
     switch (toolCall.name) {
       case "list_services": {
         const { data: services, error } = await supabase
           .from("services")
-          .select("id, name, description, duration_minutes, price, is_active")
+          .select("id, name, description, duration_minutes, price")
           .eq("law_firm_id", lawFirmId)
           .eq("is_active", true)
           .order("name");
 
         if (error) {
+          console.error("[Scheduling] Error listing services:", error);
           return JSON.stringify({ success: false, error: "Erro ao buscar serviços" });
         }
 
         if (!services || services.length === 0) {
           return JSON.stringify({
             success: true,
-            message: "Nenhum serviço cadastrado ainda.",
+            message: "Nenhum serviço cadastrado",
             services: []
           });
         }
 
-        const serviceList = services.map((s: any) => ({
+        const formattedServices = services.map((s: any) => ({
           id: s.id,
-          nome: s.name,
-          descricao: s.description,
-          duracao_minutos: s.duration_minutes,
-          preco: s.price ? `R$ ${s.price.toFixed(2)}` : "Gratuito"
+          name: s.name,
+          description: s.description || "",
+          duration: `${s.duration_minutes} minutos`,
+          price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
         }));
 
         return JSON.stringify({
           success: true,
           message: `${services.length} serviço(s) disponível(is)`,
-          services: serviceList
+          services: formattedServices
         });
       }
 
       case "get_available_slots": {
         const { date, service_id } = args;
         
-        if (!date || !service_id) {
-          return JSON.stringify({ success: false, error: "Data e serviço são obrigatórios" });
+        if (!date) {
+          return JSON.stringify({ success: false, error: "Data é obrigatória" });
         }
 
-        // Get service details
-        const { data: service, error: serviceError } = await supabase
-          .from("services")
-          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes")
-          .eq("id", service_id)
-          .eq("law_firm_id", lawFirmId)
-          .single();
-
-        if (serviceError || !service) {
-          return JSON.stringify({ success: false, error: "Serviço não encontrado" });
+        // Get service duration
+        let serviceDuration = 60; // Default 60 min
+        if (service_id) {
+          const { data: service } = await supabase
+            .from("services")
+            .select("duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
+            .eq("id", service_id)
+            .eq("law_firm_id", lawFirmId)
+            .single();
+          
+          if (service) {
+            serviceDuration = service.duration_minutes + 
+              (service.buffer_before_minutes || 0) + 
+              (service.buffer_after_minutes || 0);
+          }
         }
 
-        // Get law firm business hours and timezone
-        const { data: lawFirm, error: lawFirmError } = await supabase
+        // Get business hours for this day
+        const { data: lawFirm } = await supabase
           .from("law_firms")
-          .select("business_hours, timezone")
+          .select("business_hours")
           .eq("id", lawFirmId)
           .single();
 
-        if (lawFirmError || !lawFirm?.business_hours) {
-          return JSON.stringify({ success: false, error: "Horário de funcionamento não configurado" });
-        }
-
-        const timezone = lawFirm.timezone || "America/Sao_Paulo";
-        const businessHours = lawFirm.business_hours as Record<string, { enabled: boolean; start: string; end: string }>;
-        
-        // Parse the date correctly considering timezone
-        const targetDate = new Date(date + "T12:00:00"); // use noon to avoid date shift issues
-        const dayOfWeek = targetDate.getDay();
-        const dayMap: Record<number, string> = {
-          0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday",
-          4: "thursday", 5: "friday", 6: "saturday"
-        };
-        const dayKey = dayMap[dayOfWeek];
-        const dayHours = businessHours[dayKey];
+        const businessHours = lawFirm?.business_hours as Record<string, any> || {};
+        const requestedDate = new Date(date + "T12:00:00Z"); // Noon to avoid timezone issues
+        const dayOfWeek = requestedDate.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+        const dayHours = businessHours[dayOfWeek];
 
         if (!dayHours?.enabled) {
           return JSON.stringify({
             success: true,
-            message: `Não há atendimento neste dia da semana.`,
+            message: `Não há atendimento neste dia da semana (${dayOfWeek})`,
             available_slots: []
           });
         }
 
-        // Get existing appointments for this date
-        // IMPORTANT: Appointments are stored in UTC, so we need to search using UTC range
-        // Brazil is UTC-3, so 00:00 local = 03:00 UTC and 23:59 local = 02:59 UTC next day
-        const startOfDayUTC = date + "T03:00:00Z"; // 00:00 Brazil = 03:00 UTC
-        const endOfDayUTC = new Date(new Date(date + "T00:00:00Z").getTime() + 27 * 60 * 60 * 1000).toISOString(); // next day 03:00 UTC
-
-        console.log(`[get_available_slots] Searching appointments for date ${date}`);
-        console.log(`[get_available_slots] UTC range: ${startOfDayUTC} to ${endOfDayUTC}`);
-        console.log(`[get_available_slots] Business hours: ${dayHours.start} to ${dayHours.end}`);
-
-        const { data: existingAppointments, error: apptError } = await supabase
-          .from("appointments")
-          .select("start_time, end_time, status")
-          .eq("law_firm_id", lawFirmId)
-          .neq("status", "cancelled")
-          .gte("start_time", startOfDayUTC)
-          .lt("start_time", endOfDayUTC);
-
-        console.log(`[get_available_slots] Found ${existingAppointments?.length || 0} existing appointments:`, 
-          existingAppointments?.map((a: { start_time: string; end_time: string; status: string }) => ({
-            start: a.start_time,
-            end: a.end_time,
-            status: a.status
-          }))
-        );
-
-        // Parse business hours properly (these are local times like "08:00")
-        const [startHour, startMin] = dayHours.start.split(":").map(Number);
-        const [endHour, endMin] = dayHours.end.split(":").map(Number);
-
-        const totalDuration = service.duration_minutes + 
-          (service.buffer_before_minutes || 0) + 
-          (service.buffer_after_minutes || 0);
-
-        // Generate slots using simple hour/minute arithmetic (local time logic)
+        // Generate all possible slots
+        const startHour = parseInt(dayHours.start?.split(":")[0] || "9");
+        const startMin = parseInt(dayHours.start?.split(":")[1] || "0");
+        const endHour = parseInt(dayHours.end?.split(":")[0] || "18");
+        const endMin = parseInt(dayHours.end?.split(":")[1] || "0");
+        
         const slots: string[] = [];
-        let currentHour = startHour;
-        let currentMin = startMin;
-        
-        // Get current time in Brazil timezone for comparison
-        const nowBrazil = new Date().toLocaleString("en-US", { timeZone: timezone });
-        const nowDate = new Date(nowBrazil);
-        const todayStr = nowDate.toISOString().split("T")[0];
-        const isToday = date === todayStr;
-        const currentTimeMinutes = isToday ? nowDate.getHours() * 60 + nowDate.getMinutes() : 0;
+        let currentMinutes = startHour * 60 + startMin;
+        const endMinutes = endHour * 60 + endMin;
 
-        while (true) {
-          const slotStartMinutes = currentHour * 60 + currentMin;
-          const slotEndMinutes = slotStartMinutes + totalDuration;
-          const businessEndMinutes = endHour * 60 + endMin;
-          
-          // Stop if slot would end after business hours
-          if (slotEndMinutes > businessEndMinutes) break;
-          
-          // Skip past slots if today
-          if (!isToday || slotStartMinutes > currentTimeMinutes) {
-            // Format times properly
-            const slotStartStr = `${String(currentHour).padStart(2, "0")}:${String(currentMin).padStart(2, "0")}`;
-            
-            // Create slot times in LOCAL timezone, then compare with UTC appointments
-            // Convert slot local time to UTC for comparison
-            const slotStartUTC = new Date(`${date}T${slotStartStr}:00.000-03:00`); // Brazil time = UTC-3
-            const slotEndUTC = new Date(slotStartUTC.getTime() + totalDuration * 60000);
-            
-            const hasConflict = (existingAppointments || []).some((apt: any) => {
-              const aptStart = new Date(apt.start_time);
-              const aptEnd = new Date(apt.end_time);
-              // Check overlap: slot overlaps appointment if slot starts before apt ends AND slot ends after apt starts
-              const overlaps = slotStartUTC < aptEnd && slotEndUTC > aptStart;
-              if (overlaps) {
-                console.log(`[get_available_slots] Conflict at ${slotStartStr}: slot ${slotStartUTC.toISOString()} - ${slotEndUTC.toISOString()} overlaps with apt ${aptStart.toISOString()} - ${aptEnd.toISOString()}`);
-              }
-              return overlaps;
-            });
-
-            if (!hasConflict) {
-              slots.push(slotStartStr);
-            }
-          }
-
-          // Move to next slot (increment by service duration)
-          currentMin += service.duration_minutes;
-          while (currentMin >= 60) {
-            currentMin -= 60;
-            currentHour += 1;
-          }
+        while (currentMinutes + serviceDuration <= endMinutes) {
+          const hour = Math.floor(currentMinutes / 60);
+          const min = currentMinutes % 60;
+          slots.push(`${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`);
+          currentMinutes += 30; // 30 minute intervals
         }
-        
-        console.log(`[get_available_slots] Generated ${slots.length} available slots: ${slots.join(", ")}`);
-        
 
-        if (slots.length === 0) {
+        // Get existing appointments for this date
+        const startOfDay = new Date(date + "T00:00:00.000-03:00");
+        const endOfDay = new Date(date + "T23:59:59.999-03:00");
+
+        const { data: existingAppointments } = await supabase
+          .from("appointments")
+          .select("start_time, end_time")
+          .eq("law_firm_id", lawFirmId)
+          .gte("start_time", startOfDay.toISOString())
+          .lte("start_time", endOfDay.toISOString())
+          .neq("status", "cancelled");
+
+        // Filter out occupied slots
+        const availableSlots = slots.filter((slot) => {
+          // IMPORTANT: slot is in Brazil time, need to convert for comparison
+          const slotStart = new Date(`${date}T${slot}:00.000-03:00`);
+          const slotEnd = new Date(slotStart.getTime() + serviceDuration * 60000);
+
+          const isOccupied = existingAppointments?.some((apt: any) => {
+            const aptStart = new Date(apt.start_time);
+            const aptEnd = new Date(apt.end_time);
+            return slotStart < aptEnd && slotEnd > aptStart;
+          });
+
+          return !isOccupied;
+        });
+
+        if (availableSlots.length === 0) {
           return JSON.stringify({
             success: true,
-            message: `Não há horários disponíveis para ${service.name} no dia ${date}. Sugira outra data.`,
-            available_slots: [],
-            business_hours: `${dayHours.start} às ${dayHours.end}`
+            message: "Não há horários disponíveis nesta data",
+            available_slots: []
           });
         }
 
-        // Group slots for better presentation (morning, afternoon, evening)
-        const morning = slots.filter(s => parseInt(s.split(":")[0]) < 12);
-        const afternoon = slots.filter(s => {
-          const h = parseInt(s.split(":")[0]);
-          return h >= 12 && h < 18;
-        });
-        const evening = slots.filter(s => parseInt(s.split(":")[0]) >= 18);
+        // Get service info for the response
+        const { data: service } = await supabase
+          .from("services")
+          .select("name, duration_minutes")
+          .eq("id", service_id)
+          .single();
 
-        // Create summary for AI to present nicely
-        let summary = `Horários disponíveis para ${service.name} em ${date} (expediente: ${dayHours.start} às ${dayHours.end}):\n`;
+        // Group by period for better readability
+        const morning = availableSlots.filter(s => parseInt(s.split(":")[0]) < 12);
+        const afternoon = availableSlots.filter(s => {
+          const hour = parseInt(s.split(":")[0]);
+          return hour >= 12 && hour < 18;
+        });
+        const evening = availableSlots.filter(s => parseInt(s.split(":")[0]) >= 18);
+
+        let summary = `📅 Horários disponíveis para ${date}:\n`;
         if (morning.length > 0) {
           summary += `• Manhã: ${morning[0]} até ${morning[morning.length - 1]} (${morning.length} horários)\n`;
         }
@@ -1404,17 +1259,17 @@ async function executeSchedulingTool(
         return JSON.stringify({
           success: true,
           message: summary,
-          service_name: service.name,
-          duration_minutes: service.duration_minutes,
+          service_name: service?.name,
+          duration_minutes: service?.duration_minutes,
           business_hours: `${dayHours.start} às ${dayHours.end}`,
           available_slots_summary: {
             morning: morning.length > 0 ? `${morning[0]} - ${morning[morning.length - 1]}` : null,
             afternoon: afternoon.length > 0 ? `${afternoon[0]} - ${afternoon[afternoon.length - 1]}` : null,
             evening: evening.length > 0 ? `${evening[0]} - ${evening[evening.length - 1]}` : null,
-            total: slots.length
+            total: availableSlots.length
           },
-          available_slots: slots.length <= 8 ? slots : undefined,
-          hint: slots.length > 8 
+          available_slots: availableSlots.length <= 8 ? availableSlots : undefined,
+          hint: availableSlots.length > 8 
             ? "Há muitos horários. Pergunte em qual período o cliente prefere (manhã/tarde) para sugerir opções específicas."
             : "Apresente os horários disponíveis."
         });
@@ -1443,8 +1298,7 @@ async function executeSchedulingTool(
         }
 
         // Parse date and time - IMPORTANT: time is in Brazil local time (UTC-3)
-        // We need to convert to UTC for storage
-        const startTime = new Date(`${date}T${time}:00.000-03:00`); // Brazil time = UTC-3
+        const startTime = new Date(`${date}T${time}:00.000-03:00`);
         const totalDuration = service.duration_minutes + 
           (service.buffer_before_minutes || 0) + 
           (service.buffer_after_minutes || 0);
@@ -1474,7 +1328,6 @@ async function executeSchedulingTool(
         // Try to find existing client by phone, or create/update one
         let agendaClientId = clientId;
         
-        // First, try to find existing client with this phone
         const { data: existingClient } = await supabase
           .from("clients")
           .select("id")
@@ -1483,20 +1336,18 @@ async function executeSchedulingTool(
           .maybeSingle();
 
         if (existingClient) {
-          // Update existing client to be an agenda client
           agendaClientId = existingClient.id;
           await supabase
             .from("clients")
             .update({
               is_agenda_client: true,
-              name: client_name, // Update name if provided
+              name: client_name,
               email: client_email || undefined,
               updated_at: new Date().toISOString()
             })
             .eq("id", existingClient.id);
           console.log(`[book_appointment] Updated existing client ${existingClient.id} as agenda client`);
         } else {
-          // Create new client as agenda client
           const { data: newClient, error: clientError } = await supabase
             .from("clients")
             .insert({
@@ -1633,14 +1484,12 @@ async function executeSchedulingTool(
         
         console.log(`[Scheduling] list_client_appointments - clientId: ${clientId}, conversationId: ${conversationId}, client_phone arg: ${client_phone}`);
         
-        // Build a more flexible query to find appointments
         let query = supabase
           .from("appointments")
           .select("id, start_time, end_time, status, client_name, client_phone, client_id, conversation_id, service:services(name, duration_minutes)")
           .eq("law_firm_id", lawFirmId)
           .order("start_time", { ascending: true });
 
-        // Filter by status
         if (status === "scheduled") {
           query = query.eq("status", "scheduled");
         } else if (status === "confirmed") {
@@ -1649,7 +1498,6 @@ async function executeSchedulingTool(
           query = query.in("status", ["scheduled", "confirmed"]);
         }
 
-        // Only future appointments
         query = query.gte("start_time", new Date().toISOString());
 
         const { data: allAppointments, error } = await query;
@@ -1659,10 +1507,8 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Erro ao buscar agendamentos" });
         }
 
-        // Filter appointments by client - use multiple methods
         let filteredAppointments = allAppointments || [];
         
-        // If we have a clientId, filter by it
         if (clientId) {
           const byClientId = filteredAppointments.filter((apt: any) => apt.client_id === clientId);
           if (byClientId.length > 0) {
@@ -1670,7 +1516,6 @@ async function executeSchedulingTool(
           }
         }
         
-        // If no results and we have a conversation_id, try to find by it
         if (filteredAppointments.length === 0 || !clientId) {
           const byConversation = (allAppointments || []).filter((apt: any) => apt.conversation_id === conversationId);
           if (byConversation.length > 0) {
@@ -1678,7 +1523,6 @@ async function executeSchedulingTool(
           }
         }
         
-        // If the AI provided a phone number, try to find by phone
         if (client_phone && filteredAppointments.length === 0) {
           const normalizedPhone = client_phone.replace(/\D/g, '');
           const byPhone = (allAppointments || []).filter((apt: any) => {
@@ -1728,7 +1572,6 @@ async function executeSchedulingTool(
           });
         }
 
-        // Get existing appointment
         const { data: existingApt, error: aptError } = await supabase
           .from("appointments")
           .select("*, service:services(id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes)")
@@ -1745,7 +1588,6 @@ async function executeSchedulingTool(
         }
 
         const service = existingApt.service;
-        // IMPORTANT: time is in Brazil local time (UTC-3), convert to UTC for storage
         const newStartTime = new Date(`${new_date}T${new_time}:00.000-03:00`);
         const totalDuration = service.duration_minutes + 
           (service.buffer_before_minutes || 0) + 
@@ -1754,7 +1596,6 @@ async function executeSchedulingTool(
         
         console.log(`[reschedule_appointment] Rescheduling to ${new_time} Brazil time = ${newStartTime.toISOString()} UTC`);
 
-        // Check for conflicts (excluding the current appointment)
         const { data: conflicts } = await supabase
           .from("appointments")
           .select("id")
@@ -1771,7 +1612,6 @@ async function executeSchedulingTool(
           });
         }
 
-        // Update appointment - reset message timestamps so they're re-sent at new times
         const { error: updateError } = await supabase
           .from("appointments")
           .update({
@@ -1779,7 +1619,6 @@ async function executeSchedulingTool(
             end_time: newEndTime.toISOString(),
             status: "scheduled",
             confirmed_at: null,
-            // Reset all scheduled message timestamps
             reminder_sent_at: null,
             confirmation_sent_at: null,
             pre_message_sent_at: null,
@@ -1792,7 +1631,6 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Erro ao reagendar" });
         }
 
-        // Send notification
         if (existingApt.client_phone) {
           try {
             await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
@@ -1811,7 +1649,6 @@ async function executeSchedulingTool(
           }
         }
 
-        // Get company name for the message
         const { data: lawFirmData } = await supabase
           .from("law_firms")
           .select("name")
@@ -1819,7 +1656,6 @@ async function executeSchedulingTool(
           .single();
         const companyName = lawFirmData?.name || "";
 
-        // Format date and time nicely
         const dateObj = new Date(`${new_date}T${new_time}:00.000-03:00`);
         const rescheduleEndTime = new Date(dateObj.getTime() + service.duration_minutes * 60000);
         
@@ -1835,7 +1671,7 @@ async function executeSchedulingTool(
           minute: "2-digit",
           timeZone: "America/Sao_Paulo"
         });
-        const formattedEndTimeStr = rescheduleEndTime.toLocaleTimeString("pt-BR", { 
+        const formattedEndTime = rescheduleEndTime.toLocaleTimeString("pt-BR", { 
           hour: "2-digit", 
           minute: "2-digit",
           timeZone: "America/Sao_Paulo"
@@ -1843,7 +1679,14 @@ async function executeSchedulingTool(
 
         return JSON.stringify({
           success: true,
-          message: `Olá ${existingApt.client_name}!\n\nSeu agendamento foi reagendado! 🗓️\n\n📅 *Nova data:* ${formattedDate}\n⏰ *Novo horário:* ${formattedStartTime} às ${formattedEndTimeStr}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nCaso tenha dúvidas, entre em contato.\n\nAguardamos você! 😊`
+          message: `Seu agendamento foi reagendado com sucesso! 📅\n\n📅 *Nova data:* ${formattedDate}\n⏰ *Novo horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nAguardamos você! 😊`,
+          appointment: {
+            id: appointment_id,
+            service: service.name,
+            date: formattedDate,
+            time: formattedStartTime,
+            end_time: formattedEndTime
+          }
         });
       }
 
@@ -1851,45 +1694,41 @@ async function executeSchedulingTool(
         const { appointment_id, reason } = args;
 
         if (!appointment_id) {
-          return JSON.stringify({ success: false, error: "ID do agendamento é obrigatório" });
+          return JSON.stringify({
+            success: false,
+            error: "ID do agendamento é obrigatório"
+          });
         }
 
-        // Get appointment
-        const { data: existingApt } = await supabase
+        const { data: existingApt, error: aptError } = await supabase
           .from("appointments")
-          .select("id, client_phone, status")
+          .select("*, service:services(name)")
           .eq("id", appointment_id)
           .eq("law_firm_id", lawFirmId)
           .single();
 
-        if (!existingApt) {
+        if (aptError || !existingApt) {
           return JSON.stringify({ success: false, error: "Agendamento não encontrado" });
         }
 
         if (existingApt.status === "cancelled") {
-          return JSON.stringify({ success: false, error: "Este agendamento já está cancelado" });
+          return JSON.stringify({ success: false, error: "Este agendamento já foi cancelado" });
         }
 
-        // Cancel appointment and clear scheduled messages
-        const { error: cancelError } = await supabase
+        const { error: updateError } = await supabase
           .from("appointments")
           .update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
-            cancel_reason: reason || "Cancelado pelo cliente via chat",
-            // Clear scheduled messages - they won't be sent for cancelled appointments
-            reminder_sent_at: null,
-            confirmation_sent_at: null,
-            pre_message_sent_at: null
+            cancel_reason: reason || "Cancelado pelo cliente via chat"
           })
           .eq("id", appointment_id);
 
-        if (cancelError) {
-          console.error("[Scheduling] Error cancelling:", cancelError);
-          return JSON.stringify({ success: false, error: "Erro ao cancelar agendamento" });
+        if (updateError) {
+          console.error("[Scheduling] Error cancelling:", updateError);
+          return JSON.stringify({ success: false, error: "Erro ao cancelar" });
         }
 
-        // Send notification
         if (existingApt.client_phone) {
           try {
             await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
@@ -1904,13 +1743,17 @@ async function executeSchedulingTool(
               }),
             });
           } catch (e) {
-            console.error("[Scheduling] Failed to send cancel notification:", e);
+            console.error("[Scheduling] Failed to send cancellation notification:", e);
           }
         }
 
         return JSON.stringify({
           success: true,
-          message: "Agendamento cancelado com sucesso. O horário foi liberado."
+          message: `Agendamento cancelado com sucesso. Se desejar, você pode agendar um novo horário.`,
+          cancelled_appointment: {
+            id: appointment_id,
+            service: existingApt.service?.name
+          }
         });
       }
 
@@ -1918,18 +1761,20 @@ async function executeSchedulingTool(
         const { appointment_id } = args;
 
         if (!appointment_id) {
-          return JSON.stringify({ success: false, error: "ID do agendamento é obrigatório" });
+          return JSON.stringify({
+            success: false,
+            error: "ID do agendamento é obrigatório"
+          });
         }
 
-        // Get appointment
-        const { data: existingApt } = await supabase
+        const { data: existingApt, error: aptError } = await supabase
           .from("appointments")
-          .select("id, status, start_time, service:services(name)")
+          .select("*, service:services(name)")
           .eq("id", appointment_id)
           .eq("law_firm_id", lawFirmId)
           .single();
 
-        if (!existingApt) {
+        if (aptError || !existingApt) {
           return JSON.stringify({ success: false, error: "Agendamento não encontrado" });
         }
 
@@ -1938,14 +1783,10 @@ async function executeSchedulingTool(
         }
 
         if (existingApt.status === "confirmed") {
-          return JSON.stringify({
-            success: true,
-            message: "Este agendamento já está confirmado!"
-          });
+          return JSON.stringify({ success: true, message: "Este agendamento já está confirmado!" });
         }
 
-        // Confirm appointment
-        const { error: confirmError } = await supabase
+        const { error: updateError } = await supabase
           .from("appointments")
           .update({
             status: "confirmed",
@@ -1953,256 +1794,203 @@ async function executeSchedulingTool(
           })
           .eq("id", appointment_id);
 
-        if (confirmError) {
-          console.error("[Scheduling] Error confirming:", confirmError);
-          return JSON.stringify({ success: false, error: "Erro ao confirmar agendamento" });
+        if (updateError) {
+          console.error("[Scheduling] Error confirming:", updateError);
+          return JSON.stringify({ success: false, error: "Erro ao confirmar" });
         }
 
         const aptDate = new Date(existingApt.start_time);
+        const formattedDate = aptDate.toLocaleDateString("pt-BR", { 
+          day: "numeric", 
+          month: "long",
+          timeZone: "America/Sao_Paulo"
+        });
+        const formattedTime = aptDate.toLocaleTimeString("pt-BR", { 
+          hour: "2-digit", 
+          minute: "2-digit",
+          timeZone: "America/Sao_Paulo"
+        });
+
         return JSON.stringify({
           success: true,
-          message: `Presença confirmada! Aguardamos você no dia ${aptDate.toLocaleDateString("pt-BR")} às ${aptDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.`
+          message: `Agendamento confirmado com sucesso! ✅\n\nEsperamos você no dia ${formattedDate} às ${formattedTime}.\n\nServiço: ${existingApt.service?.name}`,
+          confirmed_appointment: {
+            id: appointment_id,
+            service: existingApt.service?.name,
+            date: formattedDate,
+            time: formattedTime
+          }
         });
       }
 
       default:
-        return JSON.stringify({ error: `Ferramenta desconhecida: ${toolCall.name}` });
+        return JSON.stringify({ success: false, error: `Ferramenta de agendamento desconhecida: ${toolCall.name}` });
     }
   } catch (error) {
-    console.error(`[AI Chat] Scheduling tool error:`, error);
+    console.error(`[Scheduling] Tool error:`, error);
     return JSON.stringify({ error: "Erro ao executar ação de agendamento" });
   }
 }
 
-// Get all available tools (calendar + CRM)
-function getCurrentBillingPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-/**
- * Record AI conversation usage for billing purposes.
- * Deduplicates by conversation_id per billing period (monthly).
- */
-async function recordAIConversationUsage(
+// Execute template tool call
+async function executeTemplateTool(
   supabase: any,
   lawFirmId: string,
   conversationId: string,
-  automationId: string,
-  automationName: string,
-  source: string
-): Promise<boolean> {
-  const billingPeriod = getCurrentBillingPeriod();
-  
+  toolCall: { name: string; arguments: string }
+): Promise<string> {
   try {
-    // Check if this conversation was already counted this billing period
-    const { data: existingRecord } = await supabase
-      .from('usage_records')
-      .select('id')
-      .eq('law_firm_id', lawFirmId)
-      .eq('usage_type', 'ai_conversation')
-      .eq('billing_period', billingPeriod)
-      .eq('metadata->>conversation_id', conversationId)
-      .limit(1);
+    const args = JSON.parse(toolCall.arguments);
     
-    if (existingRecord && existingRecord.length > 0) {
-      console.log('[AI Chat] Conversation already counted this period', { 
-        conversationId, 
-        billingPeriod 
+    console.log(`[AI Chat] Executing template tool: ${toolCall.name}`, args);
+    
+    const templateName = args.template_name;
+    
+    // Search for template by name or shortcut
+    const { data: templates } = await supabase
+      .from("templates")
+      .select("id, name, shortcut, content, media_url, media_type")
+      .eq("law_firm_id", lawFirmId)
+      .eq("is_active", true);
+    
+    if (!templates || templates.length === 0) {
+      return JSON.stringify({ 
+        success: false, 
+        error: "Nenhum template encontrado. Os templates precisam ser configurados primeiro." 
       });
-      return false; // Already counted
     }
     
-    // Record the usage - this conversation is being handled by AI for the first time this month
-    const { error } = await supabase
-      .from('usage_records')
-      .insert({
-        law_firm_id: lawFirmId,
-        usage_type: 'ai_conversation',
-        count: 1,
-        billing_period: billingPeriod,
-        metadata: {
-          conversation_id: conversationId,
-          automation_id: automationId,
-          automation_name: automationName,
-          source: source,
-          first_ai_response_at: new Date().toISOString(),
-        }
-      });
+    // Find best match
+    const normalizedSearch = templateName.toLowerCase().trim();
+    const matchedTemplate = templates.find((t: any) => 
+      t.name.toLowerCase() === normalizedSearch ||
+      t.shortcut.toLowerCase() === normalizedSearch ||
+      t.name.toLowerCase().includes(normalizedSearch) ||
+      normalizedSearch.includes(t.name.toLowerCase())
+    );
     
-    if (error) {
-      console.error('[AI Chat] Failed to record AI usage', { error, lawFirmId });
-      return false;
+    if (!matchedTemplate) {
+      const availableTemplates = templates.map((t: any) => t.name).join(", ");
+      return JSON.stringify({ 
+        success: false, 
+        error: `Template "${templateName}" não encontrado. Templates disponíveis: ${availableTemplates}` 
+      });
     }
     
-    console.log('[AI Chat] AI conversation usage recorded', { 
-      lawFirmId,
-      conversationId,
-      source,
-      billingPeriod 
-    });
-    return true;
-  } catch (err) {
-    console.error('[AI Chat] Error recording AI usage', { error: err instanceof Error ? err.message : err });
-    return false;
+    // Return template content for AI to use
+    let response: any = {
+      success: true,
+      template_name: matchedTemplate.name,
+      content: matchedTemplate.content,
+      message: `Encontrei o template "${matchedTemplate.name}". Envie o conteúdo ao cliente:`
+    };
+    
+    // Include media if available
+    if (matchedTemplate.media_url) {
+      response.media_url = matchedTemplate.media_url;
+      response.media_type = matchedTemplate.media_type;
+      response.message += ` (inclui ${matchedTemplate.media_type || 'mídia'})`;
+    }
+    
+    // Include additional message if provided
+    if (args.additional_message) {
+      response.additional_message = args.additional_message;
+    }
+    
+    return JSON.stringify(response);
+    
+  } catch (error) {
+    console.error(`[AI Chat] Template tool error:`, error);
+    return JSON.stringify({ error: "Erro ao buscar template" });
   }
 }
 
-// Helper to fetch agent knowledge base items
-async function getAgentKnowledge(
-  supabase: any,
-  automationId: string
-): Promise<string> {
-  const { data: agentKnowledge, error } = await supabase
-    .from("agent_knowledge")
-    .select(`
-      knowledge_item_id,
-      knowledge_items (
-        id,
-        title,
-        content,
-        category,
-        item_type
-      )
-    `)
-    .eq("automation_id", automationId);
-
-  if (error || !agentKnowledge || agentKnowledge.length === 0) {
-    console.log(`[AI Chat] No knowledge items found for automation ${automationId}`);
+// Fetch knowledge base content for an agent
+async function getAgentKnowledge(supabase: any, automationId: string): Promise<string> {
+  try {
+    // Get knowledge items linked to this specific agent
+    const { data: linkedKnowledge, error } = await supabase
+      .from("agent_knowledge")
+      .select(`
+        knowledge_item_id,
+        knowledge_items (
+          id,
+          title,
+          content,
+          category,
+          item_type
+        )
+      `)
+      .eq("automation_id", automationId);
+    
+    if (error || !linkedKnowledge || linkedKnowledge.length === 0) {
+      return "";
+    }
+    
+    // Build knowledge context
+    const knowledgeTexts = linkedKnowledge
+      .filter((item: any) => item.knowledge_items?.content)
+      .map((item: any) => {
+        const ki = item.knowledge_items;
+        return `### ${ki.title}\n${ki.content}`;
+      });
+    
+    if (knowledgeTexts.length === 0) {
+      return "";
+    }
+    
+    return `\n\n## BASE DE CONHECIMENTO\nUse as informações abaixo para responder perguntas do cliente:\n\n${knowledgeTexts.join("\n\n")}`;
+    
+  } catch (error) {
+    console.error("[AI Chat] Error fetching agent knowledge:", error);
     return "";
   }
-
-  const knowledgeItems = agentKnowledge
-    .map((ak: any) => ak.knowledge_items)
-    .filter(Boolean);
-
-  if (knowledgeItems.length === 0) {
-    return "";
-  }
-
-  const knowledgeText = knowledgeItems
-    .map((item: any) => `### ${item.title} (${item.category})\n${item.content || ""}`)
-    .join("\n\n");
-
-  console.log(`[AI Chat] Loaded ${knowledgeItems.length} knowledge items for automation ${automationId}`);
-
-  return `\n\n📚 BASE DE CONHECIMENTO (use estas informações para responder):\n${knowledgeText}`;
 }
 
-// Helper to fetch client memories
-async function getClientMemories(
-  supabase: any,
-  clientId: string
-): Promise<string> {
-  const { data: memories } = await supabase
-    .from("client_memories")
-    .select("fact_type, content, importance")
-    .eq("client_id", clientId)
-    .eq("is_active", true)
-    .order("importance", { ascending: false })
-    .limit(15);
-
-  if (!memories || memories.length === 0) {
-    return "";
-  }
-
-  const memoryText = (memories as any[])
-    .map((m: any) => `- [${m.fact_type}] ${m.content}`)
-    .join("\n");
-
-  return `\n\n📝 MEMÓRIA DO CLIENTE (fatos importantes já conhecidos):\n${memoryText}`;
-}
-
-// Helper to get conversation context for long conversations
-async function getConversationContext(
-  supabase: any,
-  conversationId: string,
-  maxMessages: number = 25 // Increased from 10 to maintain better context
-): Promise<{ messages: Array<{ role: string; content: string }>; needsSummary: boolean }> {
-  // Get total message count
-  const { count } = await supabase
-    .from("messages")
-    .select("*", { count: "exact", head: true })
-    .eq("conversation_id", conversationId);
-
-  const totalMessages = count || 0;
-  // Generate summary earlier (after 15 messages instead of 20)
-  const needsSummary = totalMessages > 15;
-
-  // Get recent messages
-  const { data: recentMessages } = await supabase
-    .from("messages")
-    .select("content, is_from_me, created_at")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
-    .limit(maxMessages);
-
-  if (!recentMessages || recentMessages.length === 0) {
-    return { messages: [], needsSummary: false };
-  }
-
-  // Convert to chat format (reverse to chronological order)
-  const messages = (recentMessages as any[])
-    .reverse()
-    .filter((m: any) => m.content)
-    .map((m: any) => ({
-      role: m.is_from_me ? "assistant" : "user",
-      content: m.content!
-    }));
-
-  return { messages, needsSummary };
-}
-
-// Generate and save conversation summary
-async function generateAndSaveSummary(
+// Generate conversation summary if needed
+async function generateSummaryIfNeeded(
   supabase: any,
   conversationId: string,
   LOVABLE_API_KEY: string
 ): Promise<string | null> {
-  // Check if we recently summarized
-  const { data: conversation } = await supabase
-    .from("conversations")
-    .select("ai_summary, last_summarized_at, summary_message_count")
-    .eq("id", conversationId)
-    .single();
+  try {
+    // Check if we need to generate a new summary
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("summary_message_count, last_summarized_at, ai_summary")
+      .eq("id", conversationId)
+      .single();
+    
+    if (!conv) return null;
+    
+    const lastCount = conv.summary_message_count || 0;
+    
+    // Get current message count
+    const { count: currentCount } = await supabase
+      .from("messages")
+      .select("id", { count: "exact" })
+      .eq("conversation_id", conversationId);
+    
+    // Generate summary every 20 messages
+    if (currentCount && currentCount > lastCount + 20) {
+      // Fetch last 50 messages for summary
+      const { data: allMessages } = await supabase
+        .from("messages")
+        .select("content, is_from_me, created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true })
+        .limit(50);
+      
+      if (!allMessages || allMessages.length < 10) {
+        return conv.ai_summary || null;
+      }
+      
+      const conversationText = (allMessages as any[])
+        .filter((m: any) => m.content)
+        .map((m: any) => `${m.is_from_me ? "Assistente" : "Cliente"}: ${m.content}`)
+        .join("\n");
 
-  const { count: currentCount } = await supabase
-    .from("messages")
-    .select("*", { count: "exact", head: true })
-    .eq("conversation_id", conversationId);
-
-  const conv = conversation as any;
-
-  // If we have a recent summary and not many new messages, use existing
-  // Reduced threshold from 15 to 8 new messages to update summary more frequently
-  if (
-    conv?.ai_summary &&
-    conv?.summary_message_count &&
-    currentCount &&
-    currentCount - conv.summary_message_count < 8
-  ) {
-    return conv.ai_summary;
-  }
-
-  // Get all messages for summary
-  const { data: allMessages } = await supabase
-    .from("messages")
-    .select("content, is_from_me, created_at")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-    .limit(100);
-
-  if (!allMessages || allMessages.length < 10) {
-    return null;
-  }
-
-  // Build conversation text for summarization
-  const conversationText = (allMessages as any[])
-    .filter((m: any) => m.content)
-    .map((m: any) => `${m.is_from_me ? "Assistente" : "Cliente"}: ${m.content}`)
-    .join("\n");
-
-  const summaryPrompt = `Resuma esta conversa jurídica em 3-4 frases, destacando:
+      const summaryPrompt = `Resuma esta conversa jurídica em 3-4 frases, destacando:
 - O problema principal do cliente
 - Informações importantes coletadas
 - Status atual do atendimento
@@ -2213,47 +2001,48 @@ ${conversationText}
 
 Responda apenas com o resumo, sem formatação especial.`;
 
-  try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [{ role: "user", content: summaryPrompt }],
-        temperature: 0.3,
-      }),
-    });
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [{ role: "user", content: summaryPrompt }],
+          temperature: 0.3,
+        }),
+      });
 
-    if (!response.ok) {
-      console.error("[AI Chat] Failed to generate summary");
-      return conv?.ai_summary || null;
+      if (!response.ok) {
+        console.error("[AI Chat] Failed to generate summary");
+        return conv.ai_summary || null;
+      }
+
+      const data = await response.json();
+      const summary = data.choices?.[0]?.message?.content;
+
+      if (summary) {
+        await supabase
+          .from("conversations")
+          .update({
+            ai_summary: summary,
+            last_summarized_at: new Date().toISOString(),
+            summary_message_count: currentCount,
+          })
+          .eq("id", conversationId);
+
+        console.log(`[AI Chat] Generated new summary for conversation ${conversationId}`);
+        return summary;
+      }
+
+      return conv.ai_summary || null;
     }
-
-    const data = await response.json();
-    const summary = data.choices?.[0]?.message?.content;
-
-    if (summary) {
-      // Save summary to conversation
-      await supabase
-        .from("conversations")
-        .update({
-          ai_summary: summary,
-          last_summarized_at: new Date().toISOString(),
-          summary_message_count: currentCount,
-        })
-        .eq("id", conversationId);
-
-      console.log(`[AI Chat] Generated new summary for conversation ${conversationId}`);
-      return summary;
-    }
-
-    return conv?.ai_summary || null;
+    
+    return conv.ai_summary || null;
   } catch (error) {
     console.error("[AI Chat] Summary generation error:", error);
-    return conv?.ai_summary || null;
+    return null;
   }
 }
 
@@ -2289,6 +2078,7 @@ serve(async (req) => {
     }
 
     // Track if this is a widget conversation (needs special handling)
+    // CRITICAL FIX: Also check source to handle conversations where ID is already a UUID
     let isWidgetConversation = false;
     let widgetSessionId = '';
 
@@ -2297,13 +2087,19 @@ serve(async (req) => {
       if (isWidgetId(conversationId)) {
         isWidgetConversation = true;
         widgetSessionId = conversationId;
-        console.log(`[AI Chat] Widget conversation detected: ${widgetSessionId}`);
+        console.log(`[AI Chat] Widget conversation detected (by ID format): ${widgetSessionId}`);
       } else {
         console.error(`[${errorRef}] Invalid conversationId format`);
         return new Response(
           JSON.stringify({ error: "Invalid request format", ref: errorRef }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+    } else {
+      // conversationId is a UUID - check if it's still a widget conversation by source
+      if (source === 'WIDGET' || source === 'TRAY') {
+        isWidgetConversation = true;
+        console.log(`[AI Chat] Widget conversation detected (by source=${source}, uuid=${conversationId})`);
       }
     }
 
@@ -2366,7 +2162,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[AI Chat] Request validated - conversationId: ${conversationId}, messageLength: ${message.length}`);
+    console.log(`[AI Chat] Request validated - conversationId: ${conversationId}, messageLength: ${message.length}, isWidget: ${isWidgetConversation}, source: ${source}`);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
@@ -2389,17 +2185,16 @@ serve(async (req) => {
     
     if ((source === 'web' || source === 'TRAY' || source === 'WIDGET') && context?.lawFirmId) {
       // SECURITY: For widget requests, validate lawFirmId matches the widget_key
-      // This prevents attackers from sending a fake lawFirmId
-      if (isWidgetConversation && (context as any).widgetKey) {
+      if (isWidgetConversation && context?.widgetKey) {
         const { data: widgetValidation } = await supabase
           .from("tray_chat_integrations")
-          .select("law_firm_id, default_automation_id, default_department_id, default_status_id, is_active")
-          .eq("widget_key", (context as any).widgetKey)
+          .select("law_firm_id, default_automation_id, default_department_id, default_status_id, default_handler_type, default_human_agent_id, is_active")
+          .eq("widget_key", context.widgetKey)
           .eq("is_active", true)
           .maybeSingle();
         
         if (!widgetValidation) {
-          console.error(`[${errorRef}] Widget key not found or inactive: ${(context as any).widgetKey}`);
+          console.error(`[${errorRef}] Widget key not found or inactive: ${context.widgetKey}`);
           return new Response(
             JSON.stringify({ error: "Widget configuration not found", ref: errorRef }),
             { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -2407,7 +2202,6 @@ serve(async (req) => {
         }
         
         // CRITICAL: Override lawFirmId with the validated one from widget_key
-        // This ensures tenant isolation even if someone tries to spoof lawFirmId
         if (widgetValidation.law_firm_id !== context.lawFirmId) {
           console.warn(`[AI Chat] LawFirmId mismatch - using validated: ${widgetValidation.law_firm_id} instead of provided: ${context.lawFirmId}`);
         }
@@ -2415,7 +2209,9 @@ serve(async (req) => {
         traySettings = widgetValidation;
         
         console.log(`[AI Chat] Widget validated for law_firm ${validatedLawFirmId}:`, {
+          default_handler_type: traySettings.default_handler_type,
           default_automation_id: traySettings.default_automation_id,
+          default_human_agent_id: traySettings.default_human_agent_id,
           default_department_id: traySettings.default_department_id,
           default_status_id: traySettings.default_status_id
         });
@@ -2423,7 +2219,7 @@ serve(async (req) => {
         // Non-widget requests - use provided lawFirmId
         const { data: trayIntegration } = await supabase
           .from("tray_chat_integrations")
-          .select("default_automation_id, default_department_id, default_status_id, is_active")
+          .select("default_automation_id, default_department_id, default_status_id, default_handler_type, default_human_agent_id, is_active")
           .eq("law_firm_id", context.lawFirmId)
           .eq("is_active", true)
           .maybeSingle();
@@ -2432,25 +2228,22 @@ serve(async (req) => {
           traySettings = trayIntegration;
           validatedLawFirmId = context.lawFirmId;
           console.log(`[AI Chat] Loaded Tray settings for law_firm ${context.lawFirmId}:`, {
-            default_automation_id: traySettings.default_automation_id,
-            default_department_id: traySettings.default_department_id,
-            default_status_id: traySettings.default_status_id
+            default_handler_type: traySettings.default_handler_type,
+            default_automation_id: traySettings.default_automation_id
           });
         }
       }
       
-      // Use Tray's default automation if no automationId was provided
-      if (!automationId && traySettings?.default_automation_id) {
+      // Use Tray's default automation if handler type is 'ai' and no automationId was provided
+      if (!automationId && traySettings?.default_handler_type === 'ai' && traySettings?.default_automation_id) {
         automationId = traySettings.default_automation_id;
-        console.log(`[AI Chat] Using Tray/Widget default automation: ${automationId}`);
+        console.log(`[AI Chat] Using Tray/Widget default AI automation: ${automationId}`);
       }
     }
     
-    // Store validated lawFirmId for widget (will be used later alongside agentLawFirmId)
-
     // For widget conversations, create or find existing conversation
     // CRITICAL: Use validatedLawFirmId (from widget_key validation) for tenant isolation
-    if (isWidgetConversation && validatedLawFirmId) {
+    if (isWidgetConversation && validatedLawFirmId && widgetSessionId) {
       // Extract client info from context
       const clientName = context?.clientName || "Visitante Web";
       const clientPhone = context?.clientPhone || null;
@@ -2476,7 +2269,6 @@ serve(async (req) => {
             .update({ contact_name: clientName, contact_phone: clientPhone })
             .eq("id", conversationId);
           
-          // Update client record if exists
           if (existingConv.client_id) {
             await supabase
               .from("clients")
@@ -2489,11 +2281,10 @@ serve(async (req) => {
           }
         }
       } else {
-        // First, try to find or create a client record
+        // Create new client record if phone provided
         let clientId: string | null = null;
         
         if (clientPhone) {
-          // Look for existing client with same phone in this tenant
           const { data: existingClient } = await supabase
             .from("clients")
             .select("id")
@@ -2503,7 +2294,6 @@ serve(async (req) => {
           
           if (existingClient) {
             clientId = existingClient.id;
-            // Update client info
             await supabase
               .from("clients")
               .update({ 
@@ -2513,7 +2303,6 @@ serve(async (req) => {
               .eq("id", clientId);
             console.log(`[AI Chat] Found existing client: ${clientId}`);
           } else {
-            // Create new client
             const { data: newClient, error: clientError } = await supabase
               .from("clients")
               .insert({
@@ -2535,11 +2324,16 @@ serve(async (req) => {
           }
         }
         
+        // Determine handler based on settings
+        const handlerType = traySettings?.default_handler_type || 'human';
+        const assignedTo = handlerType === 'human' ? (traySettings?.default_human_agent_id || null) : null;
+        const currentAutomationId = handlerType === 'ai' ? (traySettings?.default_automation_id || null) : null;
+        
         // Create new conversation for widget with VALIDATED law_firm_id
         const { data: newConv, error: convError } = await supabase
           .from("conversations")
           .insert({
-            law_firm_id: validatedLawFirmId, // SECURITY: Use validated ID, not from context
+            law_firm_id: validatedLawFirmId,
             remote_jid: widgetSessionId,
             contact_name: clientName,
             contact_phone: clientPhone,
@@ -2547,7 +2341,7 @@ serve(async (req) => {
             origin: "WIDGET",
             origin_metadata: {
               widget_session: widgetSessionId,
-              widget_key: (context as any)?.widgetKey || null,
+              widget_key: context?.widgetKey || null,
               client_email: clientEmail,
               page_url: (context as any)?.pageUrl || null,
               page_title: (context as any)?.pageTitle || null,
@@ -2555,10 +2349,11 @@ serve(async (req) => {
               device: (context as any)?.device || null,
               user_agent: (context as any)?.userAgent || null,
             },
-            current_handler: automationId ? "ai" : "human",
-            current_automation_id: automationId || null,
+            current_handler: currentAutomationId ? "ai" : "human",
+            current_automation_id: currentAutomationId,
+            assigned_to: assignedTo,
             department_id: traySettings?.default_department_id || null,
-            status: traySettings?.default_status_id ? undefined : "novo_contato", // Use valid enum value
+            status: "novo_contato",
           })
           .select("id")
           .single();
@@ -2572,68 +2367,16 @@ serve(async (req) => {
         }
 
         conversationId = newConv.id;
-        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}, client: ${clientId}`);
+        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}, handler: ${handlerType}, client: ${clientId}`);
       }
     }
 
-    // Determine which AI to use based on law_firm_settings
-    let useOpenAI = false;
-    let iaSettings: any = null;
-    let openaiModel = "gpt-4o-mini"; // Default model
-    
-    // Fetch global AI settings (model selection from Global Admin)
-    const { data: globalSettings } = await supabase
-      .from("system_settings")
-      .select("key, value")
-      .in("key", ["ai_openai_model"]);
-    
-    if (globalSettings) {
-      const modelSetting = globalSettings.find((s: any) => s.key === "ai_openai_model");
-      if (modelSetting?.value && typeof modelSetting.value === "string") {
-        openaiModel = modelSetting.value;
-        console.log(`[AI Chat] Global OpenAI model configured: ${openaiModel}`);
-      }
-    }
-    
-    if (context?.lawFirmId) {
-      const { data: settings } = await supabase
-        .from("law_firm_settings")
-        .select("ai_provider, ai_capabilities")
-        .eq("law_firm_id", context.lawFirmId)
-        .maybeSingle();
-      
-      iaSettings = settings;
-      
-      if (settings?.ai_capabilities) {
-        const caps = settings.ai_capabilities as any;
-        const iaInternal = caps.ia_site_active ?? (settings.ai_provider === "internal");
-        const iaOpenAI = caps.openai_active ?? (settings.ai_provider === "openai");
-        
-        // Priority rule: If OpenAI is active (alone or with IA do Site), use OpenAI for chat
-        // Exception: If ONLY IA do Site is active, use Lovable AI
-        if (iaOpenAI && OPENAI_API_KEY) {
-          useOpenAI = true;
-          console.log(`[AI Chat] Using OpenAI (openai_active=${iaOpenAI}, ia_site_active=${iaInternal}, model=${openaiModel})`);
-        } else {
-          console.log(`[AI Chat] Using Lovable AI (internal) - openai_active=${iaOpenAI}, ia_site_active=${iaInternal}`);
-        }
-      }
-    }
-
-    // CRITICAL: Agent prompt is the SINGLE SOURCE OF TRUTH
-    // No default/fallback prompts - must have automationId with valid prompt
-    let systemPrompt: string | null = null;
-    let temperature = 0.7;
-    let automationName = "";
-    let knowledgeText = "";
-    let agentLawFirmId: string | null = null;
-
-    // automationId is REQUIRED for proper agent behavior
-    // For widget conversations without default automation, return a helpful message
+    // automationId is REQUIRED for AI behavior
+    // For widget conversations without automation (human mode), save message and return
     if (!automationId) {
       // If this is a widget conversation without automation, provide a fallback message
       if (isWidgetConversation && conversationId) {
-        console.log(`[${errorRef}] Widget conversation without automation - returning setup message`);
+        console.log(`[${errorRef}] Widget conversation without automation (human mode) - saving message`);
         
         // Save the user message to the conversation
         await supabase.from("messages").insert({
@@ -2645,20 +2388,46 @@ serve(async (req) => {
           status: "delivered"
         });
         
-        // Create a system response message
-        const systemMessage = "Olá! Obrigado por entrar em contato. Nossa equipe irá atendê-lo em breve. Por favor, aguarde.";
-        await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          content: systemMessage,
-          sender_type: "system",
-          is_from_me: true,
-          message_type: "text",
-          status: "delivered"
-        });
+        // Update conversation last_message_at
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", conversationId);
         
+        // Check if there are any previous assistant messages (to avoid duplicate system messages)
+        const { data: existingMessages } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", conversationId)
+          .eq("is_from_me", true)
+          .limit(1);
+        
+        // Only send welcome message on first contact
+        if (!existingMessages || existingMessages.length === 0) {
+          const systemMessage = "Olá! Obrigado por entrar em contato. Nossa equipe irá atendê-lo em breve. Por favor, aguarde.";
+          await supabase.from("messages").insert({
+            conversation_id: conversationId,
+            content: systemMessage,
+            sender_type: "system",
+            is_from_me: true,
+            message_type: "text",
+            status: "delivered"
+          });
+          
+          return new Response(
+            JSON.stringify({ 
+              response: systemMessage,
+              conversationId,
+              messageId: null,
+              status: "awaiting_agent"
+            }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        // For subsequent messages, just acknowledge without a bot response
         return new Response(
           JSON.stringify({ 
-            response: systemMessage,
             conversationId,
             messageId: null,
             status: "awaiting_agent"
@@ -2675,7 +2444,6 @@ serve(async (req) => {
     }
 
     // Fetch agent configuration - the ONLY source of behavior
-    // CRITICAL: Always fetch fresh from database - NO CACHING
     const { data: automation, error: automationError } = await supabase
       .from("automations")
       .select("id, ai_prompt, ai_temperature, name, law_firm_id, version, updated_at, trigger_config, notify_on_transfer, trigger_type, scheduling_enabled")
@@ -2691,10 +2459,7 @@ serve(async (req) => {
       );
     }
 
-    // ========================================================================
     // CRITICAL SECURITY CHECK: Validate tenant isolation
-    // If context includes lawFirmId, the automation MUST belong to that tenant
-    // ========================================================================
     const contextLawFirmId = context?.lawFirmId;
     if (contextLawFirmId && automation.law_firm_id !== contextLawFirmId) {
       console.error(`[${errorRef}] SECURITY VIOLATION - Cross-tenant automation execution blocked`);
@@ -2705,14 +2470,15 @@ serve(async (req) => {
     }
 
     // Use ONLY the agent's configured prompt
-    systemPrompt = (automation as any).ai_prompt;
+    let systemPrompt = (automation as any).ai_prompt;
+    let temperature = 0.7;
     if ((automation as any).ai_temperature !== null) {
       temperature = (automation as any).ai_temperature;
     }
-    automationName = (automation as any).name;
+    const automationName = (automation as any).name;
     
     // Get law_firm_id from automation (for usage tracking)
-    agentLawFirmId = (automation as any).law_firm_id;
+    const agentLawFirmId = (automation as any).law_firm_id;
 
     // Get notify_on_transfer setting (default false)
     const notifyOnTransfer = (automation as any).notify_on_transfer ?? false;
@@ -2746,7 +2512,7 @@ serve(async (req) => {
         .single();
       
       if (lawFirmData) {
-        // Process mentions - replace @mention placeholders with actual values
+        // Process mentions
         const mentionReplacements: Record<string, string> = {
           "@Nome da empresa": lawFirmData.name || "",
           "@Endereço": lawFirmData.address || "",
@@ -2757,7 +2523,7 @@ serve(async (req) => {
           "@Website": lawFirmData.website || "",
         };
         
-        // Process @Horário comercial - format business hours if available
+        // Process @Horário comercial
         if (lawFirmData.business_hours) {
           const businessHours = lawFirmData.business_hours as Record<string, any>;
           const dayNames: Record<string, string> = {
@@ -2797,19 +2563,14 @@ serve(async (req) => {
         mentionReplacements["@Data atual"] = brazilFormatter.format(now);
         mentionReplacements["@Hora atual"] = timeFormatter.format(now);
         
-        // Log the prompt before replacement to debug
-        console.log(`[AI Chat] Processing prompt for mentions. Prompt length: ${systemPrompt.length}`);
-        console.log(`[AI Chat] Sample of prompt (first 200 chars): ${systemPrompt.substring(0, 200)}`);
-        
         // Apply all replacements
         for (const [mention, value] of Object.entries(mentionReplacements)) {
           if (systemPrompt.includes(mention)) {
             systemPrompt = systemPrompt.replace(new RegExp(mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-            console.log(`[AI Chat] ✅ Replaced mention "${mention}" with: "${value.substring(0, 50)}..."`);
           }
         }
         
-        // Also handle the structured format @empresa:Nome, @empresa:Telefone, etc.
+        // Also handle the structured format
         const structuredReplacements: Record<string, string> = {
           "@empresa:Nome": lawFirmData.name || "",
           "@empresa:Endereço": lawFirmData.address || "",
@@ -2824,7 +2585,6 @@ serve(async (req) => {
         for (const [mention, value] of Object.entries(structuredReplacements)) {
           if (systemPrompt.includes(mention)) {
             systemPrompt = systemPrompt.replace(new RegExp(mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-            console.log(`[AI Chat] Replaced structured mention ${mention}`);
           }
         }
       }
@@ -2835,17 +2595,14 @@ serve(async (req) => {
         systemPrompt = systemPrompt.replace(/@cliente:Nome/g, context.clientName);
       }
       
-      // ========================================================================
-      // PROCESS TEMPLATE MENTIONS: Replace @template:Name with actual content
-      // ========================================================================
+      // Process template mentions
       const templateMentionPattern = /@template:([^\s@]+(?:\s+[^\s@]+)*?)(?=\s*[@\n]|$)/g;
       const templateMatches = systemPrompt.matchAll(templateMentionPattern);
       
       for (const match of templateMatches) {
-        const fullMatch = match[0]; // @template:Nome do Template
-        const templateNameRaw = match[1].trim(); // Nome do Template
+        const fullMatch = match[0];
+        const templateNameRaw = match[1].trim();
         
-        // Try to find template by name or shortcut (case insensitive)
         const { data: templateData } = await supabase
           .from("templates")
           .select("name, shortcut, content")
@@ -2853,7 +2610,6 @@ serve(async (req) => {
           .eq("is_active", true);
         
         if (templateData && templateData.length > 0) {
-          // Find best match by name or shortcut
           const matchedTemplate = templateData.find(
             (t: any) => 
               t.name.toLowerCase() === templateNameRaw.toLowerCase() ||
@@ -2863,660 +2619,302 @@ serve(async (req) => {
           
           if (matchedTemplate) {
             systemPrompt = systemPrompt.replace(fullMatch, matchedTemplate.content || "");
-            console.log(`[AI Chat] ✅ Replaced template mention "${fullMatch}" with content from "${matchedTemplate.name}"`);
-          } else {
-            console.log(`[AI Chat] ⚠️ Template not found: "${templateNameRaw}"`);
           }
         }
       }
     }
 
-    // ========================================================================
-    // AUDIT LOG: Canonical identity for every AI execution
-    // ========================================================================
+    // AUDIT LOG
     console.log(`[AI_ISOLATION] ✅ EXECUTION START - Canonical Identity Validated`, JSON.stringify({
       tenant_id: agentLawFirmId,
       ai_id: automation.id,
       ai_name: automationName,
       ai_role: aiRole,
       prompt_version: automation.version,
-      prompt_updated_at: automation.updated_at,
-      prompt_length: systemPrompt.length,
       conversation_id: conversationId,
-      context_tenant_validated: !!contextLawFirmId,
+      is_widget: isWidgetConversation,
       timestamp: new Date().toISOString(),
     }));
 
     // ONLY load knowledge bases that are EXPLICITLY LINKED to this agent
-    // This ensures complete tenant and agent isolation
-    knowledgeText = await getAgentKnowledge(supabase, automationId);
+    const knowledgeText = await getAgentKnowledge(supabase, automationId);
     if (knowledgeText) {
-      console.log(`[AI_ISOLATION] Knowledge base loaded ONLY for agent ${automationId} (tenant: ${agentLawFirmId})`);
-    } else {
-      console.log(`[AI_ISOLATION] No knowledge base linked to agent ${automationId}`);
+      console.log(`[AI_ISOLATION] Knowledge base loaded ONLY for agent ${automationId}`);
     }
 
-    // Build messages array - agent prompt is the ONLY system instruction
+    // Determine which AI to use
+    let useOpenAI = false;
+    let openaiModel = "gpt-4o-mini";
+    
+    const { data: globalSettings } = await supabase
+      .from("system_settings")
+      .select("key, value")
+      .in("key", ["ai_openai_model"]);
+    
+    if (globalSettings) {
+      const modelSetting = globalSettings.find((s: any) => s.key === "ai_openai_model");
+      if (modelSetting?.value && typeof modelSetting.value === "string") {
+        openaiModel = modelSetting.value;
+      }
+    }
+    
+    if (context?.lawFirmId) {
+      const { data: settings } = await supabase
+        .from("law_firm_settings")
+        .select("ai_provider, ai_capabilities")
+        .eq("law_firm_id", context.lawFirmId)
+        .maybeSingle();
+      
+      if (settings?.ai_capabilities) {
+        const caps = settings.ai_capabilities as any;
+        const iaOpenAI = caps.openai_active ?? (settings.ai_provider === "openai");
+        
+        if (iaOpenAI && OPENAI_API_KEY) {
+          useOpenAI = true;
+          console.log(`[AI Chat] Using OpenAI (model=${openaiModel})`);
+        }
+      }
+    }
+
+    // Build messages array
+    const fullSystemPrompt = systemPrompt + knowledgeText;
     const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: systemPrompt }
+      { role: "system", content: fullSystemPrompt }
     ];
 
-    // Add behavioral instruction for human-like responses (appended, not replacing)
-    messages.push({ 
-      role: "system", 
-      content: `REGRA CRÍTICA DE COMUNICAÇÃO E FORMATAÇÃO:
-- Responda como uma pessoa real em atendimento por WhatsApp
-- Divida sua resposta em PARÁGRAFOS SEPARADOS (com linha em branco entre eles)
-- Cada parágrafo deve conter NO MÁXIMO 2-3 frases
-- NÃO envie um único bloco de texto longo
-- Faça UMA pergunta ou informação por parágrafo
-- Use linguagem natural e profissional
-- Aguarde a resposta do cliente antes de continuar
-
-EXEMPLO DE FORMATAÇÃO CORRETA:
-"Claro, Sr. João! Para a revisão da aposentadoria, precisamos dos seguintes documentos:
-
-- Extrato de contribuições (CNIS)
-- Extrato de informações de benefício
-- Carta de concessão do benefício
-
-O senhor já tem acesso ao aplicativo Meu INSS para baixar esses documentos?"
-
-EXEMPLO INCORRETO (não faça assim):
-"Claro, Sr. João. Para a revisão da aposentadoria, precisamos dos seguintes documentos: Extrato de contribuições (CNIS), Extrato de informações de benefício e a Carta de concessão do benefício. O senhor já tem acesso ao aplicativo Meu INSS para baixar esses documentos?"
-
-🚨 REGRA ABSOLUTAMENTE CRÍTICA SOBRE PEDIDOS DE ÁUDIO 🚨
-ATENÇÃO: Esta regra é OBRIGATÓRIA e sua violação causa falha total no sistema!
-
-QUANDO O CLIENTE PEDIR RESPOSTA POR ÁUDIO/VOZ:
-✅ CORRETO: Responda diretamente com a informação solicitada em texto
-   Exemplo: "Você vai precisar de RG, CPF e comprovante de residência."
-
-❌ PROIBIDO (causa erro crítico no sistema):
-   - "Vou ativar o áudio..."
-   - "Vou mandar por áudio..."
-   - "Um momento, vou gravar..."
-   - "Claro, vou te explicar por áudio..."
-   - Qualquer frase anunciando que vai enviar áudio
-
-O SISTEMA CONVERTE AUTOMATICAMENTE SUA RESPOSTA DE TEXTO EM ÁUDIO.
-Se você enviar apenas um "aviso", o cliente receberá um áudio dizendo "vou mandar áudio" - o que é inútil e quebra a experiência.
-
-RESPONDA SEMPRE COM O CONTEÚDO REAL, NUNCA COM AVISOS!` 
-    });
-
-    // Add knowledge base as context (if linked to this agent)
-    if (knowledgeText) {
-      messages.push({ role: "system", content: knowledgeText });
-    }
-
-    // Check Google Calendar integration and add instructions
-    const effectiveLawFirmIdForCalendar = agentLawFirmId || context?.lawFirmId;
-    if (effectiveLawFirmIdForCalendar) {
-      const calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmIdForCalendar);
-      if (calendarIntegration.active && calendarIntegration.permissions.read) {
-        // Get current date/time for context
-        const now = new Date();
-        const currentDate = now.toISOString().split('T')[0];
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth() + 1;
-        const currentDay = now.getDate();
-        const brazilTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-        
-        let calendarInstructions = `\n\n📅 GOOGLE CALENDAR INTEGRADO - VOCÊ TEM ACESSO PARA:`;
-        if (calendarIntegration.permissions.read) {
-          calendarInstructions += `\n- Verificar horários disponíveis (use a função check_availability)`;
-          calendarInstructions += `\n- Listar eventos agendados (use a função list_events)`;
-        }
-        if (calendarIntegration.permissions.create) {
-          calendarInstructions += `\n- Criar novos agendamentos (use a função create_event)`;
-        }
-        if (calendarIntegration.permissions.edit) {
-          calendarInstructions += `\n- Remarcar compromissos (use a função update_event)`;
-        }
-        if (calendarIntegration.permissions.delete) {
-          calendarInstructions += `\n- Cancelar compromissos (use a função delete_event)`;
-        }
-        calendarInstructions += `\n\n⚠️ DATA E HORA ATUAL: ${brazilTime} (Fuso: America/Sao_Paulo)
-📆 DATA ATUAL: ${currentDate} (Ano: ${currentYear}, Mês: ${currentMonth}, Dia: ${currentDay})
-
-REGRAS CRÍTICAS PARA AGENDAMENTO:
-1. SEMPRE use o ano ${currentYear} ou posterior para datas futuras
-2. Se o cliente disser "segunda-feira" ou "próxima semana", calcule a partir de HOJE (${currentDate})
-3. NUNCA use datas no passado - sempre verifique se start_time é MAIOR que ${now.toISOString()}
-4. Use as funções do calendário SEMPRE que identificar intenção de agendamento
-5. Confirme os dados com o cliente ANTES de criar o evento
-6. Após executar a ação, confirme o sucesso ao cliente
-7. Se o cliente não especificar horário, verifique disponibilidade primeiro usando check_availability`;
-        
-        messages.push({ role: "system", content: calendarInstructions });
-        console.log(`[AI Chat] Added calendar instructions for law_firm ${effectiveLawFirmIdForCalendar}`);
-      }
-    }
-
-    // Add CRM/Internal actions instructions (always available)
-    if (effectiveLawFirmIdForCalendar) {
-      // Fetch available departments, statuses, and agents for context
-      const [deptResult, statusResult, agentResult, memberResult] = await Promise.all([
-        supabase.from("departments").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true),
-        supabase.from("custom_statuses").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true),
-        supabase.from("automations").select("name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true).neq("id", automationId),
-        supabase.from("profiles").select("full_name").eq("law_firm_id", effectiveLawFirmIdForCalendar).eq("is_active", true)
-      ]);
-      
-      const departments = deptResult.data?.map((d: any) => d.name) || [];
-      const statuses = statusResult.data?.map((s: any) => s.name) || [];
-      const otherAgents = agentResult.data?.map((a: any) => a.name) || [];
-      const teamMembers = memberResult.data?.map((m: any) => m.full_name) || [];
-      
-      const crmInstructions = `\n\n🔧 AÇÕES INTERNAS DISPONÍVEIS - VOCÊ PODE:
-
-📁 TRANSFERIR PARA DEPARTAMENTO (use transfer_to_department):
-- Use quando o cliente precisa de atendimento especializado
-- Departamentos disponíveis: ${departments.length > 0 ? departments.join(", ") : "nenhum configurado"}
-- Exemplo: transferir para "Suporte" quando há problema técnico
-
-📊 ALTERAR STATUS DO CLIENTE (use change_status):
-- Use para marcar evolução no funil de vendas/atendimento
-- Status disponíveis: ${statuses.length > 0 ? statuses.join(", ") : "nenhum configurado"}
-- Exemplo: marcar como "Qualificado" quando cliente demonstra interesse
-
-🏷️ ADICIONAR/REMOVER ETIQUETAS (use add_tag e remove_tag):
-- Use para categorizar o cliente baseado em suas características
-- Você pode criar novas tags se necessário
-- Exemplo: adicionar "VIP" para clientes prioritários
-
-👥 TRANSFERIR PARA OUTRO RESPONSÁVEL (use transfer_to_responsible):
-- Use quando precisa passar o atendimento para outra pessoa ou IA
-- Para humanos disponíveis: ${teamMembers.length > 0 ? teamMembers.join(", ") : "nenhum"}
-- Para outros agentes de IA: ${otherAgents.length > 0 ? otherAgents.join(", ") : "nenhum"}
-- Tipos: "human" para atendente, "ai" para outro agente de IA
-
-REGRAS PARA USO DAS AÇÕES:
-1. Use quando identificar claramente a necessidade
-2. Confirme a ação com o cliente quando apropriado
-3. Informe o cliente sobre o que foi feito após executar
-4. Use nomes exatos ou similares dos itens disponíveis`;
-      
-      messages.push({ role: "system", content: crmInstructions });
-      console.log(`[AI Chat] Added CRM instructions with ${departments.length} depts, ${statuses.length} statuses, ${otherAgents.length} agents, ${teamMembers.length} members`);
-      
-      // Fetch available templates for this law firm
-      const { data: templatesData } = await supabase
-        .from("templates")
-        .select("name, shortcut, content")
-        .eq("law_firm_id", effectiveLawFirmIdForCalendar)
-        .eq("is_active", true);
-      
-      if (templatesData && templatesData.length > 0) {
-        const templatesList = templatesData.map((t: any) => {
-          const hasMedia = t.content?.match(/^\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\]/i);
-          const mediaType = hasMedia ? hasMedia[1].toLowerCase() : null;
-          const mediaLabel = mediaType === 'image' ? '📷' : mediaType === 'video' ? '🎬' : mediaType === 'audio' ? '🎤' : mediaType === 'document' ? '📄' : '📝';
-          return `  - ${mediaLabel} "${t.name}" (atalho: ${t.shortcut || 'N/A'})`;
-        }).join("\n");
-        
-        const templateInstructions = `\n\n📨 TEMPLATES DISPONÍVEIS (use send_template):
-Você pode enviar materiais pré-configurados para o cliente usando a função send_template.
-
-TEMPLATES DISPONÍVEIS:
-${templatesList}
-
-COMO USAR:
-- Quando o cliente pedir um arquivo, guia, imagem ou documento, use send_template
-- Informe o nome do template (ex: "Baixar extratos", "Avaliação")
-- Você pode adicionar uma mensagem personalizada junto com o template
-- O sistema enviará automaticamente o conteúdo do template (texto, imagem, vídeo, etc.)
-
-⚠️ IMPORTANTE:
-- NÃO diga apenas "vou enviar" sem usar a função send_template
-- SEMPRE use a função send_template para realmente enviar o material
-- Use o nome do template exato ou similar para encontrar o correto`;
-        
-        messages.push({ role: "system", content: templateInstructions });
-        console.log(`[AI Chat] Added ${templatesData.length} templates to instructions`);
-      }
-    }
-
-    // Add SCHEDULING instructions if agent has scheduling enabled
-    if (isSchedulingAgent && effectiveLawFirmIdForCalendar) {
-      // Fetch services for context
-      const { data: services } = await supabase
-        .from("services")
-        .select("id, name, duration_minutes, price")
-        .eq("law_firm_id", effectiveLawFirmIdForCalendar)
-        .eq("is_active", true);
-
-      const servicesList = services?.map((s: any) =>
-        `  - ${s.name} (id: ${s.id}, ${s.duration_minutes}min${s.price ? `, R$${s.price}` : ""})`
-      ).join("\n") || "  Nenhum serviço cadastrado";
-
-      const onlyService = services && services.length === 1 ? services[0] : null;
-
-      // Get current date for context
-      const now = new Date();
-      const currentDate = now.toISOString().split("T")[0];
-      const brazilTime = now.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
-
-      const schedulingInstructions = `\n\n📅 SISTEMA DE AGENDAMENTO INTELIGENTE - VOCÊ TEM ACESSO PARA:
-
-🎯 FUNÇÕES DISPONÍVEIS:
-1. **list_services** - Listar serviços (retorna IDs)
-2. **get_available_slots** - Verificar horários livres (exige date + service_id)
-3. **book_appointment** - Criar agendamento
-4. **list_client_appointments** - Ver agendamentos do cliente (reagendar/cancelar/confirmar)
-5. **reschedule_appointment** - Remarcar
-6. **cancel_appointment** - Cancelar
-7. **confirm_appointment** - Confirmar presença
-
-📋 SERVIÇOS DISPONÍVEIS (com ID e duração):
-${servicesList}
-
-⏰ DATA/HORA ATUAL: ${brazilTime} (Fuso: America/Sao_Paulo)
-📆 HOJE: ${currentDate}
-
-🎯 COMO APRESENTAR SERVIÇOS AO CLIENTE:
-- Quando o cliente perguntar sobre serviços, apresente de forma clara e organizada:
-  - Nome do serviço
-  - Duração (ex: "40 minutos")
-  - Preço se houver
-- Exemplo de resposta: "Temos os seguintes serviços:\n\n💆 *Massagem* - 40 minutos - R$ 80,00\n💅 *Manicure* - 30 minutos - R$ 50,00"
-
-✅ COMO RESPONDER QUANDO O CLIENTE PEDIR HORÁRIOS LIVRES/DISPONÍVEIS:
-- Se o cliente informar a DATA (ex: "amanhã", "dia 15") e o SERVIÇO (ex: "massagem") → use **get_available_slots** e devolva a lista de horários.
-- Se o cliente NÃO informar o serviço:
-  - Se existir apenas 1 serviço cadastrado (${onlyService ? `"${onlyService.name}"` : "nenhum/mais de um"}) → você PODE usar esse serviço e chamar **get_available_slots** direto.
-  - Se houver mais de 1 serviço → use **list_services** e pergunte qual serviço deseja.
-- Se o cliente NÃO informar a data → pergunte a data desejada (e só depois chame get_available_slots).
-
-⏰ SEMPRE MOSTRE O INTERVALO COMPLETO DO HORÁRIO:
-- Quando mencionar horários, SEMPRE inclua início e fim baseado na duração do serviço
-- Exemplo: Se o serviço dura 40 minutos e o cliente quer 10:00, diga "10:00 às 10:40"
-- Exemplo: Se o serviço dura 1h30 e o cliente quer 14:00, diga "14:00 às 15:30"
-- Isso ajuda o cliente a saber exatamente quanto tempo ficará
-
-🔄 FLUXO COMPLETO PARA AGENDAR:
-1) Cliente pede para agendar/marcar/reservar → mostre serviços (list_services) se houver mais de 1, ou use o único
-2) Cliente escolhe serviço → pergunte a data
-3) Data definida → get_available_slots (apresente os horários de forma resumida)
-4) Horário escolhido → confirme nome e telefone
-5) book_appointment → confirme detalhes finais com intervalo completo
-
-📊 COMO APRESENTAR HORÁRIOS (IMPORTANTE):
-- Se houver POUCOS horários (≤8): liste todos com o formato "HH:MM às HH:MM"
-- Se houver MUITOS horários (>8): apresente por PERÍODO (ex: "Manhã: 08:00 a 11:30 | Tarde: 14:00 a 17:30") e pergunte qual período o cliente prefere
-- NUNCA liste mais de 10 horários de uma vez, é confuso para o cliente
-- Use o campo "hint" e "available_slots_summary" da resposta para montar uma apresentação limpa
-
-⚠️ REGRAS CRÍTICAS:
-- Use funções de agendamento quando o cliente pedir: agendar, marcar, reservar, reagendar, remarcar, cancelar, **horários livres**, **horários disponíveis**, disponibilidade
-- NÃO responda "vou verificar" sem chamar a ferramenta necessária
-- NÃO invente horários — sempre consulte get_available_slots
-- Use telefone do contexto se disponível (${context?.clientPhone || "não informado"})
-- Use nome do contexto se disponível (${context?.clientName || "não informado"})`;
-
-      messages.push({ role: "system", content: schedulingInstructions });
-      console.log(`[AI Chat] Added scheduling instructions with ${services?.length || 0} services`);
-    }
-
-    let clientMemoriesText = "";
-    if (context?.clientId) {
-      clientMemoriesText = await getClientMemories(supabase, context.clientId);
-    }
-
-    // Get conversation context with potential summary
-    const { messages: previousMessages, needsSummary } = await getConversationContext(
-      supabase,
-      conversationId
-    );
-
-    // If conversation is long, generate/use summary
-    let summaryText = "";
-    if (needsSummary) {
-      const summary = await generateAndSaveSummary(supabase, conversationId, LOVABLE_API_KEY);
+    // Add context about conversation summary if available
+    if (isValidUUID(conversationId)) {
+      const summary = await generateSummaryIfNeeded(supabase, conversationId, LOVABLE_API_KEY);
       if (summary) {
-        summaryText = `\n\n📋 RESUMO DA CONVERSA ANTERIOR:\n${summary}`;
+        messages.push({
+          role: "system",
+          content: `RESUMO DA CONVERSA ANTERIOR:\n${summary}`
+        });
       }
     }
 
-    // Add context about the client
-    if (context?.clientName || context?.clientPhone || clientMemoriesText || summaryText) {
-      const clientInfo = `Informações do cliente:
-- Nome: ${context?.clientName || "Não informado"}
-- Telefone: ${context?.clientPhone || "Não informado"}
-- Status atual: ${context?.currentStatus || "Novo contato"}${clientMemoriesText}${summaryText}`;
-      
-      messages.push({ role: "system", content: clientInfo });
+    // Add previous messages from context
+    if (context?.previousMessages) {
+      messages.push(...context.previousMessages);
     }
 
-    // Add previous messages for context
-    if (previousMessages.length > 0) {
-      messages.push(...previousMessages);
-    } else if (context?.previousMessages && context.previousMessages.length > 0) {
-      const recentMessages = context.previousMessages.slice(-10);
-      messages.push(...recentMessages);
-    }
-
-    // ========================================================================
-    // PROMPT INJECTION DETECTION
-    // Check for potential prompt injection attempts before processing
-    // ========================================================================
-    const injectionCheck = detectPromptInjection(message);
-    if (injectionCheck.detected) {
-      console.warn(`[${errorRef}] PROMPT INJECTION DETECTED - Pattern: ${injectionCheck.pattern}`, {
-        conversation_id: conversationId,
-        message_preview: message.slice(0, 200),
-        tenant_id: agentLawFirmId,
-      });
-      
-      // Log to audit_logs for monitoring
-      await supabase.from('audit_logs').insert({
-        action: 'AI_INJECTION_ATTEMPT',
-        entity_type: 'conversation',
-        entity_id: conversationId,
-        new_values: {
-          pattern_detected: injectionCheck.pattern,
-          message_preview: message.slice(0, 200),
-          tenant_id: agentLawFirmId,
-          timestamp: new Date().toISOString(),
-        },
-      });
-      
-      // Don't block - but add warning to context for the AI to handle naturally
-      // The AI will respond normally but we've logged the attempt
-    }
-
-    // Add the current message with XML delimiters to reduce injection risk
+    // Add current message (wrapped for injection protection)
     messages.push({ role: "user", content: wrapUserInput(message) });
 
-    // Check Google Calendar integration and get available tools
-    const effectiveLawFirmId = agentLawFirmId || context?.lawFirmId;
-    let allTools: any[] = [];
-    let calendarIntegration = { active: false, permissions: { read: false, create: false, edit: false, delete: false } };
-    
-    if (effectiveLawFirmId) {
-      calendarIntegration = await checkCalendarIntegration(supabase, effectiveLawFirmId);
-      // Get all tools (calendar if active + CRM always + scheduling if agent is scheduling type)
-      allTools = getAllAvailableTools(
-        calendarIntegration.active ? calendarIntegration.permissions : null,
-        true, // Always include CRM tools
-        isSchedulingAgent // Include scheduling tools for scheduling agents
-      );
-      console.log(`[AI Chat] Tools available: ${allTools.length} (Calendar: ${calendarIntegration.active ? 'yes' : 'no'}, CRM: yes, Scheduling: ${isSchedulingAgent ? 'yes' : 'no'})`);
+    // Check for calendar integration
+    let calendarPermissions = null;
+    if (agentLawFirmId) {
+      const calendarCheck = await checkCalendarIntegration(supabase, agentLawFirmId);
+      if (calendarCheck.active) {
+        calendarPermissions = calendarCheck.permissions;
+      }
     }
 
-    console.log(`[AI Chat] Processing message for conversation ${conversationId}, useOpenAI: ${useOpenAI}`);
-    console.log(`[AI Chat] Message count: ${messages.length}, Temperature: ${temperature}, HasKnowledge: ${!!knowledgeText}, HasMemories: ${!!clientMemoriesText}, HasSummary: ${!!summaryText}, Tools: ${allTools.length}`);
+    // Get available tools
+    const tools = getAllAvailableTools(
+      calendarPermissions,
+      true, // CRM tools
+      isSchedulingAgent, // Scheduling tools only for scheduling agents
+      true // Template tools
+    );
 
-    // Build request body with optional tools
-    const aiRequestBody: any = {
+    // Call AI
+    let aiResponse: string;
+    let usedTokens = 0;
+
+    const apiUrl = useOpenAI 
+      ? "https://api.openai.com/v1/chat/completions"
+      : "https://ai.gateway.lovable.dev/v1/chat/completions";
+    
+    const apiKey = useOpenAI ? OPENAI_API_KEY : LOVABLE_API_KEY;
+    const model = useOpenAI ? openaiModel : "google/gemini-2.5-flash";
+
+    const requestBody: any = {
+      model,
       messages,
       temperature,
-      max_tokens: context?.audioRequested ? 900 : 400,
     };
 
-    // Add tools if available
-    if (allTools.length > 0) {
-      aiRequestBody.tools = allTools;
-      aiRequestBody.tool_choice = "auto";
+    if (tools.length > 0) {
+      requestBody.tools = tools;
+      requestBody.tool_choice = "auto";
     }
 
-    let response;
-    let aiProvider = "";
-    
-    if (useOpenAI && OPENAI_API_KEY) {
-      // Use OpenAI API with configured model from Global Admin
-      aiProvider = "OpenAI";
-      console.log(`[AI Chat] Calling OpenAI API (${openaiModel}) with tools:`, allTools.length);
-      aiRequestBody.model = openaiModel;
-      response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(aiRequestBody),
-      });
-    } else {
-      // Use Lovable AI (IA do Site / Internal)
-      aiProvider = "Lovable AI";
-      console.log("[AI Chat] Calling Lovable AI (gemini-2.5-flash) with tools:", allTools.length);
-      aiRequestBody.model = "google/gemini-2.5-flash";
-      response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(aiRequestBody),
-      });
-    }
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[${errorRef}] ${aiProvider} error: ${response.status}`, errorText);
-
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again.", ref: errorRef }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Service quota exceeded", ref: errorRef }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
+      console.error(`[AI Chat] AI API error:`, errorText);
       return new Response(
-        JSON.stringify({ error: "Failed to generate AI response", ref: errorRef }),
+        JSON.stringify({ error: "AI service error", ref: errorRef }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const data = await response.json();
-    let aiMessage = data.choices?.[0]?.message;
-    let aiResponse = aiMessage?.content || "";
-    let toolCallsExecuted: any[] = [];
+    let data = await response.json();
+    usedTokens = data.usage?.total_tokens || 0;
 
-    // Handle tool calls if present
-    if (aiMessage?.tool_calls && aiMessage.tool_calls.length > 0) {
-      console.log(`[AI Chat] Processing ${aiMessage.tool_calls.length} tool calls`);
+    // Handle tool calls in a loop
+    let iterations = 0;
+    const maxIterations = 5;
+
+    while (data.choices?.[0]?.message?.tool_calls && iterations < maxIterations) {
+      iterations++;
+      const toolCalls = data.choices[0].message.tool_calls;
       
+      // Add assistant message with tool calls
+      messages.push(data.choices[0].message);
+
       // Execute each tool call
-      const toolResults: Array<{ role: string; tool_call_id: string; content: string }> = [];
-      
-      for (const toolCall of aiMessage.tool_calls) {
+      for (const toolCall of toolCalls) {
         const toolName = toolCall.function.name;
-        const toolArgs = toolCall.function.arguments;
-        
-        console.log(`[AI Chat] Executing tool: ${toolName}`, toolArgs);
-        
-        // Determine which executor to use based on tool name
-        const calendarToolNames = ["check_availability", "list_events", "create_event", "update_event", "delete_event"];
-        const crmToolNames = ["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"];
-        const schedulingToolNames = ["list_services", "get_available_slots", "book_appointment"];
-        const templateToolNames = ["send_template"];
-        
-        let result: string;
-        
-        if (calendarToolNames.includes(toolName)) {
-          result = await executeCalendarTool(
-            supabase,
-            supabaseUrl,
-            supabaseKey,
-            effectiveLawFirmId!,
-            conversationId,
-            context?.clientId,
-            automationId!,
-            { name: toolName, arguments: toolArgs }
+        let toolResult: string;
+
+        // Route to appropriate tool executor
+        if (["check_availability", "create_event", "list_events", "update_event", "delete_event"].includes(toolName)) {
+          toolResult = await executeCalendarTool(
+            supabase, supabaseUrl, supabaseKey, agentLawFirmId, conversationId,
+            context?.clientId, automationId, { name: toolName, arguments: toolCall.function.arguments }
           );
-        } else if (crmToolNames.includes(toolName)) {
-          result = await executeCrmTool(
-            supabase,
-            effectiveLawFirmId!,
-            conversationId,
-            context?.clientId,
-            automationId!,
-            automationName,
-            { name: toolName, arguments: toolArgs },
+        } else if (["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"].includes(toolName)) {
+          toolResult = await executeCrmTool(
+            supabase, agentLawFirmId, conversationId, context?.clientId,
+            automationId, automationName, { name: toolName, arguments: toolCall.function.arguments },
             notifyOnTransfer
           );
-        } else if (schedulingToolNames.includes(toolName)) {
-          result = await executeSchedulingTool(
-            supabase,
-            supabaseUrl,
-            supabaseKey,
-            effectiveLawFirmId!,
-            conversationId,
-            context?.clientId,
-            { name: toolName, arguments: toolArgs }
+        } else if (["list_services", "get_available_slots", "book_appointment", "list_client_appointments", "reschedule_appointment", "cancel_appointment", "confirm_appointment"].includes(toolName)) {
+          toolResult = await executeSchedulingTool(
+            supabase, supabaseUrl, supabaseKey, agentLawFirmId, conversationId,
+            context?.clientId, { name: toolName, arguments: toolCall.function.arguments }
           );
-        } else if (templateToolNames.includes(toolName)) {
-          result = await executeTemplateTool(
-            supabase,
-            effectiveLawFirmId!,
-            { name: toolName, arguments: toolArgs }
+        } else if (toolName === "send_template") {
+          toolResult = await executeTemplateTool(
+            supabase, agentLawFirmId, conversationId,
+            { name: toolName, arguments: toolCall.function.arguments }
           );
         } else {
-          result = JSON.stringify({ error: `Unknown tool: ${toolName}` });
+          toolResult = JSON.stringify({ error: "Unknown tool" });
         }
-        
-        toolResults.push({
+
+        // Add tool result to messages
+        messages.push({
           role: "tool",
-          tool_call_id: toolCall.id,
-          content: result,
-        });
-        
-        toolCallsExecuted.push({
-          tool: toolName,
-          args: JSON.parse(toolArgs),
-          result: JSON.parse(result),
+          content: toolResult,
+          // @ts-ignore
+          tool_call_id: toolCall.id
         });
       }
-      
-      // Add assistant message with tool calls and tool results
-      messages.push({
-        role: "assistant",
-        content: aiMessage.content || "",
-        tool_calls: aiMessage.tool_calls,
-      } as any);
-      
-      for (const tr of toolResults) {
-        messages.push(tr as any);
-      }
-      
-      // Call AI again with tool results to get final response
-      console.log(`[AI Chat] Calling ${aiProvider} again with tool results`);
-      
-      const finalRequestBody = {
-        model: aiRequestBody.model,
-        messages,
-        temperature,
-        max_tokens: 500,
-      };
-      
-      const finalResponse = await fetch(
-        useOpenAI && OPENAI_API_KEY 
-          ? "https://api.openai.com/v1/chat/completions"
-          : "https://ai.gateway.lovable.dev/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${useOpenAI && OPENAI_API_KEY ? OPENAI_API_KEY : LOVABLE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(finalRequestBody),
-        }
-      );
-      
-      if (finalResponse.ok) {
-        const finalData = await finalResponse.json();
-        aiResponse = finalData.choices?.[0]?.message?.content || aiResponse;
-        console.log(`[AI Chat] Final response after tool execution, length: ${aiResponse.length}`);
-      }
-      
-      // If a template was sent, append the template content to the response
-      const templateToolResult = toolCallsExecuted.find((tc: any) => tc.tool === "send_template");
-      if (templateToolResult?.result?.success && templateToolResult.result.template_content) {
-        console.log(`[AI Chat] Appending template content from "${templateToolResult.result.template_name}"`);
-        // If AI response is empty or just acknowledgement, use template content
-        // Otherwise append template after AI response
-        if (!aiResponse || aiResponse.length < 20) {
-          aiResponse = templateToolResult.result.template_content;
-        } else {
-          aiResponse = aiResponse + "\n\n" + templateToolResult.result.template_content;
-        }
-      }
-    }
 
-    if (!aiResponse && toolCallsExecuted.length === 0) {
-      throw new Error("No response generated");
-    }
-
-    console.log(`[AI Chat] Response generated by ${aiProvider}, length: ${aiResponse.length}, toolCalls: ${toolCallsExecuted.length}`);
-
-    // Record AI conversation usage for billing (uses agent's law_firm_id)
-    const effectiveSource = source || 'web';
-    
-    if (effectiveLawFirmId && automationId) {
-      // Fire and forget - don't block response
-      recordAIConversationUsage(
-        supabase,
-        effectiveLawFirmId,
-        conversationId,
-        automationId!,
-        automationName,
-        effectiveSource
-      ).catch(err => console.error('[AI Chat] Failed to record AI usage:', err));
-    }
-
-    // Trigger fact extraction in background if we have client info
-    if (context?.clientId && context?.lawFirmId) {
-      // Fire and forget - don't await
-      fetch(`${supabaseUrl}/functions/v1/extract-client-facts`, {
+      // Call AI again with tool results
+      const followUpResponse = await fetch(apiUrl, {
         method: "POST",
         headers: {
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          Authorization: `Bearer ${supabaseKey}`,
         },
         body: JSON.stringify({
-          conversationId,
-          clientId: context.clientId,
-          lawFirmId: context.lawFirmId,
+          model,
+          messages,
+          temperature,
+          tools: tools.length > 0 ? tools : undefined,
+          tool_choice: tools.length > 0 ? "auto" : undefined,
         }),
-      }).catch(err => console.error("[AI Chat] Failed to trigger fact extraction:", err));
+      });
+
+      if (!followUpResponse.ok) {
+        const errorText = await followUpResponse.text();
+        console.error(`[AI Chat] Follow-up AI error:`, errorText);
+        break;
+      }
+
+      data = await followUpResponse.json();
+      usedTokens += data.usage?.total_tokens || 0;
     }
 
-    // Include Tray settings in response so caller can apply department/status
-    const responsePayload: any = {
-      success: true,
-      response: aiResponse,
-      conversationId,
-      toolCallsExecuted: toolCallsExecuted.length > 0 ? toolCallsExecuted : undefined,
-    };
-    
-    // Include Tray default settings for the caller to use
-    if (traySettings) {
-      responsePayload.trayDefaults = {
-        default_department_id: traySettings.default_department_id,
-        default_status_id: traySettings.default_status_id,
-        default_automation_id: traySettings.default_automation_id,
-      };
+    // Extract final response
+    aiResponse = data.choices?.[0]?.message?.content || "";
+
+    if (!aiResponse) {
+      console.error(`[${errorRef}] Empty AI response`);
+      aiResponse = "Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.";
     }
 
+    // Save messages to database if we have a valid conversation
+    if (isValidUUID(conversationId)) {
+      // Save user message
+      await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        content: message,
+        sender_type: "client",
+        is_from_me: false,
+        message_type: "text",
+        status: "delivered"
+      });
+
+      // Save AI response
+      const { data: savedMessage } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        content: aiResponse,
+        sender_type: "ai",
+        is_from_me: true,
+        message_type: "text",
+        status: "delivered"
+      }).select("id").single();
+
+      // Update conversation last_message_at
+      await supabase
+        .from("conversations")
+        .update({ 
+          last_message_at: new Date().toISOString(),
+          n8n_last_response_at: new Date().toISOString()
+        })
+        .eq("id", conversationId);
+
+      // Track AI usage
+      if (agentLawFirmId) {
+        try {
+          await supabase.rpc("increment_ai_usage", {
+            p_law_firm_id: agentLawFirmId,
+            p_tokens: usedTokens,
+            p_conversations: 1
+          });
+        } catch (e) {
+          console.error("[AI Chat] Failed to track usage:", e);
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          response: aiResponse,
+          conversationId,
+          messageId: savedMessage?.id,
+          tokensUsed: usedTokens
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // For widget conversations that don't have a UUID yet
     return new Response(
-      JSON.stringify(responsePayload),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        response: aiResponse,
+        conversationId,
+        tokensUsed: usedTokens
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
-    // Log actual error internally but return generic message
-    console.error(`[${errorRef}] AI Chat error:`, error instanceof Error ? error.message : error);
+    console.error(`[${errorRef}] Unhandled error:`, error);
     return new Response(
-      JSON.stringify({ error: "An error occurred processing your request", ref: errorRef }),
+      JSON.stringify({ error: "Internal server error", ref: errorRef }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
