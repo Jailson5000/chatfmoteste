@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Radio } from "lucide-react";
+import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -28,6 +28,7 @@ interface KanbanCardProps {
     assigned_profile?: { full_name: string } | null;
     unread_count?: number;
     client?: { custom_status_id?: string | null } | null;
+    origin?: string | null;
   };
   customStatus?: { name: string; color: string } | null;
   tags?: Array<{ id: string; name: string; color: string }>;
@@ -138,18 +139,36 @@ export function KanbanCard({
     handlerName = "Sem responsável";
   }
 
-  // Instance identifier: show last 4 digits of phone number (like Conversations page)
-  const getInstanceDisplay = () => {
+  // Connection info: differentiate between Site (widget) and WhatsApp
+  const getConnectionInfo = () => {
+    const upperOrigin = conversation.origin?.toUpperCase();
+    
+    // Non-WhatsApp origins (Widget, Tray, Site, Web) -> Globe icon
+    if (upperOrigin === 'WIDGET' || upperOrigin === 'TRAY' || upperOrigin === 'SITE' || upperOrigin === 'WEB') {
+      return { 
+        label: "Site", 
+        isWidget: true,
+        tooltipText: upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin
+      };
+    }
+    
+    // WhatsApp origin -> Phone icon with last 4 digits
     const phoneNumber = conversation.whatsapp_instance?.phone_number;
     if (phoneNumber) {
       const digits = phoneNumber.replace(/\D/g, "");
       if (digits.length >= 4) {
-        return `•••${digits.slice(-4)}`;
+        return { 
+          label: `•••${digits.slice(-4)}`,
+          isWidget: false,
+          tooltipText: conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name || "WhatsApp"
+        };
       }
     }
-    return "----";
+    
+    return { label: "----", isWidget: false, tooltipText: "Canal não identificado" };
   };
-  const instanceDisplay = getInstanceDisplay();
+  
+  const connectionInfo = getConnectionInfo();
   
   // Get matched tags
   const conversationTags = (conversation.tags || [])
@@ -296,11 +315,27 @@ export function KanbanCard({
             </Tooltip>
           </TooltipProvider>
 
-          {/* Instance phone (last 4 digits) with signal icon */}
-          <div className="flex items-center gap-0.5">
-            <Radio className="h-2.5 w-2.5" />
-            <span>{instanceDisplay}</span>
-          </div>
+          {/* Connection icon: Globe for Site, Phone for WhatsApp */}
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "flex items-center gap-0.5 cursor-pointer hover:text-foreground transition-colors",
+                  connectionInfo.isWidget && "text-blue-500"
+                )}>
+                  {connectionInfo.isWidget ? (
+                    <Globe className="h-2.5 w-2.5" />
+                  ) : (
+                    <Phone className="h-2.5 w-2.5" />
+                  )}
+                  <span>{connectionInfo.label}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <span className="text-xs">{connectionInfo.tooltipText}</span>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
 
         {/* Handler (takes remaining space, aligns right) */}
