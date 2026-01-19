@@ -4203,6 +4203,17 @@ export type Database = {
         Returns: string
       }
       get_user_law_firm_id: { Args: { _user_id: string }; Returns: string }
+      get_widget_config: {
+        Args: { p_widget_key: string }
+        Returns: {
+          is_active: boolean
+          law_firm_id: string
+          law_firm_logo_url: string
+          law_firm_name: string
+          welcome_message: string
+          widget_color: string
+        }[]
+      }
       has_admin_role: {
         Args: {
           _role: Database["public"]["Enums"]["admin_role"]

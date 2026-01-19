@@ -166,15 +166,18 @@
     }
   };
 
-  // Fetch widget configuration
+  // Fetch widget configuration via secure RPC function
   const fetchConfig = async () => {
     try {
       const response = await fetch(
-        `https://jiragtersejnarxruqyd.supabase.co/rest/v1/tray_chat_integrations?widget_key=eq.${WIDGET_KEY}&is_active=eq.true&select=law_firm_id,welcome_message,offline_message,widget_color,widget_position`,
+        `https://jiragtersejnarxruqyd.supabase.co/rest/v1/rpc/get_widget_config`,
         {
+          method: 'POST',
           headers: {
-            'apikey': SUPABASE_ANON_KEY
-          }
+            'apikey': SUPABASE_ANON_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ p_widget_key: WIDGET_KEY })
         }
       );
       
@@ -185,7 +188,6 @@
         const config = data[0];
         lawFirmId = config.law_firm_id;
         if (config.welcome_message) welcomeMessage = config.welcome_message;
-        if (config.offline_message) offlineMessage = config.offline_message;
         if (config.widget_color) widgetColor = config.widget_color;
         return true;
       } else {
