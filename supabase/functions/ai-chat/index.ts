@@ -1832,7 +1832,7 @@ async function executeSchedulingTool(
   }
 }
 
-// Execute template tool call
+// Execute template tool call - ACTUALLY SENDS the template content
 async function executeTemplateTool(
   supabase: any,
   lawFirmId: string,
@@ -1877,31 +1877,56 @@ async function executeTemplateTool(
       });
     }
     
-    // Return template content for AI to use
-    let response: any = {
-      success: true,
-      template_name: matchedTemplate.name,
-      content: matchedTemplate.content,
-      message: `Encontrei o template "${matchedTemplate.name}". Envie o conteúdo ao cliente:`
-    };
-    
-    // Include media if available
-    if (matchedTemplate.media_url) {
-      response.media_url = matchedTemplate.media_url;
-      response.media_type = matchedTemplate.media_type;
-      response.message += ` (inclui ${matchedTemplate.media_type || 'mídia'})`;
+    // ACTUALLY SEND the template content as a message if we have a valid conversation
+    if (isValidUUID(conversationId) && matchedTemplate.content) {
+      // Save template content as AI message
+      const { data: savedMsg, error: saveError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        content: matchedTemplate.content,
+        sender_type: "ai",
+        is_from_me: true,
+        message_type: matchedTemplate.media_url ? "media" : "text",
+        media_url: matchedTemplate.media_url || null,
+        media_type: matchedTemplate.media_type || null,
+        status: "delivered",
+        ai_generated: true,
+        metadata: { template_id: matchedTemplate.id, template_name: matchedTemplate.name }
+      }).select("id").single();
+      
+      if (saveError) {
+        console.error(`[AI Chat] Failed to save template message:`, saveError);
+      } else {
+        console.log(`[AI Chat] Template message saved: ${savedMsg?.id}`);
+      }
+      
+      // Update conversation last_message_at
+      await supabase
+        .from("conversations")
+        .update({ last_message_at: new Date().toISOString() })
+        .eq("id", conversationId);
     }
     
-    // Include additional message if provided
-    if (args.additional_message) {
-      response.additional_message = args.additional_message;
+    // Return success with instruction for AI to acknowledge
+    let response: any = {
+      success: true,
+      template_sent: true,
+      template_name: matchedTemplate.name,
+      content_sent: matchedTemplate.content,
+      instruction: `O template "${matchedTemplate.name}" FOI ENVIADO com sucesso ao cliente. NÃO repita o conteúdo do template. Apenas confirme brevemente que enviou e pergunte se o cliente tem dúvidas.`
+    };
+    
+    // Include media info if available
+    if (matchedTemplate.media_url) {
+      response.media_sent = true;
+      response.media_type = matchedTemplate.media_type;
+      response.instruction += ` Uma ${matchedTemplate.media_type || 'mídia'} também foi enviada.`;
     }
     
     return JSON.stringify(response);
     
   } catch (error) {
     console.error(`[AI Chat] Template tool error:`, error);
-    return JSON.stringify({ error: "Erro ao buscar template" });
+    return JSON.stringify({ error: "Erro ao enviar template" });
   }
 }
 
