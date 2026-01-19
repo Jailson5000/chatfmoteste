@@ -823,8 +823,8 @@ export function useMessagesWithPagination({
       }
     };
 
-    // Poll every 5 seconds
-    const pollInterval = setInterval(pollForNewMessages, 5000);
+    // Poll every 3 seconds for more responsive updates
+    const pollInterval = setInterval(pollForNewMessages, 3000);
     
     return () => clearInterval(pollInterval);
   }, [conversationId, messages.length, onNewMessage]);

@@ -820,6 +820,7 @@ export default function Conversations() {
   }, [selectedConversationId]);
 
   // Handle new incoming messages - update unseen count if not at bottom
+  // This includes client messages AND AI responses (sender_type: 'ai')
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (!last?.id) return;
@@ -835,9 +836,19 @@ export default function Conversations() {
     // Ignore pagination prepend (tail message didn't change)
     if (prevLastId === last.id) return;
 
-    if (last.is_from_me) return;
+    // Check if this is an AI response or system message that should trigger indicator
+    const isAiOrSystemResponse = last.is_from_me && (last.sender_type === 'ai' || last.sender_type === 'system');
+    const isClientMessage = !last.is_from_me;
+    
+    // Only show indicator for client messages or AI/system responses, not human agent messages
+    if (!isClientMessage && !isAiOrSystemResponse) {
+      // This is a message sent by human agent - just scroll to bottom
+      lastTailMessageIdRef.current = last.id;
+      requestAnimationFrame(() => scrollMessagesToBottom("smooth"));
+      return;
+    }
 
-    // Update tail marker for incoming messages
+    // Update tail marker for incoming/AI messages
     lastTailMessageIdRef.current = last.id;
 
     // If user is reading older messages, show indicator
@@ -858,31 +869,6 @@ export default function Conversations() {
     });
   }, [selectedConversationId, messagesLoading, scrollMessagesToBottom]);
 
-  // Auto-scroll when YOU send a new message (do not trigger on pagination prepend)
-  useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (!last?.id) return;
-
-    const prevLastId = lastTailMessageIdRef.current;
-
-    // First render / initial load: just initialize the tail marker
-    if (prevLastId === null) {
-      lastTailMessageIdRef.current = last.id;
-      return;
-    }
-
-    // If last message didn't change, we probably prepended older messages
-    if (prevLastId === last.id) return;
-
-    if (!last.is_from_me) return;
-
-    // Update tail marker for outgoing messages
-    lastTailMessageIdRef.current = last.id;
-
-    requestAnimationFrame(() => {
-      scrollMessagesToBottom("smooth");
-    });
-  }, [messages, scrollMessagesToBottom]);
 
   // Map conversations for display with tag colors
   const mappedConversations = useMemo(() => {
@@ -3606,18 +3592,22 @@ export default function Conversations() {
               </ScrollArea>
 
               {!isAtBottom && unseenMessages > 0 && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 animate-in fade-in slide-in-from-bottom-2 duration-200">
                   <Button
-                    variant="secondary"
+                    variant="default"
                     size="sm"
-                    className="shadow-sm"
+                    className="shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
                     onClick={() => {
                       setUnseenMessages(0);
                       scrollMessagesToBottom("smooth");
                     }}
                   >
-                    <ChevronDown className="h-4 w-4 mr-2" />
-                    {unseenMessages} nova{unseenMessages > 1 ? "s" : ""} mensagem{unseenMessages > 1 ? "s" : ""} · Voltar ao fim
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span>
+                    </span>
+                    {unseenMessages} nova{unseenMessages > 1 ? "s" : ""} mensagem{unseenMessages > 1 ? "s" : ""}
+                    <ChevronDown className="h-4 w-4" />
                   </Button>
                 </div>
               )}
