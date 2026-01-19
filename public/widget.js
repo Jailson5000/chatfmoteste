@@ -965,18 +965,13 @@
         <!-- Pre-chat form -->
         <div class="miauchat-prechat" id="miauchat-prechat">
           <div class="miauchat-form-group">
+            <label class="miauchat-form-label">Nome *</label>
+            <input type="text" class="miauchat-form-input" id="miauchat-name" placeholder="Seu nome" required />
+          </div>
+          
+          <div class="miauchat-form-group">
             <label class="miauchat-form-label">Telefone *</label>
             <input type="tel" class="miauchat-form-input" id="miauchat-phone" placeholder="(00) 00000-0000" required />
-          </div>
-          
-          <div class="miauchat-form-group">
-            <label class="miauchat-form-label">E-mail *</label>
-            <input type="email" class="miauchat-form-input" id="miauchat-email" placeholder="seu@email.com" required />
-          </div>
-          
-          <div class="miauchat-form-group">
-            <label class="miauchat-form-label">Nome</label>
-            <input type="text" class="miauchat-form-input" id="miauchat-name" placeholder="Seu nome (opcional)" />
           </div>
           
           <button class="miauchat-start-btn" id="miauchat-start-chat">
@@ -1134,22 +1129,22 @@
 
   // Validate form
   const validateForm = () => {
+    const nameInput = document.getElementById('miauchat-name');
     const phoneInput = document.getElementById('miauchat-phone');
-    const emailInput = document.getElementById('miauchat-email');
     
     let isValid = true;
     
+    nameInput.classList.remove('error');
     phoneInput.classList.remove('error');
-    emailInput.classList.remove('error');
+    
+    if (!nameInput.value.trim()) {
+      nameInput.classList.add('error');
+      isValid = false;
+    }
     
     const phoneDigits = phoneInput.value.replace(/\D/g, '');
     if (phoneDigits.length < 10) {
       phoneInput.classList.add('error');
-      isValid = false;
-    }
-    
-    if (!emailInput.value.trim() || !emailInput.value.includes('@')) {
-      emailInput.classList.add('error');
       isValid = false;
     }
     
@@ -1164,12 +1159,11 @@
     
     const nameInput = document.getElementById('miauchat-name');
     const phoneInput = document.getElementById('miauchat-phone');
-    const emailInput = document.getElementById('miauchat-email');
     
     clientInfo = {
-      name: nameInput.value.trim() || 'Visitante',
+      name: nameInput.value.trim(),
       phone: phoneInput.value.replace(/\D/g, ''),
-      email: emailInput.value.trim()
+      email: ''
     };
     isIdentified = true;
     saveClientInfo();
