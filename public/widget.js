@@ -253,19 +253,31 @@
 
         // is_from_me = true => business/attendant/system
         if (msg.is_from_me === true) {
-          // Skip if we already have a local assistant message with exact same content (dedup)
-          // Check for messages without serverId OR with temporary pending serverId
-          const alreadyByContent = messages.find(
+          // DEDUP FIX: Find ALL local assistant messages without serverId that match content
+          // Then update the first one AND remove extras to prevent visual duplicates
+          const matchingLocalMsgs = messages.filter(
             (m) => m.role === 'assistant' && 
                    (!m.serverId || m.serverId.startsWith('pending_')) && 
                    m.content === msg.content
           );
-          if (alreadyByContent) {
-            // Update local message with real server ID instead of adding duplicate
-            alreadyByContent.serverId = msg.id;
-            alreadyByContent.timestamp = msg.created_at;
+          
+          if (matchingLocalMsgs.length > 0) {
+            // Update the first match with real server ID
+            matchingLocalMsgs[0].serverId = msg.id;
+            matchingLocalMsgs[0].timestamp = msg.created_at;
             hasUpdatedMessages = true;
             console.log('[MiauChat] Updated existing message with server ID:', msg.id);
+            
+            // Remove any extra duplicates (keep only the first one)
+            if (matchingLocalMsgs.length > 1) {
+              for (let i = 1; i < matchingLocalMsgs.length; i++) {
+                const idx = messages.indexOf(matchingLocalMsgs[i]);
+                if (idx > -1) {
+                  messages.splice(idx, 1);
+                  console.log('[MiauChat] Removed duplicate local message');
+                }
+              }
+            }
             return;
           }
           

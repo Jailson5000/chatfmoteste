@@ -1971,8 +1971,8 @@ async function generateSummaryIfNeeded(
       .select("id", { count: "exact" })
       .eq("conversation_id", conversationId);
     
-    // Generate summary every 20 messages
-    if (currentCount && currentCount > lastCount + 20) {
+    // Generate summary every 6 user messages for better context retention
+    if (currentCount && currentCount > lastCount + 6) {
       // Fetch last 50 messages for summary
       const { data: allMessages } = await supabase
         .from("messages")
@@ -1990,16 +1990,19 @@ async function generateSummaryIfNeeded(
         .map((m: any) => `${m.is_from_me ? "Assistente" : "Cliente"}: ${m.content}`)
         .join("\n");
 
-      const summaryPrompt = `Resuma esta conversa jurídica em 3-4 frases, destacando:
-- O problema principal do cliente
-- Informações importantes coletadas
-- Status atual do atendimento
-- Próximos passos acordados (se houver)
+      const summaryPrompt = `Atualize o resumo desta conversa de atendimento, preservando os seguintes elementos-chave:
+- Objetivo principal do cliente e o que ele busca
+- Decisões tomadas ou acordos feitos
+- Preferências e informações pessoais coletadas (nome, telefone, dados relevantes)
+- Fatos importantes mencionados pelo cliente
+- Itens pendentes ou próximos passos
+
+Seja conciso (máximo 5 frases). Não invente informações. Se já houver um resumo anterior, incorpore as novas informações.
 
 CONVERSA:
 ${conversationText}
 
-Responda apenas com o resumo, sem formatação especial.`;
+Responda apenas com o resumo atualizado, sem formatação especial.`;
 
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -2851,14 +2854,19 @@ serve(async (req) => {
       messages.push(...context.previousMessages);
     } else if (isValidUUID(conversationId)) {
       // Fetch conversation history from database for widget/site conversations
-      // Get last 20 messages to provide context without overloading the model
+      // Get last 30 messages to provide context without overloading the model
       const { data: historyMessages, error: historyError } = await supabase
         .from("messages")
         .select("content, is_from_me, sender_type, created_at")
         .eq("conversation_id", conversationId)
         .neq("content", message) // Exclude the current message being processed
-        .order("created_at", { ascending: true })
-        .limit(20);
+        .order("created_at", { ascending: false })
+        .limit(30);
+      
+      // Reverse to get chronological order (oldest first)
+      if (historyMessages) {
+        historyMessages.reverse();
+      }
       
       if (!historyError && historyMessages && historyMessages.length > 0) {
         console.log(`[AI Chat] Loaded ${historyMessages.length} previous messages for context`);

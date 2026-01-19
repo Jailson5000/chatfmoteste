@@ -55,6 +55,7 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Reply
 } from "lucide-react";
 import { ReplyPreview, QuotedMessage } from "@/components/conversations/ReplyPreview";
@@ -1083,6 +1084,12 @@ export function KanbanChatPanel({
     conversationId,
     initialBatchSize: 35,
     loadMoreBatchSize: 30,
+    onNewMessage: (msg) => {
+      // If user is not at bottom AND this is a client/AI message, increment unseen count
+      if (!isAtBottomRef.current && (!msg.is_from_me || msg.sender_type === 'ai' || msg.sender_type === 'system')) {
+        setUnseenMessageCount(prev => prev + 1);
+      }
+    },
   });
 
   const [messageInput, setMessageInput] = useState("");
@@ -1096,6 +1103,8 @@ export function KanbanChatPanel({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [unseenMessageCount, setUnseenMessageCount] = useState(0);
+  const lastSeenMessageIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   
@@ -1470,6 +1479,11 @@ export function KanbanChatPanel({
       const atBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 40;
       isAtBottomRef.current = atBottom;
       setIsAtBottom(atBottom);
+      
+      // Clear unseen count when user scrolls to bottom
+      if (atBottom) {
+        setUnseenMessageCount(0);
+      }
 
       // Skip pagination on initial bind; only load more when user scrolls up
       if (skipFirst) {
@@ -2870,6 +2884,28 @@ export function KanbanChatPanel({
           </div>
         )}
       </ScrollArea>
+
+      {/* New Messages Indicator */}
+      {!isAtBottom && unseenMessageCount > 0 && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <Button
+            variant="default"
+            size="sm"
+            className="shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
+            onClick={() => {
+              setUnseenMessageCount(0);
+              scrollToBottomOnce();
+            }}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span>
+            </span>
+            {unseenMessageCount} nova{unseenMessageCount > 1 ? "s" : ""} mensagem{unseenMessageCount > 1 ? "s" : ""}
+            <ChevronDown className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Hidden file inputs */}
       <input
