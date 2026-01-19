@@ -997,6 +997,8 @@ interface KanbanChatPanelProps {
   clientStatus?: string | null;
   conversationTags?: string[] | null;
   departmentId?: string | null;
+  /** Conversation origin - used to route messages correctly (WhatsApp vs Widget/Tray) */
+  origin?: string | null;
   customStatuses: CustomStatus[];
   tags: TagItem[];
   departments: Department[];
@@ -1019,6 +1021,7 @@ export function KanbanChatPanel({
   clientStatus,
   conversationTags,
   departmentId,
+  origin,
   customStatuses,
   tags,
   departments,
@@ -1026,6 +1029,10 @@ export function KanbanChatPanel({
   automations,
   onClose,
 }: KanbanChatPanelProps) {
+  // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+  const conversationOrigin = origin?.toUpperCase();
+  const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+  const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1644,7 +1651,7 @@ export function KanbanChatPanel({
           m.id === tempId ? { ...m, status: "sent" } : m
         ));
       } else {
-        // External message - send via WhatsApp
+        // External message - route based on channel (WhatsApp vs Widget/Tray)
         const { data: userData } = await supabase.auth.getUser();
         const currentUserId = userData.user?.id;
         
@@ -1662,30 +1669,67 @@ export function KanbanChatPanel({
           });
         }
         
-        const response = await supabase.functions.invoke("evolution-api", {
-          body: {
-            action: "send_message_async",
-            conversationId,
-            message: messageToSend,
-            replyToWhatsAppMessageId: replyWhatsAppId,
-            replyToMessageId: replyToId,
-          },
-        });
+        // Check if this is a non-WhatsApp conversation
+        if (isNonWhatsAppConversation) {
+          // Widget/Tray: save directly to database, don't use Evolution API
+          console.log('[Kanban] Widget/Tray channel - saving directly to DB');
+          const { error: insertError } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              content: messageToSend,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              sender_id: currentUserId,
+              ai_generated: false,
+              is_pontual: wasPontualMode,
+              reply_to_message_id: replyToId,
+            });
+          
+          if (insertError) throw new Error('Falha ao salvar mensagem');
+          
+          // Update conversation timestamp
+          await supabase
+            .from("conversations")
+            .update({ 
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+            })
+            .eq("id", conversationId);
+          
+          // Update optimistic message status
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "sent" } : m
+          ));
+        } else {
+          // WhatsApp: use Evolution API
+          const response = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "send_message_async",
+              conversationId,
+              message: messageToSend,
+              replyToWhatsAppMessageId: replyWhatsAppId,
+              replyToMessageId: replyToId,
+            },
+          });
 
-        if (response.error) {
-          throw new Error(response.error.message || "Falha ao enviar mensagem");
-        }
+          if (response.error) {
+            throw new Error(response.error.message || "Falha ao enviar mensagem");
+          }
 
-        if (!response.data?.success) {
-          throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          }
+          
+          // Update optimistic message with real data
+          setMessages(prev => prev.map(m => 
+            m.id === tempId 
+              ? { ...m, id: response.data.messageId || tempId, status: "sent" }
+              : m
+          ));
         }
-        
-        // Update optimistic message with real data
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" }
-            : m
-        ));
       }
     }).catch((error) => {
       console.error("Erro ao enviar mensagem:", error);
@@ -1736,17 +1780,47 @@ export function KanbanChatPanel({
         });
       }
       
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId,
-          mediaUrl: urlData.publicUrl,
-          mediaType: "audio",
-          mimeType: audioBlob.type || "audio/webm",
-        },
-      });
-      
-      if (response.error) throw response.error;
+      // Check if this is a non-WhatsApp conversation
+      if (isNonWhatsAppConversation) {
+        // Widget/Tray: save audio message directly to database
+        console.log('[Kanban] Widget/Tray channel - saving audio directly to DB');
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            content: urlData.publicUrl,
+            message_type: "audio",
+            is_from_me: true,
+            sender_type: "human",
+            sender_id: currentUserId,
+            ai_generated: false,
+          });
+        
+        if (insertError) throw insertError;
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ 
+            last_message_at: new Date().toISOString(),
+            archived_at: null,
+            archived_reason: null,
+          })
+          .eq("id", conversationId);
+      } else {
+        // WhatsApp: use Evolution API
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId,
+            mediaUrl: urlData.publicUrl,
+            mediaType: "audio",
+            mimeType: audioBlob.type || "audio/webm",
+          },
+        });
+        
+        if (response.error) throw response.error;
+      }
       
       toast({ title: "Áudio enviado" });
       setIsRecordingAudio(false);
@@ -1802,18 +1876,48 @@ export function KanbanChatPanel({
         });
       }
       
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId,
-          mediaUrl: urlData.publicUrl,
-          mediaType: mediaType === "image" ? "image" : "document",
-          mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
-          fileName: file.name,
-        },
-      });
-      
-      if (response.error) throw response.error;
+      // Check if this is a non-WhatsApp conversation
+      if (isNonWhatsAppConversation) {
+        // Widget/Tray: save file directly to database
+        console.log('[Kanban] Widget/Tray channel - saving file directly to DB');
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            content: urlData.publicUrl,
+            message_type: mediaType,
+            is_from_me: true,
+            sender_type: "human",
+            sender_id: currentUserId,
+            ai_generated: false,
+          });
+        
+        if (insertError) throw insertError;
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ 
+            last_message_at: new Date().toISOString(),
+            archived_at: null,
+            archived_reason: null,
+          })
+          .eq("id", conversationId);
+      } else {
+        // WhatsApp: use Evolution API
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId,
+            mediaUrl: urlData.publicUrl,
+            mediaType: mediaType === "image" ? "image" : "document",
+            mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
+            fileName: file.name,
+          },
+        });
+        
+        if (response.error) throw response.error;
+      }
       
       // Do NOT add optimistic message - backend already inserted via send_media
       // Realtime will bring the message with correct whatsapp_message_id
@@ -1879,19 +1983,49 @@ export function KanbanChatPanel({
         });
       }
 
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId,
-          mediaUrl: urlData.publicUrl,
-          mediaType: mediaPreview.mediaType,
-          mimeType: mediaPreview.file.type || "application/octet-stream",
-          fileName: mediaPreview.file.name,
-          caption: caption || undefined,
-        },
-      });
+      // Check if this is a non-WhatsApp conversation
+      if (isNonWhatsAppConversation) {
+        // Widget/Tray: save media directly to database
+        console.log('[Kanban] Widget/Tray channel - saving preview media directly to DB');
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            content: caption ? `${urlData.publicUrl}\n${caption}` : urlData.publicUrl,
+            message_type: mediaPreview.mediaType,
+            is_from_me: true,
+            sender_type: "human",
+            sender_id: currentUserId,
+            ai_generated: false,
+          });
+        
+        if (insertError) throw insertError;
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ 
+            last_message_at: new Date().toISOString(),
+            archived_at: null,
+            archived_reason: null,
+          })
+          .eq("id", conversationId);
+      } else {
+        // WhatsApp: use Evolution API
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId,
+            mediaUrl: urlData.publicUrl,
+            mediaType: mediaPreview.mediaType,
+            mimeType: mediaPreview.file.type || "application/octet-stream",
+            fileName: mediaPreview.file.name,
+            caption: caption || undefined,
+          },
+        });
 
-      if (response.error) throw response.error;
+        if (response.error) throw response.error;
+      }
 
       // Do NOT add optimistic message - backend already inserted via send_media
       // Realtime will bring the message with correct whatsapp_message_id
@@ -1943,18 +2077,48 @@ export function KanbanChatPanel({
         });
       }
 
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId,
-          mediaUrl: urlData.publicUrl,
-          mediaType: type,
-          mimeType: file.type || "application/octet-stream",
-          fileName: file.name,
-        },
-      });
+      // Check if this is a non-WhatsApp conversation
+      if (isNonWhatsAppConversation) {
+        // Widget/Tray: save media directly to database
+        console.log('[Kanban] Widget/Tray channel - saving media directly to DB');
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            content: urlData.publicUrl,
+            message_type: type,
+            is_from_me: true,
+            sender_type: "human",
+            sender_id: currentUserId,
+            ai_generated: false,
+          });
+        
+        if (insertError) throw insertError;
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ 
+            last_message_at: new Date().toISOString(),
+            archived_at: null,
+            archived_reason: null,
+          })
+          .eq("id", conversationId);
+      } else {
+        // WhatsApp: use Evolution API
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId,
+            mediaUrl: urlData.publicUrl,
+            mediaType: type,
+            mimeType: file.type || "application/octet-stream",
+            fileName: file.name,
+          },
+        });
 
-      if (response.error) throw response.error;
+        if (response.error) throw response.error;
+      }
 
       toast({ title: type === "audio" ? "Áudio enviado" : "Documento enviado" });
     } catch (error) {

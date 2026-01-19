@@ -1504,24 +1504,58 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_message_async",
-          conversationId: selectedConversationId,
-          message: content,
-        },
-      });
+      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+      const conversationOrigin = selectedConversation.origin?.toUpperCase();
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
 
-      if (response.error || !response.data?.success) {
-        throw new Error(response.data?.error || "Falha ao reenviar mensagem");
+      if (isNonWhatsAppConversation) {
+        // For Widget/Tray: save directly to database, don't use Evolution API
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: selectedConversationId,
+            content,
+            message_type: "text",
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+          });
+        
+        if (insertError) throw new Error('Falha ao salvar mensagem');
+        
+        // Delete the failed message
+        await supabase.from("messages").delete().eq("id", messageId);
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", selectedConversationId);
+        
+        // Remove old message from state (new one will come via realtime)
+        setMessages(prev => prev.filter(m => m.id !== messageId));
+      } else {
+        // WhatsApp: use Evolution API
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_message_async",
+            conversationId: selectedConversationId,
+            message: content,
+          },
+        });
+
+        if (response.error || !response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao reenviar mensagem");
+        }
+
+        // Update to "sent"
+        setMessages(prev => prev.map(m => 
+          m.id === messageId 
+            ? { ...m, id: response.data.messageId || messageId, status: "sent" as MessageStatus }
+            : m
+        ));
       }
-
-      // Update to "sent"
-      setMessages(prev => prev.map(m => 
-        m.id === messageId 
-          ? { ...m, id: response.data.messageId || messageId, status: "sent" as MessageStatus }
-          : m
-      ));
       
       toast({
         title: "Mensagem reenviada",
