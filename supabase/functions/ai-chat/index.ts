@@ -2782,9 +2782,36 @@ serve(async (req) => {
       }
     }
 
-    // Add previous messages from context
-    if (context?.previousMessages) {
+    // Add previous messages from context OR fetch from database for widget conversations
+    if (context?.previousMessages && context.previousMessages.length > 0) {
       messages.push(...context.previousMessages);
+    } else if (isValidUUID(conversationId)) {
+      // Fetch conversation history from database for widget/site conversations
+      // Get last 20 messages to provide context without overloading the model
+      const { data: historyMessages, error: historyError } = await supabase
+        .from("messages")
+        .select("content, is_from_me, sender_type, created_at")
+        .eq("conversation_id", conversationId)
+        .neq("content", message) // Exclude the current message being processed
+        .order("created_at", { ascending: true })
+        .limit(20);
+      
+      if (!historyError && historyMessages && historyMessages.length > 0) {
+        console.log(`[AI Chat] Loaded ${historyMessages.length} previous messages for context`);
+        
+        for (const msg of historyMessages) {
+          // Skip empty messages
+          if (!msg.content?.trim()) continue;
+          
+          // Map to assistant/user roles
+          const role = msg.is_from_me ? "assistant" : "user";
+          
+          // Wrap user messages for injection protection
+          const content = role === "user" ? wrapUserInput(msg.content) : msg.content;
+          
+          messages.push({ role, content });
+        }
+      }
     }
 
     // Add current message (wrapped for injection protection)
