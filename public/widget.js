@@ -1088,6 +1088,16 @@
     console.log('[MiauChat] Client identified:', clientInfo.name, clientInfo.phone);
   };
 
+  // Strip attendant signature pattern from messages (_*Name*_ - Role)
+  const stripSignature = (text) => {
+    if (!text) return text;
+    // Remove pattern: _*Name*_ - Role (at start or end of message, with optional newlines)
+    return text
+      .replace(/^\s*_\*[^*]+\*_\s*-\s*[^\n]+\n*/gm, '') // At line start
+      .replace(/\n*_\*[^*]+\*_\s*-\s*[^\n]+\s*$/gm, '') // At line end  
+      .trim();
+  };
+
   // Render messages
   const renderMessages = () => {
     const container = document.getElementById('miauchat-messages');
@@ -1098,7 +1108,8 @@
     messages.forEach(msg => {
       const div = document.createElement('div');
       div.className = `miauchat-message ${msg.role}`;
-      div.textContent = msg.content;
+      // Strip attendant signature from displayed content
+      div.textContent = stripSignature(msg.content);
       container.appendChild(div);
     });
 

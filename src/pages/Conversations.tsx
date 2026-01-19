@@ -1288,6 +1288,7 @@ export default function Conversations() {
               sender_type: "human",
               ai_generated: false,
               is_pontual: wasPontualMode,
+              status: "sent", // Ensure status is set for proper Realtime detection
             });
           
           if (insertError) {

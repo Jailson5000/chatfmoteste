@@ -1685,6 +1685,7 @@ export function KanbanChatPanel({
               ai_generated: false,
               is_pontual: wasPontualMode,
               reply_to_message_id: replyToId,
+              status: "sent", // Ensure status is set for proper Realtime detection
             });
           
           if (insertError) throw new Error('Falha ao salvar mensagem');
@@ -1794,6 +1795,7 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
+            status: "sent", // Ensure status is set for proper Realtime detection
           });
         
         if (insertError) throw insertError;
@@ -1890,6 +1892,7 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
+            status: "sent", // Ensure status is set for proper Realtime detection
           });
         
         if (insertError) throw insertError;
@@ -1997,6 +2000,7 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
+            status: "sent", // Ensure status is set for proper Realtime detection
           });
         
         if (insertError) throw insertError;
@@ -2091,6 +2095,7 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
+            status: "sent", // Ensure status is set for proper Realtime detection
           });
         
         if (insertError) throw insertError;
