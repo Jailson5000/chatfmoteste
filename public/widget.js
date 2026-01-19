@@ -251,7 +251,7 @@
           return;
         }
 
-        // is_from_me = true => business/attendant/system
+        // is_from_me = true => business/attendant/AI/system
         if (msg.is_from_me === true) {
           // DEDUP FIX: Find ALL local assistant messages without serverId that match content
           // Then update the first one AND remove extras to prevent visual duplicates
@@ -277,6 +277,12 @@
                   console.log('[MiauChat] Removed duplicate local message');
                 }
               }
+            }
+            
+            // IMPORTANT: Still trigger notification for AI/agent messages when widget is minimized
+            // This happens when the AI responds (message added locally) but user minimized before seeing it
+            if (!isOpen) {
+              hasNewFromAgent = true;
             }
             return;
           }

@@ -813,9 +813,11 @@ export function useMessagesWithPagination({
             });
           });
           
-          // Notify for new messages not from me (after state update)
+          // Notify for new messages: client messages, AI responses, system messages
+          // Only skip notifications for human agent messages (sent by attendants)
           addedMessages.forEach(msg => {
-            if (!msg.is_from_me && onNewMessage) {
+            const isHumanAgentMessage = msg.is_from_me && msg.sender_type === 'attendant';
+            if (!isHumanAgentMessage && onNewMessage) {
               onNewMessage(msg as PaginatedMessage);
             }
           });
