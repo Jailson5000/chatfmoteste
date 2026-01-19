@@ -397,7 +397,7 @@ export default function Connections() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {/* Tray Chat Integration Row */}
+              {/* Chat Web Integration Row */}
               {trayIntegration?.is_enabled && (
                 <tr 
                   className={`hover:bg-muted/20 cursor-pointer transition-colors bg-gradient-to-r from-orange-500/5 to-transparent ${
@@ -411,7 +411,7 @@ export default function Connections() {
                         <Globe className="h-5 w-5 text-orange-500" />
                       </div>
                       <div>
-                        <p className="font-medium text-orange-500">Chat no Site (Tray)</p>
+                        <p className="font-medium text-orange-500">Chat Web</p>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <span>Widget de atendimento</span>
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-500 border-orange-500/20">
@@ -757,7 +757,7 @@ export default function Connections() {
         </SheetContent>
       </Sheet>
 
-      {/* Tray Chat Detail Panel */}
+      {/* Chat Web Detail Panel */}
       <Sheet open={isTrayDetailOpen} onOpenChange={setIsTrayDetailOpen}>
         <SheetContent className="w-[500px] sm:max-w-[500px] p-0 overflow-y-auto">
           <SheetHeader className="p-6 border-b bg-gradient-to-r from-orange-500/10 to-transparent">
@@ -766,8 +766,8 @@ export default function Connections() {
                 <Globe className="h-6 w-6 text-orange-500" />
               </div>
               <div>
-                <SheetTitle className="text-orange-500">Chat no Site (Tray)</SheetTitle>
-                <p className="text-sm text-muted-foreground">Widget de atendimento web</p>
+                <SheetTitle className="text-orange-500">Chat Web</SheetTitle>
+                <p className="text-sm text-muted-foreground">Widget de atendimento para qualquer site</p>
               </div>
             </div>
           </SheetHeader>
