@@ -1283,9 +1283,9 @@
         } else {
           showPrechatView();
         }
-      } else {
-        stopPolling();
       }
+      // NOTE: Keep polling active even when minimized to detect new messages
+      // Polling is started in showChatView() and continues running
     }
     
     if (bubble) {
