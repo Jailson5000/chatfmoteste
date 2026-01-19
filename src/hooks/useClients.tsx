@@ -34,6 +34,7 @@ export interface Client {
     whatsapp_instance_id: string | null;
     created_at: string;
     last_message_at: string | null;
+    origin: string | null;
     whatsapp_instance?: {
       id: string;
       instance_name: string;
@@ -63,6 +64,7 @@ export function useClients() {
             whatsapp_instance_id,
             created_at,
             last_message_at,
+            origin,
             whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(id, instance_name, display_name, phone_number)
           )
         `)
