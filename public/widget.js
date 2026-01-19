@@ -657,30 +657,115 @@
         padding: 16px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 16px;
         background: #f8fafc;
         min-height: 200px;
         max-height: 340px;
       }
       
-      .miauchat-message {
+      /* Date separator */
+      .miauchat-date-separator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin: 8px 0;
+      }
+      
+      .miauchat-date-separator::before,
+      .miauchat-date-separator::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: #e2e8f0;
+      }
+      
+      .miauchat-date-text {
+        font-size: 12px;
+        color: #94a3b8;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      
+      /* Message wrapper for attendant messages */
+      .miauchat-message-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         max-width: 85%;
+      }
+      
+      .miauchat-message-wrapper.user {
+        align-self: flex-end;
+        align-items: flex-end;
+      }
+      
+      .miauchat-message-wrapper.assistant {
+        align-self: flex-start;
+        align-items: flex-start;
+      }
+      
+      /* Attendant name badge */
+      .miauchat-attendant-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        background: #e8f5e9;
+        border: 1px solid #c8e6c9;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #2e7d32;
+        margin-left: 40px;
+      }
+      
+      /* Message row with avatar */
+      .miauchat-message-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+      }
+      
+      .miauchat-message-row.user {
+        flex-direction: row-reverse;
+      }
+      
+      /* Attendant avatar */
+      .miauchat-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, ${widgetColor}20 0%, ${widgetColor}40 100%);
+        border: 2px solid ${widgetColor};
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      
+      .miauchat-avatar svg {
+        width: 16px;
+        height: 16px;
+        fill: ${widgetColor};
+      }
+      
+      .miauchat-message {
         padding: 12px 16px;
         border-radius: 16px;
         font-size: 14px;
         line-height: 1.5;
         word-wrap: break-word;
+        position: relative;
       }
       
       .miauchat-message.user {
-        align-self: flex-end;
         background: ${widgetColor};
         color: white;
         border-bottom-right-radius: 4px;
       }
       
       .miauchat-message.assistant {
-        align-self: flex-start;
         background: white;
         color: #1f2937;
         border-bottom-left-radius: 4px;
@@ -694,6 +779,27 @@
         font-size: 12px;
         padding: 10px 14px;
         border-radius: 10px;
+        max-width: 90%;
+      }
+      
+      /* Timestamp */
+      .miauchat-timestamp {
+        font-size: 11px;
+        color: #94a3b8;
+        margin-left: 40px;
+        margin-top: 2px;
+      }
+      
+      .miauchat-message-wrapper.user .miauchat-timestamp {
+        margin-left: 0;
+        margin-right: 0;
+      }
+      
+      .miauchat-typing-wrapper {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        align-self: flex-start;
       }
       
       .miauchat-typing {
@@ -703,7 +809,6 @@
         background: white;
         border-radius: 16px;
         border-bottom-left-radius: 4px;
-        align-self: flex-start;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
       }
       
@@ -1098,6 +1203,45 @@
       .trim();
   };
 
+  // Extract attendant name from signature pattern
+  const extractAttendantName = (text) => {
+    if (!text) return null;
+    const match = text.match(/_\*([^*]+)\*_/);
+    return match ? match[1] : null;
+  };
+
+  // Format timestamp to display time
+  const formatMessageTime = (timestamp) => {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // Format date for separator
+  const formatDateSeparator = (timestamp) => {
+    if (!timestamp) return 'Hoje';
+    try {
+      const date = new Date(timestamp);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      if (date.toDateString() === today.toDateString()) {
+        return 'Hoje';
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        return 'Ontem';
+      } else {
+        return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+    } catch (e) {
+      return 'Hoje';
+    }
+  };
+
   // Render messages
   const renderMessages = () => {
     const container = document.getElementById('miauchat-messages');
@@ -1105,19 +1249,108 @@
 
     container.innerHTML = '';
     
-    messages.forEach(msg => {
-      const div = document.createElement('div');
-      div.className = `miauchat-message ${msg.role}`;
-      // Strip attendant signature from displayed content
-      div.textContent = stripSignature(msg.content);
-      container.appendChild(div);
+    let lastDateStr = null;
+    
+    messages.forEach((msg, index) => {
+      // Date separator logic
+      const msgDate = msg.timestamp ? new Date(msg.timestamp).toDateString() : new Date().toDateString();
+      if (msgDate !== lastDateStr) {
+        lastDateStr = msgDate;
+        const separator = document.createElement('div');
+        separator.className = 'miauchat-date-separator';
+        separator.innerHTML = `<span class="miauchat-date-text">${formatDateSeparator(msg.timestamp)}</span>`;
+        container.appendChild(separator);
+      }
+      
+      if (msg.role === 'system') {
+        // System messages remain simple
+        const div = document.createElement('div');
+        div.className = 'miauchat-message system';
+        div.textContent = msg.content;
+        container.appendChild(div);
+        return;
+      }
+      
+      // Create message wrapper
+      const wrapper = document.createElement('div');
+      wrapper.className = `miauchat-message-wrapper ${msg.role}`;
+      
+      if (msg.role === 'assistant') {
+        // Extract attendant name from message or use default
+        const attendantName = extractAttendantName(msg.content) || 'Atendente';
+        
+        // Attendant name badge
+        const nameBadge = document.createElement('div');
+        nameBadge.className = 'miauchat-attendant-name';
+        nameBadge.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg> ${attendantName}`;
+        wrapper.appendChild(nameBadge);
+        
+        // Message row with avatar
+        const messageRow = document.createElement('div');
+        messageRow.className = 'miauchat-message-row';
+        
+        // Avatar
+        const avatar = document.createElement('div');
+        avatar.className = 'miauchat-avatar';
+        avatar.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+        messageRow.appendChild(avatar);
+        
+        // Message bubble
+        const bubble = document.createElement('div');
+        bubble.className = 'miauchat-message assistant';
+        bubble.textContent = stripSignature(msg.content);
+        messageRow.appendChild(bubble);
+        
+        wrapper.appendChild(messageRow);
+        
+        // Timestamp
+        const time = formatMessageTime(msg.timestamp);
+        if (time) {
+          const timestamp = document.createElement('div');
+          timestamp.className = 'miauchat-timestamp';
+          timestamp.textContent = time;
+          wrapper.appendChild(timestamp);
+        }
+      } else {
+        // User message
+        const messageRow = document.createElement('div');
+        messageRow.className = 'miauchat-message-row user';
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'miauchat-message user';
+        bubble.textContent = msg.content;
+        messageRow.appendChild(bubble);
+        
+        wrapper.appendChild(messageRow);
+        
+        // Timestamp for user
+        const time = formatMessageTime(msg.timestamp);
+        if (time) {
+          const timestamp = document.createElement('div');
+          timestamp.className = 'miauchat-timestamp';
+          timestamp.textContent = time;
+          wrapper.appendChild(timestamp);
+        }
+      }
+      
+      container.appendChild(wrapper);
     });
 
     if (isLoading) {
+      const typingWrapper = document.createElement('div');
+      typingWrapper.className = 'miauchat-typing-wrapper';
+      
+      const avatar = document.createElement('div');
+      avatar.className = 'miauchat-avatar';
+      avatar.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+      typingWrapper.appendChild(avatar);
+      
       const typing = document.createElement('div');
       typing.className = 'miauchat-typing';
       typing.innerHTML = '<span></span><span></span><span></span>';
-      container.appendChild(typing);
+      typingWrapper.appendChild(typing);
+      
+      container.appendChild(typingWrapper);
     }
 
     container.scrollTop = container.scrollHeight;
