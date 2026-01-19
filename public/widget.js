@@ -1487,24 +1487,37 @@
         saveConversation();
       }
 
-      let botResponse = null;
-      if (data) {
-        botResponse = data.setupMessage || data.response || data.message || data.assistantMessage || data.reply;
+      // Check if we have response parts (fragmented) or single response
+      const responseParts = data?.responseParts;
+      let botResponses = [];
+      
+      if (Array.isArray(responseParts) && responseParts.length > 0) {
+        // Use fragmented parts - each becomes a separate message
+        botResponses = responseParts.filter(p => typeof p === 'string' && p.trim());
+        console.log('[MiauChat] Using fragmented response:', botResponses.length, 'parts');
+      } else {
+        // Fallback to single response
+        let botResponse = data?.setupMessage || data?.response || data?.message || data?.assistantMessage || data?.reply;
+        if (botResponse && typeof botResponse === 'object') {
+          botResponse = botResponse.content || botResponse.text || botResponse.message || '';
+        }
+        if (typeof botResponse === 'string' && botResponse.trim()) {
+          botResponses = [botResponse.trim()];
+        }
       }
 
-      if (botResponse && typeof botResponse === 'object') {
-        botResponse = botResponse.content || botResponse.text || botResponse.message || '';
-      }
-
-      // Only add bot response locally if we got one - mark with serverId placeholder to avoid duplication by polling
-      if (typeof botResponse === 'string' && botResponse.trim()) {
-        // Mark this message so polling won't add it again
-        messages.push({ 
-          role: 'assistant', 
-          content: botResponse.trim(),
-          serverId: `pending_${Date.now()}` // Temporary ID to prevent polling duplication
+      // Add each response part as a separate message with pending ID
+      // This ensures polling will match fragments correctly
+      if (botResponses.length > 0) {
+        const baseTime = Date.now();
+        botResponses.forEach((part, index) => {
+          messages.push({ 
+            role: 'assistant', 
+            content: part.trim(),
+            serverId: `pending_${baseTime}_${index}` // Unique ID per fragment
+          });
         });
-        console.log('[MiauChat] Bot response added:', botResponse);
+        console.log('[MiauChat] Bot responses added:', botResponses.length, 'messages');
         saveConversation();
       }
 
