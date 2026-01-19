@@ -2383,10 +2383,18 @@ serve(async (req) => {
               status: "delivered"
             });
             
-            // Update conversation last_message_at
+            // Update conversation last_message_at AND unarchive if archived
+            // This ensures archived widget conversations are restored when client sends new message
             await supabase
               .from("conversations")
-              .update({ last_message_at: new Date().toISOString() })
+              .update({ 
+                last_message_at: new Date().toISOString(),
+                // Clear archived state - conversation should reappear in active list
+                archived_at: null,
+                archived_reason: null,
+                archived_next_responsible_type: null,
+                archived_next_responsible_id: null
+              })
               .eq("id", conversationId);
             
             return new Response(
@@ -3229,12 +3237,18 @@ serve(async (req) => {
         }
       }
 
-      // Update conversation last_message_at
+      // Update conversation last_message_at AND unarchive if archived
+      // This ensures archived widget conversations are restored when client sends new message
       await supabase
         .from("conversations")
         .update({ 
           last_message_at: new Date().toISOString(),
-          n8n_last_response_at: new Date().toISOString()
+          n8n_last_response_at: new Date().toISOString(),
+          // Clear archived state - conversation should reappear in active list
+          archived_at: null,
+          archived_reason: null,
+          archived_next_responsible_type: null,
+          archived_next_responsible_id: null
         })
         .eq("id", conversationId);
 
