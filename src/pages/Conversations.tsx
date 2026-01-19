@@ -3176,81 +3176,115 @@ export default function Conversations() {
                       <span className="truncate">{selectedConversation.contact_phone || "---"}</span>
                     </p>
                     <div className="flex items-center gap-1 mt-1 min-w-0">
-                      <Inbox className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      {/* Show dropdown if: multiple instances exist OR current instance is disconnected/missing */}
-                      {(whatsappInstances.length > 1 || instanceDisconnectedInfo) ? (
-                        <Select
-                          value={selectedConversation.whatsapp_instance_id || ""}
-                          onValueChange={async (value) => {
-                            if (value && selectedConversation?.id && value !== selectedConversation.whatsapp_instance_id) {
-                              // Buscar dados das instâncias antiga e nova
-                              const oldInstance = whatsappInstances.find(
-                                (inst) => inst.id === selectedConversation.whatsapp_instance_id
-                              );
-                              const newInstance = whatsappInstances.find(
-                                (inst) => inst.id === value
-                              );
-                              
-                              const changeData = {
-                                conversationId: selectedConversation.id,
-                                newInstanceId: value,
-                                oldInstanceName: oldInstance?.display_name || oldInstance?.instance_name || "Desconhecido",
-                                newInstanceName: newInstance?.display_name || newInstance?.instance_name || "Desconhecido",
-                                oldPhoneDigits: oldInstance?.phone_number?.slice(-4),
-                                newPhoneDigits: newInstance?.phone_number?.slice(-4),
-                              };
+                      {/* Check if this is a widget/site conversation */}
+                      {(() => {
+                        const origin = selectedConversation.origin?.toUpperCase();
+                        const isWidgetOrigin = origin && ['WIDGET', 'TRAY', 'SITE', 'WEB'].includes(origin);
+                        
+                        if (isWidgetOrigin) {
+                          // Site/Widget conversations - show static "Site" label with globe icon
+                          return (
+                            <>
+                              <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                className="h-3 w-3 text-muted-foreground flex-shrink-0"
+                              >
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+                                <path d="M2 12h20"/>
+                              </svg>
+                              <span className="text-xs text-muted-foreground">Site</span>
+                            </>
+                          );
+                        }
+                        
+                        // WhatsApp conversations - show instance selector or static label
+                        return (
+                          <>
+                            <Inbox className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                            {/* Show dropdown if: multiple instances exist OR current instance is disconnected/missing */}
+                            {(whatsappInstances.length > 1 || instanceDisconnectedInfo) ? (
+                              <Select
+                                value={selectedConversation.whatsapp_instance_id || ""}
+                                onValueChange={async (value) => {
+                                  if (value && selectedConversation?.id && value !== selectedConversation.whatsapp_instance_id) {
+                                    // Buscar dados das instâncias antiga e nova
+                                    const oldInstance = whatsappInstances.find(
+                                      (inst) => inst.id === selectedConversation.whatsapp_instance_id
+                                    );
+                                    const newInstance = whatsappInstances.find(
+                                      (inst) => inst.id === value
+                                    );
+                                    
+                                    const changeData = {
+                                      conversationId: selectedConversation.id,
+                                      newInstanceId: value,
+                                      oldInstanceName: oldInstance?.display_name || oldInstance?.instance_name || "Desconhecido",
+                                      newInstanceName: newInstance?.display_name || newInstance?.instance_name || "Desconhecido",
+                                      oldPhoneDigits: oldInstance?.phone_number?.slice(-4),
+                                      newPhoneDigits: newInstance?.phone_number?.slice(-4),
+                                    };
 
-                              // Check if there's a conflict before proceeding
-                              try {
-                                const result = await checkExistingConversationInDestination(
-                                  selectedConversation.id,
-                                  value,
-                                  selectedConversation.law_firm_id
-                                );
-                                
-                                if (result.exists) {
-                                  // Show confirmation dialog
-                                  setPendingInstanceChange({
-                                    ...changeData,
-                                    existingConvName: result.existingConvName,
-                                  });
-                                  setInstanceChangeDialogOpen(true);
-                                } else {
-                                  // No conflict, proceed directly
-                                  changeWhatsAppInstance.mutate(changeData);
-                                }
-                              } catch (error) {
-                                // If check fails, try direct mutation (will handle errors there)
-                                changeWhatsAppInstance.mutate(changeData);
-                              }
-                            }
-                          }}
-                        >
-                          <SelectTrigger className={`h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px] ${instanceDisconnectedInfo ? 'text-destructive' : ''}`}>
-                            <SelectValue placeholder="Selecione um canal" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {whatsappInstances.map((inst) => {
-                              const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
-                              const isConnected = inst.status === "connected";
-                              return (
-                                <SelectItem key={inst.id} value={inst.id} className="text-xs">
-                                  <span className="flex items-center gap-2">
-                                    <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                                    {inst.display_name || inst.instance_name}
-                                    {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
-                                    {isConnected && <span className="text-green-500 text-[10px]">✓</span>}
-                                  </span>
-                                </SelectItem>
-                              );
-                            })}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <span className="text-xs text-muted-foreground truncate">
-                          Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
-                        </span>
-                      )}
+                                    // Check if there's a conflict before proceeding
+                                    try {
+                                      const result = await checkExistingConversationInDestination(
+                                        selectedConversation.id,
+                                        value,
+                                        selectedConversation.law_firm_id
+                                      );
+                                      
+                                      if (result.exists) {
+                                        // Show confirmation dialog
+                                        setPendingInstanceChange({
+                                          ...changeData,
+                                          existingConvName: result.existingConvName,
+                                        });
+                                        setInstanceChangeDialogOpen(true);
+                                      } else {
+                                        // No conflict, proceed directly
+                                        changeWhatsAppInstance.mutate(changeData);
+                                      }
+                                    } catch (error) {
+                                      // If check fails, try direct mutation (will handle errors there)
+                                      changeWhatsAppInstance.mutate(changeData);
+                                    }
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className={`h-6 text-xs border-none p-0 pl-1 bg-transparent w-auto min-w-0 max-w-[220px] ${instanceDisconnectedInfo ? 'text-destructive' : ''}`}>
+                                  <SelectValue placeholder="Selecione um canal" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {whatsappInstances.map((inst) => {
+                                    const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
+                                    const isConnected = inst.status === "connected";
+                                    return (
+                                      <SelectItem key={inst.id} value={inst.id} className="text-xs">
+                                        <span className="flex items-center gap-2">
+                                          <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                                          {inst.display_name || inst.instance_name}
+                                          {lastDigits && <span className="text-muted-foreground">(...{lastDigits})</span>}
+                                          {isConnected && <span className="text-green-500 text-[10px]">✓</span>}
+                                        </span>
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className="text-xs text-muted-foreground truncate">
+                                Canal: {selectedConversation.whatsapp_instance?.display_name || selectedConversation.whatsapp_instance?.instance_name || connectedInstances[0]?.display_name || connectedInstances[0]?.instance_name || "Não vinculado"}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
