@@ -1342,7 +1342,21 @@
       container.appendChild(typingWrapper);
     }
 
+    // Scroll to bottom immediately
     container.scrollTop = container.scrollHeight;
+    
+    // Also scroll after a small delay to ensure DOM is fully updated
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  };
+  
+  // Scroll to bottom helper (can be called independently)
+  const scrollToBottom = () => {
+    const container = document.getElementById('miauchat-messages');
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   };
 
   // Send message
@@ -1501,7 +1515,14 @@
             messages.push({ role: 'assistant', content: welcomeMessage });
             renderMessages();
             saveConversation();
+          } else {
+            // Ensure scroll to bottom when opening with existing messages
+            renderMessages();
           }
+          // Extra scroll after panel transition completes
+          setTimeout(() => {
+            scrollToBottom();
+          }, 100);
         } else {
           showPrechatView();
         }
