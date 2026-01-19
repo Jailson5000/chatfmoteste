@@ -253,6 +253,32 @@ export default function GlobalAdminConnections() {
     ["disconnected", "error", "suspended"].includes(i.status)
   ).length;
 
+  // CRITICAL: Detect duplicate phone numbers across connected instances
+  // This is a security issue that can cause message duplication and tenant data mixing
+  const duplicatePhoneNumbers = useMemo(() => {
+    const phoneMap = new Map<string, InstanceWithCompany[]>();
+    
+    instances.forEach((instance) => {
+      if (instance.phone_number && instance.status === "connected") {
+        const existing = phoneMap.get(instance.phone_number) || [];
+        existing.push(instance);
+        phoneMap.set(instance.phone_number, existing);
+      }
+    });
+
+    // Return only phones that have more than one connected instance
+    const duplicates = new Map<string, InstanceWithCompany[]>();
+    phoneMap.forEach((instancesWithPhone, phone) => {
+      if (instancesWithPhone.length > 1) {
+        duplicates.set(phone, instancesWithPhone);
+      }
+    });
+
+    return duplicates;
+  }, [instances]);
+
+  const duplicateCount = duplicatePhoneNumbers.size;
+
   const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
     connected: "default",
     connecting: "secondary",
@@ -321,6 +347,43 @@ export default function GlobalAdminConnections() {
   return (
     <TooltipProvider>
       <div className="space-y-6">
+        {/* Critical: Duplicate Phone Numbers Warning */}
+        {duplicateCount > 0 && (
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-destructive">
+                  ⚠️ ALERTA CRÍTICO: {duplicateCount} número(s) duplicado(s) detectado(s)
+                </h3>
+                <p className="text-sm text-destructive/80 mt-1">
+                  O mesmo número de WhatsApp está conectado em múltiplas instâncias. 
+                  Isso causa <strong>duplicação de mensagens</strong> e <strong>mistura de dados entre empresas</strong>.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {Array.from(duplicatePhoneNumbers.entries()).map(([phone, dupeInstances]) => (
+                    <div key={phone} className="bg-background/50 rounded p-2 text-sm">
+                      <span className="font-mono font-bold text-destructive">+{phone}</span>
+                      <span className="text-muted-foreground ml-2">conectado em:</span>
+                      <ul className="ml-4 mt-1">
+                        {dupeInstances.map((inst) => (
+                          <li key={inst.id} className="flex items-center gap-2">
+                            <span className="font-medium">{inst.company_name}</span>
+                            <span className="text-muted-foreground">({inst.instance_name})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Solução: Desconecte as instâncias duplicadas mantendo apenas UMA por número.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -869,8 +932,23 @@ export default function GlobalAdminConnections() {
                           <div className="flex items-center gap-2">
                             {instance.phone_number ? (
                               <>
-                                <Phone className="h-4 w-4 text-green-500" />
-                                <span className="font-mono text-sm">
+                                {instance.status === "connected" && duplicatePhoneNumbers.has(instance.phone_number) ? (
+                                  <Tooltip>
+                                    <TooltipTrigger>
+                                      <AlertTriangle className="h-4 w-4 text-destructive animate-pulse" />
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <p className="font-semibold text-destructive">⚠️ NÚMERO DUPLICADO</p>
+                                      <p className="text-xs mt-1">
+                                        Este número está conectado em {duplicatePhoneNumbers.get(instance.phone_number)?.length} instâncias diferentes.
+                                        Isso causa duplicação de mensagens!
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  <Phone className="h-4 w-4 text-green-500" />
+                                )}
+                                <span className={`font-mono text-sm ${instance.status === "connected" && duplicatePhoneNumbers.has(instance.phone_number) ? "text-destructive font-bold" : ""}`}>
                                   +{instance.phone_number.replace(/^55/, "55 ").replace(/(\d{2}) (\d{2})(\d{5})(\d{4})$/, "$1 ($2) $3-$4").replace(/(\d{2}) (\d{2})(\d{4})(\d{4})$/, "$1 ($2) $3-$4")}
                                 </span>
                               </>

@@ -3085,6 +3085,69 @@ serve(async (req) => {
             if (phoneNumber) {
               updatePayload.phone_number = phoneNumber;
               logDebug('CONNECTION', `Phone number fetched: ${phoneNumber}`, { requestId });
+              
+              // ========================================
+              // CRITICAL: DUPLICATE PHONE NUMBER CHECK
+              // Prevent the same WhatsApp number from being connected to multiple instances
+              // This prevents message duplication and tenant data mixing
+              // ========================================
+              const { data: existingInstances, error: dupCheckError } = await supabaseClient
+                .from('whatsapp_instances')
+                .select('id, instance_name, law_firm_id, phone_number')
+                .eq('phone_number', phoneNumber)
+                .eq('status', 'connected')
+                .neq('id', instance.id);
+              
+              if (!dupCheckError && existingInstances && existingInstances.length > 0) {
+                const existingInstance = existingInstances[0];
+                logDebug('CONNECTION', `🚨 CRITICAL: Phone ${phoneNumber} already connected on another instance!`, { 
+                  requestId,
+                  thisInstanceId: instance.id,
+                  thisInstanceName: instance.instance_name,
+                  thisLawFirmId: instance.law_firm_id,
+                  existingInstanceId: existingInstance.id,
+                  existingInstanceName: existingInstance.instance_name,
+                  existingLawFirmId: existingInstance.law_firm_id,
+                  sameTenant: existingInstance.law_firm_id === instance.law_firm_id,
+                });
+                
+                // Disconnect THIS instance (the newer one) to prevent conflicts
+                // The existing instance keeps working normally
+                try {
+                  const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
+                  await fetch(`${apiUrl}/instance/logout/${instance.instance_name}`, {
+                    method: 'DELETE',
+                    headers: {
+                      'apikey': instance.api_key || '',
+                      'Content-Type': 'application/json',
+                    },
+                  });
+                  logDebug('CONNECTION', `⚠️ Auto-disconnected duplicate instance ${instance.instance_name}`, { requestId });
+                } catch (logoutErr) {
+                  logDebug('CONNECTION', `Failed to logout duplicate instance: ${logoutErr}`, { requestId });
+                }
+                
+                // Update status to disconnected with a clear reason
+                await supabaseClient
+                  .from('whatsapp_instances')
+                  .update({ 
+                    status: 'disconnected', 
+                    updated_at: new Date().toISOString(),
+                    phone_number: phoneNumber, // Still save the phone for reference
+                  })
+                  .eq('id', instance.id);
+                
+                // Return early - don't process further
+                return new Response(
+                  JSON.stringify({ 
+                    success: true, 
+                    action: 'disconnected',
+                    reason: 'duplicate_phone_number',
+                    message: `Phone ${phoneNumber} is already connected on instance ${existingInstance.instance_name}. This instance was auto-disconnected to prevent conflicts.`,
+                  }),
+                  { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
+              }
             }
           } catch (e) {
             logDebug('CONNECTION', `Failed to fetch phone number (non-fatal): ${e}`, { requestId });

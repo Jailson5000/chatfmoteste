@@ -203,6 +203,29 @@ function extractRejectCallFlag(payload: any): boolean {
 // Get the webhook URL for this project
 const WEBHOOK_URL = `${Deno.env.get("SUPABASE_URL")}/functions/v1/evolution-webhook`;
 
+/**
+ * Check if a phone number is already connected on another instance.
+ * Returns the conflicting instance info if found, null otherwise.
+ */
+async function checkPhoneNumberDuplicate(
+  supabaseClient: any,
+  phoneNumber: string,
+  excludeInstanceId: string
+): Promise<{ id: string; instance_name: string; law_firm_id: string } | null> {
+  const { data: existingInstances, error } = await supabaseClient
+    .from("whatsapp_instances")
+    .select("id, instance_name, law_firm_id, phone_number")
+    .eq("phone_number", phoneNumber)
+    .eq("status", "connected")
+    .neq("id", excludeInstanceId);
+
+  if (error || !existingInstances || existingInstances.length === 0) {
+    return null;
+  }
+
+  return existingInstances[0];
+}
+
 async function getInstanceById(supabaseClient: any, lawFirmId: string | null, instanceDbId: string, isGlobalAdmin: boolean = false) {
   // Global admins can access any instance (for audit/support purposes)
   let query = supabaseClient
@@ -771,11 +794,20 @@ serve(async (req) => {
 
         // Fetch and store phone number when connected using enhanced method
         let phoneNumberToSave: string | null = null;
+        let duplicateWarning: { id: string; instance_name: string; law_firm_id: string } | null = null;
         if (dbStatus === "connected" && !instance.phone_number && instance.api_key) {
           try {
             const result = await fetchPhoneNumberEnhanced(apiUrl, instance.api_key, instance.instance_name);
             phoneNumberToSave = result.phone;
             console.log(`[Evolution API] Phone fetch (get_status): ${phoneNumberToSave ? `found ${phoneNumberToSave.slice(0,4)}***` : result.reason}`);
+            
+            // Check for duplicate - log warning but still save (webhook will auto-disconnect)
+            if (phoneNumberToSave) {
+              duplicateWarning = await checkPhoneNumberDuplicate(supabaseClient, phoneNumberToSave, body.instanceId);
+              if (duplicateWarning) {
+                console.log(`[Evolution API] ⚠️ DUPLICATE PHONE on get_status: ${phoneNumberToSave} already on ${duplicateWarning.instance_name}`);
+              }
+            }
           } catch (e) {
             console.log("[Evolution API] Failed to fetch phone number (non-fatal):", e);
           }
@@ -806,6 +838,10 @@ serve(async (req) => {
             status: dbStatus,
             evolutionState: state,
             instance: updatedInstance,
+            duplicateWarning: duplicateWarning ? {
+              message: `Número ${phoneNumberToSave} já está conectado em outra instância (${duplicateWarning.instance_name})`,
+              existingInstance: duplicateWarning,
+            } : undefined,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
@@ -1071,6 +1107,22 @@ serve(async (req) => {
         const phoneNumber = result.phone;
 
         console.log(`[Evolution API] Phone fetch result: ${phoneNumber ? `found ${phoneNumber.slice(0,4)}***` : result.reason}`);
+
+        // CRITICAL: Check for duplicate phone number before saving
+        if (phoneNumber) {
+          const duplicate = await checkPhoneNumberDuplicate(supabaseClient, phoneNumber, body.instanceId);
+          if (duplicate) {
+            console.log(`[Evolution API] ⚠️ DUPLICATE PHONE DETECTED: ${phoneNumber} already on instance ${duplicate.instance_name}`);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: `Este número (${phoneNumber}) já está conectado em outra instância: ${duplicate.instance_name}. Desconecte a outra instância primeiro.`,
+                duplicateInstance: duplicate,
+              }),
+              { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+        }
 
         const updatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
