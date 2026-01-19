@@ -2729,15 +2729,15 @@ serve(async (req) => {
     const apiKey = useOpenAI ? OPENAI_API_KEY : LOVABLE_API_KEY;
     const model = useOpenAI ? openaiModel : "google/gemini-2.5-flash";
 
-    const requestBody: any = {
+    const aiRequestBody: Record<string, unknown> = {
       model,
       messages,
       temperature,
     };
 
     if (tools.length > 0) {
-      requestBody.tools = tools;
-      requestBody.tool_choice = "auto";
+      aiRequestBody.tools = tools;
+      aiRequestBody.tool_choice = "auto";
     }
 
     const response = await fetch(apiUrl, {
@@ -2746,7 +2746,7 @@ serve(async (req) => {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(aiRequestBody),
     });
 
     if (!response.ok) {
