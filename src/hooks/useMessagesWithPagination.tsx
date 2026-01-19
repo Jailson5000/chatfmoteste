@@ -747,6 +747,88 @@ export function useMessagesWithPagination({
     };
   }, [conversationId, onNewMessage]);
 
+  // FALLBACK: Polling for new messages every 5 seconds
+  // This ensures messages are captured even if realtime events are missed
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const pollForNewMessages = async () => {
+      // Get the latest message timestamp we have
+      const latestTimestamp = messages
+        .map(m => m.created_at)
+        .filter(Boolean)
+        .sort()
+        .slice(-1)[0];
+
+      if (!latestTimestamp) return;
+
+      try {
+        const { data: newMsgs, error } = await supabase
+          .from("messages")
+          .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction")
+          .eq("conversation_id", conversationId)
+          .gt("created_at", latestTimestamp)
+          .order("created_at", { ascending: true })
+          .limit(20);
+
+        if (error) {
+          console.error("[useMessagesWithPagination] Poll error:", error);
+          return;
+        }
+
+        if (newMsgs && newMsgs.length > 0) {
+          console.log("[useMessagesWithPagination] Poll found", newMsgs.length, "new messages");
+          
+          // Filter truly new messages outside of setMessages to use for notifications
+          let addedMessages: typeof newMsgs = [];
+          
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const trulyNew = newMsgs.filter(m => !existingIds.has(m.id));
+            
+            if (trulyNew.length === 0) return prev;
+            
+            console.log("[useMessagesWithPagination] Adding", trulyNew.length, "messages from poll");
+            addedMessages = trulyNew;
+            
+            const withOrder = trulyNew.map(msg => ({
+              ...msg,
+              _clientOrder: ++clientOrderCounterRef.current,
+            }));
+            
+            const updated = [...prev, ...withOrder];
+            return updated.sort((a, b) => {
+              const timeA = new Date(a.created_at).getTime();
+              const timeB = new Date(b.created_at).getTime();
+              const diff = timeA - timeB;
+              if (diff !== 0) return diff;
+              
+              if (a._clientOrder !== undefined && b._clientOrder !== undefined) {
+                return a._clientOrder - b._clientOrder;
+              }
+              
+              return String(a.id).localeCompare(String(b.id));
+            });
+          });
+          
+          // Notify for new messages not from me (after state update)
+          addedMessages.forEach(msg => {
+            if (!msg.is_from_me && onNewMessage) {
+              onNewMessage(msg as PaginatedMessage);
+            }
+          });
+        }
+      } catch (e) {
+        console.error("[useMessagesWithPagination] Poll exception:", e);
+      }
+    };
+
+    // Poll every 5 seconds
+    const pollInterval = setInterval(pollForNewMessages, 5000);
+    
+    return () => clearInterval(pollInterval);
+  }, [conversationId, messages.length, onNewMessage]);
+
   return {
     messages,
     setMessages,
