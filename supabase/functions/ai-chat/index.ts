@@ -3036,13 +3036,7 @@ serve(async (req) => {
 
     // Split AI response into paragraphs for better readability (like WhatsApp)
     // This prevents sending one large block of text
-    // NOTE: Only fragment for WhatsApp sources - Widget sources should receive single messages
-    // to avoid duplication issues with polling sync
-    const splitIntoParagraphs = (text: string, shouldFragment: boolean): string[] => {
-      if (!shouldFragment) {
-        return [text.trim()];
-      }
-      
+    const splitIntoParagraphs = (text: string): string[] => {
       // Split by double newlines or paragraph breaks
       const paragraphs = text
         .split(/\n\n+/)
@@ -3057,13 +3051,11 @@ serve(async (req) => {
       return paragraphs;
     };
 
-    // Determine if we should fragment - only for WhatsApp, not for Widget/web sources
     const sourceUpper = (source || '').toUpperCase();
     const isWebSource = ['WIDGET', 'TRAY', 'SITE', 'WEB'].includes(sourceUpper);
-    const shouldFragment = !isWebSource;
     
-    const messageParts = splitIntoParagraphs(aiResponse, shouldFragment);
-    console.log(`[AI Chat] Split response into ${messageParts.length} parts (fragment=${shouldFragment}, source=${sourceUpper})`);
+    const messageParts = splitIntoParagraphs(aiResponse);
+    console.log(`[AI Chat] Split response into ${messageParts.length} parts (source=${sourceUpper})`);
 
     // Save messages to database if we have a valid conversation
     if (isValidUUID(conversationId)) {
@@ -3125,6 +3117,21 @@ serve(async (req) => {
         }
       }
 
+      // For web sources, return fragments array so widget can add them individually
+      // This prevents duplication issues with polling sync
+      if (isWebSource && messageParts.length > 1) {
+        return new Response(
+          JSON.stringify({
+            response: aiResponse, // Keep full response for backwards compatibility
+            responseParts: messageParts, // Array of fragments for widget to use
+            conversationId,
+            messageId: savedMessageId,
+            tokensUsed: usedTokens
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       return new Response(
         JSON.stringify({
           response: aiResponse,
@@ -3137,6 +3144,19 @@ serve(async (req) => {
     }
 
     // For widget conversations that don't have a UUID yet
+    // Also return fragments for proper rendering
+    if (isWebSource && messageParts.length > 1) {
+      return new Response(
+        JSON.stringify({
+          response: aiResponse,
+          responseParts: messageParts,
+          conversationId,
+          tokensUsed: usedTokens
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
     return new Response(
       JSON.stringify({
         response: aiResponse,
