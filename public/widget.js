@@ -421,7 +421,7 @@
         font-weight: 500;
         white-space: nowrap;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-        border: 2px solid #DC2626;
+        border: 2px solid #22C55E;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -436,14 +436,14 @@
       .miauchat-online-dot {
         width: 10px;
         height: 10px;
-        background: #DC2626;
+        background: #22C55E;
         border-radius: 50%;
         animation: miauchat-glow 1.5s ease-in-out infinite;
       }
       
       @keyframes miauchat-glow {
-        0%, 100% { box-shadow: 0 0 4px #DC2626; }
-        50% { box-shadow: 0 0 10px #DC2626, 0 0 16px #DC2626; }
+        0%, 100% { box-shadow: 0 0 4px #22C55E; }
+        50% { box-shadow: 0 0 10px #22C55E, 0 0 16px #22C55E; }
       }
       
       /* Panel - Modern design */
