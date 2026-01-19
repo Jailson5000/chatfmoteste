@@ -253,13 +253,16 @@
 
         // is_from_me = true => business/attendant/AI/system
         if (msg.is_from_me === true) {
-          // DEDUP FIX: Find ALL local assistant messages without serverId that match content
-          // Then update the first one AND remove extras to prevent visual duplicates
-          const matchingLocalMsgs = messages.filter(
-            (m) => m.role === 'assistant' && 
-                   (!m.serverId || m.serverId.startsWith('pending_')) && 
-                   m.content === msg.content
-          );
+          // DEDUP FIX v2: Use normalized content for comparison
+          const normalizedServerContent = msg.content.trim().toLowerCase();
+          
+          // Find ALL local assistant messages without confirmed serverId that might match
+          const matchingLocalMsgs = messages.filter((m) => {
+            if (m.role !== 'assistant') return false;
+            if (m.serverId && !m.serverId.startsWith('pending_')) return false; // Already confirmed
+            // Match by normalized content
+            return m.content.trim().toLowerCase() === normalizedServerContent;
+          });
           
           if (matchingLocalMsgs.length > 0) {
             // Update the first match with real server ID
@@ -269,21 +272,38 @@
             console.log('[MiauChat] Updated existing message with server ID:', msg.id);
             
             // Remove any extra duplicates (keep only the first one)
-            if (matchingLocalMsgs.length > 1) {
-              for (let i = 1; i < matchingLocalMsgs.length; i++) {
-                const idx = messages.indexOf(matchingLocalMsgs[i]);
-                if (idx > -1) {
-                  messages.splice(idx, 1);
-                  console.log('[MiauChat] Removed duplicate local message');
-                }
+            for (let i = 1; i < matchingLocalMsgs.length; i++) {
+              const idx = messages.indexOf(matchingLocalMsgs[i]);
+              if (idx > -1) {
+                messages.splice(idx, 1);
+                console.log('[MiauChat] Removed duplicate local message');
               }
             }
             
             // IMPORTANT: Still trigger notification for AI/agent messages when widget is minimized
-            // This happens when the AI responds (message added locally) but user minimized before seeing it
             if (!isOpen) {
               hasNewFromAgent = true;
             }
+            return;
+          }
+          
+          // Double-check: maybe content was slightly different due to formatting
+          // Check if any pending message exists for similar timestamp window (within 10s)
+          const msgTimestamp = new Date(msg.created_at).getTime();
+          const recentPending = messages.find((m) => {
+            if (m.role !== 'assistant') return false;
+            if (!m.serverId?.startsWith('pending_')) return false;
+            // Extract timestamp from pending ID: pending_1234567890_0
+            const pendingTs = parseInt(m.serverId.split('_')[1], 10);
+            return !isNaN(pendingTs) && Math.abs(msgTimestamp - pendingTs) < 10000;
+          });
+          
+          if (recentPending) {
+            recentPending.serverId = msg.id;
+            recentPending.content = msg.content; // Use server content as source of truth
+            recentPending.timestamp = msg.created_at;
+            hasUpdatedMessages = true;
+            console.log('[MiauChat] Updated pending message by timestamp proximity:', msg.id);
             return;
           }
           
