@@ -189,15 +189,34 @@ function extractPhoneFromJid(jid?: string | null): string | null {
 }
 
 function extractRejectCallFlag(payload: any): boolean {
-  const rejectCall =
-    payload?.settings?.settings?.reject_call ??
-    payload?.settings?.settings?.rejectCall ??
-    payload?.settings?.reject_call ??
-    payload?.settings?.rejectCall ??
-    payload?.reject_call ??
-    payload?.rejectCall;
+  // Evolution API v2.3+ returns settings in different formats depending on version/endpoint
+  // Try all known patterns to extract the rejectCall flag
+  const candidates = [
+    // Direct on response (most common in v2.3+)
+    payload?.rejectCall,
+    payload?.reject_call,
+    // Nested under 'settings' wrapper
+    payload?.settings?.rejectCall,
+    payload?.settings?.reject_call,
+    // Double nested (some versions)
+    payload?.settings?.settings?.rejectCall,
+    payload?.settings?.settings?.reject_call,
+    // Array response format (fetchSettings returns array sometimes)
+    Array.isArray(payload) && payload.length > 0 ? payload[0]?.rejectCall : undefined,
+    Array.isArray(payload) && payload.length > 0 ? payload[0]?.reject_call : undefined,
+  ];
 
-  return Boolean(rejectCall);
+  for (const candidate of candidates) {
+    if (typeof candidate === "boolean") {
+      return candidate;
+    }
+    // Some APIs return string "true"/"false"
+    if (candidate === "true") return true;
+    if (candidate === "false") return false;
+  }
+
+  // Default to false if not found
+  return false;
 }
 
 // Get the webhook URL for this project
@@ -984,7 +1003,9 @@ serve(async (req) => {
         }
 
         const settingsData = await settingsResponse.json();
+        console.log(`[Evolution API] Raw settings response:`, JSON.stringify(settingsData));
         const rejectCall = extractRejectCallFlag(settingsData);
+        console.log(`[Evolution API] Extracted rejectCall:`, rejectCall);
 
         return new Response(JSON.stringify({ success: true, settings: { rejectCall } }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

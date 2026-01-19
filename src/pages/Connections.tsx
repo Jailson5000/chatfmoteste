@@ -206,6 +206,37 @@ export default function Connections() {
     });
   }, [instances, selectedInstance?.id]);
 
+  // Load actual Evolution settings when an instance is selected
+  useEffect(() => {
+    if (!selectedInstance) return;
+    
+    // Only fetch settings for connected instances
+    if (selectedInstance.status !== "connected") return;
+    
+    // Skip if we already have settings cached for this instance
+    if (rejectCalls[selectedInstance.id] !== undefined) return;
+    
+    const loadSettings = async () => {
+      try {
+        console.log("[Connections] Loading settings from Evolution for:", selectedInstance.instance_name);
+        const result = await getSettings.mutateAsync(selectedInstance.id);
+        if (result.settings) {
+          console.log("[Connections] Settings loaded:", result.settings);
+          setRejectCalls((prev) => ({ 
+            ...prev, 
+            [selectedInstance.id]: result.settings.rejectCall ?? false 
+          }));
+        }
+      } catch (error) {
+        console.error("[Connections] Failed to load settings:", error);
+        // Keep the default false value on error
+      }
+    };
+    
+    loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInstance?.id, selectedInstance?.status]);
+
   const handleCreateInstance = async (displayName: string, instanceName: string) => {
     try {
       // Use the random instanceName for Evolution API, displayName for user display
@@ -708,7 +739,19 @@ export default function Connections() {
       </div>
 
       {/* Detail Panel */}
-      <Sheet open={!!selectedInstance} onOpenChange={(open) => !open && setSelectedInstance(null)}>
+      <Sheet open={!!selectedInstance} onOpenChange={(open) => {
+        if (!open) {
+          // Clear cached settings to force reload on next open
+          if (selectedInstance) {
+            setRejectCalls((prev) => {
+              const updated = { ...prev };
+              delete updated[selectedInstance.id];
+              return updated;
+            });
+          }
+          setSelectedInstance(null);
+        }
+      }}>
         <SheetContent className="w-[500px] sm:max-w-[500px] p-0 overflow-hidden">
           {selectedInstance && (
             <ConnectionDetailPanel
@@ -748,7 +791,7 @@ export default function Connections() {
                 phone: refreshPhone.isPending,
                 delete: deleteInstance.isPending,
                 webhook: configureWebhook.isPending,
-                settings: setSettings.isPending,
+                settings: setSettings.isPending || getSettings.isPending,
                 logout: logoutInstance.isPending,
                 restart: restartInstance.isPending,
               }}
