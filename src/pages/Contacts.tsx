@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Upload, Download, MoreVertical, Trash2, Merge, MessageCircle, User } from "lucide-react";
+import { Plus, Search, Upload, Download, MoreVertical, Trash2, Merge, MessageCircle, User, Globe } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import type { DateRange } from "react-day-picker";
@@ -420,24 +420,32 @@ export default function Contacts() {
                 const status = getStatusById(client.custom_status_id);
                 const department = getDepartmentById(client.department_id);
                 
-                // Get WhatsApp instance display:
-                // 1) client.whatsapp_instance_id if set
-                // 2) fallback to last conversation instance
-                const getInstanceDisplay = () => {
+                // Get WhatsApp instance display or web origin:
+                // 1) Check if conversation origin is from web widget
+                // 2) client.whatsapp_instance_id if set
+                // 3) fallback to last conversation instance
+                const getConnectionDisplay = () => {
+                  const conversation = client.conversations?.[0];
+                  
+                  // Check if from web widget
+                  if (conversation?.origin === 'WIDGET' || conversation?.origin === 'TRAY' || conversation?.origin === 'WEB' || conversation?.origin === 'SITE') {
+                    return { type: 'web', label: 'Chat Web' };
+                  }
+                  
                   const inst =
-                    client.whatsapp_instance || client.conversations?.[0]?.whatsapp_instance || null;
+                    client.whatsapp_instance || conversation?.whatsapp_instance || null;
 
                   if (!inst) return null;
 
                   const phoneNumber = inst.phone_number;
                   if (phoneNumber) {
                     const digits = phoneNumber.replace(/\D/g, "");
-                    if (digits.length >= 4) return `•••${digits.slice(-4)}`;
+                    if (digits.length >= 4) return { type: 'whatsapp', label: `•••${digits.slice(-4)}` };
                   }
 
-                  return inst.display_name || inst.instance_name || null;
+                  return { type: 'whatsapp', label: inst.display_name || inst.instance_name || null };
                 };
-                const instanceDisplay = getInstanceDisplay();
+                const connectionDisplay = getConnectionDisplay();
 
                 return (
                   <TableRow key={client.id} className="hover:bg-muted/20">
@@ -534,8 +542,21 @@ export default function Contacts() {
                         <span className="text-muted-foreground">—</span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {instanceDisplay || "—"}
+                    <TableCell className="text-sm">
+                      {connectionDisplay ? (
+                        <div className="flex items-center gap-1.5">
+                          {connectionDisplay.type === 'web' ? (
+                            <>
+                              <Globe className="h-3.5 w-3.5 text-blue-500" />
+                              <span className="text-blue-500 font-medium">{connectionDisplay.label}</span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">{connectionDisplay.label}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDistanceToNow(new Date(client.created_at), { 
