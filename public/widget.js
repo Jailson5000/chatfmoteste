@@ -522,9 +522,9 @@
       .miauchat-status-dot {
         width: 8px;
         height: 8px;
-        background: #DC2626;
+        background: #22C55E;
         border-radius: 50%;
-        box-shadow: 0 0 6px #DC2626;
+        box-shadow: 0 0 6px #22C55E;
       }
       
       .miauchat-close-btn {
