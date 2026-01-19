@@ -1085,8 +1085,20 @@ export function KanbanChatPanel({
     initialBatchSize: 35,
     loadMoreBatchSize: 30,
     onNewMessage: (msg) => {
-      // If user is not at bottom AND this is a client/AI message, increment unseen count
-      if (!isAtBottomRef.current && (!msg.is_from_me || msg.sender_type === 'ai' || msg.sender_type === 'system')) {
+      // If user is not at bottom AND this is a client/AI/system message, increment unseen count
+      // For AI messages: is_from_me=true but sender_type='ai'
+      // For client messages: is_from_me=false
+      // For system messages: sender_type='system'
+      const isClientMessage = !msg.is_from_me;
+      const isAIMessage = msg.sender_type === 'ai';
+      const isSystemMessage = msg.sender_type === 'system';
+      
+      if (!isAtBottomRef.current && (isClientMessage || isAIMessage || isSystemMessage)) {
+        console.log('[KanbanChat] New message while not at bottom, incrementing unseen count:', {
+          sender_type: msg.sender_type,
+          is_from_me: msg.is_from_me,
+          isAtBottom: isAtBottomRef.current
+        });
         setUnseenMessageCount(prev => prev + 1);
       }
     },
@@ -1589,6 +1601,29 @@ export function KanbanChatPanel({
       cancelled = true;
     };
   }, [conversationId, isLoading, messages.length, resolveViewport, scrollToBottomOnce]);
+
+  // Auto-scroll to bottom when new messages arrive AND user is at bottom
+  // This tracks the last message ID and scrolls when it changes (if at bottom)
+  const lastMessageForScrollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    
+    const lastMsg = messages[messages.length - 1];
+    const lastMsgKey = lastMsg?.id || lastMsg?.created_at;
+    
+    // If this is a new message
+    if (lastMsgKey && lastMsgKey !== lastMessageForScrollRef.current) {
+      lastMessageForScrollRef.current = lastMsgKey;
+      
+      // Auto-scroll if user is at bottom (or nearly at bottom)
+      if (isAtBottomRef.current) {
+        // Small delay to let the new message render
+        requestAnimationFrame(() => {
+          scrollToBottomOnce();
+        });
+      }
+    }
+  }, [messages, scrollToBottomOnce]);
 
   // Update editing name when contactName changes
   useEffect(() => {

@@ -298,12 +298,14 @@
           return;
         }
 
-        // client message - skip if we already have it locally (user just sent it)
+        // client message - check if we already have it locally (pending or exact match)
         const alreadyByUserContent = messages.find(
-          (m) => m.role === 'user' && !m.serverId && m.content === msg.content
+          (m) => m.role === 'user' && 
+                 ((!m.serverId || m.serverId.startsWith('pending_user_')) && m.content === msg.content)
         );
         if (alreadyByUserContent) {
-          // Update local message with server ID instead of adding duplicate
+          // Update local message with real server ID instead of adding duplicate
+          console.log('[MiauChat] Updated user message with server ID:', msg.id);
           alreadyByUserContent.serverId = msg.id;
           alreadyByUserContent.timestamp = msg.created_at;
           hasUpdatedMessages = true;
@@ -1407,7 +1409,9 @@
     }
 
     const trimmedMessage = inputText.trim();
-    const userMessage = { role: 'user', content: trimmedMessage };
+    // Add user message with a temporary pending ID to prevent duplication
+    const pendingUserMsgId = `pending_user_${Date.now()}`;
+    const userMessage = { role: 'user', content: trimmedMessage, serverId: pendingUserMsgId };
     messages.push(userMessage);
     renderMessages();
     saveConversation();

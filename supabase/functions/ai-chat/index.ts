@@ -3037,18 +3037,62 @@ serve(async (req) => {
     // Split AI response into paragraphs for better readability (like WhatsApp)
     // This prevents sending one large block of text
     const splitIntoParagraphs = (text: string): string[] => {
-      // Split by double newlines or paragraph breaks
-      const paragraphs = text
+      // First try: split by double newlines (preferred natural paragraph breaks)
+      let paragraphs = text
         .split(/\n\n+/)
         .map(p => p.trim())
         .filter(p => p.length > 0);
       
-      // If no paragraphs found, return original text
-      if (paragraphs.length <= 1) {
-        return [text.trim()];
+      // If we got good paragraphs, return them
+      if (paragraphs.length > 1) {
+        return paragraphs;
       }
       
-      return paragraphs;
+      // Second try: split by single newlines (common in some AI responses)
+      paragraphs = text
+        .split(/\n+/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      
+      if (paragraphs.length > 1) {
+        return paragraphs;
+      }
+      
+      // Third try: if text is too long (>400 chars), split by sentences
+      const trimmedText = text.trim();
+      if (trimmedText.length > 400) {
+        // Split by sentence-ending punctuation followed by space
+        const sentences = trimmedText
+          .split(/(?<=[.!?])\s+/)
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
+        
+        if (sentences.length > 1) {
+          // Group sentences into chunks of ~200-300 chars for readability
+          const chunks: string[] = [];
+          let currentChunk = '';
+          
+          for (const sentence of sentences) {
+            if (currentChunk.length + sentence.length > 300 && currentChunk.length > 0) {
+              chunks.push(currentChunk.trim());
+              currentChunk = sentence;
+            } else {
+              currentChunk = currentChunk ? `${currentChunk} ${sentence}` : sentence;
+            }
+          }
+          
+          if (currentChunk.trim()) {
+            chunks.push(currentChunk.trim());
+          }
+          
+          if (chunks.length > 1) {
+            return chunks;
+          }
+        }
+      }
+      
+      // Fallback: return original text as single message
+      return [trimmedText];
     };
 
     const sourceUpper = (source || '').toUpperCase();
@@ -3117,9 +3161,9 @@ serve(async (req) => {
         }
       }
 
-      // For web sources, return fragments array so widget can add them individually
-      // This prevents duplication issues with polling sync
-      if (isWebSource && messageParts.length > 1) {
+      // For web sources, ALWAYS return fragments array so widget can add them individually
+      // This prevents duplication issues with polling sync (even for single messages)
+      if (isWebSource) {
         return new Response(
           JSON.stringify({
             response: aiResponse, // Keep full response for backwards compatibility
@@ -3144,8 +3188,8 @@ serve(async (req) => {
     }
 
     // For widget conversations that don't have a UUID yet
-    // Also return fragments for proper rendering
-    if (isWebSource && messageParts.length > 1) {
+    // ALWAYS return fragments for proper rendering
+    if (isWebSource) {
       return new Response(
         JSON.stringify({
           response: aiResponse,
