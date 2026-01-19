@@ -2243,139 +2243,220 @@ serve(async (req) => {
     
     // For widget conversations, create or find existing conversation
     // CRITICAL: Use validatedLawFirmId (from widget_key validation) for tenant isolation
-    if (isWidgetConversation && validatedLawFirmId && widgetSessionId) {
+    // IMPORTANT: Widget can send either a session id (widget_...) OR the real conversation UUID.
+    if (isWidgetConversation && validatedLawFirmId) {
       // Extract client info from context
       const clientName = context?.clientName || "Visitante Web";
       const clientPhone = context?.clientPhone || null;
       const clientEmail = (context as any)?.clientEmail || null;
-      
-      // Look for existing conversation with this widget session ID
-      // CRITICAL: Include current_handler and current_automation_id to respect transfers made in the panel
-      const { data: existingConv } = await supabase
-        .from("conversations")
-        .select("id, client_id, current_handler, current_automation_id")
-        .eq("law_firm_id", validatedLawFirmId)
-        .eq("origin", "WIDGET")
-        .eq("remote_jid", widgetSessionId)
-        .maybeSingle();
 
-      if (existingConv) {
-        conversationId = existingConv.id;
-        console.log(`[AI Chat] Found existing widget conversation: ${conversationId}, current_handler: ${existingConv.current_handler}, current_automation_id: ${existingConv.current_automation_id}`);
-        
-        // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
-        // This overrides the widget defaults when handler is 'ai' and automation is set
-        if (existingConv.current_handler === 'ai' && existingConv.current_automation_id) {
-          automationId = existingConv.current_automation_id;
-          console.log(`[AI Chat] Using conversation's current AI automation (from panel transfer): ${automationId}`);
-        }
-        
-        // Update contact info if provided and changed
-        if (clientName && clientName !== "Visitante Web") {
-          await supabase
-            .from("conversations")
-            .update({ contact_name: clientName, contact_phone: clientPhone })
-            .eq("id", conversationId);
-          
-          if (existingConv.client_id) {
-            await supabase
-              .from("clients")
-              .update({ 
-                name: clientName,
-                phone: clientPhone || undefined,
-                email: clientEmail || undefined
-              })
-              .eq("id", existingConv.client_id);
+      const widgetOrigins = new Set(["WIDGET", "TRAY", "SITE", "WEB"]);
+
+      // 1) If we received a real UUID (common after first message), respect panel transfers
+      // by loading the conversation directly.
+      let convById: any = null;
+      if (isValidUUID(conversationId)) {
+        const { data: maybeConvById } = await supabase
+          .from("conversations")
+          .select("id, client_id, origin, remote_jid, current_handler, current_automation_id")
+          .eq("id", conversationId)
+          .eq("law_firm_id", validatedLawFirmId)
+          .maybeSingle();
+
+        if (maybeConvById && widgetOrigins.has(maybeConvById.origin)) {
+          convById = maybeConvById;
+
+          // Keep remote_jid as the canonical widget session id when available
+          if (!widgetSessionId && convById.remote_jid) {
+            widgetSessionId = convById.remote_jid;
           }
-        }
-      } else {
-        // Create new client record if phone provided
-        let clientId: string | null = null;
-        
-        if (clientPhone) {
-          const { data: existingClient } = await supabase
-            .from("clients")
-            .select("id")
-            .eq("law_firm_id", validatedLawFirmId)
-            .eq("phone", clientPhone)
-            .maybeSingle();
-          
-          if (existingClient) {
-            clientId = existingClient.id;
+
+          console.log(
+            `[AI Chat] Widget conversation found by UUID: ${convById.id}, current_handler: ${convById.current_handler}, current_automation_id: ${convById.current_automation_id}`
+          );
+
+          // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
+          if (convById.current_handler === "ai") {
+            if (convById.current_automation_id) {
+              automationId = convById.current_automation_id;
+              console.log(`[AI Chat] Using conversation's current AI automation (from panel transfer): ${automationId}`);
+            } else if (!automationId && traySettings?.default_automation_id) {
+              // Fallback for edge cases where handler is AI but automation wasn't set
+              automationId = traySettings.default_automation_id;
+              console.log(`[AI Chat] Conversation in AI mode but missing automation; falling back to default: ${automationId}`);
+            }
+          }
+
+          // Update contact info if provided and changed
+          if (clientName && clientName !== "Visitante Web") {
             await supabase
-              .from("clients")
-              .update({ 
-                name: clientName,
-                email: clientEmail || undefined
-              })
-              .eq("id", clientId);
-            console.log(`[AI Chat] Found existing client: ${clientId}`);
-          } else {
-            const { data: newClient, error: clientError } = await supabase
-              .from("clients")
-              .insert({
-                law_firm_id: validatedLawFirmId,
-                name: clientName,
-                phone: clientPhone,
-                email: clientEmail || null,
-                notes: `Origem: Widget do site`,
-                department_id: traySettings?.default_department_id || null,
-                custom_status_id: traySettings?.default_status_id || null,
-              })
-              .select("id")
-              .single();
-            
-            if (!clientError && newClient) {
-              clientId = newClient.id;
-              console.log(`[AI Chat] Created new client: ${clientId}`);
+              .from("conversations")
+              .update({ contact_name: clientName, contact_phone: clientPhone })
+              .eq("id", conversationId);
+
+            if (convById.client_id) {
+              await supabase
+                .from("clients")
+                .update({
+                  name: clientName,
+                  phone: clientPhone || undefined,
+                  email: clientEmail || undefined,
+                })
+                .eq("id", convById.client_id);
             }
           }
         }
-        
-        // Determine handler based on settings
-        const handlerType = traySettings?.default_handler_type || 'human';
-        const assignedTo = handlerType === 'human' ? (traySettings?.default_human_agent_id || null) : null;
-        const currentAutomationId = handlerType === 'ai' ? (traySettings?.default_automation_id || null) : null;
-        
-        // Create new conversation for widget with VALIDATED law_firm_id
-        const { data: newConv, error: convError } = await supabase
-          .from("conversations")
-          .insert({
-            law_firm_id: validatedLawFirmId,
-            remote_jid: widgetSessionId,
-            contact_name: clientName,
-            contact_phone: clientPhone,
-            client_id: clientId,
-            origin: "WIDGET",
-            origin_metadata: {
-              widget_session: widgetSessionId,
-              widget_key: context?.widgetKey || null,
-              client_email: clientEmail,
-              page_url: (context as any)?.pageUrl || null,
-              page_title: (context as any)?.pageTitle || null,
-              referrer: (context as any)?.referrer || null,
-              device: (context as any)?.device || null,
-              user_agent: (context as any)?.userAgent || null,
-            },
-            current_handler: currentAutomationId ? "ai" : "human",
-            current_automation_id: currentAutomationId,
-            assigned_to: assignedTo,
-            department_id: traySettings?.default_department_id || null,
-            status: "novo_contato",
-          })
-          .select("id")
-          .single();
+      }
 
-        if (convError || !newConv) {
-          console.error(`[${errorRef}] Failed to create widget conversation:`, convError);
-          return new Response(
-            JSON.stringify({ error: "Failed to create conversation", ref: errorRef }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      // 2) If we still don't have a widgetSessionId (e.g., UUID not found), try reconstructing it
+      // from the widget payload so we can find/create the conversation by remote_jid.
+      if (!widgetSessionId) {
+        const visitorIdRaw = (context as any)?.visitorId;
+        const visitorId = sanitizeString(visitorIdRaw, 120);
+        if (context?.widgetKey && visitorId) {
+          widgetSessionId = `widget_${context.widgetKey}_${visitorId}`;
+        }
+      }
+
+      // 3) Session-based flow (first message OR when UUID lookup failed)
+      if (widgetSessionId && (!isValidUUID(conversationId) || !convById)) {
+        // Look for existing conversation with this widget session ID
+        // CRITICAL: Include current_handler and current_automation_id to respect transfers made in the panel
+        const { data: existingConv } = await supabase
+          .from("conversations")
+          .select("id, client_id, current_handler, current_automation_id")
+          .eq("law_firm_id", validatedLawFirmId)
+          .eq("origin", "WIDGET")
+          .eq("remote_jid", widgetSessionId)
+          .maybeSingle();
+
+        if (existingConv) {
+          conversationId = existingConv.id;
+          console.log(
+            `[AI Chat] Found existing widget conversation (by remote_jid): ${conversationId}, current_handler: ${existingConv.current_handler}, current_automation_id: ${existingConv.current_automation_id}`
+          );
+
+          // CRITICAL FIX: If the conversation was transferred to AI in the panel, use that automation
+          // This overrides the widget defaults when handler is 'ai' and automation is set
+          if (existingConv.current_handler === "ai") {
+            if (existingConv.current_automation_id) {
+              automationId = existingConv.current_automation_id;
+              console.log(`[AI Chat] Using conversation's current AI automation (from panel transfer): ${automationId}`);
+            } else if (!automationId && traySettings?.default_automation_id) {
+              automationId = traySettings.default_automation_id;
+              console.log(`[AI Chat] Conversation in AI mode but missing automation; falling back to default: ${automationId}`);
+            }
+          }
+
+          // Update contact info if provided and changed
+          if (clientName && clientName !== "Visitante Web") {
+            await supabase
+              .from("conversations")
+              .update({ contact_name: clientName, contact_phone: clientPhone })
+              .eq("id", conversationId);
+
+            if (existingConv.client_id) {
+              await supabase
+                .from("clients")
+                .update({
+                  name: clientName,
+                  phone: clientPhone || undefined,
+                  email: clientEmail || undefined,
+                })
+                .eq("id", existingConv.client_id);
+            }
+          }
+        } else {
+          // Create new client record if phone provided
+          let clientId: string | null = null;
+
+          if (clientPhone) {
+            const { data: existingClient } = await supabase
+              .from("clients")
+              .select("id")
+              .eq("law_firm_id", validatedLawFirmId)
+              .eq("phone", clientPhone)
+              .maybeSingle();
+
+            if (existingClient) {
+              clientId = existingClient.id;
+              await supabase
+                .from("clients")
+                .update({
+                  name: clientName,
+                  email: clientEmail || undefined,
+                })
+                .eq("id", clientId);
+              console.log(`[AI Chat] Found existing client: ${clientId}`);
+            } else {
+              const { data: newClient, error: clientError } = await supabase
+                .from("clients")
+                .insert({
+                  law_firm_id: validatedLawFirmId,
+                  name: clientName,
+                  phone: clientPhone,
+                  email: clientEmail || null,
+                  notes: `Origem: Widget do site`,
+                  department_id: traySettings?.default_department_id || null,
+                  custom_status_id: traySettings?.default_status_id || null,
+                })
+                .select("id")
+                .single();
+
+              if (!clientError && newClient) {
+                clientId = newClient.id;
+                console.log(`[AI Chat] Created new client: ${clientId}`);
+              }
+            }
+          }
+
+          // Determine handler based on settings
+          const handlerType = traySettings?.default_handler_type || "human";
+          const assignedTo = handlerType === "human" ? (traySettings?.default_human_agent_id || null) : null;
+          const currentAutomationId = handlerType === "ai" ? (traySettings?.default_automation_id || null) : null;
+
+          // Create new conversation for widget with VALIDATED law_firm_id
+          const { data: newConv, error: convError } = await supabase
+            .from("conversations")
+            .insert({
+              law_firm_id: validatedLawFirmId,
+              remote_jid: widgetSessionId,
+              contact_name: clientName,
+              contact_phone: clientPhone,
+              client_id: clientId,
+              origin: "WIDGET",
+              origin_metadata: {
+                widget_session: widgetSessionId,
+                widget_key: context?.widgetKey || null,
+                client_email: clientEmail,
+                page_url: (context as any)?.pageUrl || null,
+                page_title: (context as any)?.pageTitle || null,
+                referrer: (context as any)?.referrer || null,
+                device: (context as any)?.device || null,
+                user_agent: (context as any)?.userAgent || null,
+              },
+              current_handler: currentAutomationId ? "ai" : "human",
+              current_automation_id: currentAutomationId,
+              assigned_to: assignedTo,
+              department_id: traySettings?.default_department_id || null,
+              status: "novo_contato",
+            })
+            .select("id")
+            .single();
+
+          if (convError || !newConv) {
+            console.error(`[${errorRef}] Failed to create widget conversation:`, convError);
+            return new Response(
+              JSON.stringify({ error: "Failed to create conversation", ref: errorRef }),
+              { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          conversationId = newConv.id;
+          console.log(
+            `[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}, handler: ${handlerType}, client: ${clientId}`
           );
         }
-
-        conversationId = newConv.id;
-        console.log(`[AI Chat] Created new widget conversation: ${conversationId} for tenant: ${validatedLawFirmId}, handler: ${handlerType}, client: ${clientId}`);
       }
     }
 
