@@ -573,21 +573,6 @@ export default function Conversations() {
   // Dynamic favicon based on unread count
   useDynamicFavicon(totalUnread);
 
-  // Update browser tab title with unread count
-  useEffect(() => {
-    const baseTitle = "Conversas | MiauChat";
-    
-    if (totalUnread > 0) {
-      document.title = `(${totalUnread}) ${baseTitle}`;
-    } else {
-      document.title = baseTitle;
-    }
-
-    // Cleanup: reset title when leaving page
-    return () => {
-      document.title = "MiauChat | Multiplataforma de Inteligência Artificial Unificada";
-    };
-  }, [totalUnread]);
 
   // Search matches
   const searchMatches = useMemo(() => {
