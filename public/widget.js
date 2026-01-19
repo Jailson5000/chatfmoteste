@@ -207,9 +207,11 @@
     }
 
     try {
+      // Get the timestamp of the most recent message we have WITH a server ID
+      // This ensures we don't miss messages due to local-only timestamps
       const lastTs = messages
+        .filter((m) => m.serverId && m.timestamp)
         .map((m) => m.timestamp)
-        .filter(Boolean)
         .sort()
         .slice(-1)[0];
 
@@ -228,7 +230,12 @@
 
       const payload = await response.json();
       const serverMessages = payload?.messages || [];
-      if (!serverMessages.length) return;
+      
+      if (!serverMessages.length) {
+        return;
+      }
+      
+      console.log('[MiauChat] Polling received', serverMessages.length, 'messages');
 
       const newMessages = [];
       let hasNewFromAgent = false;
@@ -239,7 +246,10 @@
         
         // Skip if we already have this message by server ID
         const alreadyByServerId = messages.find((m) => m.serverId === msg.id);
-        if (alreadyByServerId) return;
+        if (alreadyByServerId) {
+          console.log('[MiauChat] Skipping already known message:', msg.id);
+          return;
+        }
 
         // is_from_me = true => business/attendant/system
         if (msg.is_from_me === true) {
@@ -255,9 +265,11 @@
             alreadyByContent.serverId = msg.id;
             alreadyByContent.timestamp = msg.created_at;
             hasUpdatedMessages = true;
+            console.log('[MiauChat] Updated existing message with server ID:', msg.id);
             return;
           }
           
+          console.log('[MiauChat] New agent message:', msg.content.substring(0, 50));
           newMessages.push({
             role: 'assistant',
             content: msg.content,
@@ -289,6 +301,8 @@
       });
 
       if (newMessages.length || hasUpdatedMessages) {
+        console.log('[MiauChat] Adding', newMessages.length, 'new messages, updated:', hasUpdatedMessages);
+        
         if (newMessages.length) {
           messages.push(...newMessages);
         }
@@ -298,6 +312,9 @@
         });
         saveConversation();
         renderMessages();
+        
+        // Scroll to bottom after new messages
+        scrollToBottom();
         
         // Alert for new agent messages when minimized (only for truly new messages)
         if (hasNewFromAgent && !isOpen) {
@@ -1116,6 +1133,9 @@
     
     // Start polling when chat view is shown
     startPolling();
+    
+    // Also fetch immediately to catch any missed messages
+    fetchNewMessages();
   };
 
   // Show prechat form (hide chat)
