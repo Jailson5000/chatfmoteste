@@ -38,6 +38,69 @@ function generateErrorRef(): string {
   return crypto.randomUUID().slice(0, 8);
 }
 
+// Get current billing period in YYYY-MM format
+function getCurrentBillingPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Record AI conversation usage for billing - counts unique conversations per billing period
+async function recordAIConversationUsage(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string,
+  automationId: string,
+  automationName: string,
+  source: string
+): Promise<boolean> {
+  const billingPeriod = getCurrentBillingPeriod();
+  
+  try {
+    // Check if this conversation was already counted this billing period
+    const { data: existingRecord } = await supabaseClient
+      .from('usage_records')
+      .select('id')
+      .eq('law_firm_id', lawFirmId)
+      .eq('usage_type', 'ai_conversation')
+      .eq('billing_period', billingPeriod)
+      .filter('metadata->>conversation_id', 'eq', conversationId)
+      .limit(1);
+    
+    if (existingRecord && existingRecord.length > 0) {
+      console.log(`[AI Chat] Conversation ${conversationId} already counted this period`);
+      return false; // Already counted
+    }
+    
+    // Record the usage - this conversation is being handled by AI for the first time this month
+    const { error } = await supabaseClient
+      .from('usage_records')
+      .insert({
+        law_firm_id: lawFirmId,
+        usage_type: 'ai_conversation',
+        count: 1,
+        billing_period: billingPeriod,
+        metadata: {
+          conversation_id: conversationId,
+          automation_id: automationId,
+          automation_name: automationName,
+          source: source,
+          first_ai_response_at: new Date().toISOString(),
+        }
+      });
+    
+    if (error) {
+      console.error('[AI Chat] Failed to record AI conversation usage:', error);
+      return false;
+    }
+    
+    console.log(`[AI Chat] AI usage recorded for conversation ${conversationId}, period ${billingPeriod}`);
+    return true;
+  } catch (err) {
+    console.error('[AI Chat] Error recording AI conversation usage:', err);
+    return false;
+  }
+}
+
 // Helper to validate UUID format
 function isValidUUID(str: string | undefined | null): boolean {
   if (!str) return false;
@@ -3411,17 +3474,16 @@ serve(async (req) => {
         })
         .eq("id", conversationId);
 
-      // Track AI usage
-      if (agentLawFirmId) {
-        try {
-          await supabase.rpc("increment_ai_usage", {
-            p_law_firm_id: agentLawFirmId,
-            p_tokens: usedTokens,
-            p_conversations: 1
-          });
-        } catch (e) {
-          console.error("[AI Chat] Failed to track usage:", e);
-        }
+      // Track AI usage - record unique conversation per billing period
+      if (agentLawFirmId && automationId) {
+        await recordAIConversationUsage(
+          supabase,
+          agentLawFirmId,
+          conversationId,
+          automationId,
+          automationName,
+          source || 'unknown'
+        );
       }
 
       // For web sources, ALWAYS return fragments array so widget can add them individually
