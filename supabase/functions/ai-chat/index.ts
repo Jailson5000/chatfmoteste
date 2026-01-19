@@ -2947,14 +2947,17 @@ serve(async (req) => {
         status: "delivered"
       });
 
-      // Save AI response
+      // Save AI response with ai_generated flag for proper UI styling
       const { data: savedMessage } = await supabase.from("messages").insert({
         conversation_id: conversationId,
         content: aiResponse,
         sender_type: "ai",
         is_from_me: true,
         message_type: "text",
-        status: "delivered"
+        status: "delivered",
+        ai_generated: true,
+        ai_agent_id: automationId,
+        ai_agent_name: automationName
       }).select("id").single();
 
       // Update conversation last_message_at
