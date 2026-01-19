@@ -12,13 +12,11 @@ export function useDynamicFavicon(unreadCount: number) {
       document.title = baseTitle;
     }
 
-    // Ensure favicon is always the default one
+    // Ensure favicon is always the default one (with cache busting)
     const link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
     if (link) {
-      // Only update if different to avoid unnecessary reloads
-      if (!link.href.endsWith(DEFAULT_FAVICON)) {
-        link.href = DEFAULT_FAVICON;
-      }
+      const faviconUrl = `${DEFAULT_FAVICON}?v=${Date.now()}`;
+      link.href = faviconUrl;
     }
   }, [unreadCount]);
 }
