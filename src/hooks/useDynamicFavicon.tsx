@@ -26,40 +26,23 @@ export function useDynamicFavicon(unreadCount: number) {
         // Clear canvas
         ctx.clearRect(0, 0, 32, 32);
 
+        // Always draw the original favicon first
+        ctx.drawImage(img, 0, 0, 32, 32);
+
         if (unreadCount > 0) {
-          // Draw a colored background circle
-          ctx.beginPath();
-          ctx.arc(16, 16, 16, 0, Math.PI * 2);
-          ctx.fillStyle = UNREAD_COLOR;
-          ctx.fill();
-
-          // Draw white icon on top (scaled smaller)
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(16, 16, 14, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(img, 2, 2, 28, 28);
-          ctx.restore();
-
-          // Draw notification badge with count
+          // Draw notification badge with count (red circle with white text)
           ctx.beginPath();
           ctx.arc(24, 8, 8, 0, Math.PI * 2);
-          ctx.fillStyle = "#ffffff";
+          ctx.fillStyle = UNREAD_COLOR;
           ctx.fill();
-          ctx.strokeStyle = UNREAD_COLOR;
-          ctx.lineWidth = 1;
-          ctx.stroke();
 
           // Draw count text
-          ctx.fillStyle = UNREAD_COLOR;
+          ctx.fillStyle = "#ffffff";
           ctx.font = "bold 10px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           const displayCount = unreadCount > 9 ? "9+" : unreadCount.toString();
           ctx.fillText(displayCount, 24, 8);
-        } else {
-          // Just draw the original favicon
-          ctx.drawImage(img, 0, 0, 32, 32);
         }
 
         // Update favicon
