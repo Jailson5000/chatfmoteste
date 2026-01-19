@@ -2962,6 +2962,26 @@ serve(async (req) => {
       aiResponse = "Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.";
     }
 
+    // Split AI response into paragraphs for better readability (like WhatsApp)
+    // This prevents sending one large block of text
+    const splitIntoParagraphs = (text: string): string[] => {
+      // Split by double newlines or paragraph breaks
+      const paragraphs = text
+        .split(/\n\n+/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      
+      // If no paragraphs found, return original text
+      if (paragraphs.length <= 1) {
+        return [text.trim()];
+      }
+      
+      return paragraphs;
+    };
+
+    const messageParts = splitIntoParagraphs(aiResponse);
+    console.log(`[AI Chat] Split response into ${messageParts.length} parts`);
+
     // Save messages to database if we have a valid conversation
     if (isValidUUID(conversationId)) {
       // Save user message
@@ -2974,18 +2994,31 @@ serve(async (req) => {
         status: "delivered"
       });
 
-      // Save AI response with ai_generated flag for proper UI styling
-      const { data: savedMessage } = await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        content: aiResponse,
-        sender_type: "ai",
-        is_from_me: true,
-        message_type: "text",
-        status: "delivered",
-        ai_generated: true,
-        ai_agent_id: automationId,
-        ai_agent_name: automationName
-      }).select("id").single();
+      // Save each AI response part as a separate message
+      let savedMessageId: string | null = null;
+      for (let i = 0; i < messageParts.length; i++) {
+        const part = messageParts[i];
+        const { data: savedMessage } = await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          content: part,
+          sender_type: "ai",
+          is_from_me: true,
+          message_type: "text",
+          status: "delivered",
+          ai_generated: true,
+          ai_agent_id: automationId,
+          ai_agent_name: automationName
+        }).select("id").single();
+        
+        if (i === messageParts.length - 1) {
+          savedMessageId = savedMessage?.id || null;
+        }
+        
+        // Small delay between messages for natural typing feel
+        if (i < messageParts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
 
       // Update conversation last_message_at
       await supabase
@@ -3013,7 +3046,7 @@ serve(async (req) => {
         JSON.stringify({
           response: aiResponse,
           conversationId,
-          messageId: savedMessage?.id,
+          messageId: savedMessageId,
           tokensUsed: usedTokens
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
