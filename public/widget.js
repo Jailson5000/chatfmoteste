@@ -370,10 +370,10 @@
         width: 60px;
         height: 60px;
         border-radius: 50%;
-        background: #111111;
-        border: 3px solid #DC2626;
+        background: #22C55E;
+        border: 3px solid #22C55E;
         cursor: pointer;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -384,7 +384,7 @@
       
       .miauchat-bubble-icon:hover {
         transform: scale(1.05);
-        box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4);
       }
       
       .miauchat-bubble-icon svg {
