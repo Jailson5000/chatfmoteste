@@ -1832,6 +1832,38 @@ async function executeSchedulingTool(
   }
 }
 
+/**
+ * Parse [IMAGE]url from template content
+ * Returns: { cleanContent, extractedMediaUrl }
+ * - Accepts [IMAGE]url or [IMAGE] url (with space)
+ * - Only extracts the FIRST [IMAGE] marker; removes all occurrences from content
+ */
+function parseImageFromContent(content: string): { cleanContent: string; extractedMediaUrl: string | null } {
+  if (!content) return { cleanContent: content, extractedMediaUrl: null };
+  
+  // Pattern: [IMAGE] followed by optional space then URL until whitespace/newline
+  const imagePattern = /\[IMAGE\]\s*(https?:\/\/[^\s\n]+)/gi;
+  const matches = [...content.matchAll(imagePattern)];
+  
+  let extractedMediaUrl: string | null = null;
+  if (matches.length > 0) {
+    // Use first match as the media URL
+    extractedMediaUrl = matches[0][1].trim();
+    console.log(`[AI Chat] Extracted image URL from content: ${extractedMediaUrl}`);
+  }
+  
+  // Remove ALL [IMAGE]url occurrences from content
+  let cleanContent = content.replace(imagePattern, '').trim();
+  
+  // Also clean up any orphaned [IMAGE] tags without URLs
+  cleanContent = cleanContent.replace(/\[IMAGE\]\s*/gi, '').trim();
+  
+  // Clean up multiple consecutive newlines
+  cleanContent = cleanContent.replace(/\n{3,}/g, '\n\n').trim();
+  
+  return { cleanContent, extractedMediaUrl };
+}
+
 // Execute template tool call - ACTUALLY SENDS the template content
 async function executeTemplateTool(
   supabase: any,
@@ -1877,26 +1909,59 @@ async function executeTemplateTool(
       });
     }
     
+    // PRIORITY: 1) media_url field, 2) [IMAGE] in content, 3) text only
+    let finalMediaUrl = matchedTemplate.media_url || null;
+    let finalMediaType = matchedTemplate.media_type || null;
+    let finalContent = matchedTemplate.content || '';
+    
+    // If no media_url but content has [IMAGE], parse it
+    if (!finalMediaUrl && matchedTemplate.content) {
+      const parsed = parseImageFromContent(matchedTemplate.content);
+      if (parsed.extractedMediaUrl) {
+        finalMediaUrl = parsed.extractedMediaUrl;
+        finalContent = parsed.cleanContent;
+        // Detect media type from URL extension
+        const ext = finalMediaUrl.split('.').pop()?.toLowerCase();
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
+          finalMediaType = 'image';
+        } else if (['mp4', 'mov', 'avi', 'webm'].includes(ext || '')) {
+          finalMediaType = 'video';
+        } else if (['pdf'].includes(ext || '')) {
+          finalMediaType = 'document';
+        } else {
+          finalMediaType = 'image'; // Default assumption for [IMAGE] tag
+        }
+        console.log(`[AI Chat] Parsed [IMAGE] from template - URL: ${finalMediaUrl}, Type: ${finalMediaType}`);
+      }
+    }
+    
     // ACTUALLY SEND the template content as a message if we have a valid conversation
-    if (isValidUUID(conversationId) && matchedTemplate.content) {
+    if (isValidUUID(conversationId) && (finalContent || finalMediaUrl)) {
+      const messageType = finalMediaUrl ? 'media' : 'text';
+      
       // Save template content as AI message
       const { data: savedMsg, error: saveError } = await supabase.from("messages").insert({
         conversation_id: conversationId,
-        content: matchedTemplate.content,
+        content: finalContent || '',
         sender_type: "ai",
         is_from_me: true,
-        message_type: matchedTemplate.media_url ? "media" : "text",
-        media_url: matchedTemplate.media_url || null,
-        media_type: matchedTemplate.media_type || null,
+        message_type: messageType,
+        media_url: finalMediaUrl,
+        media_type: finalMediaType,
         status: "delivered",
         ai_generated: true,
-        metadata: { template_id: matchedTemplate.id, template_name: matchedTemplate.name }
+        metadata: { 
+          template_id: matchedTemplate.id, 
+          template_name: matchedTemplate.name,
+          image_extracted: !matchedTemplate.media_url && !!finalMediaUrl
+        }
       }).select("id").single();
       
       if (saveError) {
         console.error(`[AI Chat] Failed to save template message:`, saveError);
+        return JSON.stringify({ error: "Erro ao salvar mensagem do template" });
       } else {
-        console.log(`[AI Chat] Template message saved: ${savedMsg?.id}`);
+        console.log(`[AI Chat] Template message saved: ${savedMsg?.id}, hasMedia: ${!!finalMediaUrl}`);
       }
       
       // Update conversation last_message_at
@@ -1911,15 +1976,15 @@ async function executeTemplateTool(
       success: true,
       template_sent: true,
       template_name: matchedTemplate.name,
-      content_sent: matchedTemplate.content,
+      has_media: !!finalMediaUrl,
       instruction: `O template "${matchedTemplate.name}" FOI ENVIADO com sucesso ao cliente. NÃO repita o conteúdo do template. Apenas confirme brevemente que enviou e pergunte se o cliente tem dúvidas.`
     };
     
     // Include media info if available
-    if (matchedTemplate.media_url) {
+    if (finalMediaUrl) {
       response.media_sent = true;
-      response.media_type = matchedTemplate.media_type;
-      response.instruction += ` Uma ${matchedTemplate.media_type || 'mídia'} também foi enviada.`;
+      response.media_type = finalMediaType;
+      response.instruction += ` Uma ${finalMediaType || 'mídia'} também foi enviada junto com o texto.`;
     }
     
     return JSON.stringify(response);
