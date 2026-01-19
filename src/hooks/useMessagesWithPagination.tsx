@@ -635,8 +635,10 @@ export function useMessagesWithPagination({
             }
           }
 
-          // Callback for new message (e.g., play notification)
-          if (!rawMsg.is_from_me && onNewMessage) {
+          // Callback for new message (e.g., play notification, show unseen indicator)
+          // Trigger for: client messages, AI responses, system messages (NOT human agent messages from me)
+          const isHumanAgentMessage = rawMsg.is_from_me && rawMsg.sender_type === 'attendant';
+          if (!isHumanAgentMessage && onNewMessage) {
             onNewMessage(rawMsg);
           }
         }
