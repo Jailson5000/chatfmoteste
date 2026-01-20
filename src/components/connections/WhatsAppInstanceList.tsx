@@ -55,11 +55,24 @@ function getStatusBadge(status: string | null) {
         </Badge>
       );
     case "connecting":
-    case "awaiting_qr":
       return (
         <Badge variant="outline" className="text-warning border-warning/30">
           <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
           Conectando
+        </Badge>
+      );
+    case "awaiting_qr":
+      return (
+        <Badge variant="outline" className="text-amber-500 border-amber-500/30">
+          <QrCode className="h-3 w-3 mr-1" />
+          Aguardando QR
+        </Badge>
+      );
+    case "suspended":
+      return (
+        <Badge variant="outline" className="text-destructive border-destructive/30">
+          <XCircle className="h-3 w-3 mr-1" />
+          Suspenso
         </Badge>
       );
     default:
