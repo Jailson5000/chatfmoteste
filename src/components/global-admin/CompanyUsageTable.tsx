@@ -45,6 +45,7 @@ import {
   Calendar,
   ArrowUpRight,
   Trash2,
+  DollarSign,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -60,6 +61,7 @@ import { useCompanies } from "@/hooks/useCompanies";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
+import { calculateAdditionalCosts, formatCurrency, ADDITIONAL_PRICING } from "@/lib/billing-config";
 
 interface CompanyUsage {
   company_id: string;
@@ -79,6 +81,13 @@ interface CompanyUsage {
   effective_max_ai_conversations: number;
   effective_max_tts_minutes: number;
   effective_max_workspaces: number;
+  // Plan limits for calculating additional costs
+  plan_max_users?: number;
+  plan_max_instances?: number;
+  plan_max_agents?: number;
+  plan_max_ai_conversations?: number;
+  plan_max_tts_minutes?: number;
+  plan_price?: number;
 }
 
 interface AgentWithConversations {
@@ -94,6 +103,7 @@ interface CompanyWithStatus extends CompanyUsage {
   subdomain: string | null;
   last_activity?: string;
   agents?: AgentWithConversations[];
+  monthly_value?: number;
 }
 
 type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled" | "critical" | "warning";
