@@ -476,19 +476,21 @@ export function useWhatsAppInstances() {
 
   const restartInstance = useMutation({
     mutationFn: async (instanceId: string): Promise<EvolutionResponse> => {
-      console.log("[useWhatsAppInstances] Restarting instance:", instanceId);
+      console.log("[useWhatsAppInstances] Restarting instance via get_qrcode:", instanceId);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
+      // Use get_qrcode which calls /instance/connect - more stable than restart endpoint
+      // This handles cases where the instance was deleted or recreated in Evolution
       const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
         body: {
-          action: "restart_instance",
+          action: "get_qrcode",
           instanceId,
         },
       });
 
       if (response.error) throw new Error(response.error.message);
-      if (!response.data?.success) throw new Error(response.data?.error || "Failed to restart instance");
+      if (!response.data?.success) throw new Error(response.data?.error || "Falha ao reiniciar instância");
 
       return response.data;
     },
