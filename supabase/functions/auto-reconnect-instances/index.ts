@@ -6,10 +6,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Configuration
-const CONNECTING_THRESHOLD_MINUTES = 5; // Consider stale if "connecting" for more than 5 min
-const DISCONNECTED_THRESHOLD_MINUTES = 10; // Try to reconnect if disconnected for more than 10 min
-const MAX_RECONNECT_ATTEMPTS_PER_HOUR = 3; // Limit attempts to avoid spam
+// Configuration - 3 attempts in 3 minutes (1 per minute)
+const CONNECTING_THRESHOLD_MINUTES = 1; // Try after 1 min if stuck in "connecting"
+const DISCONNECTED_THRESHOLD_MINUTES = 1; // Try after 1 min if disconnected
+const MAX_RECONNECT_ATTEMPTS = 3; // Total 3 attempts per disconnection cycle
+const ATTEMPT_WINDOW_MINUTES = 3; // Window for counting attempts
 
 interface InstanceToReconnect {
   id: string;
@@ -73,18 +74,18 @@ function shouldSkipReconnect(instance: InstanceToReconnect): { skip: boolean; re
     return { skip: false, reason: "" };
   }
 
-  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const windowStart = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60 * 1000);
   
-  // Reset counter if last attempt was more than an hour ago
-  if (lastAttempt < hourAgo) {
+  // Reset counter if last attempt was outside the window
+  if (lastAttempt < windowStart) {
     return { skip: false, reason: "" };
   }
 
-  // Check if we've hit the limit
-  if (instance.reconnect_attempts_count >= MAX_RECONNECT_ATTEMPTS_PER_HOUR) {
+  // Check if we've hit the limit (3 attempts in 3 minutes)
+  if (instance.reconnect_attempts_count >= MAX_RECONNECT_ATTEMPTS) {
     return { 
       skip: true, 
-      reason: `Max attempts (${MAX_RECONNECT_ATTEMPTS_PER_HOUR}) reached in the last hour` 
+      reason: `Max attempts (${MAX_RECONNECT_ATTEMPTS}) reached in ${ATTEMPT_WINDOW_MINUTES} minutes - QR scan required` 
     };
   }
 
@@ -346,12 +347,12 @@ serve(async (req) => {
       }
 
       // Update attempt counter BEFORE trying
-      const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const windowStart = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60 * 1000);
       const lastAttempt = instance.last_reconnect_attempt_at 
         ? new Date(instance.last_reconnect_attempt_at) 
         : null;
       
-      const newAttemptCount = (lastAttempt && lastAttempt >= hourAgo) 
+      const newAttemptCount = (lastAttempt && lastAttempt >= windowStart) 
         ? (instance.reconnect_attempts_count || 0) + 1 
         : 1;
 
@@ -377,6 +378,21 @@ serve(async (req) => {
         // CRITICAL: Mark instance as awaiting_qr to STOP future auto-reconnect attempts
         // User must manually scan QR - no point in auto-reconnecting anymore
         console.log(`[Auto-Reconnect] Setting awaiting_qr=true for ${instance.instance_name} to stop reconnection loop`);
+        await supabaseClient
+          .from("whatsapp_instances")
+          .update({
+            status: "awaiting_qr",
+            awaiting_qr: true,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", instance.id);
+      } else if (!result.success && newAttemptCount >= MAX_RECONNECT_ATTEMPTS) {
+        // Max attempts reached without success - mark as awaiting QR to stop loop
+        console.log(`[Auto-Reconnect] Max attempts (${MAX_RECONNECT_ATTEMPTS}) reached for ${instance.instance_name} - marking awaiting_qr`);
+        qrCodesNeeded.push({
+          instance_name: instance.instance_name,
+          law_firm_id: instance.law_firm_id,
+        });
         await supabaseClient
           .from("whatsapp_instances")
           .update({
