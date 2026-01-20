@@ -74,7 +74,7 @@ export function LandingPage() {
         "30 minutos de áudio",
         "4 WhatsApps conectados",
         "5 usuários",
-        "3 agentes de IA",
+        "4 agentes de IA",
         "Tudo do plano Starter",
         "IA avançada para conversação",
         "Maior capacidade operacional",
