@@ -3997,6 +3997,7 @@ export type Database = {
           last_webhook_at: string | null
           last_webhook_event: string | null
           law_firm_id: string
+          manual_disconnect: boolean | null
           phone_number: string | null
           reconnect_attempts_count: number | null
           status: string
@@ -4021,6 +4022,7 @@ export type Database = {
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id: string
+          manual_disconnect?: boolean | null
           phone_number?: string | null
           reconnect_attempts_count?: number | null
           status?: string
@@ -4045,6 +4047,7 @@ export type Database = {
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id?: string
+          manual_disconnect?: boolean | null
           phone_number?: string | null
           reconnect_attempts_count?: number | null
           status?: string

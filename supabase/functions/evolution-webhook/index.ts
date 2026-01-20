@@ -3073,6 +3073,11 @@ serve(async (req) => {
           updated_at: new Date().toISOString() 
         };
 
+        // When connected, reset manual_disconnect flag to allow future auto-reconnects
+        if (dbStatus === 'connected') {
+          updatePayload.manual_disconnect = false;
+        }
+
         // When connected, fetch and store phone number if missing
         if (dbStatus === 'connected' && !instance.phone_number && instance.api_key && instance.api_url) {
           logDebug('CONNECTION', `Fetching phone number for newly connected instance`, { requestId });
