@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 export interface Service {
   id: string;
@@ -28,18 +29,23 @@ export interface Service {
 export function useServices() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: services = [], isLoading } = useQuery({
-    queryKey: ["services"],
+    queryKey: ["services", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       const { data, error } = await supabase
         .from("services")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .order("position", { ascending: true });
 
       if (error) throw error;
       return data as Service[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createService = useMutation({

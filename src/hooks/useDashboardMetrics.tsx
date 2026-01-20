@@ -189,7 +189,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       if (!profiles || profiles.length === 0) return [];
 
-      // Get conversations with their messages
+      // Get conversations with their messages - already tenant-filtered
       const { data: conversations } = await supabase
         .from("conversations")
         .select("id, assigned_to")
@@ -197,10 +197,27 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         .gte("updated_at", startDate.toISOString())
         .lte("updated_at", endDate.toISOString());
 
-      // Get message counts per conversation - using is_from_me
+      // CRITICAL: Get conversation IDs first to filter messages by tenant
+      const lawFirmConvIds = conversations?.map(c => c.id) || [];
+      
+      // If no conversations, return empty metrics for all profiles
+      if (lawFirmConvIds.length === 0) {
+        return profiles.map(profile => ({
+          id: profile.id,
+          name: profile.full_name || "Sem nome",
+          avatarUrl: profile.avatar_url,
+          conversationsHandled: 0,
+          messagesSent: 0,
+          messagesReceived: 0,
+          avgResponseTime: 0,
+        })).sort((a, b) => b.conversationsHandled - a.conversationsHandled);
+      }
+
+      // Get message counts ONLY for conversations belonging to this law_firm
       const { data: messages } = await supabase
         .from("messages")
         .select("conversation_id, is_from_me")
+        .in("conversation_id", lawFirmConvIds)
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString());
 

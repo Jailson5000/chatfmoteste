@@ -117,11 +117,14 @@ export function useAppointments(date?: Date) {
   const { lawFirm } = useLawFirm();
 
   const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["appointments", date?.toISOString()],
+    queryKey: ["appointments", lawFirm?.id, date?.toISOString()],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       let query = supabase
         .from("appointments")
         .select("*, service:services(*), client:clients(id, name, phone)")
+        .eq("law_firm_id", lawFirm.id)
         .order("start_time", { ascending: true });
 
       if (date) {
@@ -134,6 +137,7 @@ export function useAppointments(date?: Date) {
       if (error) throw error;
       return data as Appointment[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   // Realtime subscription for appointments changes
