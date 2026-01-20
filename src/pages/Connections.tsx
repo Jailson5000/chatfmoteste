@@ -10,6 +10,7 @@ import {
   Globe,
   Bot,
   Phone,
+  QrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -331,7 +332,17 @@ export default function Connections() {
         </Badge>
       );
     }
-    if (status === "connecting" || status === "awaiting_qr") {
+
+    if (status === "awaiting_qr") {
+      return (
+        <Badge variant="outline" className="text-amber-400 border-amber-400/30">
+          <QrCode className="h-3 w-3 mr-1" />
+          Aguardando QR
+        </Badge>
+      );
+    }
+
+    if (status === "connecting") {
       return (
         <Badge variant="outline" className="text-amber-400 border-amber-400/30">
           <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
@@ -339,6 +350,7 @@ export default function Connections() {
         </Badge>
       );
     }
+
     return (
       <Badge variant="outline" className="text-muted-foreground">
         <XCircle className="h-3 w-3 mr-1" />
