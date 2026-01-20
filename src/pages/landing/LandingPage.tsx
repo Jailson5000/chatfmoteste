@@ -581,7 +581,7 @@ export function LandingPage() {
               className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-12 px-8 rounded-xl text-sm"
             >
               <a
-                href="https://wa.me/5511999999999?text=Olá! Quero saber mais sobre o MiauChat"
+                href="https://wa.me/5563999540484?text=Olá! Quero saber mais sobre o MiauChat"
                 target="_blank"
                 rel="noopener noreferrer"
               >
