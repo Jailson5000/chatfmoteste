@@ -3058,10 +3058,16 @@ serve(async (req) => {
         const data = body.data as ConnectionUpdateData;
         logDebug('CONNECTION', `Connection state update`, { requestId, state: data.state, statusReason: data.statusReason });
         
-        let dbStatus = 'disconnected';
+        let dbStatus: 'connected' | 'connecting' | 'disconnected' | 'awaiting_qr' = 'disconnected';
+        let shouldSetAwaitingQr = false;
+        
         if (data.state === 'open') {
           dbStatus = 'connected';
-        } else if (data.state === 'connecting' || data.state === 'qr') {
+        } else if (data.state === 'qr') {
+          // QR code is being displayed - mark as awaiting_qr so auto-reconnect stops
+          dbStatus = 'awaiting_qr';
+          shouldSetAwaitingQr = true;
+        } else if (data.state === 'connecting') {
           dbStatus = 'connecting';
         } else if (data.state === 'close') {
           dbStatus = 'disconnected';
@@ -3073,6 +3079,13 @@ serve(async (req) => {
           updated_at: new Date().toISOString() 
         };
 
+        // When QR is displayed, set awaiting_qr flag to stop auto-reconnect attempts
+        if (shouldSetAwaitingQr) {
+          updatePayload.awaiting_qr = true;
+          updatePayload.manual_disconnect = false;
+          logDebug('CONNECTION', `QR code displayed - setting awaiting_qr=true`, { requestId });
+        }
+
         // When connected, reset ALL flags to allow future auto-reconnects and fresh alert cycle
         if (dbStatus === 'connected') {
           updatePayload.manual_disconnect = false;
@@ -3080,6 +3093,7 @@ serve(async (req) => {
           updatePayload.last_alert_sent_at = null; // Reset alert history for fresh cycle
           updatePayload.disconnected_since = null; // Clear disconnection timestamp
           updatePayload.alert_sent_for_current_disconnect = false; // Reset alert flag for next disconnect cycle
+          updatePayload.reconnect_attempts_count = 0; // Reset reconnect counter
         }
 
         // When connected, fetch and store phone number if missing
