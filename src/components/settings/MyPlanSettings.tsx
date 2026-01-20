@@ -130,6 +130,7 @@ export function MyPlanSettings() {
   };
 
   const handleDownloadInvoice = () => {
+    const plan = companyData?.plan;
     if (!companyData || !plan || !billingInfo) {
       toast.error("Não foi possível gerar a fatura. Dados incompletos.");
       return;
