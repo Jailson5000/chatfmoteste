@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encryptToken } from "../_shared/encryption.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -173,15 +174,19 @@ serve(async (req) => {
           connectedBy = user?.id || null;
         }
 
-        // Store integration in database
+        // Encrypt tokens before storing
+        const encryptedAccessToken = await encryptToken(tokenData.access_token);
+        const encryptedRefreshToken = await encryptToken(tokenData.refresh_token);
+
+        // Store integration in database with ENCRYPTED tokens
         const { data: integration, error: dbError } = await supabase
           .from("google_calendar_integrations")
           .upsert({
             law_firm_id,
             google_email: userInfo.email,
             google_account_id: userInfo.id,
-            access_token: tokenData.access_token,
-            refresh_token: tokenData.refresh_token,
+            access_token: encryptedAccessToken,
+            refresh_token: encryptedRefreshToken,
             token_expires_at: expiresAt,
             connected_by: connectedBy,
             connected_at: new Date().toISOString(),
