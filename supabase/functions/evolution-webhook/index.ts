@@ -3058,17 +3058,28 @@ serve(async (req) => {
         const data = body.data as ConnectionUpdateData;
         logDebug('CONNECTION', `Connection state update`, { requestId, state: data.state, statusReason: data.statusReason });
         
+        // Check if instance is already awaiting QR scan - preserve this state unless connected
+        const isAlreadyAwaitingQr = instance.awaiting_qr === true || instance.status === 'awaiting_qr';
+        
         let dbStatus: 'connected' | 'connecting' | 'disconnected' | 'awaiting_qr' = 'disconnected';
         let shouldSetAwaitingQr = false;
         
         if (data.state === 'open') {
+          // Connected successfully - this is the only state that should override awaiting_qr
           dbStatus = 'connected';
         } else if (data.state === 'qr') {
           // QR code is being displayed - mark as awaiting_qr so auto-reconnect stops
           dbStatus = 'awaiting_qr';
           shouldSetAwaitingQr = true;
         } else if (data.state === 'connecting') {
-          dbStatus = 'connecting';
+          // IMPORTANT: If instance is already awaiting QR scan, preserve that status
+          // Evolution sends "connecting" events even while QR is displayed
+          if (isAlreadyAwaitingQr) {
+            dbStatus = 'awaiting_qr';
+            logDebug('CONNECTION', `Preserving awaiting_qr status (ignoring connecting state)`, { requestId });
+          } else {
+            dbStatus = 'connecting';
+          }
         } else if (data.state === 'close') {
           dbStatus = 'disconnected';
         }
