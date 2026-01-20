@@ -346,11 +346,36 @@ export function useConversations() {
         .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
+      
+      return { id, ...updates };
     },
-    onSuccess: () => {
+    onMutate: async ({ id, ...updates }) => {
+      // Cancel outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+      
+      // Optimistically update local state for immediate UI feedback
+      setAllConversations(prev => 
+        prev.map(conv => 
+          conv.id === id ? { ...conv, ...updates } : conv
+        )
+      );
+      
+      return { id, updates };
+    },
+    onSuccess: (data) => {
+      // Ensure local state is synced after successful mutation
+      if (data) {
+        setAllConversations(prev => 
+          prev.map(conv => 
+            conv.id === data.id ? { ...conv, ...data } : conv
+          )
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (error) => {
+      // Revert on error by refetching
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao atualizar conversa",
         description: error.message,

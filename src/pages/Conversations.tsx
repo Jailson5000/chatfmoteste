@@ -2028,17 +2028,24 @@ export default function Conversations() {
   const handleUpdateName = async () => {
     if (selectedConversation && editingName.trim()) {
       try {
+        const trimmedName = editingName.trim();
+        
         // Update conversation contact_name
         await updateConversation.mutateAsync({
           id: selectedConversation.id,
-          contact_name: editingName.trim(),
+          contact_name: trimmedName,
         });
+        
+        // Also update newlyCreatedConversation if it's the same one (for immediate UI sync)
+        if (newlyCreatedConversation && newlyCreatedConversation.id === selectedConversation.id) {
+          setNewlyCreatedConversation((prev: any) => prev ? { ...prev, contact_name: trimmedName } : null);
+        }
         
         // Also update linked client name if exists
         if (selectedConversation.client_id) {
           await updateClient.mutateAsync({
             id: selectedConversation.client_id,
-            name: editingName.trim(),
+            name: trimmedName,
           });
         }
         
@@ -2053,15 +2060,24 @@ export default function Conversations() {
   const handleUpdateNameInline = async (name: string) => {
     if (selectedConversation && name.trim()) {
       try {
+        const trimmedName = name.trim();
+        
+        // Update conversation contact_name
         await updateConversation.mutateAsync({
           id: selectedConversation.id,
-          contact_name: name.trim(),
+          contact_name: trimmedName,
         });
         
+        // Also update newlyCreatedConversation if it's the same one (for immediate UI sync)
+        if (newlyCreatedConversation && newlyCreatedConversation.id === selectedConversation.id) {
+          setNewlyCreatedConversation((prev: any) => prev ? { ...prev, contact_name: trimmedName } : null);
+        }
+        
+        // Update linked client name if exists
         if (selectedConversation.client_id) {
           await updateClient.mutateAsync({
             id: selectedConversation.client_id,
-            name: name.trim(),
+            name: trimmedName,
           });
         }
         
