@@ -21,6 +21,8 @@ interface InstanceToReconnect {
   disconnected_since: string | null;
   reconnect_attempts_count: number;
   last_reconnect_attempt_at: string | null;
+  manual_disconnect: boolean | null;
+  awaiting_qr: boolean | null;
 }
 
 interface ReconnectResult {
@@ -30,6 +32,7 @@ interface ReconnectResult {
   action: string;
   message: string;
   qrcode?: string;
+  needs_qr?: boolean;
 }
 
 // Helper to normalize URL
@@ -179,7 +182,7 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
       }
       
       if (qrcode) {
-        console.log(`[Auto-Reconnect] Connect returned QR code for ${instance.instance_name} - needs manual scan`);
+        console.log(`[Auto-Reconnect] Connect returned QR code for ${instance.instance_name} - marking as awaiting_qr to stop further attempts`);
         return {
           instance_id: instance.id,
           instance_name: instance.instance_name,
@@ -187,6 +190,7 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
           action: "connect",
           message: "Session expired - QR code scan required",
           qrcode: qrcode,
+          needs_qr: true, // Flag to update awaiting_qr in database
         };
       }
 
@@ -364,15 +368,25 @@ serve(async (req) => {
       results.push(result);
 
       // Track instances that need QR code
-      if (result.qrcode) {
+      if (result.qrcode || result.needs_qr) {
         qrCodesNeeded.push({
           instance_name: instance.instance_name,
           law_firm_id: instance.law_firm_id,
         });
-      }
-
-      // Update instance status based on result
-      if (result.success) {
+        
+        // CRITICAL: Mark instance as awaiting_qr to STOP future auto-reconnect attempts
+        // User must manually scan QR - no point in auto-reconnecting anymore
+        console.log(`[Auto-Reconnect] Setting awaiting_qr=true for ${instance.instance_name} to stop reconnection loop`);
+        await supabaseClient
+          .from("whatsapp_instances")
+          .update({
+            status: "awaiting_qr",
+            awaiting_qr: true,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", instance.id);
+      } else if (result.success) {
+        // Update instance status based on result
         await supabaseClient
           .from("whatsapp_instances")
           .update({

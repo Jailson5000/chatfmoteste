@@ -3073,12 +3073,13 @@ serve(async (req) => {
           updated_at: new Date().toISOString() 
         };
 
-        // When connected, reset flags to allow future auto-reconnects and fresh alert cycle
+        // When connected, reset ALL flags to allow future auto-reconnects and fresh alert cycle
         if (dbStatus === 'connected') {
           updatePayload.manual_disconnect = false;
           updatePayload.awaiting_qr = false; // QR was scanned successfully
           updatePayload.last_alert_sent_at = null; // Reset alert history for fresh cycle
           updatePayload.disconnected_since = null; // Clear disconnection timestamp
+          updatePayload.alert_sent_for_current_disconnect = false; // Reset alert flag for next disconnect cycle
         }
 
         // When connected, fetch and store phone number if missing
