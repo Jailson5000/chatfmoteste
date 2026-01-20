@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 export interface Professional {
   id: string;
@@ -28,10 +29,13 @@ export interface ProfessionalService {
 export function useProfessionals() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: professionals = [], isLoading } = useQuery({
-    queryKey: ["professionals"],
+    queryKey: ["professionals", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
+      
       const { data, error } = await supabase
         .from("professionals")
         .select(`
@@ -41,6 +45,7 @@ export function useProfessionals() {
             services:service_id (id, name, color)
           )
         `)
+        .eq("law_firm_id", lawFirm.id)
         .order("name", { ascending: true });
 
       if (error) throw error;
@@ -51,6 +56,7 @@ export function useProfessionals() {
         services: prof.professional_services?.map((ps: any) => ps.services).filter(Boolean) || [],
       })) as Professional[];
     },
+    enabled: !!lawFirm?.id,
   });
 
   const createProfessional = useMutation({

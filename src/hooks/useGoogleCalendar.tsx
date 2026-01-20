@@ -73,20 +73,24 @@ export function useGoogleCalendar() {
 
   // Fetch current integration status
   const { data: integration, isLoading, refetch } = useQuery({
-    queryKey: ["google-calendar-integration"],
+    queryKey: ["google-calendar-integration", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return null;
+      
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) return null;
 
-      // Rely on RLS to return only the current tenant integration
+      // Explicit tenant filter for safety (RLS is backup, not primary defense)
       const { data, error } = await supabase
         .from("google_calendar_integrations")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .maybeSingle();
 
       if (error) throw error;
       return data as GoogleCalendarIntegration | null;
     },
+    enabled: !!lawFirm?.id,
   });
 
   // Update settings mutation
