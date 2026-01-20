@@ -101,8 +101,21 @@ export function useClients() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast({ title: "Contato criado com sucesso" });
     },
-    onError: (error) => {
-      toast({ title: "Erro ao criar contato", description: error.message, variant: "destructive" });
+    onError: (error: any) => {
+      // Check for unique constraint violation (duplicate phone number)
+      const isDuplicate = error?.code === "23505" || 
+        error?.message?.includes("idx_clients_phone_norm_law_firm") ||
+        error?.message?.includes("duplicate key");
+      
+      if (isDuplicate) {
+        toast({ 
+          title: "Contato já existe", 
+          description: "Não é possível salvar o contato com o mesmo número. Já existe um contato cadastrado com este telefone.", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ title: "Erro ao criar contato", description: error.message, variant: "destructive" });
+      }
     },
   });
 

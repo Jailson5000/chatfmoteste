@@ -710,13 +710,82 @@ export default function Conversations() {
         setActiveTab("queue");
         clearParams();
       } else if (lawFirm?.id && connectedInstances.length > 0) {
-        // No existing conversation - create one
-        const createConversation = async () => {
-          const instance = connectedInstances[0]; // Use first connected instance
+        // No existing conversation in memory - check database before creating
+        const createOrFindConversation = async () => {
+          const instance = connectedInstances[0];
           const remoteJid = normalizedPhone.includes("@") 
             ? normalizedPhone 
             : `${normalizedPhone}@s.whatsapp.net`;
           
+          // CRITICAL: Check database for existing conversation BEFORE creating
+          // This prevents duplicates when conversation exists but isn't in current cache
+          const { data: existingDbConv } = await supabase
+            .from("conversations")
+            .select("*")
+            .eq("law_firm_id", lawFirm.id)
+            .eq("whatsapp_instance_id", instance.id)
+            .or(`remote_jid.eq.${remoteJid},contact_phone.eq.${normalizedPhone},contact_phone.ilike.%${phoneEnding}`)
+            .is("archived_at", null)
+            .limit(1)
+            .maybeSingle();
+          
+          if (existingDbConv) {
+            // Found existing conversation in database - use it instead of creating new
+            console.log("[Conversations] Found existing conversation in DB, reusing:", existingDbConv.id);
+            setSelectedConversationId(existingDbConv.id);
+            setShowMobileChat(true);
+            setActiveTab("queue");
+            
+            // Invalidate to ensure it appears in the list
+            await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            
+            toast({
+              title: "Conversa encontrada",
+              description: `Abrindo conversa existente com ${existingDbConv.contact_name || normalizedPhone}`,
+            });
+            return;
+          }
+          
+          // Also check for archived conversations that can be reactivated
+          const { data: archivedConv } = await supabase
+            .from("conversations")
+            .select("*")
+            .eq("law_firm_id", lawFirm.id)
+            .eq("whatsapp_instance_id", instance.id)
+            .or(`remote_jid.eq.${remoteJid},contact_phone.eq.${normalizedPhone},contact_phone.ilike.%${phoneEnding}`)
+            .not("archived_at", "is", null)
+            .or("archived_reason.is.null,archived_reason.neq.instance_unification")
+            .order("archived_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (archivedConv) {
+            // Reactivate archived conversation
+            console.log("[Conversations] Reactivating archived conversation:", archivedConv.id);
+            await supabase
+              .from("conversations")
+              .update({ 
+                archived_at: null, 
+                archived_reason: null,
+                archived_next_responsible_id: null,
+                archived_next_responsible_type: null
+              })
+              .eq("id", archivedConv.id);
+            
+            setSelectedConversationId(archivedConv.id);
+            setShowMobileChat(true);
+            setActiveTab("queue");
+            
+            await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            
+            toast({
+              title: "Conversa reativada",
+              description: `Abrindo conversa com ${archivedConv.contact_name || normalizedPhone}`,
+            });
+            return;
+          }
+          
+          // No existing conversation found - create new one
           const { data: newConv, error } = await supabase
             .from("conversations")
             .insert({
@@ -779,6 +848,26 @@ export default function Conversations() {
               description: `Nova conversa com ${nameParam || normalizedPhone}`,
             });
           } else if (error) {
+            // Check if it's a duplicate error (race condition)
+            if (error.code === "23505" || error.message?.includes("duplicate")) {
+              // Retry finding the conversation that was created by another process
+              const { data: raceConv } = await supabase
+                .from("conversations")
+                .select("*")
+                .eq("law_firm_id", lawFirm.id)
+                .or(`remote_jid.eq.${remoteJid},contact_phone.eq.${normalizedPhone}`)
+                .limit(1)
+                .maybeSingle();
+              
+              if (raceConv) {
+                setSelectedConversationId(raceConv.id);
+                setShowMobileChat(true);
+                setActiveTab("queue");
+                await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                return;
+              }
+            }
+            
             console.error("[Conversations] Error creating conversation:", error);
             toast({
               title: "Erro ao iniciar conversa",
@@ -788,7 +877,7 @@ export default function Conversations() {
           }
         };
         
-        createConversation();
+        createOrFindConversation();
         clearParams();
       } else {
         // No connected instances

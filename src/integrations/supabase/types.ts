@@ -4258,6 +4258,10 @@ export type Database = {
         Returns: Json
       }
       unify_duplicate_clients: { Args: { _law_firm_id: string }; Returns: Json }
+      unify_duplicate_conversations: {
+        Args: { _law_firm_id?: string }
+        Returns: Json
+      }
       update_admin_role: {
         Args: {
           _new_role: Database["public"]["Enums"]["admin_role"]
