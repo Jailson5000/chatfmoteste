@@ -4116,7 +4116,13 @@ export type Database = {
           effective_max_workspaces: number | null
           law_firm_id: string | null
           plan_id: string | null
+          plan_max_agents: number | null
+          plan_max_ai_conversations: number | null
+          plan_max_instances: number | null
+          plan_max_tts_minutes: number | null
+          plan_max_users: number | null
           plan_name: string | null
+          plan_price: number | null
           use_custom_limits: boolean | null
         }
         Relationships: [
