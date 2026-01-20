@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useLawFirm } from "@/hooks/useLawFirm";
 
 export interface AgendaClient {
   id: string;
@@ -22,13 +23,16 @@ export interface AgendaClient {
 export function useAgendaClients() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { lawFirm } = useLawFirm();
 
   const { data: clients = [], isLoading } = useQuery({
-    queryKey: ["agenda-clients"],
+    queryKey: ["agenda-clients", lawFirm?.id],
     queryFn: async () => {
+      if (!lawFirm?.id) return [];
       const { data, error } = await supabase
         .from("clients")
         .select("*")
+        .eq("law_firm_id", lawFirm.id)
         .eq("is_agenda_client", true)
         .order("name", { ascending: true });
 
@@ -39,6 +43,7 @@ export function useAgendaClients() {
 
   // Realtime subscription for clients changes
   useEffect(() => {
+    if (!lawFirm?.id) return;
     const channel = supabase
       .channel("agenda-clients-realtime")
       .on(
@@ -139,10 +144,12 @@ export function useAgendaClients() {
 
   const updateClient = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<AgendaClient> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
       const { data, error } = await supabase
         .from("clients")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id)
         .select()
         .single();
 
@@ -160,6 +167,7 @@ export function useAgendaClients() {
 
   const removeFromAgenda = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
       // Only remove from agenda (set is_agenda_client to false), don't delete the contact
       const { error } = await supabase
         .from("clients")
