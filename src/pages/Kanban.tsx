@@ -1,7 +1,6 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Phone, Search, X } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Search, X } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,15 +29,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { cn } from "@/lib/utils";
+
 
 export default function Kanban() {
   const { departments, isLoading: deptsLoading, reorderDepartments } = useDepartments();
   const { 
     conversations, 
     isLoading: convsLoading, 
-    updateConversationDepartment, 
-    transferHandler,
+    updateConversationDepartment,
     loadMoreConversations,
     hasMoreConversations,
     isLoadingMoreConversations,
@@ -60,7 +58,7 @@ export default function Kanban() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<'department' | 'status' | 'responsible' | 'connection'>('department');
-  const [filterConnection, setFilterConnection] = useState<string>('all');
+  const [filterConnection] = useState<string>('all');
   
   // Multi-select filters
   const [selectedResponsibles, setSelectedResponsibles] = useState<string[]>([]);
