@@ -54,7 +54,7 @@ export function LandingPage() {
       price: "497",
       description: "Mais organização e produtividade para equipes em crescimento.",
       items: [
-        "200 conversas com IA",
+        "250 conversas com IA",
         "20 minutos de áudio",
         "2 WhatsApps conectados",
         "4 usuários",
