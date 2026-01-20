@@ -19,6 +19,7 @@ import {
   Loader2,
   Plug,
   Database,
+  CreditCard,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -68,6 +69,7 @@ import { ClassesSubTabs } from "@/components/settings/ClassesSubTabs";
 import { GeneralInfoSettings } from "@/components/settings/GeneralInfoSettings";
 import { SettingsHelpCollapsible } from "@/components/settings/SettingsHelpCollapsible";
 import { SecuritySubTabs } from "@/components/settings/SecuritySubTabs";
+import { MyPlanSettings } from "@/components/settings/MyPlanSettings";
 import { supabase } from "@/integrations/supabase/client";
 import type { AppRole } from "@/hooks/useUserRole";
 
@@ -268,30 +270,34 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="classes">
-        <TabsList className="grid w-full max-w-3xl grid-cols-6">
+        <TabsList className="grid w-full max-w-4xl grid-cols-7">
           <TabsTrigger value="classes" className="gap-2">
             <Layers className="h-4 w-4" />
-            Classes
+            <span className="hidden sm:inline">Classes</span>
           </TabsTrigger>
           <TabsTrigger value="templates" className="gap-2">
             <MessageSquareText className="h-4 w-4" />
-            Templates
+            <span className="hidden sm:inline">Templates</span>
           </TabsTrigger>
           <TabsTrigger value="team" className="gap-2">
             <Users className="h-4 w-4" />
-            Membros
+            <span className="hidden sm:inline">Membros</span>
           </TabsTrigger>
           <TabsTrigger value="integrations" className="gap-2">
             <Plug className="h-4 w-4" />
-            Integrações
+            <span className="hidden sm:inline">Integrações</span>
           </TabsTrigger>
           <TabsTrigger value="office" className="gap-2">
             <Building2 className="h-4 w-4" />
-            Info. Gerais
+            <span className="hidden sm:inline">Info. Gerais</span>
+          </TabsTrigger>
+          <TabsTrigger value="myplan" className="gap-2">
+            <CreditCard className="h-4 w-4" />
+            <span className="hidden sm:inline">Meu Plano</span>
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-2">
             <Shield className="h-4 w-4" />
-            Segurança
+            <span className="hidden sm:inline">Segurança</span>
           </TabsTrigger>
         </TabsList>
 
@@ -769,6 +775,11 @@ export default function Settings() {
             }}
             isLoading={inviteMember.isPending}
           />
+        </TabsContent>
+
+        {/* My Plan Settings */}
+        <TabsContent value="myplan" className="space-y-6 mt-6">
+          <MyPlanSettings />
         </TabsContent>
 
         {/* Security Settings with Sub-tabs */}
