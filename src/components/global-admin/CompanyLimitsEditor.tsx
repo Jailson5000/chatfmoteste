@@ -1,15 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Users, Wifi, Bot, Layers, MessageSquare, Volume2, Info, Lock, Unlock } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Users, Wifi, Bot, Layers, MessageSquare, Volume2, Info, Lock, Unlock, DollarSign, TrendingUp } from "lucide-react";
+import { calculateAdditionalCosts, formatCurrency, ADDITIONAL_PRICING } from "@/lib/billing-config";
 
 interface Plan {
   id: string;
   name: string;
+  price?: number;
   max_users: number;
   max_instances: number;
   max_agents: number;
@@ -79,6 +82,34 @@ export function CompanyLimitsEditor({
     setUseCustomLimits(true);
   };
 
+  // Calcular custos dos adicionais em tempo real
+  const additionalCosts = useMemo(() => {
+    if (!selectedPlan) {
+      return null;
+    }
+
+    const planLimits = {
+      max_users: selectedPlan.max_users,
+      max_instances: selectedPlan.max_instances,
+      max_agents: selectedPlan.max_agents,
+      max_ai_conversations: selectedPlan.max_ai_conversations,
+      max_tts_minutes: selectedPlan.max_tts_minutes,
+    };
+
+    const effectiveLimits = {
+      use_custom_limits: useCustomLimits,
+      max_users: limits.max_users,
+      max_instances: limits.max_instances,
+      max_agents: limits.max_agents,
+      max_ai_conversations: limits.max_ai_conversations,
+      max_tts_minutes: limits.max_tts_minutes,
+    };
+
+    const basePlanPrice = selectedPlan.price || 0;
+
+    return calculateAdditionalCosts(planLimits, effectiveLimits, basePlanPrice);
+  }, [selectedPlan, limits, useCustomLimits]);
+
   const limitFields = [
     {
       key: "max_users" as const,
@@ -86,6 +117,8 @@ export function CompanyLimitsEditor({
       icon: <Users className="h-4 w-4" />,
       planValue: selectedPlan?.max_users,
       description: "Limite de usuários/funcionários cadastrados",
+      additionalPrice: ADDITIONAL_PRICING.user,
+      additionalLabel: "/ usuário",
     },
     {
       key: "max_instances" as const,
@@ -93,6 +126,8 @@ export function CompanyLimitsEditor({
       icon: <Wifi className="h-4 w-4" />,
       planValue: selectedPlan?.max_instances,
       description: "Limite de conexões WhatsApp",
+      additionalPrice: ADDITIONAL_PRICING.whatsappInstance,
+      additionalLabel: "/ conexão",
     },
     {
       key: "max_agents" as const,
@@ -100,6 +135,8 @@ export function CompanyLimitsEditor({
       icon: <Bot className="h-4 w-4" />,
       planValue: selectedPlan?.max_agents,
       description: "Limite de agentes de IA ativos",
+      additionalPrice: null, // Negociação comercial
+      additionalLabel: null,
     },
     {
       key: "max_workspaces" as const,
@@ -107,20 +144,26 @@ export function CompanyLimitsEditor({
       icon: <Layers className="h-4 w-4" />,
       planValue: selectedPlan?.max_workspaces,
       description: "Limite de workspaces/departamentos",
+      additionalPrice: null,
+      additionalLabel: null,
     },
     {
       key: "max_ai_conversations" as const,
       label: "Conversas IA/mês",
       icon: <MessageSquare className="h-4 w-4" />,
       planValue: selectedPlan?.max_ai_conversations,
-      description: "Limite de conversas com IA por mês",
+      description: "Limite de conversas com IA por mês (cobrado por uso)",
+      additionalPrice: ADDITIONAL_PRICING.aiConversation,
+      additionalLabel: "/ conversa",
     },
     {
       key: "max_tts_minutes" as const,
       label: "Áudio TTS/mês",
       icon: <Volume2 className="h-4 w-4" />,
       planValue: selectedPlan?.max_tts_minutes,
-      description: "Limite de minutos de áudio gerado por mês",
+      description: "Limite de minutos de áudio gerado por mês (cobrado por uso)",
+      additionalPrice: ADDITIONAL_PRICING.ttsMinute,
+      additionalLabel: "/ minuto",
     },
   ];
 
@@ -208,6 +251,56 @@ export function CompanyLimitsEditor({
           })}
         </div>
       </CardContent>
+
+      {/* Resumo de custos */}
+      {additionalCosts && selectedPlan?.price && (
+        <CardFooter className="flex-col items-start gap-3 border-t pt-4">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <DollarSign className="h-4 w-4 text-primary" />
+            <span>Resumo de Faturamento Mensal</span>
+          </div>
+          
+          <div className="w-full space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Plano {selectedPlan.name}</span>
+              <span>{formatCurrency(additionalCosts.basePlanPrice)}</span>
+            </div>
+
+            {additionalCosts.breakdown.users.quantity > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>+ {additionalCosts.breakdown.users.quantity} usuário(s) adicional(is)</span>
+                <span className="text-foreground">{formatCurrency(additionalCosts.breakdown.users.cost)}</span>
+              </div>
+            )}
+
+            {additionalCosts.breakdown.instances.quantity > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>+ {additionalCosts.breakdown.instances.quantity} conexão(ões) adicional(is)</span>
+                <span className="text-foreground">{formatCurrency(additionalCosts.breakdown.instances.cost)}</span>
+              </div>
+            )}
+
+            {additionalCosts.breakdown.totalAdditional > 0 && (
+              <>
+                <Separator className="my-2" />
+                <div className="flex justify-between font-medium text-base">
+                  <span className="flex items-center gap-1">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                    Total Mensal Estimado
+                  </span>
+                  <span className="text-primary">{formatCurrency(additionalCosts.totalMonthly)}</span>
+                </div>
+              </>
+            )}
+
+            {additionalCosts.breakdown.aiConversations.quantity > 0 || additionalCosts.breakdown.ttsMinutes.quantity > 0 ? (
+              <p className="text-xs text-muted-foreground mt-2">
+                * Conversas IA e minutos de áudio adicionais são cobrados por uso real, não pelo limite.
+              </p>
+            ) : null}
+          </div>
+        </CardFooter>
+      )}
     </Card>
   );
 }
