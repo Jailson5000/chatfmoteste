@@ -732,6 +732,34 @@ serve(async (req) => {
             if (createResponse.ok) {
               console.log(`[Evolution API] Instance recreated successfully`);
               
+              // CRITICAL: Configure groupsIgnore=true to prevent AI from responding in groups
+              try {
+                const settingsPayload = {
+                  groupsIgnore: true,
+                  alwaysOnline: false,
+                  readMessages: false,
+                  readStatus: false,
+                  syncFullHistory: false,
+                };
+                
+                const settingsResponse = await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                  method: "POST",
+                  headers: {
+                    apikey: instance.api_key || "",
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify(settingsPayload),
+                });
+                
+                if (settingsResponse.ok) {
+                  console.log(`[Evolution API] Auto-configured groupsIgnore=true for recreated instance ${instance.instance_name}`);
+                } else {
+                  console.warn(`[Evolution API] Failed to configure settings for recreated instance:`, await safeReadResponseText(settingsResponse));
+                }
+              } catch (settingsError) {
+                console.warn(`[Evolution API] Error configuring settings for recreated instance:`, settingsError);
+              }
+              
               // Configure webhook for the recreated instance
               await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
                 method: "POST",
@@ -1402,6 +1430,34 @@ serve(async (req) => {
               
               if (createResponse.ok) {
                 console.log(`[Evolution API] Instance recreated successfully, now getting QR code...`);
+                
+                // CRITICAL: Configure groupsIgnore=true to prevent AI from responding in groups
+                try {
+                  const settingsPayload = {
+                    groupsIgnore: true,
+                    alwaysOnline: false,
+                    readMessages: false,
+                    readStatus: false,
+                    syncFullHistory: false,
+                  };
+                  
+                  const settingsResponse = await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                    method: "POST",
+                    headers: {
+                      apikey: instance.api_key || "",
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(settingsPayload),
+                  });
+                  
+                  if (settingsResponse.ok) {
+                    console.log(`[Evolution API] Auto-configured groupsIgnore=true for recreated instance ${instance.instance_name}`);
+                  } else {
+                    console.warn(`[Evolution API] Failed to configure settings for recreated instance:`, await safeReadResponseText(settingsResponse));
+                  }
+                } catch (settingsError) {
+                  console.warn(`[Evolution API] Error configuring settings for recreated instance:`, settingsError);
+                }
                 
                 // Get QR code after recreation
                 const qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
