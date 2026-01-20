@@ -241,10 +241,11 @@ export function useGlobalAdminInstances() {
     },
   });
 
-  // Restart instance connection
+  // Restart instance connection - returns QR code for scanning
   const restartInstance = useMutation({
-    mutationFn: async (instanceId: string) => {
-      // Get QR code to restart connection
+    mutationFn: async (instanceId: string): Promise<{ success: boolean; qrCode?: string; status?: string; message?: string }> => {
+      // Use get_qrcode which calls /instance/connect - this is the correct approach
+      // because restart endpoint may not exist on some Evolution API versions
       const { data, error } = await supabase.functions.invoke("evolution-api", {
         body: {
           action: "get_qrcode",
@@ -253,16 +254,28 @@ export function useGlobalAdminInstances() {
       });
 
       if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Falha ao reiniciar instância");
       return data;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
-      toast({
-        title: data?.qrCode ? "Aguardando reconexão" : "Conexão reiniciada",
-        description: data?.qrCode
-          ? "A instância está aguardando escaneamento do QR Code"
-          : "A instância foi reiniciada",
-      });
+      
+      if (data?.status === "open" || data?.status === "connected") {
+        toast({
+          title: "Conexão ativa",
+          description: "A instância já está conectada.",
+        });
+      } else if (data?.qrCode) {
+        toast({
+          title: "QR Code disponível",
+          description: "A instância aguarda escaneamento do QR Code para conectar.",
+        });
+      } else {
+        toast({
+          title: "Conexão iniciada",
+          description: "A instância está tentando reconectar.",
+        });
+      }
     },
     onError: (error: Error) => {
       toast({

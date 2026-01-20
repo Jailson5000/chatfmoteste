@@ -240,13 +240,11 @@ serve(async (req) => {
     // Find instances that need reconnection:
     // 1. Status "connecting" for more than X minutes (stuck in connecting)
     // 2. Status "disconnected" for more than Y minutes (disconnected but not by user logout)
-    // Exclude instances that are "error" status (need manual intervention)
-    // CRITICAL: Exclude instances where manual_disconnect = true (user intentionally disconnected)
-    const { data: instances, error: fetchError } = await supabaseClient
+    // We fetch all and filter in code because Supabase's .or() doesn't combine well with multiple conditions
+    const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect")
+      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr")
       .in("status", ["connecting", "disconnected"])
-      .or("manual_disconnect.is.null,manual_disconnect.eq.false") // Only auto-reconnect if NOT manually disconnected
       .not("api_url", "is", null)
       .not("api_key", "is", null);
 
@@ -255,9 +253,26 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    console.log(`[Auto-Reconnect] Found ${instances?.length || 0} instances with connecting/disconnected status`);
+    // Filter out instances that should NOT be auto-reconnected:
+    // - manual_disconnect = true (user intentionally disconnected)
+    // - awaiting_qr = true (waiting for user to scan QR code)
+    const instances = (rawInstances || []).filter(instance => {
+      // Skip if manually disconnected
+      if (instance.manual_disconnect === true) {
+        console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: manual_disconnect=true`);
+        return false;
+      }
+      // Skip if awaiting QR scan
+      if (instance.awaiting_qr === true) {
+        console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: awaiting_qr=true`);
+        return false;
+      }
+      return true;
+    });
 
-    if (!instances || instances.length === 0) {
+    console.log(`[Auto-Reconnect] Found ${rawInstances?.length || 0} raw instances, ${instances.length} after filtering`);
+
+    if (instances.length === 0) {
       return new Response(
         JSON.stringify({
           success: true,
@@ -268,7 +283,7 @@ serve(async (req) => {
       );
     }
 
-    // Filter instances based on thresholds
+    // Filter instances based on time thresholds
     const instancesToReconnect: InstanceToReconnect[] = [];
 
     for (const instance of instances) {
