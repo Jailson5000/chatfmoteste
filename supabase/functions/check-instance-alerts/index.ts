@@ -2,49 +2,41 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 
-// Production CORS configuration
-const ALLOWED_ORIGINS = [
-  'https://miauchat.com.br',
-  'https://www.miauchat.com.br',
-  'http://localhost:5173',
-  'http://localhost:3000',
-];
-
-function getCorsHeaders(origin: string | null): Record<string, string> {
-  const isAllowed = origin && (
-    ALLOWED_ORIGINS.includes(origin) ||
-    origin.includes('.lovableproject.com') ||
-    origin.includes('.lovable.app') ||
-    origin.endsWith('.miauchat.com.br')
-  );
-  
-  return {
-    'Access-Control-Allow-Origin': isAllowed ? origin : ALLOWED_ORIGINS[0],
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-requested-with',
-    'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Max-Age': '86400',
-  };
-}
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ALERT_THRESHOLD_MINUTES = 30;
-const ALERT_COOLDOWN_HOURS = 6;
+// Configuration - alert after 5 minutes of disconnection
+const ALERT_THRESHOLD_MINUTES = 5;
+const ALERT_COOLDOWN_HOURS = 6; // Don't send same alert more than once every 6 hours
 
 interface DisconnectedInstance {
   id: string;
   instance_name: string;
+  display_name: string | null;
   status: string;
   phone_number: string | null;
   disconnected_since: string;
   last_alert_sent_at: string | null;
   law_firm_id: string;
-  company_name?: string;
-  law_firm_name?: string;
+  manual_disconnect: boolean | null;
+  awaiting_qr: boolean | null;
+}
+
+interface CompanyInfo {
+  id: string;
+  name: string;
+  email: string | null;
+  law_firm_id: string;
+  admin_user_id: string | null;
+}
+
+interface AdminProfile {
+  id: string;
+  email: string;
+  full_name: string;
+  law_firm_id: string;
 }
 
 serve(async (req) => {
@@ -59,15 +51,12 @@ serve(async (req) => {
     );
 
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    const adminEmail = Deno.env.get("ADMIN_NOTIFICATION_EMAIL");
+    const globalAdminEmail = Deno.env.get("ADMIN_NOTIFICATION_EMAIL");
 
-    if (!resendApiKey || !adminEmail) {
-      console.log("[Check Instance Alerts] Missing RESEND_API_KEY or ADMIN_NOTIFICATION_EMAIL");
+    if (!resendApiKey) {
+      console.log("[Check Instance Alerts] Missing RESEND_API_KEY");
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: "Email configuration missing" 
-        }),
+        JSON.stringify({ success: false, error: "Email configuration missing" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -78,14 +67,17 @@ serve(async (req) => {
 
     console.log("[Check Instance Alerts] Checking for disconnected instances...");
     console.log(`[Check Instance Alerts] Threshold: ${ALERT_THRESHOLD_MINUTES} minutes`);
-    console.log(`[Check Instance Alerts] Cooldown: ${ALERT_COOLDOWN_HOURS} hours`);
 
-    // Find instances that have been disconnected for more than threshold
-    // and haven't received an alert within the cooldown period
-    const { data: instances, error: fetchError } = await supabaseClient
+    // Find instances that:
+    // 1. Are disconnected or error status
+    // 2. Have been in that state for more than ALERT_THRESHOLD_MINUTES
+    // 3. Were NOT manually disconnected (manual_disconnect = false or null)
+    // 4. Are NOT awaiting QR scan (awaiting_qr = false or null)
+    // 5. Haven't received an alert within the cooldown period
+    const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("*")
-      .in("status", ["disconnected", "error"])
+      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, law_firm_id, manual_disconnect, awaiting_qr")
+      .in("status", ["disconnected", "error", "connecting"])
       .not("disconnected_since", "is", null)
       .lt("disconnected_since", thresholdTime)
       .or(`last_alert_sent_at.is.null,last_alert_sent_at.lt.${cooldownTime}`);
@@ -95,9 +87,24 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    console.log(`[Check Instance Alerts] Found ${instances?.length || 0} instances needing alerts`);
+    // Filter out manually disconnected or awaiting QR instances
+    const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
+      // Skip if manually disconnected
+      if (instance.manual_disconnect === true) {
+        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: manual_disconnect=true`);
+        return false;
+      }
+      // Skip if awaiting QR scan
+      if (instance.awaiting_qr === true) {
+        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: awaiting_qr=true`);
+        return false;
+      }
+      return true;
+    });
 
-    if (!instances || instances.length === 0) {
+    console.log(`[Check Instance Alerts] Found ${rawInstances?.length || 0} raw, ${instances.length} after filtering`);
+
+    if (instances.length === 0) {
       return new Response(
         JSON.stringify({ 
           success: true, 
@@ -108,166 +115,276 @@ serve(async (req) => {
       );
     }
 
-    // Get company and law firm info for each instance
-    const lawFirmIds = [...new Set(instances.map(i => i.law_firm_id))];
-    
-    const { data: lawFirms } = await supabaseClient
-      .from("law_firms")
-      .select("id, name")
-      .in("id", lawFirmIds);
+    // Get unique law_firm_ids
+    const lawFirmIds = [...new Set(instances.map((i: DisconnectedInstance) => i.law_firm_id))];
 
+    // Get companies and their admin info
     const { data: companies } = await supabaseClient
       .from("companies")
-      .select("id, name, law_firm_id")
+      .select("id, name, email, law_firm_id, admin_user_id")
       .in("law_firm_id", lawFirmIds);
 
-    // Enrich instances with company info
-    const enrichedInstances: DisconnectedInstance[] = instances.map((instance) => {
-      const lawFirm = lawFirms?.find(lf => lf.id === instance.law_firm_id);
-      const company = companies?.find(c => c.law_firm_id === instance.law_firm_id);
-      
-      return {
-        ...instance,
-        law_firm_name: lawFirm?.name || "Desconhecido",
-        company_name: company?.name || "Sem empresa",
-      };
-    });
+    // Get admin profiles for companies that have admin_user_id
+    const adminUserIds = (companies || [])
+      .filter((c: CompanyInfo) => c.admin_user_id)
+      .map((c: CompanyInfo) => c.admin_user_id);
 
-    // Calculate disconnection duration for each instance
-    const instancesWithDuration = enrichedInstances.map((instance) => {
-      const disconnectedAt = new Date(instance.disconnected_since);
-      const durationMs = Date.now() - disconnectedAt.getTime();
-      const durationMinutes = Math.floor(durationMs / 60000);
-      const durationHours = Math.floor(durationMinutes / 60);
-      const remainingMinutes = durationMinutes % 60;
-      
-      return {
-        ...instance,
-        duration: durationHours > 0 
-          ? `${durationHours}h ${remainingMinutes}min`
-          : `${durationMinutes}min`,
-        durationMinutes,
-      };
-    });
-
-    // Sort by duration (longest first)
-    instancesWithDuration.sort((a, b) => b.durationMinutes - a.durationMinutes);
-
-    // Build email content
-    const instanceList = instancesWithDuration.map((instance) => `
-      <tr>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${instance.company_name}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${instance.instance_name}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${instance.phone_number || "-"}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">
-          <span style="color: ${instance.status === 'error' ? '#dc2626' : '#f59e0b'}; font-weight: bold;">
-            ${instance.status === 'error' ? 'Erro' : 'Desconectada'}
-          </span>
-        </td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${instance.duration}</td>
-      </tr>
-    `).join("");
-
-    const emailHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Alerta de Instâncias Desconectadas</title>
-      </head>
-      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px;">
-        <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-          <h1 style="margin: 0; font-size: 24px;">⚠️ Alerta: Instâncias Desconectadas</h1>
-          <p style="margin: 10px 0 0 0; opacity: 0.9;">MIAUCHAT - Monitoramento de Conexões</p>
-        </div>
-        
-        <div style="background: #fff; padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-          <p style="margin-top: 0;">
-            <strong>${instancesWithDuration.length} instância(s)</strong> estão desconectadas há mais de 
-            <strong>${ALERT_THRESHOLD_MINUTES} minutos</strong>:
-          </p>
-          
-          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-            <thead>
-              <tr style="background: #f3f4f6;">
-                <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #e5e7eb;">Empresa</th>
-                <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #e5e7eb;">Instância</th>
-                <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #e5e7eb;">Número</th>
-                <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #e5e7eb;">Status</th>
-                <th style="padding: 10px 8px; text-align: left; border-bottom: 2px solid #e5e7eb;">Duração</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${instanceList}
-            </tbody>
-          </table>
-          
-          <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 15px; border-radius: 6px; margin-top: 20px;">
-            <p style="margin: 0; color: #92400e;">
-              <strong>💡 Ação recomendada:</strong> Acesse o Painel Admin do MIAUCHAT para verificar 
-              o status das conexões e tomar as medidas necessárias.
-            </p>
-          </div>
-          
-          <p style="color: #6b7280; font-size: 12px; margin-top: 30px;">
-            Este alerta será reenviado a cada ${ALERT_COOLDOWN_HOURS} horas enquanto as instâncias 
-            permanecerem desconectadas.<br>
-            Verificado em: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}
-          </p>
-        </div>
-      </body>
-      </html>
-    `;
-
-    // Send email
-    console.log(`[Check Instance Alerts] Sending alert email to ${adminEmail}`);
-    
-    const { data: emailResult, error: emailError } = await resend.emails.send({
-      from: "MIAUCHAT <onboarding@resend.dev>",
-      to: [adminEmail],
-      subject: `⚠️ ALERTA: ${instancesWithDuration.length} instância(s) desconectada(s) há mais de ${ALERT_THRESHOLD_MINUTES} min`,
-      html: emailHtml,
-    });
-
-    if (emailError) {
-      console.error("[Check Instance Alerts] Email send error:", emailError);
-      throw emailError;
+    let adminProfiles: AdminProfile[] = [];
+    if (adminUserIds.length > 0) {
+      const { data: profiles } = await supabaseClient
+        .from("profiles")
+        .select("id, email, full_name, law_firm_id")
+        .in("id", adminUserIds);
+      adminProfiles = profiles || [];
     }
 
-    console.log("[Check Instance Alerts] Email sent successfully:", emailResult);
+    // Also get profiles with admin role as fallback
+    const { data: adminRoleProfiles } = await supabaseClient
+      .from("profiles")
+      .select("id, email, full_name, law_firm_id")
+      .in("law_firm_id", lawFirmIds);
+
+    const { data: adminRoles } = await supabaseClient
+      .from("user_roles")
+      .select("user_id, role")
+      .in("user_id", (adminRoleProfiles || []).map((p: AdminProfile) => p.id))
+      .eq("role", "admin");
+
+    const adminRoleUserIds = new Set((adminRoles || []).map((r: { user_id: string }) => r.user_id));
+
+    // Group instances by company/law_firm for sending individual emails
+    const instancesByLawFirm = new Map<string, DisconnectedInstance[]>();
+    for (const instance of instances) {
+      const existing = instancesByLawFirm.get(instance.law_firm_id) || [];
+      existing.push(instance);
+      instancesByLawFirm.set(instance.law_firm_id, existing);
+    }
+
+    const results: { law_firm_id: string; company_name: string; email: string; instances_count: number; success: boolean }[] = [];
+    const notifiedInstanceIds: string[] = [];
+
+    // Send email to each company's admin
+    for (const [lawFirmId, companyInstances] of instancesByLawFirm) {
+      const company = (companies || []).find((c: CompanyInfo) => c.law_firm_id === lawFirmId);
+      
+      // Find admin email - priority:
+      // 1. Profile of company's admin_user_id
+      // 2. Company email field
+      // 3. Any profile with admin role in this law_firm
+      // 4. Global admin email (fallback)
+      let adminEmail: string | null = null;
+      let adminName = "Administrador";
+
+      if (company?.admin_user_id) {
+        const adminProfile = adminProfiles.find((p: AdminProfile) => p.id === company.admin_user_id);
+        if (adminProfile?.email) {
+          adminEmail = adminProfile.email;
+          adminName = adminProfile.full_name || "Administrador";
+        }
+      }
+
+      if (!adminEmail && company?.email) {
+        adminEmail = company.email;
+      }
+
+      if (!adminEmail) {
+        // Find any admin in this law_firm
+        const lawFirmAdmin = (adminRoleProfiles || []).find(
+          (p: AdminProfile) => p.law_firm_id === lawFirmId && adminRoleUserIds.has(p.id)
+        );
+        if (lawFirmAdmin?.email) {
+          adminEmail = lawFirmAdmin.email;
+          adminName = lawFirmAdmin.full_name || "Administrador";
+        }
+      }
+
+      if (!adminEmail) {
+        // Fallback to global admin
+        adminEmail = globalAdminEmail || null;
+      }
+
+      if (!adminEmail) {
+        console.log(`[Check Instance Alerts] No admin email found for law_firm ${lawFirmId}`);
+        continue;
+      }
+
+      const companyName = company?.name || "Sua empresa";
+
+      // Calculate duration for each instance
+      const instancesWithDuration = companyInstances.map((instance: DisconnectedInstance) => {
+        const disconnectedAt = new Date(instance.disconnected_since);
+        const durationMs = Date.now() - disconnectedAt.getTime();
+        const durationMinutes = Math.floor(durationMs / 60000);
+        const durationHours = Math.floor(durationMinutes / 60);
+        const remainingMinutes = durationMinutes % 60;
+        
+        return {
+          ...instance,
+          duration: durationHours > 0 
+            ? `${durationHours}h ${remainingMinutes}min`
+            : `${durationMinutes} minutos`,
+          durationMinutes,
+        };
+      });
+
+      // Sort by duration (longest first)
+      instancesWithDuration.sort((a, b) => b.durationMinutes - a.durationMinutes);
+
+      // Build email HTML
+      const instanceList = instancesWithDuration.map((instance) => `
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.display_name || instance.instance_name}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.phone_number || "-"}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee;">
+            <span style="background: ${instance.status === 'error' ? '#fee2e2' : '#fef3c7'}; color: ${instance.status === 'error' ? '#dc2626' : '#d97706'}; padding: 4px 8px; border-radius: 4px; font-weight: 500;">
+              ${instance.status === 'error' ? 'Erro' : instance.status === 'connecting' ? 'Conectando' : 'Desconectada'}
+            </span>
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: 500; color: #dc2626;">${instance.duration}</td>
+        </tr>
+      `).join("");
+
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Alerta de Conexão WhatsApp</title>
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; background: #f9fafb;">
+          <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            
+            <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 24px;">
+              <h1 style="margin: 0; font-size: 22px;">⚠️ Alerta: WhatsApp Desconectado</h1>
+              <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 14px;">${companyName}</p>
+            </div>
+            
+            <div style="padding: 24px;">
+              <p style="margin: 0 0 16px 0;">Olá, ${adminName}!</p>
+              
+              <p style="margin: 0 0 20px 0;">
+                Detectamos que ${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está desconectada' : 'algumas de suas conexões WhatsApp estão desconectadas'} há mais de <strong>${ALERT_THRESHOLD_MINUTES} minutos</strong>:
+              </p>
+              
+              <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                <thead>
+                  <tr style="background: #f3f4f6;">
+                    <th style="padding: 12px; text-align: left; font-weight: 600; font-size: 13px; color: #374151;">Conexão</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; font-size: 13px; color: #374151;">Número</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; font-size: 13px; color: #374151;">Status</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; font-size: 13px; color: #374151;">Tempo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${instanceList}
+                </tbody>
+              </table>
+              
+              <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin: 24px 0;">
+                <p style="margin: 0; color: #92400e; font-size: 14px;">
+                  <strong>⚡ O que fazer?</strong><br>
+                  Acesse o painel MIAUCHAT, vá em <strong>Conexões</strong> e reconecte seu WhatsApp escaneando o QR Code.
+                </p>
+              </div>
+              
+              <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; border-radius: 0 8px 8px 0;">
+                <p style="margin: 0; color: #1e40af; font-size: 14px;">
+                  <strong>💡 Dica:</strong> Enquanto desconectado, mensagens de clientes não serão recebidas e automações não funcionarão.
+                </p>
+              </div>
+            </div>
+            
+            <div style="background: #f3f4f6; padding: 16px 24px; border-top: 1px solid #e5e7eb;">
+              <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                Este alerta é enviado automaticamente quando detectamos problemas de conexão.<br>
+                Próximo alerta possível em ${ALERT_COOLDOWN_HOURS} horas caso o problema persista.
+              </p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      try {
+        console.log(`[Check Instance Alerts] Sending email to ${adminEmail} for ${companyName}`);
+        
+        const { error: emailError } = await resend.emails.send({
+          from: "MIAUCHAT <onboarding@resend.dev>",
+          to: [adminEmail],
+          subject: `⚠️ WhatsApp desconectado - ${companyName}`,
+          html: emailHtml,
+        });
+
+        if (emailError) {
+          console.error(`[Check Instance Alerts] Email error for ${companyName}:`, emailError);
+          results.push({
+            law_firm_id: lawFirmId,
+            company_name: companyName,
+            email: adminEmail,
+            instances_count: instancesWithDuration.length,
+            success: false,
+          });
+        } else {
+          console.log(`[Check Instance Alerts] Email sent to ${adminEmail}`);
+          results.push({
+            law_firm_id: lawFirmId,
+            company_name: companyName,
+            email: adminEmail,
+            instances_count: instancesWithDuration.length,
+            success: true,
+          });
+          
+          // Track notified instances
+          notifiedInstanceIds.push(...instancesWithDuration.map(i => i.id));
+        }
+      } catch (emailErr: any) {
+        console.error(`[Check Instance Alerts] Email exception for ${companyName}:`, emailErr);
+        results.push({
+          law_firm_id: lawFirmId,
+          company_name: companyName,
+          email: adminEmail,
+          instances_count: instancesWithDuration.length,
+          success: false,
+        });
+      }
+    }
 
     // Update last_alert_sent_at for all notified instances
-    const instanceIds = instancesWithDuration.map(i => i.id);
-    
-    const { error: updateError } = await supabaseClient
-      .from("whatsapp_instances")
-      .update({ last_alert_sent_at: new Date().toISOString() })
-      .in("id", instanceIds);
+    if (notifiedInstanceIds.length > 0) {
+      const { error: updateError } = await supabaseClient
+        .from("whatsapp_instances")
+        .update({ last_alert_sent_at: new Date().toISOString() })
+        .in("id", notifiedInstanceIds);
 
-    if (updateError) {
-      console.error("[Check Instance Alerts] Error updating alert timestamp:", updateError);
+      if (updateError) {
+        console.error("[Check Instance Alerts] Error updating alert timestamp:", updateError);
+      }
     }
 
-    // Log the notification
-    await supabaseClient.from("admin_notification_logs").insert({
-      event_type: "INSTANCE_DISCONNECTION_ALERT",
-      event_key: `instance_alert_${new Date().toISOString().slice(0, 13)}`,
-      email_sent_to: adminEmail,
-      metadata: {
-        instances_count: instancesWithDuration.length,
-        instance_names: instancesWithDuration.map(i => i.instance_name),
-      },
-    });
+    // Log summary
+    const successCount = results.filter(r => r.success).length;
+    console.log(`[Check Instance Alerts] Summary: ${successCount}/${results.length} emails sent`);
+
+    // Log to admin_notification_logs
+    for (const result of results.filter(r => r.success)) {
+      await supabaseClient.from("admin_notification_logs").insert({
+        event_type: "INSTANCE_DISCONNECTION_ALERT",
+        event_key: `instance_alert_${result.law_firm_id}_${new Date().toISOString().slice(0, 13)}`,
+        email_sent_to: result.email,
+        tenant_id: result.law_firm_id,
+        company_name: result.company_name,
+        metadata: {
+          instances_count: result.instances_count,
+          threshold_minutes: ALERT_THRESHOLD_MINUTES,
+        },
+      });
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Alert sent for ${instancesWithDuration.length} instances`,
-        instances: instancesWithDuration.map(i => ({
-          name: i.instance_name,
-          company: i.company_name,
-          duration: i.duration,
-        })),
+        message: `Alerts sent to ${successCount} companies`,
+        results,
         checked_at: new Date().toISOString(),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
