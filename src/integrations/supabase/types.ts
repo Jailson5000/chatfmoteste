@@ -4211,7 +4211,50 @@ export type Database = {
         | { Args: { _law_firm_id: string }; Returns: Json[] }
         | {
             Args: { _law_firm_id: string; _limit?: number; _offset?: number }
-            Returns: Json[]
+            Returns: {
+              ai_audio_enabled: boolean
+              ai_audio_enabled_by: string
+              ai_audio_last_disabled_at: string
+              ai_audio_last_enabled_at: string
+              ai_summary: string
+              archived_at: string
+              archived_next_responsible_id: string
+              archived_next_responsible_type: string
+              archived_reason: string
+              assigned_profile: Json
+              assigned_to: string
+              client: Json
+              client_id: string
+              client_tags: Json
+              contact_name: string
+              contact_phone: string
+              created_at: string
+              current_automation: Json
+              current_automation_id: string
+              current_handler: string
+              department: Json
+              department_id: string
+              id: string
+              internal_notes: string
+              last_message: Json
+              last_message_at: string
+              last_summarized_at: string
+              last_whatsapp_instance_id: string
+              law_firm_id: string
+              n8n_last_response_at: string
+              needs_human_handoff: boolean
+              origin: string
+              origin_metadata: Json
+              priority: number
+              remote_jid: string
+              status: string
+              summary_message_count: number
+              tags: string[]
+              unread_count: number
+              updated_at: string
+              whatsapp_instance: Json
+              whatsapp_instance_id: string
+            }[]
           }
       get_law_firm_by_subdomain: {
         Args: { _subdomain: string }

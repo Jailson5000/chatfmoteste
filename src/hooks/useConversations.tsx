@@ -180,11 +180,15 @@ export function useConversations() {
           const newConversations = initialData.filter(c => !existingIds.has(c.id));
           
           // Combine: fresh updated data + new conversations
-          // Sort by last_message_at to maintain proper order
+          // Sort by last_message_at, falling back to created_at for conversations without messages
           const combined = [...updatedPrev, ...newConversations];
           return combined.sort((a, b) => {
-            const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-            const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+            const aTime = a.last_message_at 
+              ? new Date(a.last_message_at).getTime() 
+              : new Date(a.created_at).getTime();
+            const bTime = b.last_message_at 
+              ? new Date(b.last_message_at).getTime() 
+              : new Date(b.created_at).getTime();
             return bTime - aTime;
           });
         });
