@@ -6,7 +6,8 @@ import {
   Settings, 
   ArrowLeft,
   Shield,
-  Bot
+  Bot,
+  CreditCard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ const adminNavItems = [
   { icon: LayoutDashboard, label: "Visão Geral", path: "/admin" },
   { icon: Users, label: "Equipe", path: "/admin/team" },
   { icon: Building2, label: "Empresa", path: "/admin/company" },
+  { icon: CreditCard, label: "Plano e Faturamento", path: "/admin/billing" },
   { icon: Settings, label: "Configurações", path: "/admin/settings" },
 ];
 

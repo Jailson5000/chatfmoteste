@@ -35,7 +35,7 @@ import TermsOfService from "./pages/TermsOfService";
 // Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
-import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings } from "./pages/admin";
+import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings, AdminBilling } from "./pages/admin";
 import {
   GlobalAdminAuth,
   GlobalAdminDashboard,
@@ -228,6 +228,7 @@ const App = () => (
             <Route index element={<AdminDashboard />} />
             <Route path="team" element={<AdminTeam />} />
             <Route path="company" element={<AdminCompany />} />
+            <Route path="billing" element={<AdminBilling />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
           
