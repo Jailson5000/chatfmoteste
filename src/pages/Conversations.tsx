@@ -7,7 +7,6 @@ import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Bot,
-  UserCheck,
   Phone,
   Send,
   Paperclip,
@@ -15,7 +14,6 @@ import {
   Archive,
   ArrowLeft,
   Image,
-  FileText,
   Tag,
   Clock,
   Users,
@@ -38,7 +36,6 @@ import {
   Plus,
   Smile,
   Sparkles,
-  Volume2,
   Filter,
   WifiOff,
   ExternalLink,
@@ -51,7 +48,6 @@ import { MessageSearch, highlightText } from "@/components/conversations/Message
 import { ReplyPreview } from "@/components/conversations/ReplyPreview";
 import { TemplatePopup } from "@/components/conversations/TemplatePopup";
 import { ContactStatusTags } from "@/components/conversations/ContactStatusTags";
-import { UnreadBadge } from "@/components/conversations/UnreadBadge";
 import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
 import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
@@ -101,7 +97,6 @@ import {
 } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { AdvancedFiltersSheet } from "@/components/conversations/AdvancedFiltersSheet";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
 import { ConversationSidebarCard } from "@/components/conversations/ConversationSidebarCard";
@@ -133,11 +128,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
 import {
   Tooltip,
   TooltipContent,

@@ -900,21 +900,7 @@ export function useConversations() {
         .eq("id", conversationId)
         .single();
 
-      // 2. Verificar se já existe um cliente com o mesmo telefone na instância de DESTINO
-      let existingClientInDestination = null;
-      if (currentConversation?.contact_phone) {
-        const { data: existingClients } = await supabase
-          .from("clients")
-          .select("id, name")
-          .eq("law_firm_id", lawFirm.id)
-          .eq("whatsapp_instance_id", newInstanceId)
-          .eq("phone", currentConversation.contact_phone)
-          .limit(1);
-        
-        existingClientInDestination = existingClients?.[0] || null;
-      }
-
-      // 3. Verificar se já existe uma conversa com o mesmo remote_jid na instância de DESTINO
+      // 2. Verificar se já existe uma conversa com o mesmo remote_jid na instância de DESTINO
       let existingConversationInDestination = null;
       if (currentConversation?.remote_jid) {
         const { data: existingConvs } = await supabase
