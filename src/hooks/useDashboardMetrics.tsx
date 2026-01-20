@@ -89,42 +89,51 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { startDate, endDate } = getDateRange();
 
-      // Build message query - using is_from_me instead of direction
-      let messageQuery = supabase
-        .from("messages")
-        .select("is_from_me, created_at, conversation_id", { count: "exact" })
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+      // CRITICAL: First get conversation IDs for this law_firm only (tenant isolation)
+      let convQuery = supabase
+        .from("conversations")
+        .select("id")
+        .eq("law_firm_id", lawFirm.id);
 
-      // Apply attendant filter via conversation
-      if (filters.attendantIds.length > 0 || filters.departmentIds.length > 0 || filters.connectionIds.length > 0) {
-        // Get conversation IDs that match the filters
-        let convQuery = supabase
-          .from("conversations")
-          .select("id")
-          .eq("law_firm_id", lawFirm.id);
-
-        if (filters.attendantIds.length > 0) {
-          convQuery = convQuery.in("assigned_to", filters.attendantIds);
-        }
-        if (filters.departmentIds.length > 0) {
-          convQuery = convQuery.in("department_id", filters.departmentIds);
-        }
-        if (filters.connectionIds.length > 0) {
-          convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
-        }
-
-        const { data: filteredConvs } = await convQuery;
-        const convIds = filteredConvs?.map(c => c.id) || [];
-        
-        if (convIds.length === 0) {
-          return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 };
-        }
-        
-        messageQuery = messageQuery.in("conversation_id", convIds);
+      // Apply additional filters
+      if (filters.attendantIds.length > 0) {
+        convQuery = convQuery.in("assigned_to", filters.attendantIds);
+      }
+      if (filters.departmentIds.length > 0) {
+        convQuery = convQuery.in("department_id", filters.departmentIds);
+      }
+      if (filters.connectionIds.length > 0) {
+        convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
       }
 
-      const { data: messages, error } = await messageQuery;
+      const { data: lawFirmConvs } = await convQuery;
+      const convIds = lawFirmConvs?.map(c => c.id) || [];
+      
+      // If no conversations for this law_firm, return zeros
+      if (convIds.length === 0) {
+        // Get active conversations count (should also be 0 but check anyway)
+        const { count: activeCount } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact" })
+          .eq("law_firm_id", lawFirm.id)
+          .is("archived_at", null);
+          
+        return { 
+          totalReceived: 0, 
+          totalSent: 0, 
+          totalConversations: 0, 
+          activeConversations: activeCount || 0, 
+          avgResponseTime: 0 
+        };
+      }
+
+      // Build message query - ONLY for conversations belonging to this law_firm
+      const { data: messages, error } = await supabase
+        .from("messages")
+        .select("is_from_me, created_at, conversation_id")
+        .in("conversation_id", convIds)
+        .gte("created_at", startDate.toISOString())
+        .lte("created_at", endDate.toISOString());
       
       if (error) {
         console.error("[useDashboardMetrics] Error fetching messages:", error);
@@ -246,39 +255,43 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         });
       }
 
-      // Get messages in range - using is_from_me
-      let messageQuery = supabase
-        .from("messages")
-        .select("is_from_me, created_at, conversation_id")
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+      // CRITICAL: First get conversation IDs for this law_firm only (tenant isolation)
+      let convQuery = supabase
+        .from("conversations")
+        .select("id")
+        .eq("law_firm_id", lawFirm.id);
 
-      // Apply filters
-      if (filters.attendantIds.length > 0 || filters.departmentIds.length > 0 || filters.connectionIds.length > 0) {
-        let convQuery = supabase
-          .from("conversations")
-          .select("id")
-          .eq("law_firm_id", lawFirm.id);
-
-        if (filters.attendantIds.length > 0) {
-          convQuery = convQuery.in("assigned_to", filters.attendantIds);
-        }
-        if (filters.departmentIds.length > 0) {
-          convQuery = convQuery.in("department_id", filters.departmentIds);
-        }
-        if (filters.connectionIds.length > 0) {
-          convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
-        }
-
-        const { data: filteredConvs } = await convQuery;
-        const convIds = filteredConvs?.map(c => c.id) || [];
-        
-        if (convIds.length > 0) {
-          messageQuery = messageQuery.in("conversation_id", convIds);
-        }
+      if (filters.attendantIds.length > 0) {
+        convQuery = convQuery.in("assigned_to", filters.attendantIds);
+      }
+      if (filters.departmentIds.length > 0) {
+        convQuery = convQuery.in("department_id", filters.departmentIds);
+      }
+      if (filters.connectionIds.length > 0) {
+        convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
       }
 
-      const { data: messages } = await messageQuery;
+      const { data: lawFirmConvs } = await convQuery;
+      const convIds = lawFirmConvs?.map(c => c.id) || [];
+      
+      // If no conversations, return empty buckets
+      if (convIds.length === 0) {
+        return buckets.map(bucket => ({
+          date: bucket.label,
+          label: bucket.label,
+          received: 0,
+          sent: 0,
+          conversations: 0,
+        }));
+      }
+
+      // Get messages ONLY for conversations belonging to this law_firm
+      const { data: messages } = await supabase
+        .from("messages")
+        .select("is_from_me, created_at, conversation_id")
+        .in("conversation_id", convIds)
+        .gte("created_at", startDate.toISOString())
+        .lte("created_at", endDate.toISOString());
 
       // Aggregate by bucket
       return buckets.map(bucket => {
