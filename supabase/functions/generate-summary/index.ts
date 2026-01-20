@@ -23,12 +23,95 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Create Supabase client
+    // Create Supabase clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    
+    // ========================================
+    // SECURITY: Validate authentication
+    // ========================================
+    const authHeader = req.headers.get("authorization");
+    
+    if (!authHeader) {
+      console.error("[generate-summary] Missing authorization header");
+      return new Response(
+        JSON.stringify({ error: "Authorization required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    // Fetch conversation messages
+    const token = authHeader.replace("Bearer ", "");
+    
+    // Validate the token and get the user
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } }
+    });
+    
+    const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
+    
+    if (userError || !userData?.user) {
+      console.error("[generate-summary] Invalid token:", userError?.message);
+      return new Response(
+        JSON.stringify({ error: "Invalid authentication token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userId = userData.user.id;
+
+    // Use service role for database queries
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // ========================================
+    // SECURITY: Get user's law_firm_id
+    // ========================================
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("law_firm_id")
+      .eq("id", userId)
+      .single();
+
+    if (profileError || !profile?.law_firm_id) {
+      console.error("[generate-summary] User has no associated law_firm:", profileError?.message);
+      return new Response(
+        JSON.stringify({ error: "Access denied" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userLawFirmId = profile.law_firm_id;
+
+    // ========================================
+    // SECURITY: Validate conversation belongs to user's tenant
+    // ========================================
+    const { data: conversation, error: convError } = await supabase
+      .from("conversations")
+      .select("id, law_firm_id, contact_name, contact_phone")
+      .eq("id", conversationId)
+      .single();
+
+    if (convError || !conversation) {
+      console.warn(`[generate-summary] Conversation ${conversationId} not found`);
+      return new Response(
+        JSON.stringify({ error: "Conversation not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (conversation.law_firm_id !== userLawFirmId) {
+      // IDOR attempt detected - log and deny
+      console.warn(`[generate-summary] IDOR ATTEMPT: User ${userId} (tenant ${userLawFirmId}) tried to access conversation ${conversationId} (tenant ${conversation.law_firm_id})`);
+      return new Response(
+        JSON.stringify({ error: "Conversation not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ========================================
+    // SECURE QUERY: Fetch messages with tenant validation
+    // ========================================
     const { data: messages, error: messagesError } = await supabase
       .from("messages")
       .select("content, is_from_me, sender_type, created_at, message_type")
@@ -46,17 +129,6 @@ serve(async (req) => {
         JSON.stringify({ summary: "Não há mensagens para resumir nesta conversa." }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-
-    // Fetch conversation details
-    const { data: conversation, error: convError } = await supabase
-      .from("conversations")
-      .select("contact_name, contact_phone")
-      .eq("id", conversationId)
-      .single();
-
-    if (convError) {
-      console.error("Error fetching conversation:", convError);
     }
 
     // Format messages for the AI
@@ -86,7 +158,7 @@ Seja objetivo e use bullet points quando apropriado. O resumo deve ter no máxim
 
 ${formattedMessages}`;
 
-    console.log(`Generating summary for conversation ${conversationId} with ${messages.length} messages`);
+    console.log(`[generate-summary] User ${userId} generating summary for conversation ${conversationId} with ${messages.length} messages`);
 
     // Call Lovable AI
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -131,13 +203,17 @@ ${formattedMessages}`;
       throw new Error("No summary generated");
     }
 
-    console.log("Summary generated successfully");
+    console.log(`[generate-summary] Summary generated successfully for conversation ${conversationId}`);
 
-    // Optionally save the summary to the conversation
+    // Save the summary to the conversation (already validated as belonging to user's tenant)
     await supabase
       .from("conversations")
-      .update({ ai_summary: summary })
-      .eq("id", conversationId);
+      .update({ 
+        ai_summary: summary,
+        last_summarized_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId)
+      .eq("law_firm_id", userLawFirmId); // Extra protection
 
     return new Response(
       JSON.stringify({ summary }),
