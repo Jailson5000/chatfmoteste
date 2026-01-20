@@ -9,7 +9,8 @@ const corsHeaders = {
 
 // Configuration - alert after 5 minutes of disconnection
 const ALERT_THRESHOLD_MINUTES = 5;
-const ALERT_COOLDOWN_HOURS = 6; // Don't send same alert more than once every 6 hours
+// NO COOLDOWN - We only send ONE alert per disconnection cycle
+// The alert_sent_for_current_disconnect flag is reset when instance reconnects
 
 interface DisconnectedInstance {
   id: string;
@@ -19,6 +20,7 @@ interface DisconnectedInstance {
   phone_number: string | null;
   disconnected_since: string;
   last_alert_sent_at: string | null;
+  alert_sent_for_current_disconnect: boolean | null;
   law_firm_id: string;
   manual_disconnect: boolean | null;
   awaiting_qr: boolean | null;
@@ -63,31 +65,29 @@ serve(async (req) => {
 
     const resend = new Resend(resendApiKey);
     const thresholdTime = new Date(Date.now() - ALERT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
-    const cooldownTime = new Date(Date.now() - ALERT_COOLDOWN_HOURS * 60 * 60 * 1000).toISOString();
 
     console.log("[Check Instance Alerts] Checking for disconnected instances...");
     console.log(`[Check Instance Alerts] Threshold: ${ALERT_THRESHOLD_MINUTES} minutes`);
 
     // Find instances that:
-    // 1. Are disconnected or error status
+    // 1. Are disconnected or error status (NOT connecting or awaiting_qr)
     // 2. Have been in that state for more than ALERT_THRESHOLD_MINUTES
-    // 3. Were NOT manually disconnected (manual_disconnect = false or null)
-    // 4. Are NOT awaiting QR scan (awaiting_qr = false or null)
-    // 5. Haven't received an alert within the cooldown period
+    // 3. Were NOT manually disconnected
+    // 4. Are NOT awaiting QR scan
+    // 5. Have NOT already received an alert for THIS disconnection cycle
     const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, law_firm_id, manual_disconnect, awaiting_qr")
-      .in("status", ["disconnected", "error", "connecting"])
+      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr")
+      .in("status", ["disconnected", "error"]) // Only truly disconnected, not "connecting" or "awaiting_qr"
       .not("disconnected_since", "is", null)
-      .lt("disconnected_since", thresholdTime)
-      .or(`last_alert_sent_at.is.null,last_alert_sent_at.lt.${cooldownTime}`);
+      .lt("disconnected_since", thresholdTime);
 
     if (fetchError) {
       console.error("[Check Instance Alerts] Error fetching instances:", fetchError);
       throw fetchError;
     }
 
-    // Filter out manually disconnected or awaiting QR instances
+    // Filter out manually disconnected, awaiting QR, or already alerted instances
     const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
       // Skip if manually disconnected
       if (instance.manual_disconnect === true) {
@@ -97,6 +97,11 @@ serve(async (req) => {
       // Skip if awaiting QR scan
       if (instance.awaiting_qr === true) {
         console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: awaiting_qr=true`);
+        return false;
+      }
+      // Skip if already sent alert for THIS disconnection cycle
+      if (instance.alert_sent_for_current_disconnect === true) {
+        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: alert already sent for this disconnect`);
         return false;
       }
       return true;
@@ -237,7 +242,7 @@ serve(async (req) => {
           <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.phone_number || "-"}</td>
           <td style="padding: 12px; border-bottom: 1px solid #eee;">
             <span style="background: ${instance.status === 'error' ? '#fee2e2' : '#fef3c7'}; color: ${instance.status === 'error' ? '#dc2626' : '#d97706'}; padding: 4px 8px; border-radius: 4px; font-weight: 500;">
-              ${instance.status === 'error' ? 'Erro' : instance.status === 'connecting' ? 'Conectando' : 'Desconectada'}
+              ${instance.status === 'error' ? 'Erro' : 'Desconectada'}
             </span>
           </td>
           <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: 500; color: #dc2626;">${instance.duration}</td>
@@ -296,8 +301,8 @@ serve(async (req) => {
             
             <div style="background: #f3f4f6; padding: 16px 24px; border-top: 1px solid #e5e7eb;">
               <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                Este alerta é enviado automaticamente quando detectamos problemas de conexão.<br>
-                Próximo alerta possível em ${ALERT_COOLDOWN_HOURS} horas caso o problema persista.
+                Este alerta é enviado uma única vez por desconexão.<br>
+                Você receberá um novo alerta somente se reconectar e a conexão cair novamente.
               </p>
             </div>
           </div>
@@ -337,7 +342,8 @@ serve(async (req) => {
           // Track notified instances
           notifiedInstanceIds.push(...instancesWithDuration.map(i => i.id));
         }
-      } catch (emailErr: any) {
+      } catch (emailErr: unknown) {
+        const errorMessage = emailErr instanceof Error ? emailErr.message : "Unknown error";
         console.error(`[Check Instance Alerts] Email exception for ${companyName}:`, emailErr);
         results.push({
           law_firm_id: lawFirmId,
@@ -349,11 +355,15 @@ serve(async (req) => {
       }
     }
 
-    // Update last_alert_sent_at for all notified instances
+    // Mark instances as alerted for THIS disconnection cycle
+    // This flag is reset when the instance reconnects (via webhook)
     if (notifiedInstanceIds.length > 0) {
       const { error: updateError } = await supabaseClient
         .from("whatsapp_instances")
-        .update({ last_alert_sent_at: new Date().toISOString() })
+        .update({ 
+          last_alert_sent_at: new Date().toISOString(),
+          alert_sent_for_current_disconnect: true // Prevents duplicate alerts until reconnection
+        })
         .in("id", notifiedInstanceIds);
 
       if (updateError) {
@@ -389,10 +399,11 @@ serve(async (req) => {
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("[Check Instance Alerts] Error:", error);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({ success: false, error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

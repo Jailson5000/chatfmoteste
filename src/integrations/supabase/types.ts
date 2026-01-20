@@ -3979,6 +3979,7 @@ export type Database = {
       }
       whatsapp_instances: {
         Row: {
+          alert_sent_for_current_disconnect: boolean | null
           api_key: string | null
           api_key_encrypted: boolean | null
           api_url: string
@@ -4005,6 +4006,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          alert_sent_for_current_disconnect?: boolean | null
           api_key?: string | null
           api_key_encrypted?: boolean | null
           api_url: string
@@ -4031,6 +4033,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          alert_sent_for_current_disconnect?: boolean | null
           api_key?: string | null
           api_key_encrypted?: boolean | null
           api_url?: string
