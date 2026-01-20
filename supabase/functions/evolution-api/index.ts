@@ -1235,11 +1235,13 @@ serve(async (req) => {
           console.log(`[Evolution API] Logout API call failed (non-fatal):`, e);
         }
 
-        // Update database status to disconnected
+        // Update database status to disconnected and mark as manual disconnect
+        // This prevents auto-reconnect from trying to reconnect this instance
         const { data: updatedInstance, error: updateError } = await supabaseClient
           .from("whatsapp_instances")
           .update({ 
             status: "disconnected", 
+            manual_disconnect: true, // Mark as manual so auto-reconnect ignores it
             updated_at: new Date().toISOString() 
           })
           .eq("id", body.instanceId)

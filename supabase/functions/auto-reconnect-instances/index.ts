@@ -241,10 +241,12 @@ serve(async (req) => {
     // 1. Status "connecting" for more than X minutes (stuck in connecting)
     // 2. Status "disconnected" for more than Y minutes (disconnected but not by user logout)
     // Exclude instances that are "error" status (need manual intervention)
+    // CRITICAL: Exclude instances where manual_disconnect = true (user intentionally disconnected)
     const { data: instances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at")
+      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect")
       .in("status", ["connecting", "disconnected"])
+      .or("manual_disconnect.is.null,manual_disconnect.eq.false") // Only auto-reconnect if NOT manually disconnected
       .not("api_url", "is", null)
       .not("api_key", "is", null);
 
