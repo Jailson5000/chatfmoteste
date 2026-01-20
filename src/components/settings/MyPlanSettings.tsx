@@ -14,10 +14,9 @@ import {
   MessageSquare, 
   Mic,
   CheckCircle2,
-  AlertCircle,
   Loader2,
-  ExternalLink,
-  Crown
+  Crown,
+  Mail
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -36,8 +35,9 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 
-export default function AdminBilling() {
+export function MyPlanSettings() {
   const { lawFirm } = useLawFirm();
   const [showAddonsDialog, setShowAddonsDialog] = useState(false);
   const [addonRequest, setAddonRequest] = useState({
@@ -119,7 +119,6 @@ export default function AdminBilling() {
       addonRequest.users * ADDITIONAL_PRICING.user + 
       addonRequest.instances * ADDITIONAL_PRICING.whatsappInstance;
 
-    // For now, just show a toast - in the future this could send an email or create a request
     toast.success(
       `Solicitação enviada! Um consultor entrará em contato para adicionar ${addonRequest.users > 0 ? `${addonRequest.users} usuário(s)` : ""} ${addonRequest.instances > 0 ? `${addonRequest.instances} conexão(ões) WhatsApp` : ""}. Valor adicional: ${formatCurrency(totalCost)}/mês`,
       { duration: 8000 }
@@ -133,9 +132,13 @@ export default function AdminBilling() {
     toast.info("Em breve você poderá baixar suas faturas por aqui. Por enquanto, entre em contato com o suporte.");
   };
 
+  const handleContactSupport = () => {
+    window.open("mailto:suporte@miauchat.com.br?subject=Solicitação de Upgrade de Plano", "_blank");
+  };
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -145,13 +148,16 @@ export default function AdminBilling() {
   const planFeatures = Array.isArray(plan?.features) ? plan.features : [];
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Plano e Faturamento</h1>
-        <p className="text-muted-foreground">
-          Gerencie seu plano, veja consumo e contrate adicionais
-        </p>
-      </div>
+    <div className="space-y-6">
+      <SettingsHelpCollapsible
+        title="Como funciona o Meu Plano?"
+        items={[
+          { text: "Aqui você pode visualizar seu plano atual e os recursos disponíveis." },
+          { text: "Acompanhe o consumo mensal de conversas IA, áudio e outros recursos." },
+          { text: "Contrate recursos adicionais como usuários e conexões WhatsApp." },
+        ]}
+        tip="Para upgrade de plano ou dúvidas sobre faturamento, entre em contato com nosso suporte."
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Current Plan Card */}
@@ -169,9 +175,9 @@ export default function AdminBilling() {
                 variant="outline" 
                 className={
                   plan?.name === "ENTERPRISE" 
-                    ? "bg-purple-100 text-purple-700 border-purple-300" 
+                    ? "bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300" 
                     : plan?.name === "PROFESSIONAL"
-                    ? "bg-blue-100 text-blue-700 border-blue-300"
+                    ? "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300"
                     : "bg-primary/10 text-primary border-primary/30"
                 }
               >
@@ -184,7 +190,7 @@ export default function AdminBilling() {
             {planFeatures.length > 0 && (
               <div>
                 <h4 className="text-sm font-medium mb-3">Recursos inclusos:</h4>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {planFeatures.slice(0, 6).map((feature, idx) => (
                     <div key={idx} className="flex items-center gap-2 text-sm text-muted-foreground">
                       <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
@@ -234,10 +240,14 @@ export default function AdminBilling() {
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex gap-3 pt-6 border-t">
+          <CardFooter className="flex flex-wrap gap-3 pt-6 border-t">
             <Button variant="outline" className="gap-2" onClick={handleDownloadInvoice}>
               <Download className="h-4 w-4" />
               Baixar Fatura
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={handleContactSupport}>
+              <Mail className="h-4 w-4" />
+              Solicitar Upgrade
             </Button>
             <Button className="gap-2" onClick={() => setShowAddonsDialog(true)}>
               <Plus className="h-4 w-4" />

@@ -4,10 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { AdminRoute } from "@/components/auth/AdminRoute";
 import { GlobalAdminRoute } from "@/components/auth/GlobalAdminRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { AdminLayout } from "@/components/layout/AdminLayout";
 import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import { TenantProvider } from "@/hooks/useTenant";
@@ -35,7 +33,7 @@ import TermsOfService from "./pages/TermsOfService";
 // Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
-import { AdminDashboard, AdminTeam, AdminCompany, AdminSettings, AdminBilling } from "./pages/admin";
+// Admin pages removed - functionality moved to Settings
 import {
   GlobalAdminAuth,
   GlobalAdminDashboard,
@@ -217,20 +215,9 @@ const App = () => (
           </Route>
           
           {/* Client Admin Routes - Protected by role (admin of law firm) */}
-          <Route
-            path="/admin"
-            element={
-              <AdminRoute allowedRoles={["admin"]}>
-                <AdminLayout />
-              </AdminRoute>
-            }
-          >
-            <Route index element={<AdminDashboard />} />
-            <Route path="team" element={<AdminTeam />} />
-            <Route path="company" element={<AdminCompany />} />
-            <Route path="billing" element={<AdminBilling />} />
-            <Route path="settings" element={<AdminSettings />} />
-          </Route>
+          {/* Redirect /admin to /settings for backwards compatibility */}
+          <Route path="/admin" element={<Navigate to="/settings" replace />} />
+          <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
           
           {/* Global Admin Routes - MiauChat SaaS Administration */}
           <Route
