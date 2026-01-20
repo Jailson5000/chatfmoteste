@@ -275,7 +275,7 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
         }
       });
 
-      // Merge data
+      // Merge data and calculate monthly values
       const merged: CompanyWithStatus[] = (usageData || []).map((usage: any) => {
         const company = companyData?.find((c) => c.id === usage.company_id);
         const lawFirm = lawFirmData?.find((lf) => lf.id === usage.law_firm_id);
@@ -290,12 +290,23 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
             conversations_count: agentConversationCounts[agent.id] || 0,
           }));
 
+        // Calculate monthly value
+        let monthlyValue = usage.plan_price || 0;
+        if (usage.use_custom_limits && usage.plan_price) {
+          const additionalUsers = Math.max(0, (usage.effective_max_users || 0) - (usage.plan_max_users || 0));
+          const additionalInstances = Math.max(0, (usage.effective_max_instances || 0) - (usage.plan_max_instances || 0));
+          monthlyValue = usage.plan_price + 
+            (additionalUsers * ADDITIONAL_PRICING.user) + 
+            (additionalInstances * ADDITIONAL_PRICING.whatsappInstance);
+        }
+
         return {
           ...usage,
           status: company?.status || "unknown",
           created_at: company?.created_at || "",
           subdomain: lawFirm?.subdomain || null,
           agents: companyAgents,
+          monthly_value: monthlyValue,
         };
       });
 
@@ -484,19 +495,20 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
                 <TableHead className="text-white/60 font-medium">Status</TableHead>
                 <TableHead className="text-white/60 font-medium">Alertas</TableHead>
                 <TableHead className="text-white/60 font-medium">Consumo</TableHead>
+                <TableHead className="text-white/60 font-medium">Valor Mensal</TableHead>
                 <TableHead className="text-white/60 font-medium text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center">
+                  <TableCell colSpan={7} className="h-32 text-center">
                     <Loader2 className="h-8 w-8 animate-spin mx-auto text-red-500" />
                   </TableCell>
                 </TableRow>
               ) : filteredCompanies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center text-white/40">
+                  <TableCell colSpan={7} className="h-32 text-center text-white/40">
                     Nenhuma empresa encontrada
                   </TableCell>
                 </TableRow>
@@ -568,6 +580,33 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
                           />
                         </div>
                       </TableCell>
+                      <TableCell>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center gap-1">
+                                <DollarSign className="h-4 w-4 text-green-400" />
+                                <span className="font-medium text-white">
+                                  {formatCurrency(company.monthly_value || 0)}
+                                </span>
+                                {company.use_custom_limits && (
+                                  <Badge className="ml-1 bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] px-1">
+                                    +add
+                                  </Badge>
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
+                              <p>Plano: {formatCurrency(company.plan_price || 0)}</p>
+                              {company.use_custom_limits && company.monthly_value && company.plan_price && company.monthly_value > company.plan_price && (
+                                <p className="text-orange-400 text-xs">
+                                  + {formatCurrency(company.monthly_value - company.plan_price)} em adicionais
+                                </p>
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           {company.status === "cancelled" && (
@@ -625,7 +664,7 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
                     {/* Expanded row with detailed usage */}
                     {expandedRow === company.company_id && (
                       <TableRow className="border-white/10 bg-white/[0.02]">
-                        <TableCell colSpan={6} className="p-4">
+                        <TableCell colSpan={7} className="p-4">
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
                               <h4 className="text-sm font-medium text-white">
