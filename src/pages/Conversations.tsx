@@ -2030,16 +2030,23 @@ export default function Conversations() {
       try {
         const trimmedName = editingName.trim();
         
-        // Update conversation contact_name
+        // CRITICAL: Immediately update local state BEFORE async call for instant UI feedback
+        setNewlyCreatedConversation((prev: any) => {
+          if (prev && prev.id === selectedConversation.id) {
+            return { ...prev, contact_name: trimmedName };
+          }
+          return prev;
+        });
+        
+        // Close dialogs immediately for better UX
+        setEditNameDialogOpen(false);
+        setIsEditingNameInline(false);
+        
+        // Update conversation contact_name in database
         await updateConversation.mutateAsync({
           id: selectedConversation.id,
           contact_name: trimmedName,
         });
-        
-        // Also update newlyCreatedConversation if it's the same one (for immediate UI sync)
-        if (newlyCreatedConversation && newlyCreatedConversation.id === selectedConversation.id) {
-          setNewlyCreatedConversation((prev: any) => prev ? { ...prev, contact_name: trimmedName } : null);
-        }
         
         // Also update linked client name if exists
         if (selectedConversation.client_id) {
@@ -2049,10 +2056,14 @@ export default function Conversations() {
           });
         }
         
-        setEditNameDialogOpen(false);
-        setIsEditingNameInline(false);
+        // Force invalidate to sync with server
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        
+        toast({ title: "Nome atualizado!" });
       } catch (error) {
         console.error("Erro ao atualizar nome:", error);
+        toast({ title: "Erro ao salvar nome", variant: "destructive" });
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
     }
   };
@@ -2062,16 +2073,23 @@ export default function Conversations() {
       try {
         const trimmedName = name.trim();
         
-        // Update conversation contact_name
+        // CRITICAL: Immediately update local state BEFORE async call for instant UI feedback
+        // This ensures the UI updates even if the conversation is from newlyCreatedConversation
+        setNewlyCreatedConversation((prev: any) => {
+          if (prev && prev.id === selectedConversation.id) {
+            return { ...prev, contact_name: trimmedName };
+          }
+          return prev;
+        });
+        
+        // Close inline editing immediately for better UX
+        setIsEditingNameInline(false);
+        
+        // Update conversation contact_name in database
         await updateConversation.mutateAsync({
           id: selectedConversation.id,
           contact_name: trimmedName,
         });
-        
-        // Also update newlyCreatedConversation if it's the same one (for immediate UI sync)
-        if (newlyCreatedConversation && newlyCreatedConversation.id === selectedConversation.id) {
-          setNewlyCreatedConversation((prev: any) => prev ? { ...prev, contact_name: trimmedName } : null);
-        }
         
         // Update linked client name if exists
         if (selectedConversation.client_id) {
@@ -2081,11 +2099,15 @@ export default function Conversations() {
           });
         }
         
-        setIsEditingNameInline(false);
+        // Force invalidate to sync with server
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        
         toast({ title: "Nome atualizado!" });
       } catch (error) {
         console.error("Erro ao atualizar nome:", error);
         toast({ title: "Erro ao salvar nome", variant: "destructive" });
+        // Revert on error
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
     }
   };
