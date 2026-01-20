@@ -700,7 +700,7 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Fetching QR from: ${apiUrl}/instance/connect/${instance.instance_name}`);
 
-        const qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+        let qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
           method: "GET",
           headers: {
             apikey: instance.api_key || "",
@@ -709,6 +709,60 @@ serve(async (req) => {
         });
 
         console.log(`[Evolution API] Get QR code response status: ${qrResponse.status}`);
+
+        // If 404 - instance doesn't exist in Evolution API, recreate it
+        if (qrResponse.status === 404) {
+          console.log(`[Evolution API] Instance ${instance.instance_name} not found in Evolution, recreating...`);
+          
+          try {
+            // Create the instance in Evolution
+            const createResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+              method: "POST",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                instanceName: instance.instance_name,
+                token: instance.api_key,
+                qrcode: true,
+              }),
+            }, 30000);
+            
+            if (createResponse.ok) {
+              console.log(`[Evolution API] Instance recreated successfully`);
+              
+              // Configure webhook for the recreated instance
+              await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+              }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
+              
+              // Wait a moment for Evolution to initialize
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Try to get QR code again
+              qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                method: "GET",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+              });
+            } else {
+              const createError = await safeReadResponseText(createResponse);
+              console.error(`[Evolution API] Failed to recreate instance:`, createError);
+              throw new Error("Não foi possível recriar a instância no servidor Evolution. Tente novamente.");
+            }
+          } catch (recreateError: any) {
+            console.error(`[Evolution API] Recreate error:`, recreateError);
+            throw new Error(recreateError.message || "Erro ao recriar instância");
+          }
+        }
 
         if (!qrResponse.ok) {
           const errorText = await safeReadResponseText(qrResponse);
@@ -1306,6 +1360,90 @@ serve(async (req) => {
         if (!restartResponse.ok) {
           const errorText = await safeReadResponseText(restartResponse);
           console.error(`[Evolution API] Restart failed:`, errorText);
+          
+          // If 404 - instance doesn't exist in Evolution API, try to recreate it
+          if (restartResponse.status === 404) {
+            console.log(`[Evolution API] Instance not found in Evolution, attempting to recreate...`);
+            
+            // Try to create the instance again
+            try {
+              const createResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  instanceName: instance.instance_name,
+                  token: instance.api_key,
+                  qrcode: true,
+                }),
+              }, 30000);
+              
+              if (createResponse.ok) {
+                console.log(`[Evolution API] Instance recreated successfully, now getting QR code...`);
+                
+                // Get QR code after recreation
+                const qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                  method: "GET",
+                  headers: {
+                    apikey: instance.api_key || "",
+                    "Content-Type": "application/json",
+                  },
+                });
+                
+                if (qrResponse.ok) {
+                  const qrData = await qrResponse.json();
+                  const qrCode = qrData.base64 || qrData.qrcode?.base64;
+                  
+                  // Update DB to awaiting_qr
+                  await supabaseClient
+                    .from("whatsapp_instances")
+                    .update({ 
+                      status: "awaiting_qr", 
+                      awaiting_qr: true,
+                      updated_at: new Date().toISOString() 
+                    })
+                    .eq("id", body.instanceId);
+                  
+                  // Configure webhook for the recreated instance
+                  await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+                    method: "POST",
+                    headers: {
+                      apikey: instance.api_key || "",
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+                  }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
+                  
+                  return new Response(JSON.stringify({ 
+                    success: true, 
+                    message: "Instância recriada. Escaneie o QR Code.",
+                    recreated: true,
+                    qrCode,
+                    needsQR: true,
+                  }), {
+                    headers: { ...corsHeaders, "Content-Type": "application/json" },
+                  });
+                }
+              }
+            } catch (recreateError) {
+              console.error(`[Evolution API] Failed to recreate instance:`, recreateError);
+            }
+            
+            // If recreation failed, mark as awaiting_qr and return helpful error
+            await supabaseClient
+              .from("whatsapp_instances")
+              .update({ 
+                status: "awaiting_qr", 
+                awaiting_qr: true,
+                updated_at: new Date().toISOString() 
+              })
+              .eq("id", body.instanceId);
+            
+            throw new Error("Instância não encontrada no servidor. Clique em 'Conectar' para recriar e gerar novo QR Code.");
+          }
+          
           throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
         }
 
