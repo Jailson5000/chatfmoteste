@@ -3073,9 +3073,10 @@ serve(async (req) => {
           updated_at: new Date().toISOString() 
         };
 
-        // When connected, reset manual_disconnect flag to allow future auto-reconnects
+        // When connected, reset flags to allow future auto-reconnects
         if (dbStatus === 'connected') {
           updatePayload.manual_disconnect = false;
+          updatePayload.awaiting_qr = false; // QR was scanned successfully
         }
 
         // When connected, fetch and store phone number if missing

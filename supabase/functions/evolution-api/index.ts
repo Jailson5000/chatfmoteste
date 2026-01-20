@@ -734,11 +734,29 @@ serve(async (req) => {
         const status = qrData.state || qrData.status || qrData.instance?.state || "unknown";
         console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}`);
 
-        // Update instance status if connected and reassociate orphans
+        // Update instance status based on state
         if (status === "open" || status === "connected") {
+          // Connected - reset all disconnect/waiting flags
           await supabaseClient
             .from("whatsapp_instances")
-            .update({ status: "connected", updated_at: new Date().toISOString() })
+            .update({ 
+              status: "connected", 
+              awaiting_qr: false,
+              manual_disconnect: false,
+              updated_at: new Date().toISOString() 
+            })
+            .eq("id", body.instanceId);
+        } else if (qrCode) {
+          // QR code returned - mark as awaiting QR scan
+          // This prevents auto-reconnect from trying to reconnect while user is viewing QR
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({ 
+              status: "awaiting_qr", 
+              awaiting_qr: true,
+              manual_disconnect: false, // Reset manual disconnect since user is trying to connect
+              updated_at: new Date().toISOString() 
+            })
             .eq("id", body.instanceId);
           
           // Reassociate orphan clients/conversations

@@ -3982,6 +3982,7 @@ export type Database = {
           api_key: string | null
           api_key_encrypted: boolean | null
           api_url: string
+          awaiting_qr: boolean | null
           created_at: string
           default_assigned_to: string | null
           default_automation_id: string | null
@@ -4007,6 +4008,7 @@ export type Database = {
           api_key?: string | null
           api_key_encrypted?: boolean | null
           api_url: string
+          awaiting_qr?: boolean | null
           created_at?: string
           default_assigned_to?: string | null
           default_automation_id?: string | null
@@ -4032,6 +4034,7 @@ export type Database = {
           api_key?: string | null
           api_key_encrypted?: boolean | null
           api_url?: string
+          awaiting_qr?: boolean | null
           created_at?: string
           default_assigned_to?: string | null
           default_automation_id?: string | null
