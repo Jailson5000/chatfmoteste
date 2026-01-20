@@ -875,11 +875,22 @@ serve(async (req) => {
         console.log(`[Evolution API] Status response:`, JSON.stringify(statusData));
 
         const state = statusData.state || statusData.instance?.state || "unknown";
-        let dbStatus = "disconnected";
+
+        // IMPORTANT: keep awaiting_qr stable.
+        // The frontend polls get_status frequently; if we downgrade awaiting_qr to connecting/disconnected,
+        // the UI flips back to "Conectando" and the system may look like it's stuck in a reconnection loop.
+        const dbIsAwaitingQr = instance.awaiting_qr === true || instance.status === "awaiting_qr";
+
+        let dbStatus: "connected" | "connecting" | "disconnected" | "awaiting_qr" = "disconnected";
 
         if (state === "open" || state === "connected") {
           dbStatus = "connected";
-        } else if (state === "connecting" || state === "qr") {
+        } else if (state === "qr") {
+          dbStatus = "awaiting_qr";
+        } else if (dbIsAwaitingQr) {
+          // Preserve awaiting_qr when DB says we are waiting for a scan
+          dbStatus = "awaiting_qr";
+        } else if (state === "connecting") {
           dbStatus = "connecting";
         }
 
@@ -909,6 +920,15 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         };
         if (phoneNumberToSave) updatePayload.phone_number = phoneNumberToSave;
+
+        // Only mutate flags when we have a definitive state
+        if (dbStatus === "connected") {
+          updatePayload.awaiting_qr = false;
+          updatePayload.manual_disconnect = false;
+        } else if (state === "qr") {
+          updatePayload.awaiting_qr = true;
+          updatePayload.manual_disconnect = false;
+        }
 
         console.log(`[Evolution API] Updating instance ${body.instanceId} to status: ${dbStatus}`);
 
