@@ -21,10 +21,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
-import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts } from "@/lib/billing-config";
+import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts, AdditionalBreakdown } from "@/lib/billing-config";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
+import { generateInvoicePDF } from "@/lib/invoiceGenerator";
 import {
   Dialog,
   DialogContent,
@@ -129,7 +130,34 @@ export function MyPlanSettings() {
   };
 
   const handleDownloadInvoice = () => {
-    toast.info("Em breve você poderá baixar suas faturas por aqui. Por enquanto, entre em contato com o suporte.");
+    if (!companyData || !plan || !billingInfo) {
+      toast.error("Não foi possível gerar a fatura. Dados incompletos.");
+      return;
+    }
+
+    try {
+      generateInvoicePDF({
+        companyName: companyData.name || "Empresa",
+        companyDocument: companyData.document || "",
+        companyEmail: companyData.email || "",
+        planName: plan.name || "Plano",
+        planPrice: plan.price || 0,
+        billingPeriod: currentBillingPeriod,
+        breakdown: billingInfo.breakdown as AdditionalBreakdown,
+        totalMonthly: billingInfo.totalMonthly,
+        usage: usageData ? {
+          users: { current: usageData.current_users || 0, max: usageData.effective_max_users || 0 },
+          instances: { current: usageData.current_instances || 0, max: usageData.effective_max_instances || 0 },
+          agents: { current: usageData.current_agents || 0, max: usageData.effective_max_agents || 0 },
+          aiConversations: { current: usageData.current_ai_conversations || 0, max: usageData.effective_max_ai_conversations || 0 },
+          ttsMinutes: { current: Math.round(usageData.current_tts_minutes || 0), max: usageData.effective_max_tts_minutes || 0 },
+        } : undefined,
+      });
+      toast.success("Fatura gerada com sucesso!");
+    } catch (error) {
+      console.error("Erro ao gerar fatura:", error);
+      toast.error("Erro ao gerar a fatura. Tente novamente.");
+    }
   };
 
   const handleContactSupport = () => {
