@@ -35,34 +35,32 @@ export function LandingPage() {
   const plans = [
     {
       name: "BASIC",
-      price: "199",
-      description: "Ideal para pequenos negócios ou profissionais que querem iniciar a automação de atendimentos com IA.",
+      price: "197",
+      description: "Para pequenos negócios que estão começando com automação e IA.",
       items: [
-        "200 conversas com IA por mês",
-        "10 minutos de áudio IA por mês",
-        "2 usuários",
+        "200 conversas com IA",
+        "5 minutos de áudio",
         "1 WhatsApp conectado",
+        "2 usuários",
         "1 agente de IA",
-        "IA BASIC para atendimento",
-        "Transcrição de áudio",
-        "Respostas automáticas essenciais",
+        "Automação essencial",
         "Mensagens rápidas",
+        "Respostas automáticas",
       ],
       cta: "Começar agora",
     },
     {
       name: "STARTER",
       price: "497",
-      description: "Para quem busca mais capacidade e recursos avançados de automação.",
+      description: "Mais organização e produtividade para equipes em crescimento.",
       items: [
-        "250 conversas com IA por mês",
-        "30 minutos de áudio IA por mês",
+        "200 conversas com IA",
+        "20 minutos de áudio",
+        "2 WhatsApps conectados",
         "4 usuários",
-        "1 WhatsApp conectado",
         "2 agentes de IA",
         "Tudo do plano Basic",
         "Transcrição de áudio e imagens",
-        "Mídias e mensagens rápidas",
         "Mensagens agendadas",
       ],
       cta: "Começar agora",
@@ -70,78 +68,87 @@ export function LandingPage() {
     {
       name: "PROFESSIONAL",
       price: "897",
-      description: "Para empresas em crescimento que precisam de mais volume e flexibilidade.",
+      description: "Mais volume, performance e flexibilidade para escalar o atendimento.",
       items: [
-        "500 conversas com IA por mês",
-        "40 minutos de áudio IA por mês",
+        "500 conversas com IA",
+        "30 minutos de áudio",
+        "4 WhatsApps conectados",
         "5 usuários",
-        "2 WhatsApps conectados",
         "3 agentes de IA",
         "Tudo do plano Starter",
         "IA avançada para conversação",
         "Maior capacidade operacional",
       ],
-      cta: "Quero escalar meu atendimento",
+      cta: "Escalar meu atendimento",
       popular: true,
     },
     {
       name: "ENTERPRISE",
-      price: "1.697",
-      description: "Para operações maiores, empresas estruturadas e alto volume de atendimento.",
+      price: "1.497",
+      startingFrom: true,
+      description: "Para operações estruturadas que precisam escalar rápido, com controle total.",
       items: [
-        "1000 conversas com IA por mês",
-        "80 minutos de áudio IA por mês",
+        "600 conversas com IA",
+        "60 minutos de áudio",
+        "6 WhatsApps conectados",
         "10 usuários",
-        "4 WhatsApps conectados",
         "10 agentes de IA",
-        "Tudo do plano Professional",
-        "Suporte exclusivo",
-        "Estrutura completa para escala",
+        "Onboarding assistido",
+        "SLA e suporte prioritário",
+        "Modelo flexível de consumo",
       ],
-      cta: "Começar agora",
+      cta: "Falar com especialista",
+      isEnterprise: true,
     },
+  ];
+
+  const additionalPricing = [
+    { item: "Conversa adicional com IA", price: "R$ 0,59 / conversa" },
+    { item: "Minuto adicional de áudio", price: "R$ 1,90 / minuto" },
+    { item: "WhatsApp adicional", price: "R$ 49 / mês" },
+    { item: "Atendente adicional", price: "R$ 29,90 / mês" },
   ];
 
   const faqs = [
     {
-      question: "O que é o MiauChat?",
+      question: "O que acontece se eu ultrapassar o limite do meu plano?",
       answer:
-        "O MiauChat é uma plataforma de atendimento com Inteligência Artificial que permite automatizar conversas no WhatsApp. Nossos Agentes IA qualificam leads, respondem dúvidas, agendam reuniões e direcionam clientes para vendas — tudo 24 horas por dia, 7 dias por semana.",
+        "Nada muda na sua operação. O sistema continua funcionando normalmente e o consumo adicional é cobrado apenas pelo excedente, conforme tabela de preços adicionais.",
     },
     {
-      question: "Como funciona o Agente de IA?",
+      question: "Vou ficar sem atendimento se atingir o limite?",
       answer:
-        "O Agente IA é treinado com informações do seu negócio: produtos, serviços, tom de voz e objetivos. Ele conversa de forma natural e humanizada, entendendo o contexto das mensagens e respondendo de maneira precisa e empática.",
+        "Não. A plataforma foi pensada para acompanhar o crescimento do seu negócio sem interrupções.",
+    },
+    {
+      question: "Posso mudar de plano depois?",
+      answer:
+        "Sim. Você pode fazer upgrade ou downgrade a qualquer momento, conforme a necessidade da sua operação.",
+    },
+    {
+      question: "O plano Enterprise tem limite?",
+      answer:
+        "O Enterprise funciona com um modelo flexível baseado em consumo, ideal para operações maiores e em crescimento contínuo.",
+    },
+    {
+      question: "O áudio consome muito?",
+      answer:
+        "O uso de áudio é opcional. Você pode escolher quando utilizar e acompanhar tudo em tempo real para manter o controle.",
+    },
+    {
+      question: "Preciso falar com vendas para contratar?",
+      answer:
+        "Apenas no plano Enterprise. Os demais planos podem ser contratados diretamente pelo site.",
+    },
+    {
+      question: "A IA substitui meu time?",
+      answer:
+        "Não. Ela automatiza tarefas repetitivas e melhora a produtividade, permitindo que sua equipe foque no que realmente importa.",
     },
     {
       question: "Preciso de conhecimento técnico para usar?",
       answer:
-        "Não! O MiauChat foi desenvolvido para ser simples e intuitivo. Nossa equipe configura o Agente IA para você, e o painel de controle é fácil de usar. Você não precisa programar nada.",
-    },
-    {
-      question: "Posso integrar com meu CRM ou outras ferramentas?",
-      answer:
-        "Sim! O plano Enterprise oferece API completa e integrações avançadas com CRMs, ERPs e outras ferramentas que sua empresa já utiliza.",
-    },
-    {
-      question: "Qual a diferença entre os planos?",
-      answer:
-        "O plano Starter é ideal para começar com 250 conversas IA, 30 min de áudio, 4 membros e 1 agente. O Professional oferece 500 conversas, 40 min de áudio e 4 agentes. O Enterprise é para operações robustas com 1000 conversas, 60 min de áudio, 20 membros e 20 agentes.",
-    },
-    {
-      question: "Existe período de teste ou contrato mínimo?",
-      answer:
-        "Oferecemos demonstração gratuita para você conhecer a plataforma. Não há contrato mínimo de fidelidade — você pode cancelar quando quiser.",
-    },
-    {
-      question: "Como é o suporte ao cliente?",
-      answer:
-        "Todos os planos incluem suporte por chat e email. O plano Enterprise conta com suporte prioritário e SLA dedicada para garantir atendimento rápido.",
-    },
-    {
-      question: "O MiauChat funciona com grupos do WhatsApp?",
-      answer:
-        "Atualmente, o MiauChat é focado em conversas individuais (1:1) para atendimento e vendas. Funcionalidades para grupos estão em nosso roadmap.",
+        "Não! O MiauChat foi desenvolvido para ser simples e intuitivo. Nossa equipe configura o Agente IA para você, e o painel de controle é fácil de usar.",
     },
   ];
 
@@ -199,7 +206,7 @@ export function LandingPage() {
             </Link>
             <Button
               className="bg-red-600 hover:bg-red-500 text-white h-10 px-6 rounded-xl"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
             >
               Começar
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -260,7 +267,7 @@ export function LandingPage() {
             <Button
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "697" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
             >
               Quero conhecer o MIAUCHAT
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -422,13 +429,13 @@ export function LandingPage() {
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-8">
             <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
-              Planos e Preços
+              💼 Planos e Preços
             </p>
             <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold">
-              Escolha o plano ideal
+              Automação de atendimento com IA
             </h2>
-            <p className="mt-3 text-white/40 text-base">
-              Soluções para empresas de todos os tamanhos
+            <p className="mt-3 text-white/50 text-base max-w-2xl mx-auto">
+              Planos flexíveis, sem desperdício, pensados para escalar com previsibilidade.
             </p>
           </div>
 
@@ -468,17 +475,20 @@ export function LandingPage() {
                 }`}
               >
                 {plan.popular && (
-                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                    Mais Popular
+                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                    ⭐ Mais Escolhido
                   </div>
                 )}
                 <div>
                   <p className="text-base font-bold tracking-wide">{plan.name}</p>
-                  <p className="text-xs text-white/40 mt-1">
+                  <p className="text-xs text-white/40 mt-1 min-h-[32px]">
                     {plan.description}
                   </p>
                 </div>
                 <div className="mt-4 mb-4">
+                  {plan.startingFrom && (
+                    <span className="text-white/40 text-xs">A partir de </span>
+                  )}
                   <span className="text-white/40 text-xs">R$</span>
                   <span className="text-3xl font-bold">{plan.price}</span>
                   <span className="text-white/40 text-sm"> / mês</span>
@@ -495,7 +505,10 @@ export function LandingPage() {
                   ))}
                 </ul>
                 <Button
-                  onClick={() => handlePlanClick({ name: plan.name, price: plan.price })}
+                  onClick={() => plan.isEnterprise 
+                    ? window.open("https://wa.me/5563999540484?text=Olá! Quero saber mais sobre o plano Enterprise", "_blank")
+                    : handlePlanClick({ name: plan.name, price: plan.price })
+                  }
                   className={`w-full h-10 rounded-lg text-sm font-medium ${
                     plan.popular
                       ? "bg-red-600 hover:bg-red-500 text-white"
@@ -506,6 +519,33 @@ export function LandingPage() {
                 </Button>
               </div>
             ))}
+          </div>
+
+          {/* Consumo Adicional */}
+          <div className="mt-12 p-6 rounded-2xl border border-white/[0.06] bg-white/[0.02]">
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-bold flex items-center justify-center gap-2">
+                ➕ Consumo adicional <span className="text-white/40 font-normal text-sm">(escala sob demanda)</span>
+              </h3>
+              <p className="text-sm text-white/50 mt-2">
+                Se sua operação crescer, você continua usando a plataforma normalmente. O consumo adicional é cobrado apenas pelo que for excedido.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {additionalPricing.map((item, i) => (
+                <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+                  <span className="text-sm text-white/70">{item.item}</span>
+                  <span className="text-sm font-semibold text-red-400">{item.price}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Mensagem de escala */}
+          <div className="mt-8 text-center">
+            <p className="text-white/40 text-sm">
+              🚀 <span className="text-white/60 font-medium">Cresça sem desperdício</span> — Comece com o plano ideal e adicione capacidade conforme sua demanda aumenta.
+            </p>
           </div>
         </div>
       </section>
