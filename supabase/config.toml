@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.widget-messages]
 verify_jwt = false
+
+[functions.auto-reconnect-instances]
+verify_jwt = false

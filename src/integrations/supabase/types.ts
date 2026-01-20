@@ -3993,10 +3993,12 @@ export type Database = {
           instance_id: string | null
           instance_name: string
           last_alert_sent_at: string | null
+          last_reconnect_attempt_at: string | null
           last_webhook_at: string | null
           last_webhook_event: string | null
           law_firm_id: string
           phone_number: string | null
+          reconnect_attempts_count: number | null
           status: string
           updated_at: string
         }
@@ -4015,10 +4017,12 @@ export type Database = {
           instance_id?: string | null
           instance_name: string
           last_alert_sent_at?: string | null
+          last_reconnect_attempt_at?: string | null
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id: string
           phone_number?: string | null
+          reconnect_attempts_count?: number | null
           status?: string
           updated_at?: string
         }
@@ -4037,10 +4041,12 @@ export type Database = {
           instance_id?: string | null
           instance_name?: string
           last_alert_sent_at?: string | null
+          last_reconnect_attempt_at?: string | null
           last_webhook_at?: string | null
           last_webhook_event?: string | null
           law_firm_id?: string
           phone_number?: string | null
+          reconnect_attempts_count?: number | null
           status?: string
           updated_at?: string
         }
