@@ -331,6 +331,7 @@ serve(async (req) => {
       }
 
       const workflow = await getResponse.json();
+      const changes: string[] = [];
 
       // Find the webhook node
       const webhookNode = workflow.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
@@ -347,8 +348,15 @@ serve(async (req) => {
           responseContentType: 'application/json',
         },
       };
+      changes.push('Webhook configurado com responseMode: lastNode');
 
-      // Find HTTP Request nodes that send to Evolution API and mark for removal
+      // Find ALL existing respondToWebhook nodes
+      const existingRespondNodes = workflow.nodes.filter((n: any) => 
+        n.type === 'n8n-nodes-base.respondToWebhook'
+      );
+      console.log(`Found ${existingRespondNodes.length} existing respondToWebhook nodes`);
+
+      // Find HTTP Request nodes that send to Evolution API (should be removed)
       const httpNodesToRemove = workflow.nodes
         .filter((n: any) => 
           n.type === 'n8n-nodes-base.httpRequest' && 
@@ -359,18 +367,66 @@ serve(async (req) => {
 
       console.log('Nodes HTTP para remover:', httpNodesToRemove);
 
-      // Find the last agent node (the one that generates the response)
+      // Find agent nodes (the ones that generate responses)
       const agentNodes = workflow.nodes.filter((n: any) => 
         n.type === '@n8n/n8n-nodes-langchain.agent'
       );
 
-      // Add a "Respond to Webhook" node if it doesn't exist
-      const respondNodeExists = workflow.nodes.some((n: any) => 
-        n.type === 'n8n-nodes-base.respondToWebhook'
-      );
+      // Check if any respondToWebhook node is PROPERLY CONNECTED to an output
+      const checkNodeIsConnected = (nodeName: string): boolean => {
+        for (const sourceNode in workflow.connections) {
+          const connections = workflow.connections[sourceNode];
+          if (connections?.main) {
+            for (const outputArray of connections.main) {
+              if (outputArray?.some((conn: any) => conn.node === nodeName)) {
+                return true;
+              }
+            }
+          }
+        }
+        return false;
+      };
 
-      if (!respondNodeExists && agentNodes.length > 0) {
-        // Find the position of the last agent
+      // Remove ALL unconnected respondToWebhook nodes (they cause the error!)
+      const unconnectedRespondNodes = existingRespondNodes.filter(
+        (n: any) => !checkNodeIsConnected(n.name)
+      );
+      
+      if (unconnectedRespondNodes.length > 0) {
+        console.log(`Removing ${unconnectedRespondNodes.length} unconnected respondToWebhook nodes`);
+        const nodesToRemove = unconnectedRespondNodes.map((n: any) => n.name);
+        workflow.nodes = workflow.nodes.filter((n: any) => !nodesToRemove.includes(n.name));
+        
+        // Also remove any connections FROM these nodes
+        for (const nodeName of nodesToRemove) {
+          delete workflow.connections[nodeName];
+        }
+        
+        changes.push(`Removidos ${unconnectedRespondNodes.length} nodes respondToWebhook não conectados`);
+      }
+
+      // Now check again for connected respondToWebhook nodes
+      const connectedRespondNodes = existingRespondNodes.filter(
+        (n: any) => checkNodeIsConnected(n.name)
+      );
+      
+      // If there's already a connected respond node, we're done
+      if (connectedRespondNodes.length > 0) {
+        console.log('Found connected respondToWebhook node, checking format...');
+        
+        // Update the respond node to use correct format
+        for (const respondNode of connectedRespondNodes) {
+          const nodeInWorkflow = workflow.nodes.find((n: any) => n.name === respondNode.name);
+          if (nodeInWorkflow) {
+            nodeInWorkflow.parameters = {
+              respondWith: 'json',
+              responseBody: '={{ JSON.stringify({ response: $json.output || $json.text || $json.message || $json, action: "send_text" }) }}',
+            };
+          }
+        }
+        changes.push('Node respondToWebhook atualizado com formato correto');
+      } else if (agentNodes.length > 0) {
+        // No connected respond node exists, need to add one
         const lastAgent = agentNodes[agentNodes.length - 1];
         
         const respondNode = {
@@ -381,11 +437,12 @@ serve(async (req) => {
           position: [lastAgent.position[0] + 400, lastAgent.position[1]],
           parameters: {
             respondWith: 'json',
-            responseBody: '={{ JSON.stringify({ response: $json.output, action: "send_text" }) }}',
+            responseBody: '={{ JSON.stringify({ response: $json.output || $json.text || $json.message || $json, action: "send_text" }) }}',
           },
         };
 
         workflow.nodes.push(respondNode);
+        changes.push('Node "Responder MiauChat" adicionado');
 
         // Connect agent to respond node
         if (!workflow.connections[lastAgent.name]) {
@@ -403,6 +460,7 @@ serve(async (req) => {
             index: 0,
           });
         }
+        changes.push('Agente conectado ao node de resposta');
       }
 
       // Clean workflow object - N8N API requires specific fields
@@ -427,18 +485,6 @@ serve(async (req) => {
         },
       };
 
-      // Remove the HTTP nodes that were sending directly to Evolution
-      // workflow.nodes = workflow.nodes.filter((n: any) => !httpNodesToRemove.includes(n.name));
-      
-      // Remove connections to these nodes
-      // for (const key in workflow.connections) {
-      //   if (workflow.connections[key].main) {
-      //     workflow.connections[key].main = workflow.connections[key].main.map((outputs: any[]) =>
-      //       outputs.filter((conn: any) => !httpNodesToRemove.includes(conn.node))
-      //     );
-      //   }
-      // }
-
       // Update the workflow using clean object
       const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
         method: 'PUT',
@@ -458,9 +504,11 @@ serve(async (req) => {
         workflow: result,
         changes: {
           webhookUpdated: true,
-          respondNodeAdded: !respondNodeExists,
+          unconnectedNodesRemoved: unconnectedRespondNodes.length,
+          respondNodeAdded: connectedRespondNodes.length === 0 && agentNodes.length > 0,
           httpNodesIdentified: httpNodesToRemove,
-          message: 'Workflow atualizado para integração MiauChat. O node "Responder MiauChat" foi adicionado para retornar a resposta no formato correto.'
+          changesList: changes,
+          message: `Workflow corrigido: ${changes.join('; ')}`
         }
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
