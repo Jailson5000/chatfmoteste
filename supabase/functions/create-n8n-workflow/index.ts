@@ -298,9 +298,26 @@ serve(async (req) => {
 
         // Create new workflow based on template - starts INACTIVE
         // Note: n8n API does not accept tags on workflow creation (read-only field)
+        
+        // CRITICAL: Update webhook path in nodes to use unique subdomain/company_id
+        const uniqueWebhookPath = subdomain || company_id;
+        const modifiedNodes = templateWorkflow.nodes.map((node: any) => {
+          if (node.type === 'n8n-nodes-base.webhook') {
+            console.log(`Updating webhook path from "${node.parameters?.path}" to "${uniqueWebhookPath}"`);
+            return {
+              ...node,
+              parameters: {
+                ...node.parameters,
+                path: uniqueWebhookPath,
+              },
+            };
+          }
+          return node;
+        });
+        
         const newWorkflowPayload = {
           name: workflowName,
-          nodes: templateWorkflow.nodes,
+          nodes: modifiedNodes,
           connections: templateWorkflow.connections,
           settings: templateWorkflow.settings,
           staticData: templateWorkflow.staticData || null,
