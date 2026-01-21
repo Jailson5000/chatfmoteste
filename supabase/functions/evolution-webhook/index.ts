@@ -1214,13 +1214,17 @@ async function processQueuedMessages(
 // =============================================================================
 
 type PlanType = 'starter' | 'professional' | 'enterprise' | 'unknown';
-type ConversationAI = 'gemini' | 'gpt';
+type ConversationAI = 'gemini' | 'gpt' | 'n8n';
 
 interface AIProviderConfig {
   planType: PlanType;
   conversationAI: ConversationAI;
   capabilities: Record<string, boolean>;
   openaiApiKey: string | null;
+  // N8N specific config
+  n8nWebhookUrl: string | null;
+  n8nWebhookSecret: string | null;
+  useN8N: boolean;
 }
 
 // Determine plan type from plan name
@@ -1252,7 +1256,7 @@ function getConversationAI(planType: PlanType): ConversationAI {
   }
 }
 
-// Get AI provider configuration based on PLAN MATRIX (not tenant settings)
+// Get AI provider configuration based on PLAN MATRIX + N8N override
 async function getAIProviderConfig(
   supabaseClient: any, 
   lawFirmId: string
@@ -1267,25 +1271,41 @@ async function getAIProviderConfig(
 
     const planName = (company?.plans as any)?.name || '';
     const planType = getPlanType(planName);
-    const conversationAI = getConversationAI(planType);
+    let conversationAI = getConversationAI(planType);
 
-    logDebug('AI_MATRIX', `Plan detected: ${planName} -> ${planType} -> Conversation AI: ${conversationAI}`, { 
+    logDebug('AI_MATRIX', `Plan detected: ${planName} -> ${planType} -> Base AI: ${conversationAI}`, { 
       lawFirmId,
       planName,
       planType,
       conversationAI
     });
 
+    // Fetch tenant settings to check for N8N and OpenAI config
+    const { data: settings } = await supabaseClient
+      .from('law_firm_settings')
+      .select('ai_provider, openai_api_key, n8n_webhook_url, n8n_webhook_secret')
+      .eq('law_firm_id', lawFirmId)
+      .maybeSingle();
+
+    // Check if N8N is configured and enabled
+    const n8nWebhookUrl = settings?.n8n_webhook_url || null;
+    const n8nWebhookSecret = settings?.n8n_webhook_secret || null;
+    const aiProvider = settings?.ai_provider || 'internal';
+    const useN8N = aiProvider === 'n8n' && Boolean(n8nWebhookUrl);
+
+    // If N8N is configured and enabled, override the conversation AI
+    if (useN8N) {
+      conversationAI = 'n8n';
+      logDebug('AI_MATRIX', `N8N OVERRIDE - Using N8N webhook for conversations`, { 
+        lawFirmId,
+        n8nWebhookUrl: n8nWebhookUrl?.substring(0, 50) + '...',
+        originalAI: getConversationAI(planType)
+      });
+    }
+
     // For GPT plans (Professional/Enterprise), we need OpenAI key
     let openaiApiKey: string | null = null;
     if (conversationAI === 'gpt') {
-      // Try to get from tenant settings first
-      const { data: settings } = await supabaseClient
-        .from('law_firm_settings')
-        .select('openai_api_key')
-        .eq('law_firm_id', lawFirmId)
-        .single();
-      
       // Use tenant key or fall back to global key
       openaiApiKey = settings?.openai_api_key || Deno.env.get('OPENAI_API_KEY') || null;
       
@@ -1305,6 +1325,9 @@ async function getAIProviderConfig(
         image_analysis: true // Always Gemini
       },
       openaiApiKey,
+      n8nWebhookUrl,
+      n8nWebhookSecret,
+      useN8N,
     };
   } catch (error) {
     logDebug('AI_MATRIX', 'Error fetching plan config, defaulting to Starter (Gemini)', { error });
@@ -1313,6 +1336,9 @@ async function getAIProviderConfig(
       conversationAI: 'gemini',
       capabilities: { auto_reply: true, summary: true, transcription: true, classification: true, image_analysis: true },
       openaiApiKey: null,
+      n8nWebhookUrl: null,
+      n8nWebhookSecret: null,
+      useN8N: false,
     };
   }
 }
@@ -2821,22 +2847,252 @@ async function processWithGPT(
   }
 }
 
-// Process automations - RESPECTS AI MATRIX BY PLAN (NO OVERRIDE ALLOWED)
+// =============================================================================
+// PROCESS WITH N8N - Send message to external N8N workflow
+// =============================================================================
+// This allows customers to use their own N8N workflow for AI processing
+// CRITICAL: Falls back to default AI (Gemini/GPT) if N8N fails
+// =============================================================================
+async function processWithN8N(
+  supabaseClient: any, 
+  context: AutomationContext, 
+  aiConfig: AIProviderConfig
+) {
+  if (!aiConfig.capabilities.auto_reply) {
+    logDebug('AI_MATRIX', 'auto_reply capability disabled, skipping N8N');
+    return;
+  }
+
+  if (!aiConfig.n8nWebhookUrl) {
+    logDebug('AI_MATRIX', 'N8N webhook URL not configured, falling back to default AI');
+    // Fallback to default AI based on plan
+    const fallbackAI = getConversationAI(aiConfig.planType);
+    if (fallbackAI === 'gpt') {
+      await processWithGPT(supabaseClient, context, { ...aiConfig, conversationAI: 'gpt' });
+    } else {
+      await processWithGemini(supabaseClient, context, { ...aiConfig, conversationAI: 'gemini' });
+    }
+    return;
+  }
+
+  logDebug('AI_MATRIX', `Processing with N8N (Plan: ${aiConfig.planType})`, { 
+    conversationId: context.conversationId,
+    webhookUrl: aiConfig.n8nWebhookUrl.substring(0, 50) + '...'
+  });
+
+  try {
+    // Get automation for context (still need it for logging and voice config)
+    const automation = await resolveAutomationForConversation(
+      supabaseClient,
+      context.lawFirmId,
+      context.conversationId
+    );
+
+    // Get client info for richer context
+    let clientInfo = {
+      phone: context.contactPhone,
+      name: context.contactName,
+    };
+
+    if (context.clientId) {
+      const { data: client } = await supabaseClient
+        .from('clients')
+        .select('name, phone, email, notes, custom_status_id')
+        .eq('id', context.clientId)
+        .maybeSingle();
+      
+      if (client) {
+        clientInfo = { ...clientInfo, ...client };
+      }
+    }
+
+    // Build N8N payload
+    const n8nPayload = {
+      event: 'new_message',
+      conversation_id: context.conversationId,
+      message: context.messageContent,
+      message_type: context.messageType,
+      client: clientInfo,
+      automation: automation ? {
+        id: automation.id,
+        name: automation.name,
+        prompt: automation.ai_prompt,
+      } : null,
+      context: {
+        law_firm_id: context.lawFirmId,
+        whatsapp_instance_id: context.instanceId,
+        remote_jid: context.remoteJid,
+        timestamp: new Date().toISOString(),
+      }
+    };
+
+    // Build headers
+    const n8nHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    // Add secret if configured
+    if (aiConfig.n8nWebhookSecret) {
+      n8nHeaders['X-Webhook-Secret'] = aiConfig.n8nWebhookSecret;
+      n8nHeaders['Authorization'] = `Bearer ${aiConfig.n8nWebhookSecret}`;
+    }
+
+    logDebug('AI_MATRIX', 'Sending to N8N webhook', { 
+      payloadSize: JSON.stringify(n8nPayload).length,
+      hasSecret: Boolean(aiConfig.n8nWebhookSecret)
+    });
+
+    // Call N8N with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+    const n8nResponse = await fetch(aiConfig.n8nWebhookUrl, {
+      method: 'POST',
+      headers: n8nHeaders,
+      body: JSON.stringify(n8nPayload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!n8nResponse.ok) {
+      const errorText = await n8nResponse.text();
+      logDebug('AI_MATRIX', 'N8N webhook failed', { 
+        status: n8nResponse.status, 
+        error: errorText.substring(0, 200)
+      });
+      throw new Error(`N8N returned ${n8nResponse.status}: ${errorText.substring(0, 100)}`);
+    }
+
+    const n8nResult = await n8nResponse.json();
+    
+    logDebug('AI_MATRIX', 'N8N response received', { 
+      hasResponse: !!n8nResult.response,
+      action: n8nResult.action || 'send_text'
+    });
+
+    // Handle N8N response
+    const aiResponse = n8nResult.response || n8nResult.text || n8nResult.message;
+    const action = n8nResult.action || 'send_text';
+
+    if (!aiResponse) {
+      logDebug('AI_MATRIX', 'N8N returned no response content');
+      return;
+    }
+
+    // Record AI conversation usage
+    if (automation) {
+      await recordAIConversationUsage(
+        supabaseClient,
+        context.lawFirmId,
+        context.conversationId,
+        automation.id,
+        automation.name
+      );
+    }
+
+    // Get voice configuration
+    const triggerConfig = automation?.trigger_config as Record<string, unknown> | null;
+    const agentVoiceId = triggerConfig?.voice_id as string | null;
+    const resolvedVoice = await resolveVoiceWithPrecedence(supabaseClient, context.lawFirmId, agentVoiceId);
+
+    const voiceConfig: VoiceConfig = {
+      enabled: Boolean(triggerConfig?.voice_enabled),
+      voiceId: resolvedVoice.voiceId,
+      source: resolvedVoice.source,
+    };
+
+    // Add AI agent info to context
+    const contextWithAgent = {
+      ...context,
+      automationId: automation?.id || undefined,
+      automationName: automation?.name || 'N8N Workflow',
+    };
+
+    // Send the response back to WhatsApp
+    const responseDelaySeconds =
+      Number((triggerConfig as any)?.response_delay_seconds ?? (triggerConfig as any)?.response_delay ?? 0) || 0;
+    
+    // Handle different actions from N8N
+    if (action === 'none' || action === 'skip') {
+      logDebug('AI_MATRIX', 'N8N requested no response (action: none/skip)');
+      return;
+    }
+
+    await sendAIResponseToWhatsApp(supabaseClient, contextWithAgent, aiResponse, voiceConfig, responseDelaySeconds);
+
+    // Log the N8N processing
+    await supabaseClient
+      .from('webhook_logs')
+      .insert({
+        automation_id: automation?.id || null,
+        direction: 'outgoing',
+        payload: {
+          provider: 'n8n',
+          webhook_url: aiConfig.n8nWebhookUrl.substring(0, 50) + '...',
+          automation_name: automation?.name || 'N8N Workflow',
+          conversation_id: context.conversationId,
+          message: context.messageContent,
+          response_sent: true,
+          action: action,
+        },
+        response: { response_length: aiResponse.length },
+        status_code: 200,
+      });
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logDebug('AI_MATRIX', 'Error processing with N8N, falling back to default AI', { error: errorMessage });
+
+    // Log the failure
+    await supabaseClient
+      .from('webhook_logs')
+      .insert({
+        automation_id: null,
+        direction: 'outgoing',
+        payload: {
+          provider: 'n8n',
+          webhook_url: aiConfig.n8nWebhookUrl?.substring(0, 50) + '...',
+          conversation_id: context.conversationId,
+          error: errorMessage,
+        },
+        status_code: 500,
+      });
+
+    // Fallback to default AI based on plan
+    logDebug('AI_MATRIX', `Falling back to ${getConversationAI(aiConfig.planType)} after N8N failure`);
+    const fallbackAI = getConversationAI(aiConfig.planType);
+    if (fallbackAI === 'gpt' && aiConfig.openaiApiKey) {
+      await processWithGPT(supabaseClient, context, { ...aiConfig, conversationAI: 'gpt', useN8N: false });
+    } else {
+      await processWithGemini(supabaseClient, context, { ...aiConfig, conversationAI: 'gemini', useN8N: false });
+    }
+  }
+}
+
+// Process automations - RESPECTS AI MATRIX BY PLAN + N8N OVERRIDE
 async function processAutomations(supabaseClient: any, context: AutomationContext) {
-  // Get AI configuration based on PLAN MATRIX
+  // Get AI configuration based on PLAN MATRIX + N8N check
   const aiConfig = await getAIProviderConfig(supabaseClient, context.lawFirmId);
   
   logDebug('AI_MATRIX', `Routing conversation based on plan matrix`, {
     planType: aiConfig.planType,
     conversationAI: aiConfig.conversationAI,
-    hasOpenAIKey: Boolean(aiConfig.openaiApiKey)
+    hasOpenAIKey: Boolean(aiConfig.openaiApiKey),
+    useN8N: aiConfig.useN8N
   });
 
-  // Route to correct AI based on PLAN (no manual override allowed)
+  // Route to correct AI based on PLAN + N8N override
   switch (aiConfig.conversationAI) {
+    case 'n8n':
+      // N8N override - customer has configured their own workflow
+      logDebug('AI_MATRIX', 'N8N OVERRIDE -> Routing to N8N Workflow');
+      await processWithN8N(supabaseClient, context, aiConfig);
+      break;
+
     case 'gemini':
-      // Starter plan -> Gemini via Lovable AI Gateway
-      logDebug('AI_MATRIX', 'STARTER PLAN -> Routing to GEMINI');
+      // Starter/Basic plan -> Gemini via Lovable AI Gateway
+      logDebug('AI_MATRIX', 'STARTER/BASIC PLAN -> Routing to GEMINI');
       await processWithGemini(supabaseClient, context, aiConfig);
       break;
       
@@ -2853,7 +3109,7 @@ async function processAutomations(supabaseClient: any, context: AutomationContex
   }
 }
 
-// (N8N routing removed - using AI Matrix only)
+// N8N routing now integrated into AI Matrix above
 
 // Evaluate if automation rules match the message context
 function evaluateAutomationRules(automation: any, context: AutomationContext): boolean {
