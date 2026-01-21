@@ -1,0 +1,484 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface N8nWorkflow {
+  id: string;
+  name: string;
+  nodes: any[];
+  connections: Record<string, any>;
+  settings?: Record<string, any>;
+  active?: boolean;
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Verify admin access
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Não autorizado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Token inválido' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check if user is admin
+    const { data: adminRole } = await supabase
+      .from('admin_user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+
+    if (!adminRole) {
+      return new Response(JSON.stringify({ error: 'Acesso negado - apenas administradores' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Get N8N settings from system_settings
+    const { data: settings } = await supabase
+      .from('system_settings')
+      .select('key, value')
+      .in('key', ['n8n_base_url', 'n8n_api_key']);
+
+    const n8nSettings: Record<string, string> = {};
+    settings?.forEach((s: any) => {
+      n8nSettings[s.key] = typeof s.value === 'string' ? s.value.replace(/^"|"$/g, '') : String(s.value);
+    });
+
+    const n8nBaseUrl = n8nSettings.n8n_base_url;
+    const n8nApiKey = n8nSettings.n8n_api_key;
+
+    if (!n8nBaseUrl || !n8nApiKey) {
+      return new Response(JSON.stringify({ error: 'Configurações do N8N não encontradas' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const body = await req.json();
+    const { action, workflowId, updates, nodeUpdates } = body;
+
+    const n8nHeaders = {
+      'X-N8N-API-KEY': n8nApiKey,
+      'Content-Type': 'application/json',
+    };
+
+    // GET - Fetch workflow
+    if (action === 'get') {
+      const response = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Erro ao buscar workflow: ${error}`);
+      }
+
+      const workflow = await response.json();
+      return new Response(JSON.stringify({ success: true, workflow }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // UPDATE - Update entire workflow
+    if (action === 'update') {
+      // First get the current workflow
+      const getResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!getResponse.ok) {
+        throw new Error('Erro ao buscar workflow atual');
+      }
+
+      const currentWorkflow = await getResponse.json();
+
+      // Merge updates
+      const updatedWorkflow = {
+        ...currentWorkflow,
+        ...updates,
+        nodes: updates.nodes || currentWorkflow.nodes,
+        connections: updates.connections || currentWorkflow.connections,
+      };
+
+      // Update the workflow
+      const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: n8nHeaders,
+        body: JSON.stringify(updatedWorkflow),
+      });
+
+      if (!updateResponse.ok) {
+        const error = await updateResponse.text();
+        throw new Error(`Erro ao atualizar workflow: ${error}`);
+      }
+
+      const result = await updateResponse.json();
+      return new Response(JSON.stringify({ success: true, workflow: result }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // UPDATE_NODE - Update specific node
+    if (action === 'update_node') {
+      const { nodeName, nodeConfig } = nodeUpdates;
+
+      // Get current workflow
+      const getResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!getResponse.ok) {
+        throw new Error('Erro ao buscar workflow atual');
+      }
+
+      const workflow = await getResponse.json();
+
+      // Find and update the specific node
+      const nodeIndex = workflow.nodes.findIndex((n: any) => n.name === nodeName);
+      if (nodeIndex === -1) {
+        return new Response(JSON.stringify({ error: `Node "${nodeName}" não encontrado` }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      workflow.nodes[nodeIndex] = {
+        ...workflow.nodes[nodeIndex],
+        ...nodeConfig,
+        parameters: {
+          ...workflow.nodes[nodeIndex].parameters,
+          ...nodeConfig.parameters,
+        },
+      };
+
+      // Update the workflow
+      const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: n8nHeaders,
+        body: JSON.stringify(workflow),
+      });
+
+      if (!updateResponse.ok) {
+        const error = await updateResponse.text();
+        throw new Error(`Erro ao atualizar node: ${error}`);
+      }
+
+      const result = await updateResponse.json();
+      return new Response(JSON.stringify({ success: true, workflow: result, updatedNode: nodeName }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ADD_NODE - Add a new node
+    if (action === 'add_node') {
+      const { newNode, connectFrom, connectTo } = nodeUpdates;
+
+      const getResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!getResponse.ok) {
+        throw new Error('Erro ao buscar workflow atual');
+      }
+
+      const workflow = await getResponse.json();
+
+      // Add the new node
+      workflow.nodes.push(newNode);
+
+      // Add connections if specified
+      if (connectFrom) {
+        if (!workflow.connections[connectFrom]) {
+          workflow.connections[connectFrom] = { main: [[]] };
+        }
+        workflow.connections[connectFrom].main[0].push({
+          node: newNode.name,
+          type: 'main',
+          index: 0,
+        });
+      }
+
+      if (connectTo) {
+        if (!workflow.connections[newNode.name]) {
+          workflow.connections[newNode.name] = { main: [[]] };
+        }
+        workflow.connections[newNode.name].main[0].push({
+          node: connectTo,
+          type: 'main',
+          index: 0,
+        });
+      }
+
+      const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: n8nHeaders,
+        body: JSON.stringify(workflow),
+      });
+
+      if (!updateResponse.ok) {
+        const error = await updateResponse.text();
+        throw new Error(`Erro ao adicionar node: ${error}`);
+      }
+
+      const result = await updateResponse.json();
+      return new Response(JSON.stringify({ success: true, workflow: result, addedNode: newNode.name }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // REMOVE_NODE - Remove a node
+    if (action === 'remove_node') {
+      const { nodeName } = nodeUpdates;
+
+      const getResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!getResponse.ok) {
+        throw new Error('Erro ao buscar workflow atual');
+      }
+
+      const workflow = await getResponse.json();
+
+      // Remove the node
+      workflow.nodes = workflow.nodes.filter((n: any) => n.name !== nodeName);
+
+      // Remove connections to/from this node
+      delete workflow.connections[nodeName];
+      for (const key in workflow.connections) {
+        if (workflow.connections[key].main) {
+          workflow.connections[key].main = workflow.connections[key].main.map((outputs: any[]) =>
+            outputs.filter((conn: any) => conn.node !== nodeName)
+          );
+        }
+      }
+
+      const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: n8nHeaders,
+        body: JSON.stringify(workflow),
+      });
+
+      if (!updateResponse.ok) {
+        const error = await updateResponse.text();
+        throw new Error(`Erro ao remover node: ${error}`);
+      }
+
+      const result = await updateResponse.json();
+      return new Response(JSON.stringify({ success: true, workflow: result, removedNode: nodeName }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ACTIVATE/DEACTIVATE
+    if (action === 'activate' || action === 'deactivate') {
+      const endpoint = action === 'activate' 
+        ? `${n8nBaseUrl}/api/v1/workflows/${workflowId}/activate`
+        : `${n8nBaseUrl}/api/v1/workflows/${workflowId}/deactivate`;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: n8nHeaders,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Erro ao ${action === 'activate' ? 'ativar' : 'desativar'} workflow: ${error}`);
+      }
+
+      const result = await response.json();
+      return new Response(JSON.stringify({ success: true, workflow: result }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // FIX_MIAUCHAT_INTEGRATION - Special action to fix MiauChat integration
+    if (action === 'fix_miauchat_integration') {
+      console.log('Iniciando correção da integração MiauChat...');
+
+      // Get current workflow
+      const getResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        headers: n8nHeaders,
+      });
+
+      if (!getResponse.ok) {
+        throw new Error('Erro ao buscar workflow atual');
+      }
+
+      const workflow = await getResponse.json();
+
+      // Find the webhook node
+      const webhookNode = workflow.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
+      if (!webhookNode) {
+        throw new Error('Node Webhook não encontrado');
+      }
+
+      // Update webhook to respond with last node
+      webhookNode.parameters = {
+        ...webhookNode.parameters,
+        responseMode: 'lastNode',
+        options: {
+          ...webhookNode.parameters?.options,
+          responseContentType: 'application/json',
+        },
+      };
+
+      // Find HTTP Request nodes that send to Evolution API and mark for removal
+      const httpNodesToRemove = workflow.nodes
+        .filter((n: any) => 
+          n.type === 'n8n-nodes-base.httpRequest' && 
+          n.parameters?.url?.includes('evo.') &&
+          n.parameters?.url?.includes('message/send')
+        )
+        .map((n: any) => n.name);
+
+      console.log('Nodes HTTP para remover:', httpNodesToRemove);
+
+      // Find the last agent node (the one that generates the response)
+      const agentNodes = workflow.nodes.filter((n: any) => 
+        n.type === '@n8n/n8n-nodes-langchain.agent'
+      );
+
+      // Add a "Respond to Webhook" node if it doesn't exist
+      const respondNodeExists = workflow.nodes.some((n: any) => 
+        n.type === 'n8n-nodes-base.respondToWebhook'
+      );
+
+      if (!respondNodeExists && agentNodes.length > 0) {
+        // Find the position of the last agent
+        const lastAgent = agentNodes[agentNodes.length - 1];
+        
+        const respondNode = {
+          id: crypto.randomUUID(),
+          name: 'Responder MiauChat',
+          type: 'n8n-nodes-base.respondToWebhook',
+          typeVersion: 1.1,
+          position: [lastAgent.position[0] + 400, lastAgent.position[1]],
+          parameters: {
+            respondWith: 'json',
+            responseBody: '={{ JSON.stringify({ response: $json.output, action: "send_text" }) }}',
+          },
+        };
+
+        workflow.nodes.push(respondNode);
+
+        // Connect agent to respond node
+        if (!workflow.connections[lastAgent.name]) {
+          workflow.connections[lastAgent.name] = { main: [[]] };
+        }
+        
+        // Replace connection to HTTP node with connection to Respond node
+        if (workflow.connections[lastAgent.name].main) {
+          workflow.connections[lastAgent.name].main[0] = workflow.connections[lastAgent.name].main[0]
+            .filter((conn: any) => !httpNodesToRemove.includes(conn.node));
+          
+          workflow.connections[lastAgent.name].main[0].push({
+            node: 'Responder MiauChat',
+            type: 'main',
+            index: 0,
+          });
+        }
+      }
+
+      // Clean workflow object - N8N API requires specific fields
+      const cleanWorkflow = {
+        name: workflow.name,
+        nodes: workflow.nodes.map((n: any) => {
+          const cleanNode: any = {
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            typeVersion: n.typeVersion,
+            position: n.position,
+            parameters: n.parameters,
+          };
+          if (n.credentials) cleanNode.credentials = n.credentials;
+          if (n.webhookId) cleanNode.webhookId = n.webhookId;
+          return cleanNode;
+        }),
+        connections: workflow.connections,
+        settings: {
+          executionOrder: workflow.settings?.executionOrder || 'v1',
+        },
+      };
+
+      // Remove the HTTP nodes that were sending directly to Evolution
+      // workflow.nodes = workflow.nodes.filter((n: any) => !httpNodesToRemove.includes(n.name));
+      
+      // Remove connections to these nodes
+      // for (const key in workflow.connections) {
+      //   if (workflow.connections[key].main) {
+      //     workflow.connections[key].main = workflow.connections[key].main.map((outputs: any[]) =>
+      //       outputs.filter((conn: any) => !httpNodesToRemove.includes(conn.node))
+      //     );
+      //   }
+      // }
+
+      // Update the workflow using clean object
+      const updateResponse = await fetch(`${n8nBaseUrl}/api/v1/workflows/${workflowId}`, {
+        method: 'PUT',
+        headers: n8nHeaders,
+        body: JSON.stringify(cleanWorkflow),
+      });
+
+      if (!updateResponse.ok) {
+        const error = await updateResponse.text();
+        throw new Error(`Erro ao atualizar workflow: ${error}`);
+      }
+
+      const result = await updateResponse.json();
+      
+      return new Response(JSON.stringify({ 
+        success: true, 
+        workflow: result,
+        changes: {
+          webhookUpdated: true,
+          respondNodeAdded: !respondNodeExists,
+          httpNodesIdentified: httpNodesToRemove,
+          message: 'Workflow atualizado para integração MiauChat. O node "Responder MiauChat" foi adicionado para retornar a resposta no formato correto.'
+        }
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: 'Ação não reconhecida' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('Erro no n8n-workflow-manager:', error);
+    return new Response(JSON.stringify({ 
+      error: error instanceof Error ? error.message : 'Erro desconhecido' 
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});
