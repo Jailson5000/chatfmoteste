@@ -119,6 +119,827 @@ export type Database = {
         }
         Relationships: []
       }
+      agenda_pro_activity_log: {
+        Row: {
+          action: string
+          appointment_id: string | null
+          created_at: string
+          details: Json | null
+          id: string
+          law_firm_id: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          appointment_id?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          law_firm_id: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          appointment_id?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          law_firm_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_activity_log_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_activity_log_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_appointments: {
+        Row: {
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          client_email: string | null
+          client_id: string | null
+          client_name: string | null
+          client_phone: string | null
+          completed_at: string | null
+          confirmation_sent_at: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          duration_minutes: number
+          end_time: string
+          id: string
+          internal_notes: string | null
+          is_paid: boolean | null
+          is_recurring: boolean | null
+          law_firm_id: string
+          notes: string | null
+          parent_appointment_id: string | null
+          payment_method: string | null
+          pre_message_sent_at: string | null
+          price: number | null
+          professional_id: string
+          recurrence_rule: string | null
+          reminder_sent_at: string | null
+          resource_id: string | null
+          service_id: string
+          source: string | null
+          start_time: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          client_email?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_phone?: string | null
+          completed_at?: string | null
+          confirmation_sent_at?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          duration_minutes: number
+          end_time: string
+          id?: string
+          internal_notes?: string | null
+          is_paid?: boolean | null
+          is_recurring?: boolean | null
+          law_firm_id: string
+          notes?: string | null
+          parent_appointment_id?: string | null
+          payment_method?: string | null
+          pre_message_sent_at?: string | null
+          price?: number | null
+          professional_id: string
+          recurrence_rule?: string | null
+          reminder_sent_at?: string | null
+          resource_id?: string | null
+          service_id: string
+          source?: string | null
+          start_time: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cancellation_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          client_email?: string | null
+          client_id?: string | null
+          client_name?: string | null
+          client_phone?: string | null
+          completed_at?: string | null
+          confirmation_sent_at?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          duration_minutes?: number
+          end_time?: string
+          id?: string
+          internal_notes?: string | null
+          is_paid?: boolean | null
+          is_recurring?: boolean | null
+          law_firm_id?: string
+          notes?: string | null
+          parent_appointment_id?: string | null
+          payment_method?: string | null
+          pre_message_sent_at?: string | null
+          price?: number | null
+          professional_id?: string
+          recurrence_rule?: string | null
+          reminder_sent_at?: string | null
+          resource_id?: string | null
+          service_id?: string
+          source?: string | null
+          start_time?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_appointments_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_appointments_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_appointments_parent_appointment_id_fkey"
+            columns: ["parent_appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_appointments_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_appointments_resource_id_fkey"
+            columns: ["resource_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_appointments_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_breaks: {
+        Row: {
+          created_at: string
+          day_of_week: number | null
+          end_time: string
+          id: string
+          is_recurring: boolean
+          name: string
+          professional_id: string
+          specific_date: string | null
+          start_time: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week?: number | null
+          end_time: string
+          id?: string
+          is_recurring?: boolean
+          name: string
+          professional_id: string
+          specific_date?: string | null
+          start_time: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number | null
+          end_time?: string
+          id?: string
+          is_recurring?: boolean
+          name?: string
+          professional_id?: string
+          specific_date?: string | null
+          start_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_breaks_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_clients: {
+        Row: {
+          address: string | null
+          birth_date: string | null
+          created_at: string
+          document: string | null
+          email: string | null
+          gender: string | null
+          id: string
+          is_active: boolean
+          last_appointment_at: string | null
+          law_firm_id: string
+          name: string
+          notes: string | null
+          phone: string | null
+          preferred_professional_id: string | null
+          send_birthday_message: boolean | null
+          tags: string[] | null
+          total_appointments: number | null
+          total_no_shows: number | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          birth_date?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          gender?: string | null
+          id?: string
+          is_active?: boolean
+          last_appointment_at?: string | null
+          law_firm_id: string
+          name: string
+          notes?: string | null
+          phone?: string | null
+          preferred_professional_id?: string | null
+          send_birthday_message?: boolean | null
+          tags?: string[] | null
+          total_appointments?: number | null
+          total_no_shows?: number | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          birth_date?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          gender?: string | null
+          id?: string
+          is_active?: boolean
+          last_appointment_at?: string | null
+          law_firm_id?: string
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          preferred_professional_id?: string | null
+          send_birthday_message?: boolean | null
+          tags?: string[] | null
+          total_appointments?: number | null
+          total_no_shows?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_clients_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_clients_preferred_professional_id_fkey"
+            columns: ["preferred_professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_holidays: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          is_national: boolean | null
+          is_recurring: boolean | null
+          law_firm_id: string | null
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          id?: string
+          is_national?: boolean | null
+          is_recurring?: boolean | null
+          law_firm_id?: string | null
+          name: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          is_national?: boolean | null
+          is_recurring?: boolean | null
+          law_firm_id?: string | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_holidays_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_professionals: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          color: string | null
+          created_at: string
+          document: string | null
+          email: string | null
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          notify_cancellation: boolean | null
+          notify_new_appointment: boolean | null
+          phone: string | null
+          position: number | null
+          specialty: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          color?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          notify_cancellation?: boolean | null
+          notify_new_appointment?: boolean | null
+          phone?: string | null
+          position?: number | null
+          specialty?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          color?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          notify_cancellation?: boolean | null
+          notify_new_appointment?: boolean | null
+          phone?: string | null
+          position?: number | null
+          specialty?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_professionals_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_resources: {
+        Row: {
+          capacity: number | null
+          color: string | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          law_firm_id: string
+          name: string
+          position: number | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          capacity?: number | null
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id: string
+          name: string
+          position?: number | null
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          capacity?: number | null
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          law_firm_id?: string
+          name?: string
+          position?: number | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_resources_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_service_professionals: {
+        Row: {
+          created_at: string
+          custom_duration_minutes: number | null
+          custom_price: number | null
+          id: string
+          professional_id: string
+          service_id: string
+        }
+        Insert: {
+          created_at?: string
+          custom_duration_minutes?: number | null
+          custom_price?: number | null
+          id?: string
+          professional_id: string
+          service_id: string
+        }
+        Update: {
+          created_at?: string
+          custom_duration_minutes?: number | null
+          custom_price?: number | null
+          id?: string
+          professional_id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_service_professionals_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_service_professionals_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_service_resources: {
+        Row: {
+          created_at: string
+          id: string
+          resource_id: string
+          service_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          resource_id: string
+          service_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          resource_id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_service_resources_resource_id_fkey"
+            columns: ["resource_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_service_resources_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_services: {
+        Row: {
+          buffer_after_minutes: number | null
+          buffer_before_minutes: number | null
+          color: string | null
+          created_at: string
+          description: string | null
+          duration_minutes: number
+          id: string
+          is_active: boolean
+          is_public: boolean
+          law_firm_id: string
+          name: string
+          position: number | null
+          pre_message_enabled: boolean | null
+          pre_message_hours_before: number | null
+          pre_message_text: string | null
+          price: number | null
+          requires_resource: boolean | null
+          return_enabled: boolean | null
+          return_interval_days: number | null
+          updated_at: string
+        }
+        Insert: {
+          buffer_after_minutes?: number | null
+          buffer_before_minutes?: number | null
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          is_public?: boolean
+          law_firm_id: string
+          name: string
+          position?: number | null
+          pre_message_enabled?: boolean | null
+          pre_message_hours_before?: number | null
+          pre_message_text?: string | null
+          price?: number | null
+          requires_resource?: boolean | null
+          return_enabled?: boolean | null
+          return_interval_days?: number | null
+          updated_at?: string
+        }
+        Update: {
+          buffer_after_minutes?: number | null
+          buffer_before_minutes?: number | null
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number
+          id?: string
+          is_active?: boolean
+          is_public?: boolean
+          law_firm_id?: string
+          name?: string
+          position?: number | null
+          pre_message_enabled?: boolean | null
+          pre_message_hours_before?: number | null
+          pre_message_text?: string | null
+          price?: number | null
+          requires_resource?: boolean | null
+          return_enabled?: boolean | null
+          return_interval_days?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_services_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_settings: {
+        Row: {
+          block_holidays: boolean | null
+          business_description: string | null
+          business_name: string | null
+          cancellation_message_template: string | null
+          confirmation_deadline_hours: number | null
+          confirmation_message_template: string | null
+          created_at: string
+          default_end_time: string | null
+          default_start_time: string | null
+          id: string
+          is_enabled: boolean
+          law_firm_id: string
+          logo_url: string | null
+          max_advance_days: number | null
+          max_daily_appointments: number | null
+          min_advance_hours: number | null
+          min_gap_between_appointments: number | null
+          primary_color: string | null
+          public_booking_enabled: boolean | null
+          public_slug: string | null
+          reminder_hours_before: number | null
+          reminder_message_template: string | null
+          require_confirmation: boolean | null
+          send_email_confirmation: boolean | null
+          send_sms_confirmation: boolean | null
+          send_whatsapp_confirmation: boolean | null
+          timezone: string | null
+          updated_at: string
+        }
+        Insert: {
+          block_holidays?: boolean | null
+          business_description?: string | null
+          business_name?: string | null
+          cancellation_message_template?: string | null
+          confirmation_deadline_hours?: number | null
+          confirmation_message_template?: string | null
+          created_at?: string
+          default_end_time?: string | null
+          default_start_time?: string | null
+          id?: string
+          is_enabled?: boolean
+          law_firm_id: string
+          logo_url?: string | null
+          max_advance_days?: number | null
+          max_daily_appointments?: number | null
+          min_advance_hours?: number | null
+          min_gap_between_appointments?: number | null
+          primary_color?: string | null
+          public_booking_enabled?: boolean | null
+          public_slug?: string | null
+          reminder_hours_before?: number | null
+          reminder_message_template?: string | null
+          require_confirmation?: boolean | null
+          send_email_confirmation?: boolean | null
+          send_sms_confirmation?: boolean | null
+          send_whatsapp_confirmation?: boolean | null
+          timezone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          block_holidays?: boolean | null
+          business_description?: string | null
+          business_name?: string | null
+          cancellation_message_template?: string | null
+          confirmation_deadline_hours?: number | null
+          confirmation_message_template?: string | null
+          created_at?: string
+          default_end_time?: string | null
+          default_start_time?: string | null
+          id?: string
+          is_enabled?: boolean
+          law_firm_id?: string
+          logo_url?: string | null
+          max_advance_days?: number | null
+          max_daily_appointments?: number | null
+          min_advance_hours?: number | null
+          min_gap_between_appointments?: number | null
+          primary_color?: string | null
+          public_booking_enabled?: boolean | null
+          public_slug?: string | null
+          reminder_hours_before?: number | null
+          reminder_message_template?: string | null
+          require_confirmation?: boolean | null
+          send_email_confirmation?: boolean | null
+          send_sms_confirmation?: boolean | null
+          send_whatsapp_confirmation?: boolean | null
+          timezone?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_settings_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_time_off: {
+        Row: {
+          created_at: string
+          end_date: string
+          end_time: string | null
+          id: string
+          is_all_day: boolean
+          professional_id: string
+          reason: string | null
+          start_date: string
+          start_time: string | null
+        }
+        Insert: {
+          created_at?: string
+          end_date: string
+          end_time?: string | null
+          id?: string
+          is_all_day?: boolean
+          professional_id: string
+          reason?: string | null
+          start_date: string
+          start_time?: string | null
+        }
+        Update: {
+          created_at?: string
+          end_date?: string
+          end_time?: string | null
+          id?: string
+          is_all_day?: boolean
+          professional_id?: string
+          reason?: string | null
+          start_date?: string
+          start_time?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_time_off_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agenda_pro_working_hours: {
+        Row: {
+          created_at: string
+          day_of_week: number
+          end_time: string
+          id: string
+          is_enabled: boolean
+          professional_id: string
+          start_time: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: number
+          end_time: string
+          id?: string
+          is_enabled?: boolean
+          professional_id: string
+          start_time: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: number
+          end_time?: string
+          id?: string
+          is_enabled?: boolean
+          professional_id?: string
+          start_time?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_working_hours_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_folders: {
         Row: {
           color: string
