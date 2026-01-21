@@ -1,5 +1,8 @@
 project_id = "jiragtersejnarxruqyd"
 
+[functions.process-agenda-pro-reminders]
+verify_jwt = false
+
 [functions.send-appointment-notification]
 verify_jwt = false
 
