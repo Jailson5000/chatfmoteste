@@ -157,7 +157,8 @@ export default function PublicBooking() {
         let workingHours: { start_time: string; end_time: string } | null = null;
         
         if (selectedProfessional) {
-          const result: any = await supabase
+          // @ts-ignore - Supabase type inference issue
+          const { data: hours } = await supabase
             .from("agenda_pro_working_hours")
             .select("start_time, end_time")
             .eq("professional_id", selectedProfessional.id)
@@ -165,7 +166,7 @@ export default function PublicBooking() {
             .eq("is_active", true)
             .single();
           
-          workingHours = result.data;
+          workingHours = hours as { start_time: string; end_time: string } | null;
         }
         
         // Default working hours if professional doesn't have specific ones
@@ -173,15 +174,14 @@ export default function PublicBooking() {
           workingHours = { start_time: "09:00", end_time: "18:00" };
         }
         
-        let query = supabase
+        // @ts-ignore - Supabase type inference issue
+        const { data: existingAppointments } = await supabase
           .from("agenda_pro_appointments")
           .select("start_time, end_time")
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", `${dateStr}T00:00:00`)
           .lte("start_time", `${dateStr}T23:59:59`)
           .neq("status", "cancelled");
-
-        const { data: existingAppointments } = await query;
         
         // Generate time slots
         const slots: TimeSlot[] = [];
@@ -783,8 +783,8 @@ export default function PublicBooking() {
         {step === "confirmation" && (
           <Card>
             <CardContent className="pt-8 text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto">
-                <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <Check className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold">Agendamento confirmado!</h2>
               <p className="text-muted-foreground">
