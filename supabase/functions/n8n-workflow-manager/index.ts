@@ -80,7 +80,27 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, workflowId, updates, nodeUpdates } = body;
+    // Backwards compatible: accept both workflowId and workflow_id
+    const { action, workflowId: workflowIdFromBody, workflow_id, updates, nodeUpdates } = body;
+    const workflowId = workflowIdFromBody || workflow_id;
+
+    // Validate workflowId for actions that require it
+    const actionsRequiringWorkflowId = new Set([
+      'get',
+      'update',
+      'update_node',
+      'add_node',
+      'remove_node',
+      'activate',
+      'deactivate',
+      'fix_miauchat_integration',
+    ]);
+    if (actionsRequiringWorkflowId.has(action) && !workflowId) {
+      return new Response(JSON.stringify({ error: 'workflowId é obrigatório', success: false }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const n8nHeaders = {
       'X-N8N-API-KEY': n8nApiKey,
@@ -112,7 +132,8 @@ serve(async (req) => {
       });
 
       if (!getResponse.ok) {
-        throw new Error('Erro ao buscar workflow atual');
+        const errorText = await getResponse.text().catch(() => '');
+        throw new Error(`Erro ao buscar workflow atual (${getResponse.status}): ${errorText}`);
       }
 
       const currentWorkflow = await getResponse.json();
@@ -153,7 +174,8 @@ serve(async (req) => {
       });
 
       if (!getResponse.ok) {
-        throw new Error('Erro ao buscar workflow atual');
+        const errorText = await getResponse.text().catch(() => '');
+        throw new Error(`Erro ao buscar workflow atual (${getResponse.status}): ${errorText}`);
       }
 
       const workflow = await getResponse.json();
@@ -203,7 +225,8 @@ serve(async (req) => {
       });
 
       if (!getResponse.ok) {
-        throw new Error('Erro ao buscar workflow atual');
+        const errorText = await getResponse.text().catch(() => '');
+        throw new Error(`Erro ao buscar workflow atual (${getResponse.status}): ${errorText}`);
       }
 
       const workflow = await getResponse.json();
@@ -260,7 +283,8 @@ serve(async (req) => {
       });
 
       if (!getResponse.ok) {
-        throw new Error('Erro ao buscar workflow atual');
+        const errorText = await getResponse.text().catch(() => '');
+        throw new Error(`Erro ao buscar workflow atual (${getResponse.status}): ${errorText}`);
       }
 
       const workflow = await getResponse.json();
@@ -327,7 +351,8 @@ serve(async (req) => {
       });
 
       if (!getResponse.ok) {
-        throw new Error('Erro ao buscar workflow atual');
+        const errorText = await getResponse.text().catch(() => '');
+        throw new Error(`Erro ao buscar workflow atual (${getResponse.status}): ${errorText}`);
       }
 
       const workflow = await getResponse.json();
