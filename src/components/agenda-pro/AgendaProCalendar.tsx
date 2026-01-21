@@ -1,0 +1,360 @@
+import { useState, useMemo } from "react";
+import { format, addDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addWeeks, addMonths, isToday } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { ChevronLeft, ChevronRight, Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAgendaProAppointments, ViewType, AgendaProAppointment } from "@/hooks/useAgendaProAppointments";
+import { useAgendaProProfessionals } from "@/hooks/useAgendaProProfessionals";
+import { cn } from "@/lib/utils";
+import { AgendaProNewAppointmentDialog } from "./AgendaProNewAppointmentDialog";
+import { AgendaProAppointmentSheet } from "./AgendaProAppointmentSheet";
+
+const STATUS_COLORS: Record<string, string> = {
+  scheduled: "bg-blue-500",
+  confirmed: "bg-green-500",
+  in_progress: "bg-yellow-500",
+  completed: "bg-gray-500",
+  cancelled: "bg-red-500",
+  no_show: "bg-orange-500",
+  rescheduled: "bg-purple-500",
+};
+
+export function AgendaProCalendar() {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [view, setView] = useState<ViewType>("week");
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedProfessionalId, setSelectedProfessionalId] = useState<string>("all");
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<AgendaProAppointment | null>(null);
+
+  const { appointments, isLoading } = useAgendaProAppointments({
+    date: currentDate,
+    view,
+    professionalId: selectedProfessionalId === "all" ? undefined : selectedProfessionalId,
+  });
+
+  const { activeProfessionals } = useAgendaProProfessionals();
+
+  // Navigation functions
+  const navigate = (direction: "prev" | "next" | "today") => {
+    if (direction === "today") {
+      setCurrentDate(new Date());
+      setSelectedDate(new Date());
+      return;
+    }
+    
+    const delta = direction === "prev" ? -1 : 1;
+    switch (view) {
+      case "day":
+        setCurrentDate(addDays(currentDate, delta));
+        break;
+      case "week":
+        setCurrentDate(addWeeks(currentDate, delta));
+        break;
+      case "month":
+        setCurrentDate(addMonths(currentDate, delta));
+        break;
+    }
+  };
+
+  // Get appointments for a specific day
+  const getAppointmentsForDay = (date: Date) => {
+    return appointments.filter((apt) => isSameDay(new Date(apt.start_time), date));
+  };
+
+  // Week days for week view
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(currentDate, { weekStartsOn: 0 });
+    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  }, [currentDate]);
+
+  // Month days for month view
+  const monthDays = useMemo(() => {
+    const start = startOfMonth(currentDate);
+    const end = endOfMonth(currentDate);
+    const startWeek = startOfWeek(start, { weekStartsOn: 0 });
+    const endWeek = addDays(startOfWeek(end, { weekStartsOn: 0 }), 6);
+    return eachDayOfInterval({ start: startWeek, end: endWeek });
+  }, [currentDate]);
+
+  // Title based on view
+  const getTitle = () => {
+    switch (view) {
+      case "day":
+        return format(currentDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
+      case "week":
+        const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+        const weekEnd = addDays(weekStart, 6);
+        return `${format(weekStart, "d MMM", { locale: ptBR })} - ${format(weekEnd, "d MMM yyyy", { locale: ptBR })}`;
+      case "month":
+        return format(currentDate, "MMMM 'de' yyyy", { locale: ptBR });
+    }
+  };
+
+  // Day view component
+  const renderDayView = () => {
+    const dayAppointments = getAppointmentsForDay(currentDate);
+    const hours = Array.from({ length: 12 }, (_, i) => i + 7); // 7:00 - 18:00
+
+    return (
+      <div className="border rounded-lg overflow-hidden">
+        {hours.map((hour) => {
+          const hourAppointments = dayAppointments.filter((apt) => {
+            const aptHour = new Date(apt.start_time).getHours();
+            return aptHour === hour;
+          });
+
+          return (
+            <div key={hour} className="flex border-b last:border-b-0 min-h-[60px]">
+              <div className="w-16 flex-shrink-0 p-2 text-xs text-muted-foreground border-r bg-muted/30">
+                {String(hour).padStart(2, "0")}:00
+              </div>
+              <div className="flex-1 p-1 relative">
+                {hourAppointments.map((apt) => (
+                  <button
+                    key={apt.id}
+                    onClick={() => setSelectedAppointment(apt)}
+                    className={cn(
+                      "w-full text-left p-2 rounded text-xs mb-1 text-white transition-transform hover:scale-[1.02]",
+                      apt.professional?.color ? "" : STATUS_COLORS[apt.status]
+                    )}
+                    style={{ backgroundColor: apt.professional?.color || undefined }}
+                  >
+                    <div className="font-medium truncate">
+                      {apt.client?.name || apt.client_name || "Cliente"}
+                    </div>
+                    <div className="opacity-90 truncate">
+                      {apt.service?.name} • {format(new Date(apt.start_time), "HH:mm")}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Week view component
+  const renderWeekView = () => (
+    <div className="grid grid-cols-7 gap-2">
+      {weekDays.map((day) => {
+        const dayAppointments = getAppointmentsForDay(day);
+        const isSelected = isSameDay(day, selectedDate);
+        const dayIsToday = isToday(day);
+
+        return (
+          <Card
+            key={day.toISOString()}
+            className={cn(
+              "cursor-pointer transition-all hover:shadow-md min-h-[200px]",
+              isSelected && "ring-2 ring-primary",
+              dayIsToday && "border-primary"
+            )}
+            onClick={() => setSelectedDate(day)}
+          >
+            <CardHeader className="p-2 pb-1">
+              <div className="flex items-center justify-between">
+                <span className={cn(
+                  "text-xs font-medium",
+                  dayIsToday && "text-primary"
+                )}>
+                  {format(day, "EEE", { locale: ptBR })}
+                </span>
+                <span className={cn(
+                  "text-lg font-bold",
+                  dayIsToday && "bg-primary text-primary-foreground rounded-full w-7 h-7 flex items-center justify-center"
+                )}>
+                  {format(day, "d")}
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-2 pt-0 space-y-1">
+              {dayAppointments.slice(0, 3).map((apt) => (
+                <button
+                  key={apt.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedAppointment(apt);
+                  }}
+                  className={cn(
+                    "w-full text-left p-1.5 rounded text-[10px] text-white transition-transform hover:scale-[1.02]"
+                  )}
+                  style={{ backgroundColor: apt.professional?.color || apt.service?.color || "#6366f1" }}
+                >
+                  <div className="font-medium truncate">
+                    {format(new Date(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
+                  </div>
+                </button>
+              ))}
+              {dayAppointments.length > 3 && (
+                <Badge variant="secondary" className="text-[10px] w-full justify-center">
+                  +{dayAppointments.length - 3} mais
+                </Badge>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+
+  // Month view component
+  const renderMonthView = () => (
+    <div className="border rounded-lg overflow-hidden">
+      <div className="grid grid-cols-7 bg-muted/30">
+        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day) => (
+          <div key={day} className="p-2 text-center text-xs font-medium text-muted-foreground border-b">
+            {day}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {monthDays.map((day, index) => {
+          const dayAppointments = getAppointmentsForDay(day);
+          const isCurrentMonth = isSameMonth(day, currentDate);
+          const dayIsToday = isToday(day);
+
+          return (
+            <button
+              key={day.toISOString()}
+              onClick={() => {
+                setSelectedDate(day);
+                setView("day");
+                setCurrentDate(day);
+              }}
+              className={cn(
+                "min-h-[80px] p-1 border-b border-r text-left transition-colors hover:bg-muted/50",
+                !isCurrentMonth && "bg-muted/20 text-muted-foreground",
+                index % 7 === 6 && "border-r-0"
+              )}
+            >
+              <div className={cn(
+                "text-sm font-medium mb-1",
+                dayIsToday && "bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center"
+              )}>
+                {format(day, "d")}
+              </div>
+              {dayAppointments.slice(0, 2).map((apt) => (
+                <div
+                  key={apt.id}
+                  className="text-[10px] p-0.5 rounded mb-0.5 truncate text-white"
+                  style={{ backgroundColor: apt.professional?.color || apt.service?.color || "#6366f1" }}
+                >
+                  {format(new Date(apt.start_time), "HH:mm")}
+                </div>
+              ))}
+              {dayAppointments.length > 2 && (
+                <div className="text-[10px] text-muted-foreground">
+                  +{dayAppointments.length - 2}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => navigate("prev")}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("today")}>
+            Hoje
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => navigate("next")}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <h2 className="text-lg font-semibold capitalize ml-2">{getTitle()}</h2>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Todos profissionais" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos profissionais</SelectItem>
+              {activeProfessionals.map((prof) => (
+                <SelectItem key={prof.id} value={prof.id}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color }} />
+                    {prof.name}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="flex rounded-md border">
+            <Button
+              variant={view === "day" ? "secondary" : "ghost"}
+              size="sm"
+              className="rounded-r-none"
+              onClick={() => setView("day")}
+            >
+              <CalendarDays className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={view === "week" ? "secondary" : "ghost"}
+              size="sm"
+              className="rounded-none border-x"
+              onClick={() => setView("week")}
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={view === "month" ? "secondary" : "ghost"}
+              size="sm"
+              className="rounded-l-none"
+              onClick={() => setView("month")}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <Button onClick={() => setShowNewDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Novo Agendamento</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Calendar View */}
+      <div className="relative">
+        {isLoading && (
+          <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+          </div>
+        )}
+        
+        {view === "day" && renderDayView()}
+        {view === "week" && renderWeekView()}
+        {view === "month" && renderMonthView()}
+      </div>
+
+      {/* Dialogs */}
+      <AgendaProNewAppointmentDialog
+        open={showNewDialog}
+        onOpenChange={setShowNewDialog}
+        defaultDate={selectedDate}
+      />
+
+      {selectedAppointment && (
+        <AgendaProAppointmentSheet
+          appointment={selectedAppointment}
+          onClose={() => setSelectedAppointment(null)}
+        />
+      )}
+    </div>
+  );
+}
