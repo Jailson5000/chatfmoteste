@@ -639,18 +639,18 @@ export function LandingPage() {
           {/* Links de Política - Seção destacada para Google OAuth */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8 pb-8 border-b border-white/[0.06]">
             <span className="text-sm text-white/40">Documentos Legais:</span>
-            <a 
-              href="https://www.miauchat.com.br/privacidade" 
+            <Link 
+              to="/privacidade" 
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white transition-all text-sm font-medium"
             >
               🔒 Política de Privacidade
-            </a>
-            <a 
-              href="https://www.miauchat.com.br/termos" 
+            </Link>
+            <Link 
+              to="/termos" 
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white transition-all text-sm font-medium"
             >
               📋 Termos de Serviço
-            </a>
+            </Link>
           </div>
 
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -662,18 +662,18 @@ export function LandingPage() {
             </div>
             
             <nav className="flex items-center gap-6 text-sm" aria-label="Links legais">
-              <a 
-                href="https://www.miauchat.com.br/privacidade" 
+              <Link 
+                to="/privacidade" 
                 className="text-white/50 hover:text-white transition-colors underline"
               >
                 Política de Privacidade
-              </a>
-              <a 
-                href="https://www.miauchat.com.br/termos" 
+              </Link>
+              <Link 
+                to="/termos" 
                 className="text-white/50 hover:text-white transition-colors underline"
               >
                 Termos de Serviço
-              </a>
+              </Link>
             </nav>
             
             <p className="text-xs text-white/30">
