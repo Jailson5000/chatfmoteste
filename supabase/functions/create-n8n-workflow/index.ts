@@ -176,9 +176,69 @@ serve(async (req) => {
     if (existingCompany?.n8n_workflow_id && existingCompany.n8n_workflow_status === 'created') {
       console.log('Workflow already exists for this company');
       
+      // Fetch the existing webhook URL from settings
+      let existingWebhookUrl: string | null = null;
+      if (law_firm_id) {
+        const { data: settings } = await supabase
+          .from('law_firm_settings')
+          .select('n8n_webhook_url')
+          .eq('law_firm_id', law_firm_id)
+          .maybeSingle();
+        existingWebhookUrl = settings?.n8n_webhook_url || null;
+        
+        // If no webhook URL in settings, try to fetch from the actual workflow
+        if (!existingWebhookUrl && n8nApiUrl && n8nApiKey) {
+          try {
+            console.log('Fetching workflow details to extract webhook URL...');
+            const workflowResponse = await fetch(`${n8nApiUrl}/api/v1/workflows/${existingCompany.n8n_workflow_id}`, {
+              method: 'GET',
+              headers: {
+                'X-N8N-API-KEY': n8nApiKey,
+                'Content-Type': 'application/json',
+              },
+            });
+            
+            if (workflowResponse.ok) {
+              const workflowDetails = await workflowResponse.json();
+              const webhookNode = workflowDetails.nodes?.find((n: any) => n.type === 'n8n-nodes-base.webhook');
+              if (webhookNode) {
+                const webhookPath = webhookNode.parameters?.path || subdomain || company_id;
+                existingWebhookUrl = `${n8nApiUrl}/webhook/${webhookPath}`;
+                console.log(`Extracted webhook URL from existing workflow: ${existingWebhookUrl}`);
+                
+                // Save it to settings for future use
+                const { data: existingSettings } = await supabase
+                  .from('law_firm_settings')
+                  .select('id')
+                  .eq('law_firm_id', law_firm_id)
+                  .maybeSingle();
+                  
+                if (existingSettings) {
+                  await supabase
+                    .from('law_firm_settings')
+                    .update({ n8n_webhook_url: existingWebhookUrl })
+                    .eq('law_firm_id', law_firm_id);
+                } else {
+                  await supabase
+                    .from('law_firm_settings')
+                    .insert({ 
+                      law_firm_id,
+                      n8n_webhook_url: existingWebhookUrl,
+                    });
+                }
+                console.log('Saved webhook URL to law_firm_settings');
+              }
+            }
+          } catch (fetchError) {
+            console.warn('Could not fetch workflow details:', fetchError);
+          }
+        }
+      }
+      
       await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'success', {
         message: 'Workflow already exists',
         workflow_id: existingCompany.n8n_workflow_id,
+        webhook_url: existingWebhookUrl,
         idempotent: true,
       }, adminUserId);
 
@@ -187,6 +247,7 @@ serve(async (req) => {
           success: true, 
           message: 'Workflow already exists',
           workflow_id: existingCompany.n8n_workflow_id,
+          webhook_url: existingWebhookUrl,
           already_exists: true 
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
