@@ -2906,17 +2906,29 @@ async function processWithN8N(
       }
     }
 
-    // Build N8N payload
+    // Build N8N payload with enhanced metadata
+    // Detect if message was transcribed from audio
+    const isTranscribedAudio = context.messageContent.startsWith('[Áudio transcrito]:');
+    const originalMessageType = isTranscribedAudio ? 'audio' : context.messageType;
+    const cleanMessageContent = isTranscribedAudio 
+      ? context.messageContent.replace('[Áudio transcrito]: ', '').trim()
+      : context.messageContent;
+
     const n8nPayload = {
       event: 'new_message',
       conversation_id: context.conversationId,
-      message: context.messageContent,
-      message_type: context.messageType,
+      message: cleanMessageContent, // Clean transcription without prefix
+      message_type: context.messageType, // Current type (may be 'text' after transcription)
+      original_message_type: originalMessageType, // Original type before transcription
+      is_audio_transcription: isTranscribedAudio, // Flag for N8N to know this was audio
+      raw_message: context.messageContent, // Full message with prefix if any
       client: clientInfo,
       automation: automation ? {
         id: automation.id,
         name: automation.name,
         prompt: automation.ai_prompt,
+        voice_enabled: Boolean((automation.trigger_config as any)?.voice_enabled),
+        voice_id: (automation.trigger_config as any)?.voice_id || null,
       } : null,
       context: {
         law_firm_id: context.lawFirmId,
