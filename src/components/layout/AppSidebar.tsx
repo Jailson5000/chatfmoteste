@@ -66,6 +66,7 @@ const aiItems = [
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
 const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
 const agendaItem = { icon: CalendarDays, label: "Agenda", path: "/agenda" };
+const agendaProItem = { icon: CalendarDays, label: "Agenda Pro", path: "/agenda-pro" };
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
@@ -84,14 +85,14 @@ export function AppSidebar() {
   const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
 
   // Build bottom menu items based on user role (profileItem is in Footer already)
-  // Order: Agenda, Conexões, Configurações
+  // Order: Agenda Pro, Agenda, Conexões, Configurações
   const bottomMenuItems = isAttendant
     ? showAgenda
-      ? [agendaItem, settingsItem]
-      : [settingsItem]
+      ? [agendaProItem, agendaItem, settingsItem]
+      : [agendaProItem, settingsItem]
     : showAgenda
-      ? [agendaItem, ...adminOnlyItems, settingsItem]
-      : [...adminOnlyItems, settingsItem];
+      ? [agendaProItem, agendaItem, ...adminOnlyItems, settingsItem]
+      : [agendaProItem, ...adminOnlyItems, settingsItem];
 
   // Open sections if on one of their pages
   useEffect(() => {
