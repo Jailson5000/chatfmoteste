@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic, Volume2 } from "lucide-react";
+import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic, Volume2, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -48,6 +48,8 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [showN8nSecret, setShowN8nSecret] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [creatingN8nWorkflow, setCreatingN8nWorkflow] = useState(false);
+  const [n8nWorkflowId, setN8nWorkflowId] = useState<string | null>(null);
 
   // ElevenLabs TTS config (per-company)
   const [elevenLabsVoice, setElevenLabsVoice] = useState(DEFAULT_VOICE_ID);
@@ -74,6 +76,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
     
     setLoading(true);
     try {
+      // Load AI settings
       const { data, error } = await supabase
         .from("law_firm_settings")
         .select("*")
@@ -115,11 +118,101 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
           setElevenLabsVoice(caps.elevenlabs_voice ?? DEFAULT_VOICE_ID);
         }
       }
+
+      // Also load company info to get workflow status
+      const { data: companyData } = await supabase
+        .from("companies")
+        .select("n8n_workflow_id, n8n_workflow_status")
+        .eq("id", company.id)
+        .single();
+
+      if (companyData?.n8n_workflow_id) {
+        setN8nWorkflowId(companyData.n8n_workflow_id);
+      }
     } catch (error) {
       console.error("Error loading AI settings:", error);
       toast.error("Erro ao carregar configurações de IA");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Create or retrieve N8N workflow automatically
+  const handleCreateN8nWorkflow = async () => {
+    if (!company?.id || !company?.law_firm_id) {
+      toast.error("Empresa não tem configuração válida");
+      return;
+    }
+
+    setCreatingN8nWorkflow(true);
+    try {
+      // First check if workflow already exists
+      const { data: companyData } = await supabase
+        .from("companies")
+        .select("n8n_workflow_id, n8n_workflow_status, law_firms(subdomain)")
+        .eq("id", company.id)
+        .single();
+
+      if (companyData?.n8n_workflow_id && companyData.n8n_workflow_status === "created") {
+        // Workflow exists, just need to fetch webhook URL
+        toast.info("Workflow já existe, buscando URL...");
+        
+        // Try to get the webhook URL from law_firm_settings or generate it
+        const { data: settings } = await supabase
+          .from("law_firm_settings")
+          .select("n8n_webhook_url")
+          .eq("law_firm_id", company.law_firm_id)
+          .maybeSingle();
+
+        if (settings?.n8n_webhook_url) {
+          setN8nWebhookUrl(settings.n8n_webhook_url);
+          setN8nWorkflowId(companyData.n8n_workflow_id);
+          toast.success("URL do webhook recuperada!");
+          return;
+        }
+      }
+
+      // Create new workflow
+      toast.info("Criando workflow N8N...");
+      
+      const { data, error } = await supabase.functions.invoke("create-n8n-workflow", {
+        body: {
+          company_id: company.id,
+          company_name: company.name,
+          law_firm_id: company.law_firm_id,
+          subdomain: (companyData?.law_firms as any)?.subdomain || "",
+          auto_activate: true,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        setN8nWorkflowId(data.workflow_id);
+        
+        // Fetch the updated webhook URL from settings
+        const { data: updatedSettings } = await supabase
+          .from("law_firm_settings")
+          .select("n8n_webhook_url")
+          .eq("law_firm_id", company.law_firm_id)
+          .maybeSingle();
+
+        if (updatedSettings?.n8n_webhook_url) {
+          setN8nWebhookUrl(updatedSettings.n8n_webhook_url);
+        }
+
+        toast.success(data.already_exists 
+          ? "Workflow já existia e foi vinculado!" 
+          : "Workflow N8N criado e ativado com sucesso!"
+        );
+      } else {
+        throw new Error(data?.error || "Erro desconhecido");
+      }
+    } catch (error: any) {
+      console.error("Error creating N8N workflow:", error);
+      toast.error("Erro ao criar workflow: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setCreatingN8nWorkflow(false);
     }
   };
 
@@ -457,6 +550,44 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
                 {n8nEnabled && (
                   <div className="space-y-3 pt-2">
+                    {/* Auto-create workflow button */}
+                    {!n8nWebhookUrl && (
+                      <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 space-y-2">
+                        <div className="flex items-center gap-2 text-orange-400">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="text-sm font-medium">Webhook não configurado</span>
+                        </div>
+                        <p className="text-xs text-white/60">
+                          Clique abaixo para criar automaticamente um workflow N8N para esta empresa.
+                        </p>
+                        <Button
+                          onClick={handleCreateN8nWorkflow}
+                          disabled={creatingN8nWorkflow}
+                          className="w-full bg-orange-600 hover:bg-orange-700"
+                        >
+                          {creatingN8nWorkflow ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Criando workflow...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4 mr-2" />
+                              Criar Workflow Automaticamente
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Workflow status indicator */}
+                    {n8nWorkflowId && (
+                      <div className="flex items-center gap-2 text-sm text-green-400">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>Workflow vinculado: {n8nWorkflowId.substring(0, 8)}...</span>
+                      </div>
+                    )}
+
                     <div className="space-y-2">
                       <Label className="text-white/70 text-sm">Webhook URL</Label>
                       <div className="flex gap-2">

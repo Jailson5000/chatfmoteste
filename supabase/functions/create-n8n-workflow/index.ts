@@ -401,19 +401,52 @@ serve(async (req) => {
         law_firm_id,
       }, adminUserId);
 
-      // Also update the automation webhook URL if law_firm_id is provided
+      // Also update the webhook URLs if law_firm_id is provided
       if (law_firm_id && workflowData.nodes) {
         const webhookNode = workflowData.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
         if (webhookNode) {
           // Construct webhook URL using subdomain pattern
           const webhookUrl = `${n8nApiUrl}/webhook/${subdomain || company_id}`;
           
+          // Update automations table
           await supabase
             .from('automations')
             .update({ webhook_url: webhookUrl })
             .eq('law_firm_id', law_firm_id);
           
           console.log(`Updated automation webhook URL: ${webhookUrl}`);
+          
+          // CRITICAL: Also update law_firm_settings with n8n_webhook_url for evolution-webhook routing
+          const { data: existingSettings } = await supabase
+            .from('law_firm_settings')
+            .select('id')
+            .eq('law_firm_id', law_firm_id)
+            .maybeSingle();
+          
+          if (existingSettings) {
+            await supabase
+              .from('law_firm_settings')
+              .update({ 
+                n8n_webhook_url: webhookUrl,
+                ai_provider: 'n8n',
+              })
+              .eq('law_firm_id', law_firm_id);
+            console.log(`Updated law_firm_settings with n8n_webhook_url: ${webhookUrl}`);
+          } else {
+            await supabase
+              .from('law_firm_settings')
+              .insert({ 
+                law_firm_id,
+                n8n_webhook_url: webhookUrl,
+                ai_provider: 'n8n',
+              });
+            console.log(`Created law_firm_settings with n8n_webhook_url: ${webhookUrl}`);
+          }
+          
+          await logAudit(supabase, 'N8N_WEBHOOK_URL_SET', company_id, 'success', {
+            law_firm_id,
+            webhook_url: webhookUrl,
+          }, adminUserId);
         }
       }
 
