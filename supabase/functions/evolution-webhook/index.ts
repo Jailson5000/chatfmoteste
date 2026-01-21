@@ -2458,7 +2458,7 @@ async function sendAIResponseToWhatsApp(
       if (i > 0) {
         await messageSplitDelay(i, messageParts.length, '[AI_RESPONSE]');
       } else if (i === 0) {
-        // First message gets client delay + human-like jitter (e.g., 10s + 7-15s = 17-25s)
+        // First message gets client delay + minimal jitter (1-3s base + configured delay)
         const clientDelayMs = responseDelaySeconds * 1000;
         await humanDelay(
           DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, 
@@ -2495,27 +2495,31 @@ async function sendAIResponseToWhatsApp(
       const sendResult = await sendResponse.json();
       lastWhatsappMessageId = sendResult?.key?.id;
 
-      logDebug('SEND_RESPONSE', `Part ${i + 1} sent successfully`, {
+      logDebug('SEND_RESPONSE', `Part ${i + 1} sent to WhatsApp successfully`, {
         whatsappMessageId: lastWhatsappMessageId,
       });
 
-      // NOTE: We do NOT save messages here because ai-chat already saves them to the database
-      // This prevents duplicate messages. We only need to update with the WhatsApp message ID.
-      // UPDATE the message with the whatsapp_message_id for proper ACK tracking
-      const { error: updateError } = await supabaseClient
+      // CRITICAL: Save message to database AFTER sending to WhatsApp
+      // This ensures the chat panel shows messages only after they're actually delivered
+      const { error: insertError } = await supabaseClient
         .from('messages')
-        .update({ whatsapp_message_id: lastWhatsappMessageId })
-        .eq('conversation_id', context.conversationId)
-        .eq('content', part)
-        .eq('ai_generated', true)
-        .is('whatsapp_message_id', null)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .insert({
+          conversation_id: context.conversationId,
+          whatsapp_message_id: lastWhatsappMessageId,
+          content: part,
+          message_type: 'text',
+          is_from_me: true,
+          sender_type: 'ai',
+          ai_generated: true,
+          ai_agent_id: context.automationId || null,
+          ai_agent_name: context.automationName || null,
+          status: 'sent',
+        });
 
-      if (updateError) {
-        logDebug('SEND_RESPONSE', `Failed to update message with WhatsApp ID`, { error: updateError });
+      if (insertError) {
+        logDebug('SEND_RESPONSE', `Failed to save message to database`, { error: insertError });
       } else {
-        logDebug('SEND_RESPONSE', `Updated message with WhatsApp ID: ${lastWhatsappMessageId}`);
+        logDebug('SEND_RESPONSE', `Message saved to database after WhatsApp delivery`);
       }
     }
 
@@ -2601,6 +2605,7 @@ async function processWithGemini(
           clientId: context.clientId, // Pass clientId for memory support
           audioRequested: audioRequestedForThisMessage,
           skipSaveUserMessage: true, // Message already saved by evolution-webhook
+          skipSaveAIResponse: true, // evolution-webhook saves AFTER sending to WhatsApp for proper sync
         },
       }),
     });
@@ -2762,6 +2767,7 @@ async function processWithGPT(
           clientId: context.clientId, // Pass clientId for memory support
           audioRequested: audioRequestedForThisMessage,
           skipSaveUserMessage: true, // Message already saved by evolution-webhook
+          skipSaveAIResponse: true, // evolution-webhook saves AFTER sending to WhatsApp for proper sync
         },
       }),
     });

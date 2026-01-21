@@ -151,6 +151,8 @@ interface ChatRequest {
     widgetKey?: string;
     // Flag to skip saving user message (when called from evolution-webhook where message is already saved)
     skipSaveUserMessage?: boolean;
+    // Flag to skip saving AI response (when called from evolution-webhook which saves AFTER sending to WhatsApp)
+    skipSaveAIResponse?: boolean;
   };
 }
 
@@ -3440,29 +3442,35 @@ serve(async (req) => {
         });
       }
 
-      // Save each AI response part as a separate message
+      // For WhatsApp sources, skip saving AI response here
+      // evolution-webhook will save AFTER sending to WhatsApp to ensure proper sync
+      const skipSaveAIResponse = context?.skipSaveAIResponse === true;
+
+      // Save each AI response part as a separate message (only for web sources)
       let savedMessageId: string | null = null;
-      for (let i = 0; i < messageParts.length; i++) {
-        const part = messageParts[i];
-        const { data: savedMessage } = await supabase.from("messages").insert({
-          conversation_id: conversationId,
-          content: part,
-          sender_type: "ai",
-          is_from_me: true,
-          message_type: "text",
-          status: "delivered",
-          ai_generated: true,
-          ai_agent_id: automationId,
-          ai_agent_name: automationName
-        }).select("id").single();
-        
-        if (i === messageParts.length - 1) {
-          savedMessageId = savedMessage?.id || null;
-        }
-        
-        // Small delay between messages for natural typing feel
-        if (i < messageParts.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+      if (!skipSaveAIResponse) {
+        for (let i = 0; i < messageParts.length; i++) {
+          const part = messageParts[i];
+          const { data: savedMessage } = await supabase.from("messages").insert({
+            conversation_id: conversationId,
+            content: part,
+            sender_type: "ai",
+            is_from_me: true,
+            message_type: "text",
+            status: "delivered",
+            ai_generated: true,
+            ai_agent_id: automationId,
+            ai_agent_name: automationName
+          }).select("id").single();
+          
+          if (i === messageParts.length - 1) {
+            savedMessageId = savedMessage?.id || null;
+          }
+          
+          // Small delay between messages for natural typing feel
+          if (i < messageParts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
         }
       }
 
