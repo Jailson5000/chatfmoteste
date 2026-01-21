@@ -333,7 +333,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       const { data, error } = await supabase.functions.invoke("n8n-workflow-manager", {
         body: {
           action: "fix_miauchat_integration",
-          workflow_id: n8nWorkflowId,
+          workflowId: n8nWorkflowId,
         },
       });
 
