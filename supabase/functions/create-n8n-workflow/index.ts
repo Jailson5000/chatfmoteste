@@ -372,9 +372,10 @@ serve(async (req) => {
         // Create new workflow based on template - starts INACTIVE
         // Note: n8n API does not accept tags on workflow creation (read-only field)
         
-        // CRITICAL: Update webhook path in nodes to use unique subdomain/company_id
+        // CRITICAL: Update webhook path and AI agent nodes to use dynamic prompt from MiauChat
         const uniqueWebhookPath = subdomain || company_id;
         const modifiedNodes = templateWorkflow.nodes.map((node: any) => {
+          // Update webhook path
           if (node.type === 'n8n-nodes-base.webhook') {
             console.log(`Updating webhook path from "${node.parameters?.path}" to "${uniqueWebhookPath}"`);
             return {
@@ -382,9 +383,43 @@ serve(async (req) => {
               parameters: {
                 ...node.parameters,
                 path: uniqueWebhookPath,
+                responseMode: 'lastNode',
+                options: {
+                  ...node.parameters?.options,
+                  responseContentType: 'application/json',
+                },
               },
             };
           }
+          
+          // CRITICAL: Configure AI Agent node to use dynamic prompt from MiauChat payload
+          if (node.type === '@n8n/n8n-nodes-langchain.agent') {
+            console.log(`Configuring AI Agent "${node.name}" to use dynamic prompt from MiauChat`);
+            
+            // Build dynamic system message that uses the prompt from MiauChat
+            const dynamicSystemMessage = `{{ $json.automation?.prompt || $('Webhook').item.json.automation?.prompt || "Você é um assistente virtual prestativo." }}
+
+=== BASE DE CONHECIMENTO ===
+{{ ($json.knowledge_base || $('Webhook').item.json.knowledge_base || []).map(k => "### " + k.title + "\\n" + k.content).join("\\n\\n") || "Nenhuma base de conhecimento configurada." }}
+
+=== MEMÓRIAS DO CLIENTE ===
+{{ ($json.client?.memories || $('Webhook').item.json.client?.memories || []).map(m => "- " + m.fact_type + ": " + m.content).join("\\n") || "Nenhuma memória registrada." }}
+
+=== INSTRUÇÕES ===
+- Responda de forma concisa e direta (máximo 3-4 parágrafos curtos)
+- Use quebras de linha para separar ideias
+- Não repita informações
+- Seja objetivo e amigável`;
+            
+            return {
+              ...node,
+              parameters: {
+                ...node.parameters,
+                systemMessage: dynamicSystemMessage,
+              },
+            };
+          }
+          
           return node;
         });
         
