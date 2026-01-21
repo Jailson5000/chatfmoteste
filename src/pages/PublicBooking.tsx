@@ -291,9 +291,9 @@ export default function PublicBooking() {
       
       if (appointmentError) throw appointmentError;
       
-      // Send notification
+      // Send notification via Agenda Pro function
       try {
-        await supabase.functions.invoke("send-appointment-notification", {
+        await supabase.functions.invoke("agenda-pro-notification", {
           body: { 
             appointment_id: newAppointment.id,
             type: "created",

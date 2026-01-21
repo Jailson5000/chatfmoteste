@@ -34,6 +34,7 @@ import TermsOfService from "./pages/TermsOfService";
 import Agenda from "./pages/Agenda";
 import AgendaPro from "./pages/AgendaPro";
 import PublicBooking from "./pages/PublicBooking";
+import ConfirmAppointment from "./pages/ConfirmAppointment";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 // Admin pages removed - functionality moved to Settings
 import {
@@ -80,6 +81,7 @@ const App = () => (
           <Route path="/privacidade" element={<PrivacyPolicy />} />
           <Route path="/termos" element={<TermsOfService />} />
           <Route path="/agendar/:slug" element={<PublicBooking />} />
+          <Route path="/confirmar" element={<ConfirmAppointment />} />
           
           {/* Protected routes with AppLayout */}
           <Route

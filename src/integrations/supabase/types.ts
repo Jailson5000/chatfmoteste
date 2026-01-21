@@ -174,9 +174,12 @@ export type Database = {
           client_name: string | null
           client_phone: string | null
           completed_at: string | null
+          confirmation_link_sent_at: string | null
           confirmation_sent_at: string | null
+          confirmation_token: string | null
           confirmed_at: string | null
           confirmed_by: string | null
+          confirmed_via: string | null
           created_at: string
           created_by: string | null
           duration_minutes: number
@@ -211,9 +214,12 @@ export type Database = {
           client_name?: string | null
           client_phone?: string | null
           completed_at?: string | null
+          confirmation_link_sent_at?: string | null
           confirmation_sent_at?: string | null
+          confirmation_token?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
+          confirmed_via?: string | null
           created_at?: string
           created_by?: string | null
           duration_minutes: number
@@ -248,9 +254,12 @@ export type Database = {
           client_name?: string | null
           client_phone?: string | null
           completed_at?: string | null
+          confirmation_link_sent_at?: string | null
           confirmation_sent_at?: string | null
+          confirmation_token?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
+          confirmed_via?: string | null
           created_at?: string
           created_by?: string | null
           duration_minutes?: number
