@@ -104,7 +104,7 @@ export function LandingPage() {
 
   const additionalPricing = [
     { item: "Conversa adicional com IA", price: "R$ 0,47 / conversa" },
-    { item: "Minuto adicional de áudio", price: "R$ 0,98 / minuto" },
+    { item: "Minuto adicional de áudio", price: "R$ 1,47 / minuto" },
     { item: "WhatsApp adicional", price: "R$ 79,90 / mês" },
     { item: "Atendente adicional", price: "R$ 47,90 / mês" },
   ];
