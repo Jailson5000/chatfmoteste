@@ -372,6 +372,33 @@ serve(async (req) => {
         n.type === '@n8n/n8n-nodes-langchain.agent'
       );
 
+      // CRITICAL: Configure ALL AI Agent nodes to use dynamic prompt from MiauChat
+      const dynamicSystemMessage = `{{ $json.automation?.prompt || $('Webhook').item.json.automation?.prompt || "Você é um assistente virtual prestativo." }}
+
+=== BASE DE CONHECIMENTO ===
+{{ ($json.knowledge_base || $('Webhook').item.json.knowledge_base || []).map(k => "### " + k.title + "\\n" + k.content).join("\\n\\n") || "Nenhuma base de conhecimento configurada." }}
+
+=== MEMÓRIAS DO CLIENTE ===
+{{ ($json.client?.memories || $('Webhook').item.json.client?.memories || []).map(m => "- " + m.fact_type + ": " + m.content).join("\\n") || "Nenhuma memória registrada." }}
+
+=== INSTRUÇÕES ===
+- Responda de forma concisa e direta (máximo 3-4 parágrafos curtos)
+- Use quebras de linha para separar ideias
+- Não repita informações
+- Seja objetivo e amigável`;
+
+      for (const agentNode of agentNodes) {
+        const nodeInWorkflow = workflow.nodes.find((n: any) => n.name === agentNode.name);
+        if (nodeInWorkflow) {
+          console.log(`Configuring AI Agent "${agentNode.name}" to use dynamic prompt from MiauChat`);
+          nodeInWorkflow.parameters = {
+            ...nodeInWorkflow.parameters,
+            systemMessage: dynamicSystemMessage,
+          };
+          changes.push(`Agente "${agentNode.name}" configurado para usar prompt do MiauChat`);
+        }
+      }
+
       // Check if any respondToWebhook node is PROPERLY CONNECTED to an output
       const checkNodeIsConnected = (nodeName: string): boolean => {
         for (const sourceNode in workflow.connections) {
