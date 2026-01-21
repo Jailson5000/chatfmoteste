@@ -33,6 +33,7 @@ import TermsOfService from "./pages/TermsOfService";
 // Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
 import AgendaPro from "./pages/AgendaPro";
+import PublicBooking from "./pages/PublicBooking";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 // Admin pages removed - functionality moved to Settings
 import {
@@ -78,6 +79,7 @@ const App = () => (
           <Route path="/integrations/google-calendar/callback" element={<GoogleCalendarCallback />} />
           <Route path="/privacidade" element={<PrivacyPolicy />} />
           <Route path="/termos" element={<TermsOfService />} />
+          <Route path="/agendar/:slug" element={<PublicBooking />} />
           
           {/* Protected routes with AppLayout */}
           <Route
