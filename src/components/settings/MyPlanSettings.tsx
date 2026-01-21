@@ -179,7 +179,7 @@ export function MyPlanSettings() {
   const planFeatures = Array.isArray(plan?.features) ? plan.features : [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SettingsHelpCollapsible
         title="Como funciona o Meu Plano?"
         items={[
@@ -190,80 +190,80 @@ export function MyPlanSettings() {
         tip="Para upgrade de plano ou dúvidas sobre faturamento, entre em contato com nosso suporte."
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Current Plan Card */}
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Crown className="h-5 w-5 text-primary" />
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Crown className="h-4 w-4 text-primary" />
                   Seu Plano Atual
                 </CardTitle>
-                <CardDescription>Período: {currentBillingPeriod}</CardDescription>
+                <CardDescription className="text-xs">Período: {currentBillingPeriod}</CardDescription>
               </div>
               <Badge 
                 variant="outline" 
-                className={
+                className={`text-xs ${
                   plan?.name === "ENTERPRISE" 
                     ? "bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300" 
                     : plan?.name === "PROFESSIONAL"
                     ? "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300"
                     : "bg-primary/10 text-primary border-primary/30"
-                }
+                }`}
               >
                 {plan?.name || "Sem plano"}
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4 pt-0">
             {/* Plan Features */}
             {planFeatures.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium mb-3">Recursos inclusos:</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <h4 className="text-xs font-medium mb-2 text-muted-foreground">Recursos inclusos:</h4>
+                <div className="grid grid-cols-2 gap-1">
                   {planFeatures.slice(0, 6).map((feature, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                      <span>{String(feature)}</span>
+                    <div key={idx} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                      <span className="truncate">{String(feature)}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            <Separator />
+            <Separator className="my-2" />
 
             {/* Usage Summary */}
             <div>
-              <h4 className="text-sm font-medium mb-3">Consumo do período:</h4>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <h4 className="text-xs font-medium mb-2 text-muted-foreground">Consumo do período:</h4>
+              <div className="grid gap-2 sm:grid-cols-2">
                 <UsageItem 
-                  icon={<Users className="h-4 w-4" />}
+                  icon={<Users className="h-3 w-3" />}
                   label="Usuários"
                   current={usageData?.current_users || 0}
                   max={usageData?.effective_max_users || 0}
                 />
                 <UsageItem 
-                  icon={<Wifi className="h-4 w-4" />}
+                  icon={<Wifi className="h-3 w-3" />}
                   label="Conexões WhatsApp"
                   current={usageData?.current_instances || 0}
                   max={usageData?.effective_max_instances || 0}
                 />
                 <UsageItem 
-                  icon={<Bot className="h-4 w-4" />}
+                  icon={<Bot className="h-3 w-3" />}
                   label="Agentes IA"
                   current={usageData?.current_agents || 0}
                   max={usageData?.effective_max_agents || 0}
                 />
                 <UsageItem 
-                  icon={<MessageSquare className="h-4 w-4" />}
+                  icon={<MessageSquare className="h-3 w-3" />}
                   label="Conversas IA"
                   current={usageData?.current_ai_conversations || 0}
                   max={usageData?.effective_max_ai_conversations || 0}
                 />
                 <UsageItem 
-                  icon={<Mic className="h-4 w-4" />}
+                  icon={<Mic className="h-3 w-3" />}
                   label="Minutos de Áudio"
                   current={Math.round(usageData?.current_tts_minutes || 0)}
                   max={usageData?.effective_max_tts_minutes || 0}
@@ -271,17 +271,17 @@ export function MyPlanSettings() {
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex flex-wrap gap-3 pt-6 border-t">
-            <Button variant="outline" className="gap-2" onClick={handleDownloadInvoice}>
-              <Download className="h-4 w-4" />
+          <CardFooter className="flex flex-wrap gap-2 pt-3 border-t">
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={handleDownloadInvoice}>
+              <Download className="h-3 w-3" />
               Baixar Fatura
             </Button>
-            <Button variant="outline" className="gap-2" onClick={handleContactSupport}>
-              <Mail className="h-4 w-4" />
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={handleContactSupport}>
+              <Mail className="h-3 w-3" />
               Solicitar Upgrade
             </Button>
-            <Button className="gap-2" onClick={() => setShowAddonsDialog(true)}>
-              <Plus className="h-4 w-4" />
+            <Button size="sm" className="gap-1.5 text-xs h-8" onClick={() => setShowAddonsDialog(true)}>
+              <Plus className="h-3 w-3" />
               Contratar Adicionais
             </Button>
           </CardFooter>
@@ -289,24 +289,24 @@ export function MyPlanSettings() {
 
         {/* Billing Summary Card */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-4 w-4" />
               Resumo Mensal
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between">
+          <CardContent className="space-y-3 pt-0">
+            <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Plano {plan?.name}</span>
               <span className="font-medium">{formatCurrency(plan?.price || 0)}</span>
             </div>
 
             {billingInfo && billingInfo.breakdown.totalAdditional > 0 && (
               <>
-                <Separator />
-                <div className="space-y-2">
+                <Separator className="my-2" />
+                <div className="space-y-1">
                   {billingInfo.breakdown.users.quantity > 0 && (
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">
                         +{billingInfo.breakdown.users.quantity} usuário(s)
                       </span>
@@ -314,7 +314,7 @@ export function MyPlanSettings() {
                     </div>
                   )}
                   {billingInfo.breakdown.instances.quantity > 0 && (
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">
                         +{billingInfo.breakdown.instances.quantity} conexão(ões)
                       </span>
@@ -325,16 +325,16 @@ export function MyPlanSettings() {
               </>
             )}
 
-            <Separator />
+            <Separator className="my-2" />
             
             <div className="flex justify-between items-center">
-              <span className="font-medium">Total Mensal</span>
-              <span className="text-xl font-bold text-primary">
+              <span className="text-sm font-medium">Total Mensal</span>
+              <span className="text-lg font-bold text-primary">
                 {formatCurrency(billingInfo?.totalMonthly || plan?.price || 0)}
               </span>
             </div>
 
-            <p className="text-xs text-muted-foreground mt-4">
+            <p className="text-[10px] text-muted-foreground">
               * Conversas IA e minutos de áudio acima do limite são cobrados por uso.
             </p>
           </CardContent>
@@ -406,7 +406,7 @@ export function MyPlanSettings() {
   );
 }
 
-// Helper component for usage items
+// Helper component for usage items - compact version
 function UsageItem({ 
   icon, 
   label, 
@@ -423,19 +423,19 @@ function UsageItem({
   const isCritical = percentage >= 100;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-1.5 text-xs">
           {icon}
           <span>{label}</span>
         </div>
-        <span className={`text-sm font-medium ${isCritical ? 'text-destructive' : isWarning ? 'text-yellow-600' : ''}`}>
+        <span className={`text-xs font-medium ${isCritical ? 'text-destructive' : isWarning ? 'text-yellow-600' : ''}`}>
           {current}/{max}
         </span>
       </div>
       <Progress 
         value={percentage} 
-        className={`h-2 ${isCritical ? '[&>div]:bg-destructive' : isWarning ? '[&>div]:bg-yellow-500' : ''}`}
+        className={`h-1.5 ${isCritical ? '[&>div]:bg-destructive' : isWarning ? '[&>div]:bg-yellow-500' : ''}`}
       />
     </div>
   );
