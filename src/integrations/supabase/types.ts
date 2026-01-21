@@ -1814,6 +1814,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "google_calendar_ai_logs_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "google_calendar_integrations_safe"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "google_calendar_ai_logs_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
@@ -1931,6 +1938,13 @@ export type Database = {
             columns: ["integration_id"]
             isOneToOne: false
             referencedRelation: "google_calendar_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "google_calendar_events_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "google_calendar_integrations_safe"
             referencedColumns: ["id"]
           },
           {
@@ -4193,6 +4207,74 @@ export type Database = {
           is_active?: boolean | null
           last_sync_at?: string | null
           law_firm_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "google_calendar_integrations_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: true
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      google_calendar_integrations_safe: {
+        Row: {
+          allow_create_events: boolean | null
+          allow_delete_events: boolean | null
+          allow_edit_events: boolean | null
+          allow_read_events: boolean | null
+          connected_at: string | null
+          connected_by: string | null
+          created_at: string | null
+          default_calendar_id: string | null
+          default_calendar_name: string | null
+          google_account_id: string | null
+          google_email: string | null
+          id: string | null
+          is_active: boolean | null
+          last_sync_at: string | null
+          law_firm_id: string | null
+          next_sync_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          allow_create_events?: boolean | null
+          allow_delete_events?: boolean | null
+          allow_edit_events?: boolean | null
+          allow_read_events?: boolean | null
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string | null
+          default_calendar_id?: string | null
+          default_calendar_name?: string | null
+          google_account_id?: string | null
+          google_email?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          law_firm_id?: string | null
+          next_sync_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          allow_create_events?: boolean | null
+          allow_delete_events?: boolean | null
+          allow_edit_events?: boolean | null
+          allow_read_events?: boolean | null
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string | null
+          default_calendar_id?: string | null
+          default_calendar_name?: string | null
+          google_account_id?: string | null
+          google_email?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          law_firm_id?: string | null
+          next_sync_at?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
