@@ -18,7 +18,7 @@ import {
   Crown,
   Mail
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts, AdditionalBreakdown } from "@/lib/billing-config";
@@ -37,9 +37,11 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
+import { OverageControlCard } from "@/components/settings/OverageControlCard";
 
 export function MyPlanSettings() {
   const { lawFirm } = useLawFirm();
+  const queryClient = useQueryClient();
   const [showAddonsDialog, setShowAddonsDialog] = useState(false);
   const [addonRequest, setAddonRequest] = useState({
     users: 0,
@@ -339,51 +341,13 @@ export function MyPlanSettings() {
         </Card>
       </div>
 
-      {/* Additional Pricing Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Preços de Consumo Adicional</CardTitle>
-          <CardDescription>
-            Valores cobrados quando você ultrapassa os limites do seu plano
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="p-4 rounded-lg border bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                <span className="font-medium">Conversa IA</span>
-              </div>
-              <p className="text-2xl font-bold">{formatCurrency(ADDITIONAL_PRICING.aiConversation)}</p>
-              <p className="text-xs text-muted-foreground">por conversa</p>
-            </div>
-            <div className="p-4 rounded-lg border bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Mic className="h-4 w-4 text-primary" />
-                <span className="font-medium">Minuto de Áudio</span>
-              </div>
-              <p className="text-2xl font-bold">{formatCurrency(ADDITIONAL_PRICING.ttsMinute)}</p>
-              <p className="text-xs text-muted-foreground">por minuto</p>
-            </div>
-            <div className="p-4 rounded-lg border bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Wifi className="h-4 w-4 text-primary" />
-                <span className="font-medium">WhatsApp</span>
-              </div>
-              <p className="text-2xl font-bold">{formatCurrency(ADDITIONAL_PRICING.whatsappInstance)}</p>
-              <p className="text-xs text-muted-foreground">por mês</p>
-            </div>
-            <div className="p-4 rounded-lg border bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Users className="h-4 w-4 text-primary" />
-                <span className="font-medium">Atendente</span>
-              </div>
-              <p className="text-2xl font-bold">{formatCurrency(ADDITIONAL_PRICING.user)}</p>
-              <p className="text-xs text-muted-foreground">por mês</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Additional Pricing Info - only AI and Audio */}
+      <OverageControlCard 
+        companyData={companyData}
+        onUpdate={() => {
+          queryClient.invalidateQueries({ queryKey: ["company-billing", lawFirm?.id] });
+        }}
+      />
 
       {/* Request Addons Dialog */}
       <Dialog open={showAddonsDialog} onOpenChange={setShowAddonsDialog}>
