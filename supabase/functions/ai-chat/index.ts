@@ -3178,14 +3178,14 @@ serve(async (req) => {
       messages.push(...context.previousMessages);
     } else if (isValidUUID(conversationId)) {
       // Fetch conversation history from database for widget/site conversations
-      // Get last 30 messages to provide context without overloading the model
+      // Get last 35 messages to provide context without overloading the model
       const { data: historyMessages, error: historyError } = await supabase
         .from("messages")
         .select("content, is_from_me, sender_type, created_at")
         .eq("conversation_id", conversationId)
         .neq("content", message) // Exclude the current message being processed
         .order("created_at", { ascending: false })
-        .limit(30);
+        .limit(35);
       
       // Reverse to get chronological order (oldest first)
       if (historyMessages) {
