@@ -190,15 +190,21 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
       if (data?.success) {
         setN8nWorkflowId(data.workflow_id);
         
-        // Fetch the updated webhook URL from settings
-        const { data: updatedSettings } = await supabase
-          .from("law_firm_settings")
-          .select("n8n_webhook_url")
-          .eq("law_firm_id", company.law_firm_id)
-          .maybeSingle();
+        // Use webhook_url directly from response if available (preferred)
+        if (data.webhook_url) {
+          setN8nWebhookUrl(data.webhook_url);
+          console.log("Webhook URL set from response:", data.webhook_url);
+        } else {
+          // Fallback: Fetch from settings
+          const { data: updatedSettings } = await supabase
+            .from("law_firm_settings")
+            .select("n8n_webhook_url")
+            .eq("law_firm_id", company.law_firm_id)
+            .maybeSingle();
 
-        if (updatedSettings?.n8n_webhook_url) {
-          setN8nWebhookUrl(updatedSettings.n8n_webhook_url);
+          if (updatedSettings?.n8n_webhook_url) {
+            setN8nWebhookUrl(updatedSettings.n8n_webhook_url);
+          }
         }
 
         toast.success(data.already_exists 

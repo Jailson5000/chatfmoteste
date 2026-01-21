@@ -401,12 +401,20 @@ serve(async (req) => {
         law_firm_id,
       }, adminUserId);
 
-      // Also update the webhook URLs if law_firm_id is provided
+      // Extract and update webhook URL if law_firm_id is provided
+      let webhookUrl: string | null = null;
+      
       if (law_firm_id && workflowData.nodes) {
         const webhookNode = workflowData.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
         if (webhookNode) {
-          // Construct webhook URL using subdomain pattern
-          const webhookUrl = `${n8nApiUrl}/webhook/${subdomain || company_id}`;
+          // Get the actual webhook path from the node parameters
+          const webhookPath = webhookNode.parameters?.path || subdomain || company_id;
+          
+          // Construct the production webhook URL using the actual path from the workflow
+          webhookUrl = `${n8nApiUrl}/webhook/${webhookPath}`;
+          
+          console.log(`Extracted webhook path from workflow node: ${webhookPath}`);
+          console.log(`Constructed webhook URL: ${webhookUrl}`);
           
           // Update automations table
           await supabase
@@ -446,6 +454,7 @@ serve(async (req) => {
           await logAudit(supabase, 'N8N_WEBHOOK_URL_SET', company_id, 'success', {
             law_firm_id,
             webhook_url: webhookUrl,
+            webhook_path: webhookPath,
           }, adminUserId);
         }
       }
@@ -457,6 +466,7 @@ serve(async (req) => {
           success: true,
           workflow_id: workflowId,
           workflow_name: workflowName,
+          webhook_url: webhookUrl,
           active: isActive,
           message: isActive ? 'Workflow created and activated successfully' : 'Workflow created successfully (inactive)',
         }),
