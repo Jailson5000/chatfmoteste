@@ -2593,12 +2593,14 @@ async function processWithGemini(
         conversationId: context.conversationId,
         message: context.messageContent,
         automationId: automation.id, // REQUIRED for proper isolation
+        source: 'whatsapp',
         context: {
           clientName: context.contactName,
           clientPhone: context.contactPhone,
           lawFirmId: context.lawFirmId,
           clientId: context.clientId, // Pass clientId for memory support
           audioRequested: audioRequestedForThisMessage,
+          skipSaveUserMessage: true, // Message already saved by evolution-webhook
         },
       }),
     });
@@ -2759,6 +2761,7 @@ async function processWithGPT(
           lawFirmId: context.lawFirmId,
           clientId: context.clientId, // Pass clientId for memory support
           audioRequested: audioRequestedForThisMessage,
+          skipSaveUserMessage: true, // Message already saved by evolution-webhook
         },
       }),
     });
