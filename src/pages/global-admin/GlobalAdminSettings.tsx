@@ -196,6 +196,73 @@ export default function GlobalAdminSettings() {
         </CardContent>
       </Card>
 
+      {/* System Alert Settings */}
+      <Card className="border-warning/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5 text-warning" />
+            Aviso de Instabilidade
+          </CardTitle>
+          <CardDescription>
+            Exibe um banner de aviso para todos os clientes no topo da tela
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-warning/30 bg-warning/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <Label className="font-medium">Ativar Aviso Global</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Quando ativado, todos os clientes verão o aviso no topo da tela
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("system_alert_enabled") === "true" || getSetting("system_alert_enabled") === true}
+                onCheckedChange={(checked) => handleChange("system_alert_enabled", checked.toString())}
+              />
+              {localSettings["system_alert_enabled"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("system_alert_enabled")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("system_alert_enabled") === "true" || getSetting("system_alert_enabled") === true) && (
+            <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-warning text-sm flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Aviso <strong>ativo</strong>. Todos os clientes estão vendo a mensagem de instabilidade.
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="system_alert_message">Mensagem do Aviso</Label>
+            <div className="flex gap-2">
+              <Input
+                id="system_alert_message"
+                value={String(getSetting("system_alert_message") || "Sistema em atualização.").replace(/^"|"$/g, "")}
+                onChange={(e) => handleChange("system_alert_message", `"${e.target.value}"`)}
+                placeholder="Sistema em atualização..."
+                className="flex-1"
+              />
+              {localSettings["system_alert_message"] !== undefined && (
+                <Button size="icon" onClick={() => handleSave("system_alert_message")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Mensagem exibida no banner de aviso
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* General Settings */}
       <Card>
         <CardHeader>
