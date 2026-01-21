@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic, Volume2, Sparkles } from "lucide-react";
+import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Image, Mic, Volume2, Sparkles, Wrench } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -49,6 +49,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [creatingN8nWorkflow, setCreatingN8nWorkflow] = useState(false);
+  const [fixingWorkflow, setFixingWorkflow] = useState(false);
   const [n8nWorkflowId, setN8nWorkflowId] = useState<string | null>(null);
 
   // ElevenLabs TTS config (per-company)
@@ -320,6 +321,37 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
     }
   };
 
+  // Fix N8N workflow to ensure proper MiauChat integration
+  const handleFixWorkflow = async () => {
+    if (!n8nWorkflowId) {
+      toast.error("Nenhum workflow vinculado para corrigir");
+      return;
+    }
+
+    setFixingWorkflow(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("n8n-workflow-manager", {
+        body: {
+          action: "fix_miauchat_integration",
+          workflow_id: n8nWorkflowId,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast.success(data.message || "Workflow corrigido com sucesso!");
+      } else {
+        throw new Error(data?.error || "Erro ao corrigir workflow");
+      }
+    } catch (error: any) {
+      console.error("Error fixing workflow:", error);
+      toast.error("Erro ao corrigir workflow: " + (error.message || "Erro desconhecido"));
+    } finally {
+      setFixingWorkflow(false);
+    }
+  };
+
   const handleProviderChange = (provider: "internal" | "openai" | "n8n", enabled: boolean) => {
     if (provider === "internal") {
       setInternalEnabled(enabled);
@@ -586,11 +618,37 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                       </div>
                     )}
 
-                    {/* Workflow status indicator */}
+                    {/* Workflow status indicator with fix button */}
                     {n8nWorkflowId && (
-                      <div className="flex items-center gap-2 text-sm text-green-400">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>Workflow vinculado: {n8nWorkflowId.substring(0, 8)}...</span>
+                      <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-sm text-green-400">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Workflow vinculado: {n8nWorkflowId.substring(0, 8)}...</span>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleFixWorkflow}
+                            disabled={fixingWorkflow}
+                            className="border-orange-500/50 text-orange-400 hover:bg-orange-500/20 h-8"
+                          >
+                            {fixingWorkflow ? (
+                              <>
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                Corrigindo...
+                              </>
+                            ) : (
+                              <>
+                                <Wrench className="h-3 w-3 mr-1" />
+                                Corrigir Workflow
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-white/50">
+                          Se o N8N retornar erros sobre "Unused Respond to Webhook", clique em "Corrigir Workflow" para ajustar automaticamente.
+                        </p>
                       </div>
                     )}
 
