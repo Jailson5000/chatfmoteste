@@ -1,6 +1,7 @@
 import { Link2, PenTool, ShoppingCart } from "lucide-react";
 import { GoogleCalendarIntegration } from "./integrations/GoogleCalendarIntegration";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
+import { AgendaProIntegration } from "./integrations/AgendaProIntegration";
 import { IntegrationCard } from "./IntegrationCard";
 import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 
@@ -62,6 +63,7 @@ export function IntegrationsSettings() {
       {/* Integrations Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Active Integrations - Available first */}
+        <AgendaProIntegration />
         <GoogleCalendarIntegration />
         <TrayChatIntegration />
         

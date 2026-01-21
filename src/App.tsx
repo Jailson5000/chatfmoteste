@@ -32,6 +32,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 // Calendar import removed - route redirects to /agenda
 import Agenda from "./pages/Agenda";
+import AgendaPro from "./pages/AgendaPro";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 // Admin pages removed - functionality moved to Settings
 import {
@@ -201,6 +202,17 @@ const App = () => (
             }
           >
             <Route index element={<Agenda />} />
+          </Route>
+          
+          <Route
+            path="/agenda-pro"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<AgendaPro />} />
           </Route>
           
           <Route
