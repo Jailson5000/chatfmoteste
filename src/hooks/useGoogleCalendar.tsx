@@ -152,23 +152,40 @@ export function useGoogleCalendar() {
     },
   });
 
-  // Toggle active status
+  // Toggle active status - when disabling, also disconnect to allow reconnecting with different account
   const toggleActive = useMutation({
     mutationFn: async (isActive: boolean) => {
       if (!integration?.id) throw new Error("Integração não encontrada");
 
-      const { error } = await supabase
-        .from("google_calendar_integrations")
-        .update({
-          is_active: isActive,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", integration.id);
+      if (isActive) {
+        // Just activate
+        const { error } = await supabase
+          .from("google_calendar_integrations")
+          .update({
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", integration.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // When deactivating, delete the integration so user can connect with different account
+        const { error } = await supabase
+          .from("google_calendar_integrations")
+          .delete()
+          .eq("id", integration.id);
+
+        if (error) throw error;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (_, isActive) => {
       queryClient.invalidateQueries({ queryKey: ["google-calendar-integration"] });
+      if (!isActive) {
+        toast({
+          title: "Desconectado",
+          description: "Google Calendar foi desconectado. Você pode conectar com outra conta.",
+        });
+      }
     },
     onError: (error: any) => {
       toast({
