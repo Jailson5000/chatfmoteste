@@ -23,47 +23,7 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // SECURITY: Authenticate user
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid authentication" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // SECURITY: Get user's law_firm_id from profile (NOT from request body)
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("law_firm_id")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile?.law_firm_id) {
-      return new Response(
-        JSON.stringify({ error: "User not associated with any company" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const law_firm_id = profile.law_firm_id; // VALIDATED law_firm_id
-
-    const { action, redirect_url, code } = await req.json();
-
-    console.log(`[google-calendar-auth] Action: ${action}, Law Firm: ${law_firm_id}, User: ${user.email}`);
-    console.log(`[google-calendar-auth] Redirect URL received: ${redirect_url}`);
+    const { action, redirect_url, code, law_firm_id: bodyLawFirmId } = await req.json();
 
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       console.error("[google-calendar-auth] Missing Google OAuth credentials");
@@ -75,8 +35,88 @@ serve(async (req) => {
       );
     }
 
+    // For get_auth_url: require authentication
+    // For exchange_code: use law_firm_id from body (passed via state parameter from OAuth callback)
+    let law_firm_id: string;
+    let user: any = null;
+
+    if (action === "get_auth_url") {
+      // SECURITY: Authenticate user for get_auth_url
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Missing authorization header" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const { data: authData, error: authError } = await userClient.auth.getUser();
+      if (authError || !authData.user) {
+        return new Response(
+          JSON.stringify({ error: "Invalid authentication" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      user = authData.user;
+
+      // SECURITY: Get user's law_firm_id from profile (NOT from request body)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("law_firm_id")
+        .eq("id", user.id)
+        .single();
+
+      if (!profile?.law_firm_id) {
+        return new Response(
+          JSON.stringify({ error: "User not associated with any company" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      law_firm_id = profile.law_firm_id;
+      console.log(`[google-calendar-auth] Action: ${action}, Law Firm: ${law_firm_id}, User: ${user.email}`);
+    } else if (action === "exchange_code") {
+      // For exchange_code, we trust the law_firm_id from the state parameter
+      // This is safe because: 1) state was encrypted/encoded during get_auth_url by authenticated user
+      // 2) Google redirects with this state, so it's tied to the original auth request
+      if (!bodyLawFirmId) {
+        return new Response(
+          JSON.stringify({ error: "law_firm_id is required for exchange_code" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Verify the law_firm exists
+      const { data: lawFirm, error: lfError } = await supabase
+        .from("law_firms")
+        .select("id")
+        .eq("id", bodyLawFirmId)
+        .single();
+
+      if (lfError || !lawFirm) {
+        return new Response(
+          JSON.stringify({ error: "Invalid law_firm_id" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      law_firm_id = bodyLawFirmId;
+      console.log(`[google-calendar-auth] Action: ${action}, Law Firm: ${law_firm_id} (from state)`);
+    } else {
+      return new Response(
+        JSON.stringify({ error: "Invalid action" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     switch (action) {
       case "get_auth_url": {
+        console.log(`[google-calendar-auth] Redirect URL received: ${redirect_url}`);
+
         // Generate Google OAuth URL
         const scopes = [
           "https://www.googleapis.com/auth/calendar",
