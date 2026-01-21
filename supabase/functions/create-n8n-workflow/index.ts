@@ -315,11 +315,23 @@ serve(async (req) => {
           return node;
         });
         
+        // Filter settings to only include valid n8n API properties
+        // The API rejects additional/unknown properties
+        const allowedSettings = ['executionOrder', 'saveExecutionProgress', 'saveManualExecutions', 'saveDataErrorExecution', 'saveDataSuccessExecution', 'executionTimeout', 'timezone', 'errorWorkflow'];
+        const filteredSettings: Record<string, any> = {};
+        if (templateWorkflow.settings) {
+          for (const key of allowedSettings) {
+            if (key in templateWorkflow.settings) {
+              filteredSettings[key] = templateWorkflow.settings[key];
+            }
+          }
+        }
+        
         const newWorkflowPayload = {
           name: workflowName,
           nodes: modifiedNodes,
           connections: templateWorkflow.connections,
-          settings: templateWorkflow.settings,
+          settings: Object.keys(filteredSettings).length > 0 ? filteredSettings : undefined,
           staticData: templateWorkflow.staticData || null,
         };
 
