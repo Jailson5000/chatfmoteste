@@ -80,15 +80,16 @@ export function useGoogleCalendar() {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) return null;
 
-      // Explicit tenant filter for safety (RLS is backup, not primary defense)
+      // Use the safe view that excludes tokens (security best practice)
+      // Tokens are only accessed by edge functions using service_role
       const { data, error } = await supabase
-        .from("google_calendar_integrations")
+        .from("google_calendar_integrations_safe" as any)
         .select("*")
         .eq("law_firm_id", lawFirm.id)
         .maybeSingle();
 
       if (error) throw error;
-      return data as GoogleCalendarIntegration | null;
+      return (data as unknown) as GoogleCalendarIntegration | null;
     },
     enabled: !!lawFirm?.id,
   });
