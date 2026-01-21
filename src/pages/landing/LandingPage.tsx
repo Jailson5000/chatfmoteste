@@ -39,9 +39,9 @@ export function LandingPage() {
       description: "Para pequenos negócios que estão começando com automação e IA.",
       items: [
         "200 conversas com IA",
-        "5 minutos de áudio",
+        "10 minutos de áudio",
         "1 WhatsApp conectado",
-        "2 usuários",
+        "3 usuários",
         "1 agente de IA",
         "Automação essencial",
         "Mensagens rápidas",
@@ -54,8 +54,8 @@ export function LandingPage() {
       price: "497",
       description: "Mais organização e produtividade para equipes em crescimento.",
       items: [
-        "250 conversas com IA",
-        "20 minutos de áudio",
+        "300 conversas com IA",
+        "25 minutos de áudio",
         "2 WhatsApps conectados",
         "4 usuários",
         "2 agentes de IA",
@@ -71,7 +71,7 @@ export function LandingPage() {
       description: "Mais volume, performance e flexibilidade para escalar o atendimento.",
       items: [
         "500 conversas com IA",
-        "30 minutos de áudio",
+        "40 minutos de áudio",
         "4 WhatsApps conectados",
         "5 usuários",
         "4 agentes de IA",
