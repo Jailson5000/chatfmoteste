@@ -180,6 +180,15 @@ export function useAgendaProAppointments(options?: {
 
       if (error) throw error;
 
+      // Send notification
+      try {
+        await supabase.functions.invoke("agenda-pro-notification", {
+          body: { appointment_id: appointment.id, type: "created" }
+        });
+      } catch (notifError) {
+        console.error("Notification error:", notifError);
+      }
+
       return appointment;
     },
     onSuccess: () => {
@@ -237,6 +246,16 @@ export function useAgendaProAppointments(options?: {
         .single();
 
       if (error) throw error;
+
+      // Send cancellation notification
+      try {
+        await supabase.functions.invoke("agenda-pro-notification", {
+          body: { appointment_id: id, type: "cancelled" }
+        });
+      } catch (notifError) {
+        console.error("Cancellation notification error:", notifError);
+      }
+
       return data;
     },
     onSuccess: () => {
