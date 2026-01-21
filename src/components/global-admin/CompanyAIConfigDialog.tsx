@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
+import { N8NFlowDocumentation } from "./N8NFlowDocumentation";
 
 interface Company {
   id: string;
@@ -503,6 +504,11 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                           {showN8nSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </Button>
                       </div>
+                    </div>
+                    
+                    {/* N8N Flow Documentation */}
+                    <div className="pt-3 border-t border-white/10">
+                      <N8NFlowDocumentation />
                     </div>
                   </div>
                 )}
