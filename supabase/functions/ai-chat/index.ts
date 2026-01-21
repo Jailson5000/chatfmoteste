@@ -149,6 +149,8 @@ interface ChatRequest {
     lawFirmId?: string;
     audioRequested?: boolean;
     widgetKey?: string;
+    // Flag to skip saving user message (when called from evolution-webhook where message is already saved)
+    skipSaveUserMessage?: boolean;
   };
 }
 
@@ -3423,15 +3425,20 @@ serve(async (req) => {
 
     // Save messages to database if we have a valid conversation
     if (isValidUUID(conversationId)) {
-      // Save user message
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        content: message,
-        sender_type: "client",
-        is_from_me: false,
-        message_type: "text",
-        status: "delivered"
-      });
+      // Save user message ONLY if not already saved (skip for evolution-webhook calls)
+      // evolution-webhook already saves the message before calling ai-chat
+      const skipSaveUserMessage = context?.skipSaveUserMessage === true;
+      
+      if (!skipSaveUserMessage) {
+        await supabase.from("messages").insert({
+          conversation_id: conversationId,
+          content: message,
+          sender_type: "client",
+          is_from_me: false,
+          message_type: "text",
+          status: "delivered"
+        });
+      }
 
       // Save each AI response part as a separate message
       let savedMessageId: string | null = null;
