@@ -2928,13 +2928,13 @@ async function processWithN8N(
       }
     }
 
-    // Get recent conversation history for N8N context (last 20 messages)
+    // Get recent conversation history for N8N context (last 35 messages)
     const { data: recentMessages } = await supabaseClient
       .from('messages')
       .select('content, is_from_me, message_type, created_at')
       .eq('conversation_id', context.conversationId)
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(35);
 
     const conversationHistory = (recentMessages || [])
       .reverse() // Oldest first
