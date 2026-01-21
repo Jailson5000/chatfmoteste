@@ -269,6 +269,79 @@ serve(async (req) => {
     let workflowId: string;
 
     try {
+      // SECURITY: Check if workflow already exists in N8N by searching for matching name
+      console.log(`Checking for existing workflow with name pattern: ${workflowName}`);
+      const searchResponse = await fetch(`${n8nApiUrl}/api/v1/workflows`, {
+        method: 'GET',
+        headers: {
+          'X-N8N-API-KEY': n8nApiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (searchResponse.ok) {
+        const allWorkflows = await searchResponse.json();
+        const existingWorkflow = allWorkflows.data?.find((wf: any) => 
+          wf.name === workflowName || 
+          wf.name.includes(company_id) ||
+          (subdomain && wf.name.toLowerCase().includes(subdomain.toLowerCase()))
+        );
+
+        if (existingWorkflow) {
+          console.log(`Found existing workflow in N8N: ${existingWorkflow.id} - ${existingWorkflow.name}`);
+          
+          // Update company with the found workflow info
+          await supabase
+            .from('companies')
+            .update({
+              n8n_workflow_id: existingWorkflow.id,
+              n8n_workflow_name: existingWorkflow.name,
+              n8n_workflow_status: 'created',
+              n8n_updated_at: new Date().toISOString(),
+            })
+            .eq('id', company_id);
+
+          // Try to extract webhook URL from existing workflow
+          let webhookUrl: string | null = null;
+          const webhookNode = existingWorkflow.nodes?.find((n: any) => n.type === 'n8n-nodes-base.webhook');
+          if (webhookNode) {
+            const webhookPath = webhookNode.parameters?.path || subdomain || company_id;
+            webhookUrl = `${n8nApiUrl}/webhook/${webhookPath}`;
+            
+            // Save webhook URL to settings
+            if (law_firm_id) {
+              await supabase
+                .from('law_firm_settings')
+                .upsert({
+                  law_firm_id,
+                  n8n_webhook_url: webhookUrl,
+                }, { onConflict: 'law_firm_id' });
+            }
+          }
+
+          await logAudit(supabase, 'N8N_WORKFLOW_CREATE', company_id, 'success', {
+            message: 'Workflow already exists in N8N',
+            workflow_id: existingWorkflow.id,
+            workflow_name: existingWorkflow.name,
+            webhook_url: webhookUrl,
+            duplicate_prevented: true,
+          }, adminUserId);
+
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              message: 'Workflow já existe no N8N e foi vinculado',
+              workflow_id: existingWorkflow.id,
+              workflow_name: existingWorkflow.name,
+              webhook_url: webhookUrl,
+              already_exists: true,
+              active: existingWorkflow.active || false,
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+
       // Strategy 1: Clone from template if template ID is provided
       if (n8nTemplateWorkflowId) {
         console.log(`Cloning from template workflow: ${n8nTemplateWorkflowId}`);
