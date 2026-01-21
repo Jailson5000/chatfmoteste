@@ -96,28 +96,30 @@ export async function messageSplitDelay(
 
 /**
  * Configuration for different sending scenarios
+ * OPTIMIZED: Reduced delays for faster message delivery while maintaining minimal jitter
+ * to avoid rate limiting and provide natural typing feel
  */
 export const DELAY_CONFIG = {
-  // Human operator sending manual messages - minimal delay
+  // Human operator sending manual messages - no delay
   MANUAL_SEND: { min: 0, max: 0 },
   
-  // AI/automation responses - full human-like jitter
-  AI_RESPONSE: { min: 7000, max: 15000 },
+  // AI/automation responses - minimal jitter (1-3s) for natural feel without blocking
+  AI_RESPONSE: { min: 1000, max: 3000 },
   
-  // Follow-up messages - moderate delay
-  FOLLOW_UP: { min: 5000, max: 12000 },
+  // Follow-up messages - short delay
+  FOLLOW_UP: { min: 1500, max: 4000 },
   
-  // Birthday/promotional messages - longer delay to avoid spam detection
-  PROMOTIONAL: { min: 10000, max: 20000 },
+  // Birthday/promotional messages - moderate delay to avoid spam detection
+  PROMOTIONAL: { min: 5000, max: 10000 },
   
-  // Appointment reminders - moderate delay
-  REMINDER: { min: 5000, max: 10000 },
+  // Appointment reminders - short delay
+  REMINDER: { min: 2000, max: 5000 },
   
-  // Between parts of a split message - shorter delay
-  SPLIT_MESSAGE: { min: 3000, max: 7000 },
+  // Between parts of a split message - very short delay
+  SPLIT_MESSAGE: { min: 800, max: 2000 },
   
-  // Audio chunks - short pacing
-  AUDIO_CHUNK: { min: 800, max: 1500 },
+  // Audio chunks - minimal pacing
+  AUDIO_CHUNK: { min: 500, max: 1000 },
 } as const;
 
 /**
