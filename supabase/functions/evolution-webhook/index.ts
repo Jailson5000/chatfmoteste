@@ -2889,7 +2889,7 @@ async function processWithN8N(
     );
 
     // Get client info for richer context
-    let clientInfo = {
+    let clientInfo: Record<string, any> = {
       phone: context.contactPhone,
       name: context.contactName,
     };
@@ -2897,12 +2897,62 @@ async function processWithN8N(
     if (context.clientId) {
       const { data: client } = await supabaseClient
         .from('clients')
-        .select('name, phone, email, notes, custom_status_id')
+        .select('id, name, phone, email, notes, custom_status_id, document, address, birth_date, state')
         .eq('id', context.clientId)
         .maybeSingle();
       
       if (client) {
         clientInfo = { ...clientInfo, ...client };
+      }
+
+      // Get client memories for N8N memory node
+      const { data: memories } = await supabaseClient
+        .from('client_memories')
+        .select('fact_type, content, importance')
+        .eq('client_id', context.clientId)
+        .eq('is_active', true)
+        .order('importance', { ascending: false })
+        .limit(10);
+
+      if (memories && memories.length > 0) {
+        clientInfo.memories = memories;
+      }
+    }
+
+    // Get recent conversation history for N8N context (last 20 messages)
+    const { data: recentMessages } = await supabaseClient
+      .from('messages')
+      .select('content, is_from_me, message_type, created_at')
+      .eq('conversation_id', context.conversationId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const conversationHistory = (recentMessages || [])
+      .reverse() // Oldest first
+      .map((msg: { is_from_me: boolean; content: string; message_type: string; created_at: string }) => ({
+        role: msg.is_from_me ? 'assistant' : 'user',
+        content: msg.content,
+        type: msg.message_type,
+        timestamp: msg.created_at,
+      }));
+
+    // Get knowledge items linked to this automation (for base de conhecimento node)
+    let knowledgeItems: any[] = [];
+    if (automation?.id) {
+      const { data: agentKnowledge } = await supabaseClient
+        .from('agent_knowledge')
+        .select('knowledge_item_id')
+        .eq('automation_id', automation.id);
+
+      if (agentKnowledge && agentKnowledge.length > 0) {
+        const knowledgeIds = agentKnowledge.map((k: { knowledge_item_id: string }) => k.knowledge_item_id);
+        const { data: items } = await supabaseClient
+          .from('knowledge_items')
+          .select('title, content, category')
+          .in('id', knowledgeIds)
+          .eq('is_active', true);
+
+        knowledgeItems = items || [];
       }
     }
 
@@ -2914,22 +2964,29 @@ async function processWithN8N(
       ? context.messageContent.replace('[Áudio transcrito]: ', '').trim()
       : context.messageContent;
 
+    // Generate session ID based on conversation for N8N memory nodes
+    const sessionId = `miauchat_${context.conversationId}`;
+
     const n8nPayload = {
       event: 'new_message',
       conversation_id: context.conversationId,
+      session_id: sessionId, // For N8N InputsessionId node
       message: cleanMessageContent, // Clean transcription without prefix
       message_type: context.messageType, // Current type (may be 'text' after transcription)
       original_message_type: originalMessageType, // Original type before transcription
       is_audio_transcription: isTranscribedAudio, // Flag for N8N to know this was audio
       raw_message: context.messageContent, // Full message with prefix if any
-      client: clientInfo,
+      client: clientInfo, // Includes memories if available
       automation: automation ? {
         id: automation.id,
         name: automation.name,
         prompt: automation.ai_prompt,
+        temperature: automation.ai_temperature || 0.7,
         voice_enabled: Boolean((automation.trigger_config as any)?.voice_enabled),
         voice_id: (automation.trigger_config as any)?.voice_id || null,
       } : null,
+      conversation_history: conversationHistory, // Last 20 messages for context
+      knowledge_base: knowledgeItems, // Knowledge items linked to agent
       context: {
         law_firm_id: context.lawFirmId,
         whatsapp_instance_id: context.instanceId,
