@@ -1167,6 +1167,8 @@ export type Database = {
       companies: {
         Row: {
           admin_user_id: string | null
+          allow_ai_overage: boolean
+          allow_tts_overage: boolean
           approval_status: string
           approved_at: string | null
           approved_by: string | null
@@ -1211,6 +1213,8 @@ export type Database = {
         }
         Insert: {
           admin_user_id?: string | null
+          allow_ai_overage?: boolean
+          allow_tts_overage?: boolean
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
@@ -1255,6 +1259,8 @@ export type Database = {
         }
         Update: {
           admin_user_id?: string | null
+          allow_ai_overage?: boolean
+          allow_tts_overage?: boolean
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
@@ -4101,6 +4107,9 @@ export type Database = {
     Views: {
       company_usage_summary: {
         Row: {
+          allow_ai_overage: boolean | null
+          allow_tts_overage: boolean | null
+          approval_status: string | null
           company_id: string | null
           company_name: string | null
           current_agents: number | null
@@ -4113,7 +4122,6 @@ export type Database = {
           effective_max_instances: number | null
           effective_max_tts_minutes: number | null
           effective_max_users: number | null
-          effective_max_workspaces: number | null
           law_firm_id: string | null
           plan_id: string | null
           plan_max_agents: number | null
@@ -4123,6 +4131,7 @@ export type Database = {
           plan_max_users: number | null
           plan_name: string | null
           plan_price: number | null
+          status: string | null
           use_custom_limits: boolean | null
         }
         Relationships: [

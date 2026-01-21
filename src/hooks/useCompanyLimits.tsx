@@ -23,12 +23,22 @@ interface CompanyUsageSummary {
   company_name: string;
   plan_id: string | null;
   plan_name: string | null;
+  status: string;
+  approval_status: string;
   use_custom_limits: boolean;
+  allow_ai_overage: boolean;
+  allow_tts_overage: boolean;
+  // Plan info
+  plan_price: number | null;
+  plan_max_users: number;
+  plan_max_instances: number;
+  plan_max_agents: number;
+  plan_max_ai_conversations: number;
+  plan_max_tts_minutes: number;
   // Effective limits
   effective_max_users: number;
   effective_max_instances: number;
   effective_max_agents: number;
-  effective_max_workspaces: number;
   effective_max_ai_conversations: number;
   effective_max_tts_minutes: number;
   // Current usage
