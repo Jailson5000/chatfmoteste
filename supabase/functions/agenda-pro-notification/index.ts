@@ -8,8 +8,8 @@ const corsHeaders = {
 };
 
 // Get the app URL for confirmation links
-// Priority: BOOKING_URL (subdomain for bookings) > APP_URL > default
-const APP_URL = Deno.env.get("BOOKING_URL") || Deno.env.get("APP_URL") || "https://chatfmoteste.lovable.app";
+// Priority: BOOKING_URL (subdomain for bookings) > APP_URL > default (white-label)
+const APP_URL = Deno.env.get("BOOKING_URL") || Deno.env.get("APP_URL") || "https://agendar.miauchat.com.br";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
