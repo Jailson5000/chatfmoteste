@@ -5,23 +5,24 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock } from "lucide-react";
+import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock, Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScheduledMessageDialog } from "./ScheduledMessageDialog";
 
 interface ScheduledMessage {
   id: string;
-  appointment_id: string;
-  type: "reminder" | "pre_message" | "confirmation";
+  appointment_id: string | null;
+  client_id: string | null;
+  type: "reminder" | "pre_message" | "confirmation" | "custom" | "birthday";
   scheduled_for: string;
   message_content: string | null;
   status: "pending" | "sent" | "cancelled";
-  appointment: {
+  channel: string;
+  appointment?: {
     id: string;
     start_time: string;
     client_name: string | null;
@@ -31,6 +32,10 @@ interface ScheduledMessage {
     agenda_pro_services: { name: string; pre_message_text: string | null } | null;
     agenda_pro_professionals: { name: string } | null;
   };
+  client?: {
+    name: string;
+    phone: string | null;
+  } | null;
 }
 
 export function AgendaProScheduledMessages() {
@@ -39,16 +44,59 @@ export function AgendaProScheduledMessages() {
   const queryClient = useQueryClient();
   const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
   const [cancellingMessage, setCancellingMessage] = useState<ScheduledMessage | null>(null);
-  const [editedContent, setEditedContent] = useState("");
+  const [showNewDialog, setShowNewDialog] = useState(false);
   const [activeTab, setActiveTab] = useState("pending");
 
-  // Fetch scheduled messages (appointments with pending reminders/pre-messages)
-  const { data: messages = [], isLoading } = useQuery({
+  // Fetch custom scheduled messages from new table
+  const { data: customMessages = [], isLoading: loadingCustom } = useQuery({
+    queryKey: ["agenda-pro-custom-messages", lawFirm?.id],
+    queryFn: async () => {
+      if (!lawFirm?.id) return [];
+
+      const { data, error } = await supabase
+        .from("agenda_pro_scheduled_messages")
+        .select(`
+          *,
+          agenda_pro_clients(name, phone),
+          agenda_pro_appointments(
+            id,
+            start_time,
+            client_name,
+            client_phone,
+            status,
+            agenda_pro_services(name),
+            agenda_pro_professionals(name)
+          )
+        `)
+        .eq("law_firm_id", lawFirm.id)
+        .eq("status", "pending")
+        .gte("scheduled_at", new Date().toISOString())
+        .order("scheduled_at", { ascending: true });
+
+      if (error) throw error;
+
+      return (data || []).map((msg: any) => ({
+        id: msg.id,
+        appointment_id: msg.appointment_id,
+        client_id: msg.client_id,
+        type: msg.message_type as any,
+        scheduled_for: msg.scheduled_at,
+        message_content: msg.message_content,
+        status: msg.status,
+        channel: msg.channel,
+        client: msg.agenda_pro_clients,
+        appointment: msg.agenda_pro_appointments,
+      }));
+    },
+    enabled: !!lawFirm?.id,
+  });
+
+  // Fetch auto-generated messages from appointments
+  const { data: autoMessages = [], isLoading: loadingAuto } = useQuery({
     queryKey: ["agenda-pro-scheduled-messages", lawFirm?.id],
     queryFn: async () => {
       if (!lawFirm?.id) return [];
 
-      // Get all upcoming appointments that haven't sent reminders/pre-messages yet
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from("agenda_pro_appointments")
@@ -73,7 +121,6 @@ export function AgendaProScheduledMessages() {
 
       if (error) throw error;
 
-      // Transform into scheduled message format
       const scheduledMessages: ScheduledMessage[] = [];
 
       (data || []).forEach((apt: any) => {
@@ -89,10 +136,12 @@ export function AgendaProScheduledMessages() {
             scheduledMessages.push({
               id: `${apt.id}_reminder`,
               appointment_id: apt.id,
+              client_id: null,
               type: "reminder",
               scheduled_for: reminderTime.toISOString(),
               message_content: null,
               status: "pending",
+              channel: "whatsapp",
               appointment: apt,
             });
           }
@@ -108,40 +157,59 @@ export function AgendaProScheduledMessages() {
             scheduledMessages.push({
               id: `${apt.id}_pre_message`,
               appointment_id: apt.id,
+              client_id: null,
               type: "pre_message",
               scheduled_for: preMessageTime.toISOString(),
               message_content: service.pre_message_text,
               status: "pending",
+              channel: "whatsapp",
               appointment: apt,
             });
           }
         }
       });
 
-      // Sort by scheduled time
       return scheduledMessages.sort((a, b) => 
         new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime()
       );
     },
     enabled: !!lawFirm?.id,
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 60000,
   });
+
+  // Combine all messages
+  const allMessages = [...customMessages, ...autoMessages].sort((a, b) =>
+    new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime()
+  );
+
+  const isLoading = loadingCustom || loadingAuto;
+  const pendingMessages = allMessages.filter(m => m.status === "pending");
 
   // Cancel a scheduled message
   const cancelMessage = useMutation({
     mutationFn: async (message: ScheduledMessage) => {
-      // Mark as sent (skipped) so it won't be sent
-      const field = message.type === "reminder" ? "reminder_sent_at" : "pre_message_sent_at";
-      
-      const { error } = await supabase
-        .from("agenda_pro_appointments")
-        .update({ [field]: new Date().toISOString() })
-        .eq("id", message.appointment_id);
-
-      if (error) throw error;
+      // Check if it's a custom message or auto-generated
+      if (message.id.includes("_reminder") || message.id.includes("_pre_message")) {
+        // Auto-generated: mark as sent (skipped)
+        const field = message.type === "reminder" ? "reminder_sent_at" : "pre_message_sent_at";
+        const { error } = await supabase
+          .from("agenda_pro_appointments")
+          .update({ [field]: new Date().toISOString() })
+          .eq("id", message.appointment_id);
+        if (error) throw error;
+      } else {
+        // Custom message: update status
+        const { error } = await supabase
+          .from("agenda_pro_scheduled_messages")
+          .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+          .eq("id", message.id)
+          .eq("law_firm_id", lawFirm?.id);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
       toast({ title: "Mensagem cancelada" });
       setCancellingMessage(null);
     },
@@ -150,27 +218,49 @@ export function AgendaProScheduledMessages() {
     },
   });
 
-  // Update pre-message content
-  const updateMessage = useMutation({
-    mutationFn: async ({ appointmentId, content }: { appointmentId: string; content: string }) => {
-      // Get service ID from appointment
-      const { data: apt } = await supabase
-        .from("agenda_pro_appointments")
-        .select("service_id")
-        .eq("id", appointmentId)
-        .single();
+  // Save custom message
+  const saveMessage = useMutation({
+    mutationFn: async (message: any) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
-      if (!apt?.service_id) throw new Error("Serviço não encontrado");
-
-      // Update the service's pre_message_text (this will affect only this type of message)
-      // Note: For per-appointment customization, we'd need a new field. For now, we show a note.
-      toast({ 
-        title: "Nota", 
-        description: "Para alterar a mensagem, edite o texto padrão do serviço na aba Serviços.",
-      });
+      if (message.id && !message.id.includes("_")) {
+        // Update existing custom message
+        const { error } = await supabase
+          .from("agenda_pro_scheduled_messages")
+          .update({
+            message_content: message.message_content,
+            scheduled_at: message.scheduled_at,
+            message_type: message.message_type,
+            channel: message.channel,
+            client_id: message.client_id,
+          })
+          .eq("id", message.id)
+          .eq("law_firm_id", lawFirm.id);
+        if (error) throw error;
+      } else {
+        // Create new custom message
+        const { error } = await supabase
+          .from("agenda_pro_scheduled_messages")
+          .insert({
+            law_firm_id: lawFirm.id,
+            message_content: message.message_content,
+            scheduled_at: message.scheduled_at,
+            message_type: message.message_type,
+            channel: message.channel,
+            client_id: message.client_id,
+            appointment_id: message.appointment_id || null,
+          });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
+      toast({ title: "Mensagem salva" });
+      setShowNewDialog(false);
       setEditingMessage(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
     },
   });
 
@@ -190,6 +280,7 @@ export function AgendaProScheduledMessages() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
       toast({ title: "Mensagem enviada" });
     },
     onError: (error: Error) => {
@@ -197,13 +288,13 @@ export function AgendaProScheduledMessages() {
     },
   });
 
-  const pendingMessages = messages.filter(m => m.status === "pending");
-
   const getTypeLabel = (type: string) => {
     switch (type) {
       case "reminder": return "Lembrete 24h";
       case "pre_message": return "Pré-atendimento";
       case "confirmation": return "Confirmação";
+      case "birthday": return "Aniversário";
+      case "custom": return "Personalizada";
       default: return type;
     }
   };
@@ -213,8 +304,14 @@ export function AgendaProScheduledMessages() {
       case "reminder": return "bg-blue-500/10 text-blue-500";
       case "pre_message": return "bg-purple-500/10 text-purple-500";
       case "confirmation": return "bg-green-500/10 text-green-500";
+      case "birthday": return "bg-pink-500/10 text-pink-500";
+      case "custom": return "bg-orange-500/10 text-orange-500";
       default: return "";
     }
+  };
+
+  const isCustomMessage = (message: ScheduledMessage) => {
+    return !message.id.includes("_reminder") && !message.id.includes("_pre_message");
   };
 
   if (isLoading) {
@@ -234,9 +331,15 @@ export function AgendaProScheduledMessages() {
             Gerencie lembretes e mensagens pré-atendimento pendentes
           </p>
         </div>
-        <Badge variant="outline" className="text-lg px-3 py-1">
-          {pendingMessages.length} pendente{pendingMessages.length !== 1 ? "s" : ""}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowNewDialog(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nova Mensagem
+          </Button>
+          <Badge variant="outline" className="text-lg px-3 py-1">
+            {pendingMessages.length} pendente{pendingMessages.length !== 1 ? "s" : ""}
+          </Badge>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -253,19 +356,23 @@ export function AgendaProScheduledMessages() {
               <CardContent className="flex flex-col items-center justify-center h-[200px] text-center">
                 <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="font-medium">Nenhuma mensagem pendente</h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground mb-4">
                   As mensagens agendadas aparecerão aqui
                 </p>
+                <Button variant="outline" onClick={() => setShowNewDialog(true)} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Criar Mensagem
+                </Button>
               </CardContent>
             </Card>
           ) : (
             <div className="space-y-3">
               {pendingMessages.map((message) => {
                 const apt = message.appointment;
-                const clientName = apt.agenda_pro_clients?.name || apt.client_name || "Cliente";
-                const clientPhone = apt.agenda_pro_clients?.phone || apt.client_phone || "";
-                const serviceName = apt.agenda_pro_services?.name || "Serviço";
-                const professionalName = apt.agenda_pro_professionals?.name;
+                const clientName = apt?.agenda_pro_clients?.name || apt?.client_name || message.client?.name || "Cliente";
+                const clientPhone = apt?.agenda_pro_clients?.phone || apt?.client_phone || message.client?.phone || "";
+                const serviceName = apt?.agenda_pro_services?.name || "Serviço";
+                const professionalName = apt?.agenda_pro_professionals?.name;
 
                 return (
                   <Card key={message.id}>
@@ -280,21 +387,26 @@ export function AgendaProScheduledMessages() {
                               <CalendarClock className="h-3 w-3" />
                               {format(parseISO(message.scheduled_for), "dd/MM HH:mm", { locale: ptBR })}
                             </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              {message.channel === "whatsapp" ? "WhatsApp" : "E-mail"}
+                            </Badge>
                           </div>
 
                           <div className="text-sm space-y-1">
                             <div className="flex items-center gap-2">
                               <User className="h-4 w-4 text-muted-foreground" />
                               <span className="font-medium">{clientName}</span>
-                              <span className="text-muted-foreground">{clientPhone}</span>
+                              {clientPhone && <span className="text-muted-foreground">{clientPhone}</span>}
                             </div>
-                            <div className="text-muted-foreground">
-                              {serviceName} • {format(parseISO(apt.start_time), "dd/MM 'às' HH:mm", { locale: ptBR })}
-                              {professionalName && ` • ${professionalName}`}
-                            </div>
+                            {apt && (
+                              <div className="text-muted-foreground">
+                                {serviceName} • {format(parseISO(apt.start_time), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                                {professionalName && ` • ${professionalName}`}
+                              </div>
+                            )}
                           </div>
 
-                          {message.type === "pre_message" && message.message_content && (
+                          {message.message_content && (
                             <div className="mt-2 p-2 bg-muted rounded text-sm">
                               <p className="text-muted-foreground text-xs mb-1">Mensagem:</p>
                               <p className="line-clamp-2">{message.message_content}</p>
@@ -303,23 +415,22 @@ export function AgendaProScheduledMessages() {
                         </div>
 
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => sendNow.mutate(message)}
-                            disabled={sendNow.isPending}
-                            title="Enviar agora"
-                          >
-                            <Send className="h-4 w-4" />
-                          </Button>
-                          {message.type === "pre_message" && message.message_content && (
+                          {message.appointment_id && (
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => {
-                                setEditingMessage(message);
-                                setEditedContent(message.message_content || "");
-                              }}
+                              onClick={() => sendNow.mutate(message)}
+                              disabled={sendNow.isPending}
+                              title="Enviar agora"
+                            >
+                              <Send className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {isCustomMessage(message) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setEditingMessage(message)}
                               title="Editar mensagem"
                             >
                               <Pencil className="h-4 w-4" />
@@ -344,31 +455,29 @@ export function AgendaProScheduledMessages() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit Dialog */}
-      <Dialog open={!!editingMessage} onOpenChange={() => setEditingMessage(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Editar Mensagem</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Textarea
-              value={editedContent}
-              onChange={(e) => setEditedContent(e.target.value)}
-              rows={5}
-              placeholder="Conteúdo da mensagem..."
-            />
-            <p className="text-xs text-muted-foreground">
-              Nota: Esta mensagem é definida no cadastro do serviço. 
-              Para alterar permanentemente, edite o serviço na aba "Serviços".
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingMessage(null)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* New/Edit Message Dialog */}
+      <ScheduledMessageDialog
+        open={showNewDialog || !!editingMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowNewDialog(false);
+            setEditingMessage(null);
+          }
+        }}
+        message={editingMessage ? {
+          id: editingMessage.id,
+          appointment_id: editingMessage.appointment_id,
+          client_id: editingMessage.client_id,
+          message_type: editingMessage.type,
+          message_content: editingMessage.message_content || "",
+          scheduled_at: editingMessage.scheduled_for,
+          channel: editingMessage.channel,
+        } : null}
+        onSave={async (msg) => {
+          await saveMessage.mutateAsync(msg);
+        }}
+        isSaving={saveMessage.isPending}
+      />
 
       {/* Cancel Confirmation */}
       <AlertDialog open={!!cancellingMessage} onOpenChange={() => setCancellingMessage(null)}>
@@ -377,7 +486,7 @@ export function AgendaProScheduledMessages() {
             <AlertDialogTitle>Cancelar Envio</AlertDialogTitle>
             <AlertDialogDescription>
               Tem certeza que deseja cancelar o envio desta mensagem? 
-              O cliente não receberá este {cancellingMessage?.type === "reminder" ? "lembrete" : "aviso pré-atendimento"}.
+              O cliente não receberá este {getTypeLabel(cancellingMessage?.type || "")}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

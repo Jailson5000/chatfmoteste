@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAgendaPro, AgendaProSettings as SettingsType } from "@/hooks/useAgendaPro";
 import { useToast } from "@/hooks/use-toast";
+import { AgendaProBirthdaySettings } from "./AgendaProBirthdaySettings";
 
 export function AgendaProSettings() {
   const { settings, updateSettings, isLoading } = useAgendaPro();
@@ -36,6 +37,14 @@ export function AgendaProSettings() {
     confirmation_message_template: "",
     reminder_message_template: "",
     cancellation_message_template: "",
+    // Birthday fields
+    birthday_enabled: true,
+    birthday_message_template: "Olá {client_name}! 🎂 A equipe {business_name} deseja um Feliz Aniversário! Que seu dia seja repleto de alegrias!",
+    birthday_include_coupon: false,
+    birthday_coupon_type: "discount" as "discount" | "service",
+    birthday_coupon_value: 10,
+    birthday_coupon_service_id: null as string | null,
+    birthday_send_time: "09:00",
   });
 
   useEffect(() => {
@@ -62,6 +71,14 @@ export function AgendaProSettings() {
         confirmation_message_template: settings.confirmation_message_template,
         reminder_message_template: settings.reminder_message_template,
         cancellation_message_template: settings.cancellation_message_template,
+        // Birthday fields
+        birthday_enabled: settings.birthday_enabled ?? true,
+        birthday_message_template: settings.birthday_message_template || "Olá {client_name}! 🎂 A equipe {business_name} deseja um Feliz Aniversário!",
+        birthday_include_coupon: settings.birthday_include_coupon ?? false,
+        birthday_coupon_type: (settings.birthday_coupon_type as "discount" | "service") ?? "discount",
+        birthday_coupon_value: settings.birthday_coupon_value ?? 10,
+        birthday_coupon_service_id: settings.birthday_coupon_service_id ?? null,
+        birthday_send_time: settings.birthday_send_time ?? "09:00",
       });
     }
   }, [settings]);
@@ -91,6 +108,14 @@ export function AgendaProSettings() {
         confirmation_message_template: formData.confirmation_message_template,
         reminder_message_template: formData.reminder_message_template,
         cancellation_message_template: formData.cancellation_message_template,
+        // Birthday fields
+        birthday_enabled: formData.birthday_enabled,
+        birthday_message_template: formData.birthday_message_template,
+        birthday_include_coupon: formData.birthday_include_coupon,
+        birthday_coupon_type: formData.birthday_coupon_type,
+        birthday_coupon_value: formData.birthday_coupon_value,
+        birthday_coupon_service_id: formData.birthday_coupon_service_id,
+        birthday_send_time: formData.birthday_send_time,
       });
       toast({ title: "Configurações salvas!" });
     } finally {
@@ -387,6 +412,20 @@ export function AgendaProSettings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Birthday Settings */}
+      <AgendaProBirthdaySettings
+        formData={{
+          birthday_enabled: formData.birthday_enabled,
+          birthday_message_template: formData.birthday_message_template,
+          birthday_include_coupon: formData.birthday_include_coupon,
+          birthday_coupon_type: formData.birthday_coupon_type,
+          birthday_coupon_value: formData.birthday_coupon_value,
+          birthday_coupon_service_id: formData.birthday_coupon_service_id,
+          birthday_send_time: formData.birthday_send_time,
+        }}
+        onChange={(data) => setFormData({ ...formData, ...data })}
+      />
 
       {/* Save Button */}
       <div className="flex justify-end">
