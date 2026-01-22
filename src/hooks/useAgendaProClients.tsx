@@ -10,14 +10,28 @@ export interface AgendaProClient {
   email: string | null;
   phone: string | null;
   document: string | null;
+  rg: string | null;
   birth_date: string | null;
   gender: string | null;
+  origin: string | null;
+  profession: string | null;
+  marital_status: string | null;
   address: string | null;
   notes: string | null;
   tags: string[] | null;
   is_active: boolean;
+  receive_notifications: boolean;
   preferred_professional_id: string | null;
   send_birthday_message: boolean;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  address_cep: string | null;
+  address_street: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  address_neighborhood: string | null;
+  address_city: string | null;
+  address_state: string | null;
   total_appointments: number;
   total_no_shows: number;
   last_appointment_at: string | null;
@@ -64,14 +78,28 @@ export function useAgendaProClients() {
         email: data.email || null,
         phone: data.phone || null,
         document: data.document || null,
+        rg: data.rg || null,
         birth_date: data.birth_date || null,
         gender: data.gender || null,
+        origin: data.origin || null,
+        profession: data.profession || null,
+        marital_status: data.marital_status || null,
         address: data.address || null,
         notes: data.notes || null,
         tags: data.tags || null,
         is_active: data.is_active ?? true,
+        receive_notifications: data.receive_notifications ?? true,
         preferred_professional_id: data.preferred_professional_id || null,
         send_birthday_message: data.send_birthday_message ?? true,
+        emergency_contact_name: data.emergency_contact_name || null,
+        emergency_contact_phone: data.emergency_contact_phone || null,
+        address_cep: data.address_cep || null,
+        address_street: data.address_street || null,
+        address_number: data.address_number || null,
+        address_complement: data.address_complement || null,
+        address_neighborhood: data.address_neighborhood || null,
+        address_city: data.address_city || null,
+        address_state: data.address_state || null,
       };
 
       const { data: client, error } = await supabase
