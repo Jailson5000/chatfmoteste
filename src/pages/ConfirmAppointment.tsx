@@ -49,45 +49,20 @@ export default function ConfirmAppointment() {
       }
 
       try {
-        // @ts-ignore - Supabase type inference issue
-        const { data, error: fetchError } = await supabase
-          .from("agenda_pro_appointments")
-          .select(`
-            id,
-            start_time,
-            end_time,
-            status,
-            confirmed_at,
-            law_firm_id,
-            agenda_pro_services(name),
-            agenda_pro_professionals(name)
-          `)
-          .eq("confirmation_token", token)
-          .single();
+        const { data, error: fnError } = await supabase.functions.invoke(
+          "agenda-pro-confirmation",
+          {
+            body: { token, action: "get" },
+          },
+        );
 
-        if (fetchError || !data) {
+        if (fnError || !data?.appointment) {
+          console.error("Error loading appointment via function:", fnError);
           setError("Agendamento não encontrado ou link expirado");
           return;
         }
 
-        // Fetch settings separately
-        // @ts-ignore
-        const { data: settingsData } = await supabase
-          .from("agenda_pro_settings")
-          .select("business_name, logo_url")
-          .eq("law_firm_id", data.law_firm_id)
-          .single();
-
-        setAppointment({
-          id: data.id,
-          start_time: data.start_time,
-          end_time: data.end_time,
-          status: data.status,
-          confirmed_at: data.confirmed_at,
-          service: data.agenda_pro_services,
-          professional: data.agenda_pro_professionals,
-          settings: settingsData,
-        });
+        setAppointment(data.appointment as AppointmentData);
       } catch (err) {
         console.error("Error loading appointment:", err);
         setError("Erro ao carregar agendamento");
@@ -104,16 +79,15 @@ export default function ConfirmAppointment() {
     
     setConfirming(true);
     try {
-      const { error: updateError } = await supabase
-        .from("agenda_pro_appointments")
-        .update({
-          status: "confirmed",
-          confirmed_at: new Date().toISOString(),
-          confirmed_via: "link",
-        })
-        .eq("confirmation_token", token);
+      const { data, error: fnError } = await supabase.functions.invoke(
+        "agenda-pro-confirmation",
+        {
+          body: { token, action: "confirm" },
+        },
+      );
 
-      if (updateError) throw updateError;
+      if (fnError) throw fnError;
+      if (data?.appointment) setAppointment(data.appointment as AppointmentData);
 
       setActionTaken("confirmed");
       toast.success("Presença confirmada com sucesso!");
@@ -130,16 +104,15 @@ export default function ConfirmAppointment() {
     
     setCancelling(true);
     try {
-      const { error: updateError } = await supabase
-        .from("agenda_pro_appointments")
-        .update({
-          status: "cancelled",
-          cancelled_at: new Date().toISOString(),
-          cancellation_reason: "Cancelled via confirmation link",
-        })
-        .eq("confirmation_token", token);
+      const { data, error: fnError } = await supabase.functions.invoke(
+        "agenda-pro-confirmation",
+        {
+          body: { token, action: "cancel" },
+        },
+      );
 
-      if (updateError) throw updateError;
+      if (fnError) throw fnError;
+      if (data?.appointment) setAppointment(data.appointment as AppointmentData);
 
       setActionTaken("cancelled");
       toast.success("Agendamento cancelado");
