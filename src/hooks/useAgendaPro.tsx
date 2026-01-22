@@ -31,6 +31,11 @@ export interface AgendaProSettings {
   send_email_confirmation: boolean;
   send_sms_confirmation: boolean;
   reminder_hours_before: number;
+  // Second reminder fields
+  reminder_2_enabled: boolean;
+  reminder_2_value: number;
+  reminder_2_unit: "minutes" | "hours";
+  respect_business_hours: boolean;
   created_at: string;
   updated_at: string;
 }

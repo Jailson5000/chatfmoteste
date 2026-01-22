@@ -830,9 +830,13 @@ export type Database = {
           primary_color: string | null
           public_booking_enabled: boolean | null
           public_slug: string | null
+          reminder_2_enabled: boolean | null
+          reminder_2_unit: string | null
+          reminder_2_value: number | null
           reminder_hours_before: number | null
           reminder_message_template: string | null
           require_confirmation: boolean | null
+          respect_business_hours: boolean | null
           send_email_confirmation: boolean | null
           send_sms_confirmation: boolean | null
           send_whatsapp_confirmation: boolean | null
@@ -860,9 +864,13 @@ export type Database = {
           primary_color?: string | null
           public_booking_enabled?: boolean | null
           public_slug?: string | null
+          reminder_2_enabled?: boolean | null
+          reminder_2_unit?: string | null
+          reminder_2_value?: number | null
           reminder_hours_before?: number | null
           reminder_message_template?: string | null
           require_confirmation?: boolean | null
+          respect_business_hours?: boolean | null
           send_email_confirmation?: boolean | null
           send_sms_confirmation?: boolean | null
           send_whatsapp_confirmation?: boolean | null
@@ -890,9 +898,13 @@ export type Database = {
           primary_color?: string | null
           public_booking_enabled?: boolean | null
           public_slug?: string | null
+          reminder_2_enabled?: boolean | null
+          reminder_2_unit?: string | null
+          reminder_2_value?: number | null
           reminder_hours_before?: number | null
           reminder_message_template?: string | null
           require_confirmation?: boolean | null
+          respect_business_hours?: boolean | null
           send_email_confirmation?: boolean | null
           send_sms_confirmation?: boolean | null
           send_whatsapp_confirmation?: boolean | null
