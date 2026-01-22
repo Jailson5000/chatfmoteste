@@ -297,10 +297,9 @@ serve(async (req) => {
               const fullClientName = appointment.agenda_pro_clients?.name || appointment.client_name || "Cliente";
               
               // === ROBUST CONVERSATION LOOKUP ===
-              // Brazilian mobile numbers may have variations with/without the "9" prefix
-              // We need to check multiple formats to find existing conversations
+              // Brazilian mobile numbers have variations with/without the "9" prefix
+              // We prioritize searching by the last 8 digits which are unique
               const last8Digits = phone.slice(-8);
-              const last9Digits = phone.slice(-9);
               
               // Generate possible remote_jid variations
               const possibleJids: string[] = [remoteJid];
@@ -324,30 +323,48 @@ serve(async (req) => {
               
               console.log(`[agenda-pro-notification] Looking for conversation with JIDs: ${possibleJids.join(", ")} or phone ending in ${last8Digits}`);
               
-              // Try to find existing conversation by exact remote_jid match first
-              let existingConv: { id: string; client_id: string | null; contact_name: string | null } | null = null;
+              let existingConv: { id: string; client_id: string | null; contact_name: string | null; remote_jid: string | null } | null = null;
               
-              for (const jid of possibleJids) {
-                const { data: conv } = await supabase
-                  .from("conversations")
-                  .select("id, client_id, contact_name")
-                  .eq("law_firm_id", appointment.law_firm_id)
-                  .eq("remote_jid", jid)
-                  .eq("whatsapp_instance_id", instance.id)
-                  .maybeSingle();
-                
-                if (conv) {
-                  existingConv = conv;
-                  console.log(`[agenda-pro-notification] Found existing conversation by JID: ${jid}`);
-                  break;
+              // PRIORITY 1: Search by last 8 digits in remote_jid (most reliable for Brazilian numbers)
+              const { data: convByJidSuffix } = await supabase
+                .from("conversations")
+                .select("id, client_id, contact_name, remote_jid")
+                .eq("law_firm_id", appointment.law_firm_id)
+                .eq("whatsapp_instance_id", instance.id)
+                .ilike("remote_jid", `%${last8Digits}@s.whatsapp.net`)
+                .order("last_message_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              
+              if (convByJidSuffix) {
+                existingConv = convByJidSuffix;
+                console.log(`[agenda-pro-notification] Found existing conversation by remote_jid suffix: ${convByJidSuffix.remote_jid}`);
+              }
+              
+              // PRIORITY 2: Try exact remote_jid matches
+              if (!existingConv) {
+                for (const jid of possibleJids) {
+                  const { data: conv } = await supabase
+                    .from("conversations")
+                    .select("id, client_id, contact_name, remote_jid")
+                    .eq("law_firm_id", appointment.law_firm_id)
+                    .eq("remote_jid", jid)
+                    .eq("whatsapp_instance_id", instance.id)
+                    .maybeSingle();
+                  
+                  if (conv) {
+                    existingConv = conv;
+                    console.log(`[agenda-pro-notification] Found existing conversation by JID: ${jid}`);
+                    break;
+                  }
                 }
               }
               
-              // If not found by JID, try by phone suffix (last 8 digits)
+              // PRIORITY 3: Search by contact_phone suffix
               if (!existingConv) {
                 const { data: convByPhone } = await supabase
                   .from("conversations")
-                  .select("id, client_id, contact_name")
+                  .select("id, client_id, contact_name, remote_jid")
                   .eq("law_firm_id", appointment.law_firm_id)
                   .eq("whatsapp_instance_id", instance.id)
                   .ilike("contact_phone", `%${last8Digits}`)
@@ -361,19 +378,21 @@ serve(async (req) => {
                 }
               }
               
-              // If still not found, check by linked client phone
+              // PRIORITY 4: Check by linked client phone in clients table
               if (!existingConv) {
                 const { data: clientMatch } = await supabase
                   .from("clients")
                   .select("id")
                   .eq("law_firm_id", appointment.law_firm_id)
                   .ilike("phone", `%${last8Digits}`)
+                  .order("created_at", { ascending: true })
+                  .limit(1)
                   .maybeSingle();
                 
                 if (clientMatch) {
                   const { data: convByClient } = await supabase
                     .from("conversations")
-                    .select("id, client_id, contact_name")
+                    .select("id, client_id, contact_name, remote_jid")
                     .eq("law_firm_id", appointment.law_firm_id)
                     .eq("client_id", clientMatch.id)
                     .eq("whatsapp_instance_id", instance.id)
