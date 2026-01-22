@@ -296,20 +296,103 @@ serve(async (req) => {
             try {
               const fullClientName = appointment.agenda_pro_clients?.name || appointment.client_name || "Cliente";
               
-              // Check for existing conversation
-              const { data: existingConv } = await supabase
-                .from("conversations")
-                .select("id, client_id")
-                .eq("law_firm_id", appointment.law_firm_id)
-                .eq("remote_jid", remoteJid)
-                .eq("whatsapp_instance_id", instance.id)
-                .maybeSingle();
+              // === ROBUST CONVERSATION LOOKUP ===
+              // Brazilian mobile numbers may have variations with/without the "9" prefix
+              // We need to check multiple formats to find existing conversations
+              const last8Digits = phone.slice(-8);
+              const last9Digits = phone.slice(-9);
+              
+              // Generate possible remote_jid variations
+              const possibleJids: string[] = [remoteJid];
+              
+              // If phone has the mobile "9" prefix (9 digits after DDD), also try without it
+              if (phone.length >= 11) {
+                const ddd = phone.startsWith("55") ? phone.slice(2, 4) : phone.slice(0, 2);
+                const numberPart = phone.startsWith("55") ? phone.slice(4) : phone.slice(2);
+                
+                // If number starts with 9 (mobile), try without it
+                if (numberPart.startsWith("9") && numberPart.length === 9) {
+                  const without9 = `55${ddd}${numberPart.slice(1)}@s.whatsapp.net`;
+                  possibleJids.push(without9);
+                }
+                // If number doesn't start with 9 but is 8 digits, try with 9
+                else if (!numberPart.startsWith("9") && numberPart.length === 8) {
+                  const with9 = `55${ddd}9${numberPart}@s.whatsapp.net`;
+                  possibleJids.push(with9);
+                }
+              }
+              
+              console.log(`[agenda-pro-notification] Looking for conversation with JIDs: ${possibleJids.join(", ")} or phone ending in ${last8Digits}`);
+              
+              // Try to find existing conversation by exact remote_jid match first
+              let existingConv: { id: string; client_id: string | null; contact_name: string | null } | null = null;
+              
+              for (const jid of possibleJids) {
+                const { data: conv } = await supabase
+                  .from("conversations")
+                  .select("id, client_id, contact_name")
+                  .eq("law_firm_id", appointment.law_firm_id)
+                  .eq("remote_jid", jid)
+                  .eq("whatsapp_instance_id", instance.id)
+                  .maybeSingle();
+                
+                if (conv) {
+                  existingConv = conv;
+                  console.log(`[agenda-pro-notification] Found existing conversation by JID: ${jid}`);
+                  break;
+                }
+              }
+              
+              // If not found by JID, try by phone suffix (last 8 digits)
+              if (!existingConv) {
+                const { data: convByPhone } = await supabase
+                  .from("conversations")
+                  .select("id, client_id, contact_name")
+                  .eq("law_firm_id", appointment.law_firm_id)
+                  .eq("whatsapp_instance_id", instance.id)
+                  .ilike("contact_phone", `%${last8Digits}`)
+                  .order("last_message_at", { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                
+                if (convByPhone) {
+                  existingConv = convByPhone;
+                  console.log(`[agenda-pro-notification] Found existing conversation by phone suffix: ${last8Digits}`);
+                }
+              }
+              
+              // If still not found, check by linked client phone
+              if (!existingConv) {
+                const { data: clientMatch } = await supabase
+                  .from("clients")
+                  .select("id")
+                  .eq("law_firm_id", appointment.law_firm_id)
+                  .ilike("phone", `%${last8Digits}`)
+                  .maybeSingle();
+                
+                if (clientMatch) {
+                  const { data: convByClient } = await supabase
+                    .from("conversations")
+                    .select("id, client_id, contact_name")
+                    .eq("law_firm_id", appointment.law_firm_id)
+                    .eq("client_id", clientMatch.id)
+                    .eq("whatsapp_instance_id", instance.id)
+                    .order("last_message_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  
+                  if (convByClient) {
+                    existingConv = convByClient;
+                    console.log(`[agenda-pro-notification] Found existing conversation by client_id: ${clientMatch.id}`);
+                  }
+                }
+              }
 
               let conversationId: string;
               let clientId: string | null = null;
 
               if (existingConv) {
-                // Update existing conversation
+                // Update existing conversation - DO NOT create a new one
                 conversationId = existingConv.id;
                 clientId = existingConv.client_id;
                 
@@ -323,9 +406,9 @@ serve(async (req) => {
                   })
                   .eq("id", conversationId);
 
-                console.log(`[agenda-pro-notification] Updated existing conversation ${conversationId}`);
+                console.log(`[agenda-pro-notification] Updated existing conversation ${conversationId} (contact: ${existingConv.contact_name})`);
               } else {
-                // Create new conversation - goes to queue (human handler, no assigned)
+                // No existing conversation found - create new one
                 const { data: newConv, error: convError } = await supabase
                   .from("conversations")
                   .insert({
@@ -358,14 +441,14 @@ serve(async (req) => {
                   conversationId = newConv.id;
                   results.conversationCreated.created = true;
                   results.conversationCreated.conversationId = conversationId;
-                  console.log(`[agenda-pro-notification] Created new conversation ${conversationId}`);
+                  console.log(`[agenda-pro-notification] Created NEW conversation ${conversationId}`);
 
                   // Create or link client in main clients table
                   const { data: existingClient } = await supabase
                     .from("clients")
                     .select("id")
                     .eq("law_firm_id", appointment.law_firm_id)
-                    .ilike("phone", `%${phone.slice(-8)}%`)
+                    .ilike("phone", `%${last8Digits}`)
                     .maybeSingle();
 
                   if (existingClient) {
