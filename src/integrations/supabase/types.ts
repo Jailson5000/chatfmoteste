@@ -5247,6 +5247,10 @@ export type Database = {
         Args: { _law_firm_id: string; _user_id: string }
         Returns: boolean
       }
+      user_has_conversation_access: {
+        Args: { folder_name: string; user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       admin_role: "super_admin" | "admin_operacional" | "admin_financeiro"
