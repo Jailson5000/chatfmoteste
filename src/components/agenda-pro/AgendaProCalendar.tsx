@@ -332,10 +332,10 @@ export function AgendaProCalendar() {
 
   return (
     <div className="flex gap-4">
-      {/* Left Sidebar with Mini Calendar */}
-      <div className="hidden lg:block w-64 flex-shrink-0 space-y-4">
+      {/* Left Sidebar with Mini Calendar and Filters */}
+      <div className="hidden lg:block w-72 flex-shrink-0 space-y-4">
         {/* Mini Calendar */}
-        <Card className="p-3">
+        <Card className="p-2 overflow-hidden">
           <Calendar
             mode="single"
             selected={selectedDate}
@@ -343,29 +343,76 @@ export function AgendaProCalendar() {
             month={miniCalendarMonth}
             onMonthChange={setMiniCalendarMonth}
             locale={ptBR}
-            className="pointer-events-auto w-full"
+            className="pointer-events-auto w-full [&_table]:w-full"
             modifiers={{
               hasAppointment: (date) => daysWithAppointments.has(format(date, 'yyyy-MM-dd')),
-              outsideWorkHours: () => false,
             }}
             modifiersStyles={{
               hasAppointment: {
                 fontWeight: 'bold',
+                textDecoration: 'underline',
               },
             }}
             classNames={{
+              months: "w-full",
+              month: "w-full space-y-2",
+              caption: "flex justify-center pt-1 relative items-center",
+              caption_label: "text-sm font-medium",
+              nav: "space-x-1 flex items-center",
+              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100 inline-flex items-center justify-center",
+              nav_button_previous: "absolute left-1",
+              nav_button_next: "absolute right-1",
+              table: "w-full border-collapse",
+              head_row: "flex w-full justify-between",
+              head_cell: "text-muted-foreground rounded-md w-8 font-normal text-[0.8rem] flex-1 text-center",
+              row: "flex w-full mt-1 justify-between",
+              cell: "flex-1 text-center text-sm relative p-0 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+              day: "h-8 w-8 p-0 font-normal aria-selected:opacity-100 mx-auto flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground",
               day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
               day_today: "bg-accent text-accent-foreground ring-1 ring-primary",
+              day_outside: "text-muted-foreground opacity-50",
+              day_disabled: "text-muted-foreground opacity-50",
+              day_hidden: "invisible",
             }}
           />
         </Card>
 
-        {/* Filters */}
+        {/* Filters - Below mini calendar like reference image */}
         <Card className="p-4 space-y-4">
-          <h3 className="font-semibold text-sm">Filtros</h3>
-          <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Filtros</h3>
+            <Button 
+              variant="link" 
+              size="sm" 
+              className="h-auto p-0 text-xs text-primary"
+              onClick={() => setSelectedProfessionalId("all")}
+            >
+              Limpar filtros
+            </Button>
+          </div>
+          
+          <div className="space-y-4">
+            {/* Status filter */}
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Profissional</label>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Status</label>
+              <Select defaultValue="all">
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="scheduled">Agendado</SelectItem>
+                  <SelectItem value="confirmed">Confirmado</SelectItem>
+                  <SelectItem value="in_progress">Em atendimento</SelectItem>
+                  <SelectItem value="completed">Concluído</SelectItem>
+                  <SelectItem value="cancelled">Cancelado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Professional filter */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Profissional</label>
               <Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Todos" />
@@ -375,7 +422,7 @@ export function AgendaProCalendar() {
                   {activeProfessionals.map((prof) => (
                     <SelectItem key={prof.id} value={prof.id}>
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color }} />
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color || '#6366f1' }} />
                         {prof.name}
                       </div>
                     </SelectItem>
@@ -411,7 +458,7 @@ export function AgendaProCalendar() {
               <span>Cancelado</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-[repeating-linear-gradient(135deg,hsl(var(--muted)),hsl(var(--muted))_3px,transparent_3px,transparent_6px)]" />
+              <div className="w-3 h-3 rounded border border-muted-foreground/30 bg-[repeating-linear-gradient(135deg,hsl(var(--muted)),hsl(var(--muted))_2px,transparent_2px,transparent_5px)]" />
               <span>Fora do expediente</span>
             </div>
           </div>

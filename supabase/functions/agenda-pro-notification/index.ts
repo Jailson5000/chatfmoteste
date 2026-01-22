@@ -251,9 +251,10 @@ serve(async (req) => {
     const results = {
       whatsapp: { sent: false, error: null as string | null },
       email: { sent: false, error: null as string | null },
+      ownerNotification: { sent: false, error: null as string | null },
     };
 
-    // Send WhatsApp notification
+    // Send WhatsApp notification to client
     if (clientPhone && settings?.send_whatsapp_confirmation !== false) {
       try {
         // Get connected WhatsApp instance for this law firm
@@ -287,11 +288,96 @@ serve(async (req) => {
 
           if (response.ok) {
             results.whatsapp.sent = true;
-            console.log(`[agenda-pro-notification] WhatsApp sent for ${appointment_id}`);
+            console.log(`[agenda-pro-notification] WhatsApp sent to client for ${appointment_id}`);
           } else {
             const errorData = await response.text();
             results.whatsapp.error = errorData;
             console.error("[agenda-pro-notification] WhatsApp failed:", errorData);
+          }
+
+          // Send notification to business owner/professional for new appointments
+          if (type === "created" && appointment.source === "online") {
+            try {
+              // Get professional phone for notification
+              const { data: professional } = await supabase
+                .from("agenda_pro_professionals")
+                .select("phone, email, notify_new_appointment")
+                .eq("id", appointment.professional_id)
+                .single();
+
+              if (professional?.phone && professional.notify_new_appointment !== false) {
+                const profPhone = professional.phone.replace(/\D/g, "");
+                const profJid = profPhone.startsWith("55") ? `${profPhone}@s.whatsapp.net` : `55${profPhone}@s.whatsapp.net`;
+                
+                const ownerMessage = `🔔 *Novo Agendamento Online!*\n\n` +
+                  `👤 *Cliente:* ${clientName} (${clientPhone})\n` +
+                  `📅 *Data:* ${dateStr}\n` +
+                  `🕐 *Horário:* ${timeRangeStr}\n` +
+                  `📋 *Serviço:* ${serviceName}\n\n` +
+                  `Acesse o sistema para mais detalhes.`;
+
+                const ownerResponse = await fetch(
+                  `${apiUrl}/message/sendText/${instance.instance_name}`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      apikey: instance.api_key as string,
+                    },
+                    body: JSON.stringify({
+                      number: profJid,
+                      text: ownerMessage,
+                    }),
+                  }
+                );
+
+                if (ownerResponse.ok) {
+                  results.ownerNotification.sent = true;
+                  console.log(`[agenda-pro-notification] Owner notification sent for ${appointment_id}`);
+                }
+              }
+
+              // Also try to notify company admin email
+              const { data: company } = await supabase
+                .from("companies")
+                .select("email")
+                .eq("law_firm_id", appointment.law_firm_id)
+                .single();
+
+              if (company?.email) {
+                const resendApiKey = Deno.env.get("RESEND_API_KEY");
+                if (resendApiKey) {
+                  const resend = new Resend(resendApiKey);
+                  await resend.emails.send({
+                    from: "Suporte <suporte@miauchat.com.br>",
+                    to: [company.email],
+                    subject: `🔔 Novo Agendamento Online - ${clientName}`,
+                    html: `
+                      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <h1 style="color: #3b82f6;">🔔 Novo Agendamento Online</h1>
+                        <p>Você recebeu um novo agendamento pelo sistema online!</p>
+                        <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                          <p style="margin: 8px 0;"><strong>👤 Cliente:</strong> ${appointment.agenda_pro_clients?.name || appointment.client_name}</p>
+                          <p style="margin: 8px 0;"><strong>📱 Telefone:</strong> ${clientPhone}</p>
+                          ${clientEmail ? `<p style="margin: 8px 0;"><strong>📧 Email:</strong> ${clientEmail}</p>` : ""}
+                          <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
+                          <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>
+                          <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+                          ${professionalName ? `<p style="margin: 8px 0;"><strong>👤 Profissional:</strong> ${professionalName}</p>` : ""}
+                        </div>
+                        <p>Acesse o sistema para gerenciar este agendamento.</p>
+                        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                        <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+                      </div>
+                    `,
+                  });
+                  console.log(`[agenda-pro-notification] Owner email sent to ${company.email}`);
+                }
+              }
+            } catch (ownerErr) {
+              console.error("[agenda-pro-notification] Owner notification error:", ownerErr);
+              results.ownerNotification.error = ownerErr instanceof Error ? ownerErr.message : "Unknown error";
+            }
           }
         } else {
           results.whatsapp.error = "No connected WhatsApp instance";
@@ -303,7 +389,7 @@ serve(async (req) => {
       }
     }
 
-    // Send Email notification
+    // Send Email notification to client
     if (clientEmail && settings?.send_email_confirmation === true) {
       try {
         const resendApiKey = Deno.env.get("RESEND_API_KEY");
