@@ -36,6 +36,14 @@ export interface AgendaProSettings {
   reminder_2_value: number;
   reminder_2_unit: "minutes" | "hours";
   respect_business_hours: boolean;
+  // Birthday fields
+  birthday_enabled: boolean;
+  birthday_message_template: string;
+  birthday_include_coupon: boolean;
+  birthday_coupon_type: "discount" | "service";
+  birthday_coupon_value: number;
+  birthday_coupon_service_id: string | null;
+  birthday_send_time: string;
   created_at: string;
   updated_at: string;
 }

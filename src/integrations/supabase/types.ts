@@ -653,6 +653,76 @@ export type Database = {
           },
         ]
       }
+      agenda_pro_scheduled_messages: {
+        Row: {
+          appointment_id: string | null
+          cancelled_at: string | null
+          channel: string
+          client_id: string | null
+          created_at: string
+          id: string
+          law_firm_id: string
+          message_content: string
+          message_type: string
+          scheduled_at: string
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          cancelled_at?: string | null
+          channel?: string
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          message_content: string
+          message_type?: string
+          scheduled_at: string
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          cancelled_at?: string | null
+          channel?: string
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          message_content?: string
+          message_type?: string
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_scheduled_messages_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_scheduled_messages_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_scheduled_messages_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agenda_pro_service_professionals: {
         Row: {
           created_at: string
@@ -810,6 +880,13 @@ export type Database = {
       }
       agenda_pro_settings: {
         Row: {
+          birthday_coupon_service_id: string | null
+          birthday_coupon_type: string | null
+          birthday_coupon_value: number | null
+          birthday_enabled: boolean | null
+          birthday_include_coupon: boolean | null
+          birthday_message_template: string | null
+          birthday_send_time: string | null
           block_holidays: boolean | null
           business_description: string | null
           business_name: string | null
@@ -844,6 +921,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          birthday_coupon_service_id?: string | null
+          birthday_coupon_type?: string | null
+          birthday_coupon_value?: number | null
+          birthday_enabled?: boolean | null
+          birthday_include_coupon?: boolean | null
+          birthday_message_template?: string | null
+          birthday_send_time?: string | null
           block_holidays?: boolean | null
           business_description?: string | null
           business_name?: string | null
@@ -878,6 +962,13 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          birthday_coupon_service_id?: string | null
+          birthday_coupon_type?: string | null
+          birthday_coupon_value?: number | null
+          birthday_enabled?: boolean | null
+          birthday_include_coupon?: boolean | null
+          birthday_message_template?: string | null
+          birthday_send_time?: string | null
           block_holidays?: boolean | null
           business_description?: string | null
           business_name?: string | null
@@ -912,6 +1003,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "agenda_pro_settings_birthday_coupon_service_id_fkey"
+            columns: ["birthday_coupon_service_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_services"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "agenda_pro_settings_law_firm_id_fkey"
             columns: ["law_firm_id"]
