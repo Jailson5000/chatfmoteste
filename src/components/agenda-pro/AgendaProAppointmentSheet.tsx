@@ -1,7 +1,6 @@
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { 
-  X, 
   Calendar, 
   Clock, 
   User, 
@@ -11,7 +10,8 @@ import {
   XCircle, 
   UserX,
   MessageSquare,
-  Loader2
+  Loader2,
+  History
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { AppointmentActivityLog } from "./AppointmentActivityLog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface AgendaProAppointmentSheetProps {
   appointment: AgendaProAppointment;
@@ -236,6 +238,19 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
                 )}
               </div>
             </div>
+
+            <Separator />
+
+            {/* Activity History */}
+            <Collapsible defaultOpen>
+              <CollapsibleTrigger className="flex items-center gap-2 w-full text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                <History className="h-4 w-4" />
+                Histórico de Alterações
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <AppointmentActivityLog appointmentId={appointment.id} />
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Metadata */}
             <div className="text-xs text-muted-foreground space-y-1 pt-4">

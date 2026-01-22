@@ -139,6 +139,20 @@ export function useAgendaProAppointments(options?: {
     };
   }, [lawFirm?.id, refetch]);
 
+  // Helper to log activity
+  const logActivity = async (appointmentId: string, action: string, details?: Record<string, any>) => {
+    if (!lawFirm?.id) return;
+    const { data: user } = await supabase.auth.getUser();
+    
+    await supabase.from("agenda_pro_activity_log").insert({
+      law_firm_id: lawFirm.id,
+      appointment_id: appointmentId,
+      user_id: user.user?.id || null,
+      action,
+      details: details || null,
+    });
+  };
+
   // Create appointment
   const createAppointment = useMutation({
     mutationFn: async (data: Partial<AgendaProAppointment>) => {
@@ -180,6 +194,12 @@ export function useAgendaProAppointments(options?: {
 
       if (error) throw error;
 
+      // Log activity
+      await logActivity(appointment.id, "created", { 
+        source: data.source || 'manual',
+        client_name: data.client_name || appointment.client?.name 
+      });
+
       // Send notification
       try {
         await supabase.functions.invoke("agenda-pro-notification", {
@@ -194,6 +214,7 @@ export function useAgendaProAppointments(options?: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
       toast({ title: "Agendamento criado com sucesso" });
     },
     onError: (error: Error) => {
@@ -247,6 +268,9 @@ export function useAgendaProAppointments(options?: {
 
       if (error) throw error;
 
+      // Log activity
+      await logActivity(id, "cancelled", { reason, source: "manual" });
+
       // Send cancellation notification
       try {
         await supabase.functions.invoke("agenda-pro-notification", {
@@ -260,6 +284,7 @@ export function useAgendaProAppointments(options?: {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
       toast({ title: "Agendamento cancelado" });
     },
     onError: (error: Error) => {
@@ -284,10 +309,15 @@ export function useAgendaProAppointments(options?: {
         .single();
 
       if (error) throw error;
+
+      // Log activity
+      await logActivity(id, "confirmed_manual", { source: "manual" });
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
       toast({ title: "Agendamento confirmado" });
     },
     onError: (error: Error) => {
@@ -309,10 +339,15 @@ export function useAgendaProAppointments(options?: {
         .single();
 
       if (error) throw error;
+
+      // Log activity
+      await logActivity(id, "completed", { source: "manual" });
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
       toast({ title: "Atendimento concluído" });
     },
     onError: (error: Error) => {
@@ -332,11 +367,15 @@ export function useAgendaProAppointments(options?: {
 
       if (error) throw error;
 
+      // Log activity
+      await logActivity(id, "no_show", { source: "manual" });
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
       toast({ title: "Marcado como falta" });
     },
     onError: (error: Error) => {
