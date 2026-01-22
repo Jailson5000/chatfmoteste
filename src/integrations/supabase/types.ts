@@ -917,6 +917,7 @@ export type Database = {
           day_of_week: number
           end_time: string
           id: string
+          is_active: boolean | null
           is_enabled: boolean
           professional_id: string
           start_time: string
@@ -926,6 +927,7 @@ export type Database = {
           day_of_week: number
           end_time: string
           id?: string
+          is_active?: boolean | null
           is_enabled?: boolean
           professional_id: string
           start_time: string
@@ -935,6 +937,7 @@ export type Database = {
           day_of_week?: number
           end_time?: string
           id?: string
+          is_active?: boolean | null
           is_enabled?: boolean
           professional_id?: string
           start_time?: string
