@@ -73,11 +73,11 @@ export function AgendaProNewAppointmentDialog({
   // Get professionals for selected service
   const serviceProf = selectedService?.professionals || activeProfessionals;
 
-  // Generate time slots
+  // Generate time slots with 15-minute intervals for precise scheduling
   const timeSlots: TimeSlot[] = [];
   const startHour = 7;
   const endHour = 19;
-  const interval = 30;
+  const interval = 15; // Changed from 30 to 15 for more precise scheduling (e.g., 12:15, 12:45)
 
   for (let hour = startHour; hour < endHour; hour++) {
     for (let min = 0; min < 60; min += interval) {
