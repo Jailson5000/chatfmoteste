@@ -23,6 +23,10 @@ interface ServiceFormData {
   color: string;
   is_public: boolean;
   professional_ids: string[];
+  // Pre-message (mensagem pré-agendamento)
+  pre_message_enabled: boolean;
+  pre_message_text: string;
+  pre_message_hours_before: number;
 }
 
 const defaultFormData: ServiceFormData = {
@@ -35,6 +39,9 @@ const defaultFormData: ServiceFormData = {
   color: "#6366f1",
   is_public: true,
   professional_ids: [],
+  pre_message_enabled: false,
+  pre_message_text: "",
+  pre_message_hours_before: 2,
 };
 
 export function AgendaProServices() {
@@ -64,6 +71,9 @@ export function AgendaProServices() {
       color: service.color,
       is_public: service.is_public,
       professional_ids: service.professionals?.map((p) => p.id) || [],
+      pre_message_enabled: service.pre_message_enabled ?? false,
+      pre_message_text: service.pre_message_text || "",
+      pre_message_hours_before: service.pre_message_hours_before ?? 2,
     });
     setDialogOpen(true);
   };
@@ -79,6 +89,9 @@ export function AgendaProServices() {
       color: formData.color,
       is_public: formData.is_public,
       professional_ids: formData.professional_ids,
+      pre_message_enabled: formData.pre_message_enabled,
+      pre_message_text: formData.pre_message_text || null,
+      pre_message_hours_before: formData.pre_message_hours_before,
     };
 
     if (editingService) {
@@ -305,6 +318,45 @@ export function AgendaProServices() {
                 onCheckedChange={(checked) => setFormData({ ...formData, is_public: checked })}
               />
               <Label>Disponível para agendamento online</Label>
+            </div>
+
+            {/* Mensagem personalizada pré-agendamento */}
+            <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+              <div className="flex items-center justify-between">
+                <Label className="font-medium">Mensagem pré-atendimento</Label>
+                <Switch
+                  checked={formData.pre_message_enabled}
+                  onCheckedChange={(checked) => setFormData({ ...formData, pre_message_enabled: checked })}
+                />
+              </div>
+              {formData.pre_message_enabled && (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="pre_message_hours">Enviar quantas horas antes</Label>
+                    <Input
+                      id="pre_message_hours"
+                      type="number"
+                      min={1}
+                      max={72}
+                      value={formData.pre_message_hours_before}
+                      onChange={(e) => setFormData({ ...formData, pre_message_hours_before: parseInt(e.target.value) || 2 })}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="pre_message_text">Mensagem personalizada</Label>
+                    <Textarea
+                      id="pre_message_text"
+                      value={formData.pre_message_text}
+                      onChange={(e) => setFormData({ ...formData, pre_message_text: e.target.value })}
+                      placeholder="Ex: Olá {nome}! Lembrando que seu atendimento de {servico} é amanhã às {horario}. Traga documentos necessários."
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use: {"{nome}"} {"{servico}"} {"{data}"} {"{horario}"} {"{profissional}"}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
           <DialogFooter>

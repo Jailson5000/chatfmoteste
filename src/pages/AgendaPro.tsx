@@ -11,7 +11,8 @@ import {
   Settings2,
   BarChart3,
   Link2,
-  Loader2
+  Loader2,
+  MessageSquare
 } from "lucide-react";
 import { useAgendaPro } from "@/hooks/useAgendaPro";
 import { AgendaProCalendar } from "@/components/agenda-pro/AgendaProCalendar";
@@ -23,6 +24,7 @@ import { AgendaProResources } from "@/components/agenda-pro/AgendaProResources";
 import { AgendaProSettings } from "@/components/agenda-pro/AgendaProSettings";
 import { AgendaProReports } from "@/components/agenda-pro/AgendaProReports";
 import { AgendaProPublicLink } from "@/components/agenda-pro/AgendaProPublicLink";
+import { AgendaProScheduledMessages } from "@/components/agenda-pro/AgendaProScheduledMessages";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -127,6 +129,10 @@ export default function AgendaPro() {
               <Link2 className="h-4 w-4" />
               <span className="hidden sm:inline text-sm">Link Público</span>
             </TabsTrigger>
+            <TabsTrigger value="messages" className="flex items-center gap-1.5 px-3 py-2">
+              <MessageSquare className="h-4 w-4" />
+              <span className="hidden sm:inline text-sm">Mensagens</span>
+            </TabsTrigger>
             <TabsTrigger value="reports" className="flex items-center gap-1.5 px-3 py-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline text-sm">Relatórios</span>
@@ -164,6 +170,10 @@ export default function AgendaPro() {
 
         <TabsContent value="public-link" className="mt-6">
           <AgendaProPublicLink />
+        </TabsContent>
+
+        <TabsContent value="messages" className="mt-6">
+          <AgendaProScheduledMessages />
         </TabsContent>
 
         <TabsContent value="reports" className="mt-6">
