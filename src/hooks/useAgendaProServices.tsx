@@ -133,10 +133,13 @@ export function useAgendaProServices() {
   // Update service
   const updateService = useMutation({
     mutationFn: async ({ id, professional_ids, resource_ids, ...updates }: Partial<AgendaProService> & { id: string; professional_ids?: string[]; resource_ids?: string[] }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_services")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -183,7 +186,14 @@ export function useAgendaProServices() {
   // Delete service
   const deleteService = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("agenda_pro_services").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
+      const { error } = await supabase
+        .from("agenda_pro_services")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant validation
+      
       if (error) throw error;
     },
     onSuccess: () => {

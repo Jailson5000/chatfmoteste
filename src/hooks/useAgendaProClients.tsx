@@ -95,10 +95,13 @@ export function useAgendaProClients() {
   // Update client
   const updateClient = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<AgendaProClient> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_clients")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -117,7 +120,14 @@ export function useAgendaProClients() {
   // Delete client
   const deleteClient = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("agenda_pro_clients").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
+      const { error } = await supabase
+        .from("agenda_pro_clients")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant validation
+      
       if (error) throw error;
     },
     onSuccess: () => {
