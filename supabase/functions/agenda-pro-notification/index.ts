@@ -253,6 +253,7 @@ serve(async (req) => {
       whatsapp: { sent: false, error: null as string | null },
       email: { sent: false, error: null as string | null },
       ownerNotification: { sent: false, error: null as string | null },
+      conversationCreated: { created: false, conversationId: null as string | null, error: null as string | null },
     };
 
     // Send WhatsApp notification to client
@@ -261,7 +262,7 @@ serve(async (req) => {
         // Get connected WhatsApp instance for this law firm
         const { data: instance } = await supabase
           .from("whatsapp_instances")
-          .select("id, instance_name, api_url, api_key, status")
+          .select("id, instance_name, api_url, api_key, status, default_automation_id, default_assigned_to, default_department_id")
           .eq("law_firm_id", appointment.law_firm_id)
           .eq("status", "connected")
           .limit(1)
@@ -290,6 +291,141 @@ serve(async (req) => {
           if (response.ok) {
             results.whatsapp.sent = true;
             console.log(`[agenda-pro-notification] WhatsApp sent to client for ${appointment_id}`);
+
+            // === CREATE/UPDATE CONVERSATION AND MESSAGE IN MAIN SYSTEM ===
+            try {
+              const fullClientName = appointment.agenda_pro_clients?.name || appointment.client_name || "Cliente";
+              
+              // Check for existing conversation
+              const { data: existingConv } = await supabase
+                .from("conversations")
+                .select("id, client_id")
+                .eq("law_firm_id", appointment.law_firm_id)
+                .eq("remote_jid", remoteJid)
+                .eq("whatsapp_instance_id", instance.id)
+                .maybeSingle();
+
+              let conversationId: string;
+              let clientId: string | null = null;
+
+              if (existingConv) {
+                // Update existing conversation
+                conversationId = existingConv.id;
+                clientId = existingConv.client_id;
+                
+                // Unarchive if archived and update last_message_at
+                await supabase
+                  .from("conversations")
+                  .update({
+                    last_message_at: new Date().toISOString(),
+                    archived_at: null,
+                    archived_reason: null,
+                  })
+                  .eq("id", conversationId);
+
+                console.log(`[agenda-pro-notification] Updated existing conversation ${conversationId}`);
+              } else {
+                // Create new conversation - goes to queue (human handler, no assigned)
+                const { data: newConv, error: convError } = await supabase
+                  .from("conversations")
+                  .insert({
+                    law_firm_id: appointment.law_firm_id,
+                    remote_jid: remoteJid,
+                    contact_name: fullClientName,
+                    contact_phone: phone,
+                    status: "novo_contato",
+                    current_handler: "human", // Goes to queue
+                    current_automation_id: null,
+                    assigned_to: null, // Not assigned = appears in Fila
+                    department_id: instance.default_department_id || null,
+                    whatsapp_instance_id: instance.id,
+                    last_message_at: new Date().toISOString(),
+                    origin: "agenda_pro",
+                    origin_metadata: {
+                      appointment_id: appointment.id,
+                      service_name: serviceName,
+                      professional_name: professionalName,
+                      notification_type: type,
+                    },
+                  })
+                  .select("id")
+                  .single();
+
+                if (convError) {
+                  console.error("[agenda-pro-notification] Error creating conversation:", convError);
+                  results.conversationCreated.error = convError.message;
+                } else {
+                  conversationId = newConv.id;
+                  results.conversationCreated.created = true;
+                  results.conversationCreated.conversationId = conversationId;
+                  console.log(`[agenda-pro-notification] Created new conversation ${conversationId}`);
+
+                  // Create or link client in main clients table
+                  const { data: existingClient } = await supabase
+                    .from("clients")
+                    .select("id")
+                    .eq("law_firm_id", appointment.law_firm_id)
+                    .ilike("phone", `%${phone.slice(-8)}%`)
+                    .maybeSingle();
+
+                  if (existingClient) {
+                    clientId = existingClient.id;
+                  } else {
+                    // Create new client
+                    const { data: newClient } = await supabase
+                      .from("clients")
+                      .insert({
+                        law_firm_id: appointment.law_firm_id,
+                        name: fullClientName,
+                        phone: phone,
+                        email: clientEmail || null,
+                        whatsapp_instance_id: instance.id,
+                        is_agenda_client: true,
+                      })
+                      .select("id")
+                      .single();
+
+                    if (newClient) {
+                      clientId = newClient.id;
+                      console.log(`[agenda-pro-notification] Created client ${clientId}`);
+                    }
+                  }
+
+                  // Link client to conversation
+                  if (clientId) {
+                    await supabase
+                      .from("conversations")
+                      .update({ client_id: clientId })
+                      .eq("id", conversationId);
+                  }
+                }
+              }
+
+              // Insert message record
+              if (conversationId!) {
+                const whatsappResponse = await response.json().catch(() => ({}));
+                const messageId = whatsappResponse?.key?.id || `agenda-pro-${Date.now()}`;
+
+                await supabase
+                  .from("messages")
+                  .insert({
+                    conversation_id: conversationId,
+                    whatsapp_message_id: messageId,
+                    content: whatsappMessage,
+                    message_type: "text",
+                    is_from_me: true,
+                    sender_type: "system",
+                    ai_generated: false,
+                  });
+
+                console.log(`[agenda-pro-notification] Inserted message for conversation ${conversationId}`);
+              }
+            } catch (convErr) {
+              console.error("[agenda-pro-notification] Error creating conversation/message:", convErr);
+              results.conversationCreated.error = convErr instanceof Error ? convErr.message : "Unknown error";
+            }
+            // === END CONVERSATION CREATION ===
+
           } else {
             const errorData = await response.text();
             results.whatsapp.error = errorData;
