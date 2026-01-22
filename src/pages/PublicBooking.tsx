@@ -272,24 +272,38 @@ export default function PublicBooking() {
       const startDateTime = setMinutes(setHours(selectedDate, hour), min);
       const endDateTime = addMinutes(startDateTime, selectedService.duration_minutes);
       
+      // Ensure we have a valid professional_id - this is required
+      const professionalId = selectedProfessional?.id || professionals[0]?.id;
+      if (!professionalId) {
+        toast.error("Nenhum profissional disponível para este serviço.");
+        return;
+      }
+      
+      // Generate confirmation token
+      const confirmationToken = crypto.randomUUID();
+      
       const { data: newAppointment, error: appointmentError } = await supabase
         .from("agenda_pro_appointments")
         .insert({
           law_firm_id: lawFirmId,
           client_id: clientId,
           service_id: selectedService.id,
-          professional_id: selectedProfessional?.id || professionals[0]?.id,
+          professional_id: professionalId,
           start_time: startDateTime.toISOString(),
           end_time: endDateTime.toISOString(),
           duration_minutes: selectedService.duration_minutes,
           status: "scheduled",
           notes: notes || null,
           source: "online",
+          confirmation_token: confirmationToken,
         })
         .select("id")
         .single();
       
-      if (appointmentError) throw appointmentError;
+      if (appointmentError) {
+        console.error("Appointment insert error:", appointmentError);
+        throw appointmentError;
+      }
       
       // Send notification via Agenda Pro function
       try {
