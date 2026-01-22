@@ -156,10 +156,13 @@ export function useAgendaProProfessionals() {
   // Update professional
   const updateProfessional = useMutation({
     mutationFn: async ({ id, service_ids, ...updates }: Partial<AgendaProProfessional> & { id: string; service_ids?: string[] }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_professionals")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -192,7 +195,14 @@ export function useAgendaProProfessionals() {
   // Delete professional
   const deleteProfessional = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("agenda_pro_professionals").delete().eq("id", id);
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
+      const { error } = await supabase
+        .from("agenda_pro_professionals")
+        .delete()
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id); // Tenant validation
+      
       if (error) throw error;
     },
     onSuccess: () => {

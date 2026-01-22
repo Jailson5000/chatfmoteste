@@ -225,10 +225,13 @@ export function useAgendaProAppointments(options?: {
   // Update appointment
   const updateAppointment = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<AgendaProAppointment> & { id: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_appointments")
         .update(updates)
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select(`
           *,
           client:agenda_pro_clients(id, name, phone),
@@ -252,6 +255,7 @@ export function useAgendaProAppointments(options?: {
   // Cancel appointment
   const cancelAppointment = useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
       const { data: user } = await supabase.auth.getUser();
 
       const { data, error } = await supabase
@@ -263,6 +267,7 @@ export function useAgendaProAppointments(options?: {
           cancellation_reason: reason,
         })
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -295,6 +300,7 @@ export function useAgendaProAppointments(options?: {
   // Confirm appointment
   const confirmAppointment = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
       const { data: user } = await supabase.auth.getUser();
 
       const { data, error } = await supabase
@@ -305,6 +311,7 @@ export function useAgendaProAppointments(options?: {
           confirmed_by: user.user?.email || 'system',
         })
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -328,6 +335,8 @@ export function useAgendaProAppointments(options?: {
   // Complete appointment
   const completeAppointment = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_appointments")
         .update({
@@ -335,6 +344,7 @@ export function useAgendaProAppointments(options?: {
           completed_at: new Date().toISOString(),
         })
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
@@ -358,10 +368,13 @@ export function useAgendaProAppointments(options?: {
   // Mark as no-show
   const markNoShow = useMutation({
     mutationFn: async (id: string) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
       const { data, error } = await supabase
         .from("agenda_pro_appointments")
         .update({ status: 'no_show' })
         .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
         .select()
         .single();
 
