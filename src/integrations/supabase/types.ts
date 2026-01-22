@@ -377,19 +377,33 @@ export type Database = {
       agenda_pro_clients: {
         Row: {
           address: string | null
+          address_cep: string | null
+          address_city: string | null
+          address_complement: string | null
+          address_neighborhood: string | null
+          address_number: string | null
+          address_state: string | null
+          address_street: string | null
           birth_date: string | null
           created_at: string
           document: string | null
           email: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
           gender: string | null
           id: string
           is_active: boolean
           last_appointment_at: string | null
           law_firm_id: string
+          marital_status: string | null
           name: string
           notes: string | null
+          origin: string | null
           phone: string | null
           preferred_professional_id: string | null
+          profession: string | null
+          receive_notifications: boolean | null
+          rg: string | null
           send_birthday_message: boolean | null
           tags: string[] | null
           total_appointments: number | null
@@ -398,19 +412,33 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          address_cep?: string | null
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_state?: string | null
+          address_street?: string | null
           birth_date?: string | null
           created_at?: string
           document?: string | null
           email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           gender?: string | null
           id?: string
           is_active?: boolean
           last_appointment_at?: string | null
           law_firm_id: string
+          marital_status?: string | null
           name: string
           notes?: string | null
+          origin?: string | null
           phone?: string | null
           preferred_professional_id?: string | null
+          profession?: string | null
+          receive_notifications?: boolean | null
+          rg?: string | null
           send_birthday_message?: boolean | null
           tags?: string[] | null
           total_appointments?: number | null
@@ -419,19 +447,33 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          address_cep?: string | null
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_state?: string | null
+          address_street?: string | null
           birth_date?: string | null
           created_at?: string
           document?: string | null
           email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           gender?: string | null
           id?: string
           is_active?: boolean
           last_appointment_at?: string | null
           law_firm_id?: string
+          marital_status?: string | null
           name?: string
           notes?: string | null
+          origin?: string | null
           phone?: string | null
           preferred_professional_id?: string | null
+          profession?: string | null
+          receive_notifications?: boolean | null
+          rg?: string | null
           send_birthday_message?: boolean | null
           tags?: string[] | null
           total_appointments?: number | null
