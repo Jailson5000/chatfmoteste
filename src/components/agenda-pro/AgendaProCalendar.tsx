@@ -3,11 +3,13 @@ import { format, addDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterv
 import { ptBR } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
 import { useAgendaProAppointments, ViewType, AgendaProAppointment } from "@/hooks/useAgendaProAppointments";
 import { useAgendaProProfessionals } from "@/hooks/useAgendaProProfessionals";
+import { useAgendaPro } from "@/hooks/useAgendaPro";
 import { cn } from "@/lib/utils";
 import { AgendaProNewAppointmentDialog } from "./AgendaProNewAppointmentDialog";
 import { AgendaProAppointmentSheet } from "./AgendaProAppointmentSheet";
@@ -24,11 +26,12 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function AgendaProCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [view, setView] = useState<ViewType>("week");
+  const [view, setView] = useState<ViewType>("day"); // Changed default to "day"
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedProfessionalId, setSelectedProfessionalId] = useState<string>("all");
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AgendaProAppointment | null>(null);
+  const [miniCalendarMonth, setMiniCalendarMonth] = useState<Date>(new Date());
 
   const { appointments, isLoading } = useAgendaProAppointments({
     date: currentDate,
@@ -37,6 +40,28 @@ export function AgendaProCalendar() {
   });
 
   const { activeProfessionals } = useAgendaProProfessionals();
+  const { settings } = useAgendaPro();
+
+  // Working hours from settings
+  const startHour = settings?.default_start_time ? parseInt(settings.default_start_time.split(':')[0]) : 7;
+  const endHour = settings?.default_end_time ? parseInt(settings.default_end_time.split(':')[0]) : 19;
+
+  // Get days with appointments for mini calendar
+  const daysWithAppointments = useMemo(() => {
+    return appointments.reduce((acc, apt) => {
+      const day = format(new Date(apt.start_time), 'yyyy-MM-dd');
+      acc.add(day);
+      return acc;
+    }, new Set<string>());
+  }, [appointments]);
+
+  // Handle mini calendar date select
+  const handleMiniCalendarSelect = (date: Date | undefined) => {
+    if (date) {
+      setSelectedDate(date);
+      setCurrentDate(date);
+    }
+  };
 
   // Navigation functions
   const navigate = (direction: "prev" | "next" | "today") => {
@@ -94,31 +119,72 @@ export function AgendaProCalendar() {
     }
   };
 
+  // Generate hours for day/week view with 30-minute intervals
+  const timeSlots = useMemo(() => {
+    const slots: string[] = [];
+    for (let h = startHour; h <= endHour; h++) {
+      slots.push(`${String(h).padStart(2, "0")}:00`);
+      if (h < endHour) {
+        slots.push(`${String(h).padStart(2, "0")}:30`);
+      }
+    }
+    return slots;
+  }, [startHour, endHour]);
+
+  // Check if a time slot is within working hours
+  const isWithinWorkingHours = (hour: number) => {
+    return hour >= startHour && hour < endHour;
+  };
+
   // Day view component
   const renderDayView = () => {
     const dayAppointments = getAppointmentsForDay(currentDate);
-    const hours = Array.from({ length: 12 }, (_, i) => i + 7); // 7:00 - 18:00
 
     return (
       <div className="border rounded-lg overflow-hidden">
-        {hours.map((hour) => {
-          const hourAppointments = dayAppointments.filter((apt) => {
-            const aptHour = new Date(apt.start_time).getHours();
-            return aptHour === hour;
+        {timeSlots.map((slot) => {
+          const [hourStr, minuteStr] = slot.split(':');
+          const hour = parseInt(hourStr);
+          const minute = parseInt(minuteStr);
+          
+          const slotAppointments = dayAppointments.filter((apt) => {
+            const aptDate = new Date(apt.start_time);
+            const aptHour = aptDate.getHours();
+            const aptMinute = aptDate.getMinutes();
+            // Show appointment in the slot that matches its start time
+            return aptHour === hour && (
+              (minute === 0 && aptMinute < 30) || 
+              (minute === 30 && aptMinute >= 30)
+            );
           });
 
+          const isWorkingHour = isWithinWorkingHours(hour);
+
           return (
-            <div key={hour} className="flex border-b last:border-b-0 min-h-[60px]">
-              <div className="w-16 flex-shrink-0 p-2 text-xs text-muted-foreground border-r bg-muted/30">
-                {String(hour).padStart(2, "0")}:00
+            <div 
+              key={slot} 
+              className={cn(
+                "flex border-b last:border-b-0 min-h-[50px]",
+                !isWorkingHour && "bg-muted/40"
+              )}
+            >
+              <div className={cn(
+                "w-16 flex-shrink-0 p-2 text-xs border-r",
+                minute === 0 ? "text-muted-foreground font-medium" : "text-muted-foreground/60",
+                !isWorkingHour && "bg-muted/50"
+              )}>
+                {slot}
               </div>
-              <div className="flex-1 p-1 relative">
-                {hourAppointments.map((apt) => (
+              <div className={cn(
+                "flex-1 p-1 relative",
+                !isWorkingHour && "bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--muted)/0.4)_5px,hsl(var(--muted)/0.4)_10px)]"
+              )}>
+                {slotAppointments.map((apt) => (
                   <button
                     key={apt.id}
                     onClick={() => setSelectedAppointment(apt)}
                     className={cn(
-                      "w-full text-left p-2 rounded text-xs mb-1 text-white transition-transform hover:scale-[1.02]",
+                      "w-full text-left p-2 rounded text-xs mb-1 text-white transition-transform hover:scale-[1.02] shadow-sm",
                       apt.professional?.color ? "" : STATUS_COLORS[apt.status]
                     )}
                     style={{ backgroundColor: apt.professional?.color || undefined }}
@@ -261,85 +327,177 @@ export function AgendaProCalendar() {
   );
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => navigate("prev")}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("today")}>
-            Hoje
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => navigate("next")}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <h2 className="text-lg font-semibold capitalize ml-2">{getTitle()}</h2>
-        </div>
+    <div className="flex gap-4">
+      {/* Left Sidebar with Mini Calendar */}
+      <div className="hidden lg:block w-64 flex-shrink-0 space-y-4">
+        {/* Mini Calendar */}
+        <Card className="p-3">
+          <Calendar
+            mode="single"
+            selected={selectedDate}
+            onSelect={handleMiniCalendarSelect}
+            month={miniCalendarMonth}
+            onMonthChange={setMiniCalendarMonth}
+            locale={ptBR}
+            className="pointer-events-auto w-full"
+            modifiers={{
+              hasAppointment: (date) => daysWithAppointments.has(format(date, 'yyyy-MM-dd')),
+              outsideWorkHours: () => false,
+            }}
+            modifiersStyles={{
+              hasAppointment: {
+                fontWeight: 'bold',
+              },
+            }}
+            classNames={{
+              day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+              day_today: "bg-accent text-accent-foreground ring-1 ring-primary",
+            }}
+          />
+        </Card>
 
-        <div className="flex items-center gap-2">
-          <Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Todos profissionais" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos profissionais</SelectItem>
-              {activeProfessionals.map((prof) => (
-                <SelectItem key={prof.id} value={prof.id}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color }} />
-                    {prof.name}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="flex rounded-md border">
-            <Button
-              variant={view === "day" ? "secondary" : "ghost"}
-              size="sm"
-              className="rounded-r-none"
-              onClick={() => setView("day")}
-            >
-              <CalendarDays className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={view === "week" ? "secondary" : "ghost"}
-              size="sm"
-              className="rounded-none border-x"
-              onClick={() => setView("week")}
-            >
-              <List className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={view === "month" ? "secondary" : "ghost"}
-              size="sm"
-              className="rounded-l-none"
-              onClick={() => setView("month")}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
+        {/* Filters */}
+        <Card className="p-4 space-y-4">
+          <h3 className="font-semibold text-sm">Filtros</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Profissional</label>
+              <Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {activeProfessionals.map((prof) => (
+                    <SelectItem key={prof.id} value={prof.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color }} />
+                        {prof.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+        </Card>
 
-          <Button onClick={() => setShowNewDialog(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Novo Agendamento</span>
-          </Button>
-        </div>
+        {/* Legend */}
+        <Card className="p-4 space-y-2">
+          <h3 className="font-semibold text-sm mb-3">Legenda</h3>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-blue-500" />
+              <span>Agendado</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-green-500" />
+              <span>Confirmado</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-yellow-500" />
+              <span>Em atendimento</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-gray-500" />
+              <span>Concluído</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-red-500" />
+              <span>Cancelado</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-[repeating-linear-gradient(135deg,hsl(var(--muted)),hsl(var(--muted))_3px,transparent_3px,transparent_6px)]" />
+              <span>Fora do expediente</span>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      {/* Calendar View */}
-      <div className="relative">
-        {isLoading && (
-          <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      {/* Main Content */}
+      <div className="flex-1 space-y-4">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={() => navigate("prev")}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate("today")}>
+              Hoje
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => navigate("next")}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <h2 className="text-lg font-semibold capitalize ml-2">{getTitle()}</h2>
           </div>
-        )}
-        
-        {view === "day" && renderDayView()}
-        {view === "week" && renderWeekView()}
-        {view === "month" && renderMonthView()}
+
+          <div className="flex items-center gap-2">
+            {/* Mobile filter */}
+            <div className="lg:hidden">
+              <Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Profissional" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {activeProfessionals.map((prof) => (
+                    <SelectItem key={prof.id} value={prof.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: prof.color }} />
+                        {prof.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex rounded-md border">
+              <Button
+                variant={view === "day" ? "secondary" : "ghost"}
+                size="sm"
+                className="rounded-r-none"
+                onClick={() => setView("day")}
+              >
+                <CalendarDays className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={view === "week" ? "secondary" : "ghost"}
+                size="sm"
+                className="rounded-none border-x"
+                onClick={() => setView("week")}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={view === "month" ? "secondary" : "ghost"}
+                size="sm"
+                className="rounded-l-none"
+                onClick={() => setView("month")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <Button onClick={() => setShowNewDialog(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Novo Agendamento</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Calendar View */}
+        <div className="relative">
+          {isLoading && (
+            <div className="absolute inset-0 bg-background/50 flex items-center justify-center z-10">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+            </div>
+          )}
+          
+          {view === "day" && renderDayView()}
+          {view === "week" && renderWeekView()}
+          {view === "month" && renderMonthView()}
+        </div>
       </div>
 
       {/* Dialogs */}

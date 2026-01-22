@@ -101,7 +101,7 @@ export default function AgendaPro() {
           <TabsList className="inline-flex h-auto gap-1 min-w-max">
             <TabsTrigger value="calendar" className="flex items-center gap-1.5 px-3 py-2">
               <CalendarDays className="h-4 w-4" />
-              <span className="hidden sm:inline text-sm">Calendário</span>
+              <span className="hidden sm:inline text-sm">Agenda</span>
             </TabsTrigger>
             <TabsTrigger value="appointments" className="flex items-center gap-1.5 px-3 py-2">
               <List className="h-4 w-4" />
