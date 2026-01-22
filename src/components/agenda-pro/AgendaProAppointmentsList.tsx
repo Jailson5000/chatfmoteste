@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { format, startOfDay, endOfDay, addDays } from "date-fns";
+import { format, startOfDay, endOfDay, addDays, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Calendar, Search, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,7 @@ export function AgendaProAppointmentsList() {
 
   // Group by date
   const groupedAppointments = filteredAppointments.reduce((acc, apt) => {
-    const dateKey = format(new Date(apt.start_time), "yyyy-MM-dd");
+    const dateKey = format(parseISO(apt.start_time), "yyyy-MM-dd");
     if (!acc[dateKey]) acc[dateKey] = [];
     acc[dateKey].push(apt);
     return acc;
@@ -170,7 +170,7 @@ export function AgendaProAppointmentsList() {
                           {/* Time */}
                           <div className="text-center min-w-[60px]">
                             <div className="text-lg font-bold">
-                              {format(new Date(apt.start_time), "HH:mm")}
+                              {format(parseISO(apt.start_time), "HH:mm")}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {apt.duration_minutes} min

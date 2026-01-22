@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { format, addMinutes, setHours, setMinutes, isBefore, startOfDay } from "date-fns";
+import { format, addMinutes, setHours, setMinutes, isBefore, startOfDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, Loader2, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -93,8 +93,8 @@ export function AgendaProNewAppointmentDialog({
         if (apt.status === 'cancelled' || apt.status === 'no_show') return false;
         if (selectedProfessionalId && apt.professional_id !== selectedProfessionalId) return false;
         
-        const aptStart = new Date(apt.start_time);
-        const aptEnd = new Date(apt.end_time);
+        const aptStart = parseISO(apt.start_time);
+        const aptEnd = parseISO(apt.end_time);
         const slotEnd = addMinutes(slotStart, selectedService?.duration_minutes || 30);
         
         return (slotStart < aptEnd && slotEnd > aptStart);
