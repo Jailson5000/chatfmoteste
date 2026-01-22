@@ -119,7 +119,8 @@ export function AgendaProCalendar() {
     }
   };
 
-  // Generate hours for day/week view with 30-minute intervals
+  // Generate hours for day/week view with 30-minute intervals (display)
+  // Note: Appointments can still be scheduled at 15-minute intervals (e.g., 12:15, 12:45)
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
     for (let h = startHour; h <= endHour; h++) {
@@ -136,6 +137,14 @@ export function AgendaProCalendar() {
     return hour >= startHour && hour < endHour;
   };
 
+  // Helper to determine which 30-min slot an appointment belongs to
+  const getSlotForTime = (date: Date): string => {
+    const hour = date.getHours();
+    const minute = date.getMinutes();
+    const slotMinute = minute < 30 ? "00" : "30";
+    return `${String(hour).padStart(2, "0")}:${slotMinute}`;
+  };
+
   // Day view component
   const renderDayView = () => {
     const dayAppointments = getAppointmentsForDay(currentDate);
@@ -147,15 +156,10 @@ export function AgendaProCalendar() {
           const hour = parseInt(hourStr);
           const minute = parseInt(minuteStr);
           
+          // Get appointments for this 30-min slot (can include 15-min appointments like 12:15, 12:45)
           const slotAppointments = dayAppointments.filter((apt) => {
             const aptDate = new Date(apt.start_time);
-            const aptHour = aptDate.getHours();
-            const aptMinute = aptDate.getMinutes();
-            // Show appointment in the slot that matches its start time
-            return aptHour === hour && (
-              (minute === 0 && aptMinute < 30) || 
-              (minute === 30 && aptMinute >= 30)
-            );
+            return getSlotForTime(aptDate) === slot;
           });
 
           const isWorkingHour = isWithinWorkingHours(hour);
