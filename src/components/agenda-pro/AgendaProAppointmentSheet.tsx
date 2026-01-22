@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format, addMinutes, startOfDay, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { 
   Calendar, 
@@ -11,7 +11,8 @@ import {
   UserX,
   MessageSquare,
   Loader2,
-  History
+  History,
+  CalendarClock
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -30,8 +31,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { AppointmentActivityLog } from "./AppointmentActivityLog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { supabase } from "@/integrations/supabase/client";
+import { useLawFirm } from "@/hooks/useLawFirm";
+import { useAgendaPro } from "@/hooks/useAgendaPro";
 
 interface AgendaProAppointmentSheetProps {
   appointment: AgendaProAppointment;
@@ -50,15 +63,138 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
 
 export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProAppointmentSheetProps) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
+  const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Reschedule state
+  const [rescheduleDate, setRescheduleDate] = useState<Date | undefined>(addDays(new Date(), 1));
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
 
-  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow } = useAgendaProAppointments();
+  const { lawFirm } = useLawFirm();
+  const { settings } = useAgendaPro();
+  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow, rescheduleAppointment } = useAgendaProAppointments();
 
   const status = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
   const StatusIcon = status.icon;
 
-  const handleAction = async (action: "confirm" | "complete" | "no_show") => {
+  // Fetch available slots for selected date
+  const fetchAvailableSlots = async (date: Date) => {
+    if (!lawFirm?.id || !appointment.professional_id) return;
+    
+    setLoadingSlots(true);
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      
+      // Get professional's working hours for this day
+      const dayOfWeek = date.getDay();
+      const { data: workingHours } = await supabase
+        .from("agenda_pro_working_hours")
+        .select("start_time, end_time, is_enabled")
+        .eq("professional_id", appointment.professional_id)
+        .eq("day_of_week", dayOfWeek)
+        .single();
+      
+      if (!workingHours?.is_enabled) {
+        setAvailableSlots([]);
+        return;
+      }
+
+      // Get existing appointments for this day (excluding cancelled/no_show)
+      const { data: existingAppointments } = await supabase
+        .from("agenda_pro_appointments")
+        .select("start_time, end_time")
+        .eq("professional_id", appointment.professional_id)
+        .eq("law_firm_id", lawFirm.id)
+        .gte("start_time", `${dateStr}T00:00:00`)
+        .lt("start_time", `${dateStr}T23:59:59`)
+        .not("status", "in", "(cancelled,no_show)")
+        .neq("id", appointment.id);
+
+      // Generate slots
+      const slots: string[] = [];
+      const slotDuration = appointment.duration_minutes || 30;
+      const slotInterval = settings?.min_gap_between_appointments || 0;
+      
+      const [startHour, startMin] = workingHours.start_time.split(":").map(Number);
+      const [endHour, endMin] = workingHours.end_time.split(":").map(Number);
+      
+      let currentSlot = startOfDay(date);
+      currentSlot = addMinutes(currentSlot, startHour * 60 + startMin);
+      const endOfWork = addMinutes(startOfDay(date), endHour * 60 + endMin);
+      
+      while (currentSlot < endOfWork) {
+        const slotEnd = addMinutes(currentSlot, slotDuration);
+        if (slotEnd > endOfWork) break;
+        
+        // Check for conflicts
+        const slotStr = format(currentSlot, "HH:mm");
+        const hasConflict = existingAppointments?.some(apt => {
+          const aptStart = new Date(apt.start_time);
+          const aptEnd = new Date(apt.end_time);
+          return (currentSlot >= aptStart && currentSlot < aptEnd) ||
+                 (slotEnd > aptStart && slotEnd <= aptEnd);
+        });
+        
+        if (!hasConflict) {
+          slots.push(slotStr);
+        }
+        
+        currentSlot = addMinutes(currentSlot, slotDuration + slotInterval);
+      }
+      
+      setAvailableSlots(slots);
+    } catch (error) {
+      console.error("Error fetching slots:", error);
+      setAvailableSlots([]);
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const handleOpenReschedule = () => {
+    setRescheduleDialogOpen(true);
+    if (rescheduleDate) {
+      fetchAvailableSlots(rescheduleDate);
+    }
+  };
+
+  const handleDateChange = (date: Date | undefined) => {
+    setRescheduleDate(date);
+    setSelectedSlot(null);
+    if (date) {
+      fetchAvailableSlots(date);
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleDate || !selectedSlot) return;
+    
+    setIsUpdating(true);
+    try {
+      const [hours, minutes] = selectedSlot.split(":").map(Number);
+      const newStartTime = new Date(rescheduleDate);
+      newStartTime.setHours(hours, minutes, 0, 0);
+      
+      const newEndTime = addMinutes(newStartTime, appointment.duration_minutes);
+      
+      await rescheduleAppointment.mutateAsync({
+        id: appointment.id,
+        start_time: newStartTime.toISOString(),
+        end_time: newEndTime.toISOString(),
+      });
+      
+      setRescheduleDialogOpen(false);
+      onClose();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleAction = async (action: "confirm" | "complete") => {
     setIsUpdating(true);
     try {
       switch (action) {
@@ -68,10 +204,18 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
         case "complete":
           await completeAppointment.mutateAsync(appointment.id);
           break;
-        case "no_show":
-          await markNoShow.mutateAsync(appointment.id);
-          break;
       }
+      onClose();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleNoShow = async () => {
+    setIsUpdating(true);
+    try {
+      await markNoShow.mutateAsync({ id: appointment.id, sendRescheduleMessage: true });
+      setNoShowDialogOpen(false);
       onClose();
     } finally {
       setIsUpdating(false);
@@ -217,15 +361,27 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
                   <Button 
                     variant="outline"
                     className="w-full text-orange-600 hover:text-orange-700"
-                    onClick={() => handleAction("no_show")}
+                    onClick={() => setNoShowDialogOpen(true)}
                     disabled={isUpdating}
                   >
-                    {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserX className="h-4 w-4 mr-2" />}
+                    <UserX className="h-4 w-4 mr-2" />
                     Faltou
                   </Button>
                 )}
 
-                {appointment.status !== "cancelled" && appointment.status !== "completed" && (
+                {(appointment.status === "scheduled" || appointment.status === "confirmed") && (
+                  <Button 
+                    variant="outline"
+                    className="w-full text-purple-600 hover:text-purple-700"
+                    onClick={handleOpenReschedule}
+                    disabled={isUpdating}
+                  >
+                    <CalendarClock className="h-4 w-4 mr-2" />
+                    Reagendar
+                  </Button>
+                )}
+
+                {appointment.status !== "cancelled" && appointment.status !== "completed" && appointment.status !== "no_show" && (
                   <Button 
                     variant="outline"
                     className="w-full text-destructive hover:text-destructive"
@@ -297,6 +453,94 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* No-Show Dialog */}
+      <AlertDialog open={noShowDialogOpen} onOpenChange={setNoShowDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como Falta</AlertDialogTitle>
+            <AlertDialogDescription>
+              O cliente não compareceu ao atendimento. Uma mensagem será enviada automaticamente perguntando se deseja reagendar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleNoShow} 
+              className="bg-orange-600 text-white hover:bg-orange-700"
+              disabled={isUpdating}
+            >
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
+              Confirmar Falta
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reschedule Dialog */}
+      <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reagendar Atendimento</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">Selecione a nova data</label>
+              <CalendarPicker
+                mode="single"
+                selected={rescheduleDate}
+                onSelect={handleDateChange}
+                disabled={(date) => date < new Date()}
+                locale={ptBR}
+                className="rounded-md border"
+              />
+            </div>
+            
+            <div>
+              <label className="text-sm font-medium mb-2 block">Horários disponíveis</label>
+              {loadingSlots ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : availableSlots.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Nenhum horário disponível para esta data
+                </p>
+              ) : (
+                <ScrollArea className="h-[200px]">
+                  <div className="grid grid-cols-4 gap-2">
+                    {availableSlots.map((slot) => (
+                      <Button
+                        key={slot}
+                        variant={selectedSlot === slot ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setSelectedSlot(slot)}
+                        className="text-sm"
+                      >
+                        {slot}
+                      </Button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRescheduleDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleReschedule} 
+              disabled={!selectedSlot || isUpdating}
+            >
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CalendarClock className="h-4 w-4 mr-2" />}
+              Confirmar Reagendamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

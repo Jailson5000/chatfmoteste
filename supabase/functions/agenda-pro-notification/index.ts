@@ -242,9 +242,42 @@ serve(async (req) => {
         </div>
       `;
 
+    } else if (type === "no_show") {
+      // No-show message asking if client wants to reschedule
+      whatsappMessage = `Olá ${clientName}! 😔\n\n` +
+        `Sentimos sua falta no atendimento de hoje:\n\n` +
+        `📅 ${dateStr}\n` +
+        `🕐 ${timeRangeStr}\n` +
+        `📋 ${serviceName}\n\n` +
+        `Gostaria de reagendar? 📅\n\n` +
+        `🔗 *Clique aqui para reagendar:*\n${confirmationLink}\n\n` +
+        `Estamos à disposição!\n${companyName}`;
+
+      emailSubject = `😔 Sentimos sua falta - ${companyName}`;
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #f97316;">Sentimos sua falta! 😔</h1>
+          <p>Olá <strong>${clientName}</strong>,</p>
+          <p>Notamos que você não pôde comparecer ao seu atendimento:</p>
+          <div style="background-color: #fff7ed; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>
+            <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+          </div>
+          <p><strong>Gostaria de reagendar?</strong></p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${confirmationLink}" style="background-color: #f97316; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+              Reagendar Atendimento
+            </a>
+          </div>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+        </div>
+      `;
+
     } else {
       return new Response(
-        JSON.stringify({ error: "Invalid notification type. Use: created, reminder, cancelled, updated" }),
+        JSON.stringify({ error: "Invalid notification type. Use: created, reminder, cancelled, updated, no_show" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

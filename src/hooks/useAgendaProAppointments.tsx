@@ -367,7 +367,7 @@ export function useAgendaProAppointments(options?: {
 
   // Mark as no-show
   const markNoShow = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, sendRescheduleMessage = true }: { id: string; sendRescheduleMessage?: boolean }) => {
       if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
       const { data, error } = await supabase
@@ -383,16 +383,84 @@ export function useAgendaProAppointments(options?: {
       // Log activity
       await logActivity(id, "no_show", { source: "manual" });
 
+      // Send reschedule message to client
+      if (sendRescheduleMessage) {
+        try {
+          await supabase.functions.invoke("agenda-pro-notification", {
+            body: { appointment_id: id, type: "no_show" }
+          });
+        } catch (notifError) {
+          console.error("No-show notification error:", notifError);
+        }
+      }
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-clients"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
-      toast({ title: "Marcado como falta" });
+      toast({ title: "Marcado como falta", description: "Mensagem de reagendamento enviada ao cliente" });
     },
     onError: (error: Error) => {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Reschedule appointment
+  const rescheduleAppointment = useMutation({
+    mutationFn: async ({ id, start_time, end_time }: { id: string; start_time: string; end_time: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+      const { data: user } = await supabase.auth.getUser();
+
+      // Generate new confirmation token
+      const newToken = crypto.randomUUID();
+
+      const { data, error } = await supabase
+        .from("agenda_pro_appointments")
+        .update({
+          start_time,
+          end_time,
+          status: 'scheduled',
+          confirmation_token: newToken,
+          confirmed_at: null,
+          confirmed_by: null,
+          reminder_sent_at: null,
+          pre_message_sent_at: null,
+          confirmation_sent_at: null,
+        })
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id) // Tenant validation
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Log activity
+      await logActivity(id, "rescheduled", { 
+        source: "manual", 
+        new_start_time: start_time,
+        rescheduled_by: user.user?.email 
+      });
+
+      // Send notification about rescheduling
+      try {
+        await supabase.functions.invoke("agenda-pro-notification", {
+          body: { appointment_id: id, type: "updated" }
+        });
+      } catch (notifError) {
+        console.error("Reschedule notification error:", notifError);
+      }
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      toast({ title: "Agendamento reagendado com sucesso" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erro ao reagendar", description: error.message, variant: "destructive" });
     },
   });
 
@@ -406,5 +474,6 @@ export function useAgendaProAppointments(options?: {
     confirmAppointment,
     completeAppointment,
     markNoShow,
+    rescheduleAppointment,
   };
 }
