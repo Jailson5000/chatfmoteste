@@ -1272,7 +1272,7 @@ async function executeSchedulingTool(
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", startOfDay.toISOString())
           .lte("start_time", endOfDay.toISOString())
-          .neq("status", "cancelled");
+          .not("status", "in", "(cancelled,no_show)");
 
         // Filter out occupied slots
         const availableSlots = slots.filter((slot) => {

@@ -87,8 +87,10 @@ export function AgendaProNewAppointmentDialog({
       // Check if slot is in the past
       const isPast = isBefore(slotStart, new Date());
       
-      // Check if slot conflicts with existing appointments
+      // Check if slot conflicts with existing appointments (exclude cancelled/no_show)
       const hasConflict = appointments.some((apt) => {
+        // Skip cancelled and no_show appointments - they don't block slots
+        if (apt.status === 'cancelled' || apt.status === 'no_show') return false;
         if (selectedProfessionalId && apt.professional_id !== selectedProfessionalId) return false;
         
         const aptStart = new Date(apt.start_time);

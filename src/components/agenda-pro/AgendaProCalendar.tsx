@@ -46,11 +46,14 @@ export function AgendaProCalendar() {
   const startHour = settings?.default_start_time ? parseInt(settings.default_start_time.split(':')[0]) : 7;
   const endHour = settings?.default_end_time ? parseInt(settings.default_end_time.split(':')[0]) : 19;
 
-  // Get days with appointments for mini calendar
+  // Get days with active appointments for mini calendar (exclude cancelled/no_show)
   const daysWithAppointments = useMemo(() => {
     return appointments.reduce((acc, apt) => {
-      const day = format(new Date(apt.start_time), 'yyyy-MM-dd');
-      acc.add(day);
+      // Only count active appointments
+      if (apt.status !== 'cancelled' && apt.status !== 'no_show') {
+        const day = format(new Date(apt.start_time), 'yyyy-MM-dd');
+        acc.add(day);
+      }
       return acc;
     }, new Set<string>());
   }, [appointments]);
@@ -85,8 +88,18 @@ export function AgendaProCalendar() {
     }
   };
 
-  // Get appointments for a specific day
-  const getAppointmentsForDay = (date: Date) => {
+  // Get appointments for a specific day (exclude cancelled/no_show for visual blocking)
+  const getAppointmentsForDay = (date: Date, includeAll: boolean = false) => {
+    return appointments.filter((apt) => {
+      if (!isSameDay(new Date(apt.start_time), date)) return false;
+      // For availability calculations, exclude cancelled and no_show
+      if (!includeAll && (apt.status === 'cancelled' || apt.status === 'no_show')) return false;
+      return true;
+    });
+  };
+
+  // Get ALL appointments for a day (including cancelled for display purposes)
+  const getAllAppointmentsForDay = (date: Date) => {
     return appointments.filter((apt) => isSameDay(new Date(apt.start_time), date));
   };
 
@@ -145,9 +158,9 @@ export function AgendaProCalendar() {
     return `${String(hour).padStart(2, "0")}:${slotMinute}`;
   };
 
-  // Day view component
+  // Day view component - shows ALL appointments (including cancelled for visibility)
   const renderDayView = () => {
-    const dayAppointments = getAppointmentsForDay(currentDate);
+    const dayAppointments = getAllAppointmentsForDay(currentDate);
 
     return (
       <div className="border rounded-lg overflow-hidden">
@@ -183,24 +196,29 @@ export function AgendaProCalendar() {
                 "flex-1 p-1 relative",
                 !isWorkingHour && "bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--muted)/0.4)_5px,hsl(var(--muted)/0.4)_10px)]"
               )}>
-                {slotAppointments.map((apt) => (
-                  <button
-                    key={apt.id}
-                    onClick={() => setSelectedAppointment(apt)}
-                    className={cn(
-                      "w-full text-left p-2 rounded text-xs mb-1 text-white transition-transform hover:scale-[1.02] shadow-sm",
-                      apt.professional?.color ? "" : STATUS_COLORS[apt.status]
-                    )}
-                    style={{ backgroundColor: apt.professional?.color || undefined }}
-                  >
-                    <div className="font-medium truncate">
-                      {apt.client?.name || apt.client_name || "Cliente"}
-                    </div>
-                    <div className="opacity-90 truncate">
-                      {apt.service?.name} • {format(new Date(apt.start_time), "HH:mm")}
-                    </div>
-                  </button>
-                ))}
+                {slotAppointments.map((apt) => {
+                  const isCancelled = apt.status === 'cancelled' || apt.status === 'no_show';
+                  return (
+                    <button
+                      key={apt.id}
+                      onClick={() => setSelectedAppointment(apt)}
+                      className={cn(
+                        "w-full text-left p-2 rounded text-xs mb-1 text-white transition-transform hover:scale-[1.02] shadow-sm",
+                        !isCancelled && apt.professional?.color ? "" : STATUS_COLORS[apt.status],
+                        isCancelled && "opacity-60 line-through"
+                      )}
+                      style={{ backgroundColor: isCancelled ? undefined : (apt.professional?.color || undefined) }}
+                    >
+                      <div className="font-medium truncate">
+                        {apt.client?.name || apt.client_name || "Cliente"}
+                        {isCancelled && <span className="ml-1 no-underline">(Cancelado)</span>}
+                      </div>
+                      <div className="opacity-90 truncate">
+                        {apt.service?.name} • {format(new Date(apt.start_time), "HH:mm")}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           );
@@ -213,7 +231,7 @@ export function AgendaProCalendar() {
   const renderWeekView = () => (
     <div className="grid grid-cols-7 gap-2">
       {weekDays.map((day) => {
-        const dayAppointments = getAppointmentsForDay(day);
+        const dayAppointments = getAllAppointmentsForDay(day);
         const isSelected = isSameDay(day, selectedDate);
         const dayIsToday = isToday(day);
 
@@ -244,23 +262,27 @@ export function AgendaProCalendar() {
               </div>
             </CardHeader>
             <CardContent className="p-2 pt-0 space-y-1">
-              {dayAppointments.slice(0, 3).map((apt) => (
-                <button
-                  key={apt.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedAppointment(apt);
-                  }}
-                  className={cn(
-                    "w-full text-left p-1.5 rounded text-[10px] text-white transition-transform hover:scale-[1.02]"
-                  )}
-                  style={{ backgroundColor: apt.professional?.color || apt.service?.color || "#6366f1" }}
-                >
-                  <div className="font-medium truncate">
-                    {format(new Date(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
-                  </div>
-                </button>
-              ))}
+              {dayAppointments.slice(0, 3).map((apt) => {
+                const isCancelled = apt.status === 'cancelled' || apt.status === 'no_show';
+                return (
+                  <button
+                    key={apt.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedAppointment(apt);
+                    }}
+                    className={cn(
+                      "w-full text-left p-1.5 rounded text-[10px] text-white transition-transform hover:scale-[1.02]",
+                      isCancelled && "opacity-50 line-through"
+                    )}
+                    style={{ backgroundColor: isCancelled ? '#ef4444' : (apt.professional?.color || apt.service?.color || "#6366f1") }}
+                  >
+                    <div className="font-medium truncate">
+                      {format(new Date(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
+                    </div>
+                  </button>
+                );
+              })}
               {dayAppointments.length > 3 && (
                 <Badge variant="secondary" className="text-[10px] w-full justify-center">
                   +{dayAppointments.length - 3} mais
@@ -285,7 +307,7 @@ export function AgendaProCalendar() {
       </div>
       <div className="grid grid-cols-7">
         {monthDays.map((day, index) => {
-          const dayAppointments = getAppointmentsForDay(day);
+          const dayAppointments = getAllAppointmentsForDay(day);
           const isCurrentMonth = isSameMonth(day, currentDate);
           const dayIsToday = isToday(day);
 
@@ -309,15 +331,21 @@ export function AgendaProCalendar() {
               )}>
                 {format(day, "d")}
               </div>
-              {dayAppointments.slice(0, 2).map((apt) => (
-                <div
-                  key={apt.id}
-                  className="text-[10px] p-0.5 rounded mb-0.5 truncate text-white"
-                  style={{ backgroundColor: apt.professional?.color || apt.service?.color || "#6366f1" }}
-                >
-                  {format(new Date(apt.start_time), "HH:mm")}
-                </div>
-              ))}
+              {dayAppointments.slice(0, 2).map((apt) => {
+                const isCancelled = apt.status === 'cancelled' || apt.status === 'no_show';
+                return (
+                  <div
+                    key={apt.id}
+                    className={cn(
+                      "text-[10px] p-0.5 rounded mb-0.5 truncate text-white",
+                      isCancelled && "opacity-50 line-through"
+                    )}
+                    style={{ backgroundColor: isCancelled ? '#ef4444' : (apt.professional?.color || apt.service?.color || "#6366f1") }}
+                  >
+                    {format(new Date(apt.start_time), "HH:mm")}
+                  </div>
+                );
+              })}
               {dayAppointments.length > 2 && (
                 <div className="text-[10px] text-muted-foreground">
                   +{dayAppointments.length - 2}
