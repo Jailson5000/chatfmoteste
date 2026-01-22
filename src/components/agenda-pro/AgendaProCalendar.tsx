@@ -1,6 +1,12 @@
 import { useState, useMemo } from "react";
-import { format, addDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addWeeks, addMonths, isToday } from "date-fns";
+import { format, addDays, startOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth, addWeeks, addMonths, isToday, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+// Helper to safely parse appointment dates - handles timezone correctly
+const parseAppointmentDate = (dateString: string): Date => {
+  // parseISO properly handles ISO 8601 strings with timezone
+  return parseISO(dateString);
+};
 import { ChevronLeft, ChevronRight, Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -51,7 +57,7 @@ export function AgendaProCalendar() {
     return appointments.reduce((acc, apt) => {
       // Only count active appointments
       if (apt.status !== 'cancelled' && apt.status !== 'no_show') {
-        const day = format(new Date(apt.start_time), 'yyyy-MM-dd');
+        const day = format(parseAppointmentDate(apt.start_time), 'yyyy-MM-dd');
         acc.add(day);
       }
       return acc;
@@ -91,7 +97,7 @@ export function AgendaProCalendar() {
   // Get appointments for a specific day (exclude cancelled/no_show for visual blocking)
   const getAppointmentsForDay = (date: Date, includeAll: boolean = false) => {
     return appointments.filter((apt) => {
-      if (!isSameDay(new Date(apt.start_time), date)) return false;
+      if (!isSameDay(parseAppointmentDate(apt.start_time), date)) return false;
       // For availability calculations, exclude cancelled and no_show
       if (!includeAll && (apt.status === 'cancelled' || apt.status === 'no_show')) return false;
       return true;
@@ -100,7 +106,7 @@ export function AgendaProCalendar() {
 
   // Get ALL appointments for a day (including cancelled for display purposes)
   const getAllAppointmentsForDay = (date: Date) => {
-    return appointments.filter((apt) => isSameDay(new Date(apt.start_time), date));
+    return appointments.filter((apt) => isSameDay(parseAppointmentDate(apt.start_time), date));
   };
 
   // Week days for week view
@@ -171,7 +177,7 @@ export function AgendaProCalendar() {
           
           // Get appointments for this 30-min slot (can include 15-min appointments like 12:15, 12:45)
           const slotAppointments = dayAppointments.filter((apt) => {
-            const aptDate = new Date(apt.start_time);
+            const aptDate = parseAppointmentDate(apt.start_time);
             return getSlotForTime(aptDate) === slot;
           });
 
@@ -214,7 +220,7 @@ export function AgendaProCalendar() {
                         {isCancelled && <span className="ml-1 no-underline">(Cancelado)</span>}
                       </div>
                       <div className="opacity-90 truncate">
-                        {apt.service?.name} • {format(new Date(apt.start_time), "HH:mm")}
+                        {apt.service?.name} • {format(parseAppointmentDate(apt.start_time), "HH:mm")}
                       </div>
                     </button>
                   );
@@ -278,7 +284,7 @@ export function AgendaProCalendar() {
                     style={{ backgroundColor: isCancelled ? '#ef4444' : (apt.professional?.color || apt.service?.color || "#6366f1") }}
                   >
                     <div className="font-medium truncate">
-                      {format(new Date(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
+                      {format(parseAppointmentDate(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
                     </div>
                   </button>
                 );
@@ -342,7 +348,7 @@ export function AgendaProCalendar() {
                     )}
                     style={{ backgroundColor: isCancelled ? '#ef4444' : (apt.professional?.color || apt.service?.color || "#6366f1") }}
                   >
-                    {format(new Date(apt.start_time), "HH:mm")}
+                    {format(parseAppointmentDate(apt.start_time), "HH:mm")}
                   </div>
                 );
               })}

@@ -1,4 +1,4 @@
-import { format, addMinutes, startOfDay, addDays } from "date-fns";
+import { format, addMinutes, startOfDay, addDays, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { 
   Calendar, 
@@ -133,8 +133,8 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
         // Check for conflicts
         const slotStr = format(currentSlot, "HH:mm");
         const hasConflict = existingAppointments?.some(apt => {
-          const aptStart = new Date(apt.start_time);
-          const aptEnd = new Date(apt.end_time);
+          const aptStart = parseISO(apt.start_time);
+          const aptEnd = parseISO(apt.end_time);
           return (currentSlot >= aptStart && currentSlot < aptEnd) ||
                  (slotEnd > aptStart && slotEnd <= aptEnd);
         });
@@ -256,13 +256,13 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
-                  {format(new Date(appointment.start_time), "EEEE, d 'de' MMMM", { locale: ptBR })}
+                  {format(parseISO(appointment.start_time), "EEEE, d 'de' MMMM", { locale: ptBR })}
                 </div>
               </div>
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <Clock className="h-4 w-4" />
-                  {format(new Date(appointment.start_time), "HH:mm")} - {format(new Date(appointment.end_time), "HH:mm")}
+                  {format(parseISO(appointment.start_time), "HH:mm")} - {format(parseISO(appointment.end_time), "HH:mm")}
                 </div>
                 <span>({appointment.duration_minutes} min)</span>
               </div>
