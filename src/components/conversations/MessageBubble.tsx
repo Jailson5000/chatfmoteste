@@ -1148,8 +1148,9 @@ function DocumentViewer({
           filePath = src.replace('internal-chat-files://', '');
         } else {
           // Handle old format: extract path from Supabase URL
-          // URL format: .../storage/v1/object/public/internal-chat-files/path
-          const match = src.match(/\/internal-chat-files\/(.+)$/);
+          // URL format: .../storage/v1/object/public/internal-chat-files/path or .../storage/v1/object/sign/internal-chat-files/path
+          // We need to extract everything after internal-chat-files/
+          const match = src.match(/internal-chat-files\/(.+?)(\?|$)/);
           if (match) {
             filePath = decodeURIComponent(match[1]);
           } else {

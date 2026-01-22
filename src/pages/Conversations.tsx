@@ -1441,14 +1441,15 @@ export default function Conversations() {
   // Handle internal file upload
   const handleInternalFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !selectedConversationId) return;
+    if (!file || !selectedConversationId || !lawFirm?.id) return;
     
     event.target.value = ""; // Reset input
     setIsSending(true);
     
     try {
       // Upload file to internal-chat-files bucket
-      const fileName = `${selectedConversationId}/${Date.now()}_${file.name}`;
+      // IMPORTANT: Use lawFirmId as first folder to comply with RLS policies
+      const fileName = `${lawFirm.id}/${Date.now()}_${file.name}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("internal-chat-files")
         .upload(fileName, file);
