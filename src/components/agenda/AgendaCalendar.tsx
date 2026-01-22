@@ -35,8 +35,8 @@ export function AgendaCalendar() {
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  // Filter out cancelled appointments for calendar view
-  const activeAppointments = appointments.filter((apt) => apt.status !== "cancelled");
+  // Filter out cancelled/no_show appointments for calendar view (they free up slots)
+  const activeAppointments = appointments.filter((apt) => apt.status !== "cancelled" && apt.status !== "no_show");
 
   const getAppointmentsForDay = (date: Date) => {
     return activeAppointments.filter((apt) => isSameDay(new Date(apt.start_time), date));

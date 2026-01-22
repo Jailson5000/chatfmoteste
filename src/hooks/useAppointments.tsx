@@ -311,9 +311,9 @@ export function useAppointments(date?: Date) {
     const businessEnd = new Date(targetDate);
     businessEnd.setHours(endHour, endMin, 0, 0);
 
-    // Get existing appointments for this day (exclude cancelled ones - they free up the slot)
+    // Get existing appointments for this day (exclude cancelled/no_show - they free up the slot)
     const dayAppointments = appointments.filter((apt) => {
-      if (apt.status === "cancelled") return false; // Cancelled appointments don't block slots
+      if (apt.status === "cancelled" || apt.status === "no_show") return false; // These don't block slots
       const aptDate = parseISO(apt.start_time);
       return (
         aptDate.getFullYear() === targetDate.getFullYear() &&

@@ -177,11 +177,11 @@ export default function PublicBooking() {
         // @ts-ignore - Supabase type inference issue
         let appointmentsQuery = supabase
           .from("agenda_pro_appointments")
-          .select("start_time, end_time")
+          .select("start_time, end_time, status")
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", `${dateStr}T00:00:00`)
           .lte("start_time", `${dateStr}T23:59:59`)
-          .neq("status", "cancelled");
+          .not("status", "in", "(cancelled,no_show)");
 
         if (selectedProfessional) {
           appointmentsQuery = appointmentsQuery.eq("professional_id", selectedProfessional.id);
