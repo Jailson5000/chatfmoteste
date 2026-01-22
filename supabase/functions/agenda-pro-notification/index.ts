@@ -541,13 +541,14 @@ serve(async (req) => {
               // Get professional phone for notification
               const { data: professional } = await supabase
                 .from("agenda_pro_professionals")
-                .select("phone, email, notify_new_appointment")
+                .select("phone, email, name, notify_new_appointment")
                 .eq("id", appointment.professional_id)
                 .single();
 
               if (professional?.phone && professional.notify_new_appointment !== false) {
                 const profPhone = professional.phone.replace(/\D/g, "");
                 const profJid = profPhone.startsWith("55") ? `${profPhone}@s.whatsapp.net` : `55${profPhone}@s.whatsapp.net`;
+                const profLast8Digits = profPhone.slice(-8);
                 
                 const ownerMessage = `🔔 *Novo Agendamento Online!*\n\n` +
                   `👤 *Cliente:* ${clientName} (${clientPhone})\n` +
@@ -574,6 +575,114 @@ serve(async (req) => {
                 if (ownerResponse.ok) {
                   results.ownerNotification.sent = true;
                   console.log(`[agenda-pro-notification] Owner notification sent for ${appointment_id}`);
+                  
+                  // === SAVE PROFESSIONAL MESSAGE TO SYSTEM ===
+                  try {
+                    // Find or create conversation for the professional
+                    let profConvId: string | null = null;
+                    
+                    // Search by last 8 digits in remote_jid (most reliable)
+                    const { data: profConvByJid } = await supabase
+                      .from("conversations")
+                      .select("id, contact_name, remote_jid")
+                      .eq("law_firm_id", appointment.law_firm_id)
+                      .eq("whatsapp_instance_id", instance.id)
+                      .ilike("remote_jid", `%${profLast8Digits}@s.whatsapp.net`)
+                      .order("last_message_at", { ascending: false })
+                      .limit(1)
+                      .maybeSingle();
+                    
+                    if (profConvByJid) {
+                      profConvId = profConvByJid.id;
+                      console.log(`[agenda-pro-notification] Found professional conversation: ${profConvByJid.contact_name}`);
+                      
+                      // Update last_message_at and unarchive
+                      await supabase
+                        .from("conversations")
+                        .update({
+                          last_message_at: new Date().toISOString(),
+                          archived_at: null,
+                          archived_reason: null,
+                        })
+                        .eq("id", profConvId);
+                    } else {
+                      // Search by contact_phone suffix
+                      const { data: profConvByPhone } = await supabase
+                        .from("conversations")
+                        .select("id, contact_name")
+                        .eq("law_firm_id", appointment.law_firm_id)
+                        .eq("whatsapp_instance_id", instance.id)
+                        .ilike("contact_phone", `%${profLast8Digits}`)
+                        .order("last_message_at", { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+                      
+                      if (profConvByPhone) {
+                        profConvId = profConvByPhone.id;
+                        console.log(`[agenda-pro-notification] Found professional conversation by phone: ${profConvByPhone.contact_name}`);
+                        
+                        await supabase
+                          .from("conversations")
+                          .update({
+                            last_message_at: new Date().toISOString(),
+                            archived_at: null,
+                            archived_reason: null,
+                          })
+                          .eq("id", profConvId);
+                      }
+                    }
+                    
+                    // If no conversation found, create one for the professional
+                    if (!profConvId) {
+                      const { data: newProfConv } = await supabase
+                        .from("conversations")
+                        .insert({
+                          law_firm_id: appointment.law_firm_id,
+                          remote_jid: profJid,
+                          contact_name: professional.name || "Profissional",
+                          contact_phone: profPhone,
+                          status: "em_atendimento",
+                          current_handler: "human",
+                          whatsapp_instance_id: instance.id,
+                          last_message_at: new Date().toISOString(),
+                          origin: "system_notification",
+                          origin_metadata: {
+                            type: "professional_notification",
+                            professional_id: appointment.professional_id,
+                          },
+                        })
+                        .select("id")
+                        .single();
+                      
+                      if (newProfConv) {
+                        profConvId = newProfConv.id;
+                        console.log(`[agenda-pro-notification] Created new professional conversation: ${profConvId}`);
+                      }
+                    }
+                    
+                    // Save the message to the conversation
+                    if (profConvId) {
+                      const ownerMsgResponse = await ownerResponse.clone().json().catch(() => ({}));
+                      const ownerMsgId = ownerMsgResponse?.key?.id || `agenda-notify-prof-${Date.now()}`;
+                      
+                      await supabase
+                        .from("messages")
+                        .insert({
+                          conversation_id: profConvId,
+                          whatsapp_message_id: ownerMsgId,
+                          content: ownerMessage,
+                          message_type: "text",
+                          is_from_me: true,
+                          sender_type: "system",
+                          ai_generated: false,
+                        });
+                      
+                      console.log(`[agenda-pro-notification] Professional message saved to conversation ${profConvId}`);
+                    }
+                  } catch (profMsgErr) {
+                    console.error("[agenda-pro-notification] Error saving professional message:", profMsgErr);
+                  }
+                  // === END PROFESSIONAL MESSAGE SAVE ===
                 }
               }
 
