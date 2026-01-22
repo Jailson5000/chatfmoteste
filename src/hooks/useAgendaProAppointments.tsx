@@ -188,7 +188,7 @@ export function useAgendaProAppointments(options?: {
           *,
           client:agenda_pro_clients(id, name, phone),
           professional:agenda_pro_professionals(id, name, color),
-          service:agenda_pro_services(id, name, color, duration_minutes)
+          service:agenda_pro_services(id, name, color, duration_minutes, pre_message_enabled, pre_message_hours_before, pre_message_text)
         `)
         .single();
 
@@ -199,6 +199,47 @@ export function useAgendaProAppointments(options?: {
         source: data.source || 'manual',
         client_name: data.client_name || appointment.client?.name 
       });
+
+      // Create scheduled reminder messages (24h before)
+      try {
+        const startTime = new Date(appointment.start_time);
+        const reminderTime = new Date(startTime.getTime() - 24 * 60 * 60 * 1000);
+        
+        // Only create if reminder time is in the future
+        if (reminderTime > new Date()) {
+          await supabase.from("agenda_pro_scheduled_messages").insert({
+            law_firm_id: lawFirm.id,
+            appointment_id: appointment.id,
+            client_id: appointment.client_id,
+            message_type: "reminder",
+            message_content: "Lembrete automático de 24h",
+            scheduled_at: reminderTime.toISOString(),
+            channel: "whatsapp",
+            status: "pending",
+          });
+        }
+
+        // Create pre-message if service has it enabled
+        const service = appointment.service as any;
+        if (service?.pre_message_enabled && service?.pre_message_hours_before) {
+          const preMessageTime = new Date(startTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
+          
+          if (preMessageTime > new Date()) {
+            await supabase.from("agenda_pro_scheduled_messages").insert({
+              law_firm_id: lawFirm.id,
+              appointment_id: appointment.id,
+              client_id: appointment.client_id,
+              message_type: "pre_message",
+              message_content: service.pre_message_text || "Mensagem pré-atendimento",
+              scheduled_at: preMessageTime.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
+        }
+      } catch (msgError) {
+        console.error("Error creating scheduled messages:", msgError);
+      }
 
       // Send notification
       try {
@@ -215,6 +256,8 @@ export function useAgendaProAppointments(options?: {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-clients"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
       toast({ title: "Agendamento criado com sucesso" });
     },
     onError: (error: Error) => {
@@ -273,6 +316,21 @@ export function useAgendaProAppointments(options?: {
 
       if (error) throw error;
 
+      // Cancel all pending scheduled messages for this appointment
+      try {
+        await supabase
+          .from("agenda_pro_scheduled_messages")
+          .update({ 
+            status: "cancelled", 
+            cancelled_at: new Date().toISOString() 
+          })
+          .eq("appointment_id", id)
+          .eq("status", "pending")
+          .eq("law_firm_id", lawFirm.id);
+      } catch (msgError) {
+        console.error("Error cancelling scheduled messages:", msgError);
+      }
+
       // Log activity
       await logActivity(id, "cancelled", { reason, source: "manual" });
 
@@ -290,6 +348,8 @@ export function useAgendaProAppointments(options?: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
       toast({ title: "Agendamento cancelado" });
     },
     onError: (error: Error) => {
@@ -416,6 +476,17 @@ export function useAgendaProAppointments(options?: {
       // Generate new confirmation token
       const newToken = crypto.randomUUID();
 
+      // First, get the appointment to know service details
+      const { data: existingAppointment } = await supabase
+        .from("agenda_pro_appointments")
+        .select(`
+          *,
+          service:agenda_pro_services(pre_message_enabled, pre_message_hours_before, pre_message_text)
+        `)
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id)
+        .single();
+
       const { data, error } = await supabase
         .from("agenda_pro_appointments")
         .update({
@@ -435,6 +506,58 @@ export function useAgendaProAppointments(options?: {
         .single();
 
       if (error) throw error;
+
+      // Update scheduled messages with new times
+      try {
+        const newStartTime = new Date(start_time);
+        
+        // Cancel old pending messages
+        await supabase
+          .from("agenda_pro_scheduled_messages")
+          .update({ 
+            status: "cancelled", 
+            cancelled_at: new Date().toISOString() 
+          })
+          .eq("appointment_id", id)
+          .eq("status", "pending")
+          .eq("law_firm_id", lawFirm.id);
+
+        // Create new reminder (24h before)
+        const reminderTime = new Date(newStartTime.getTime() - 24 * 60 * 60 * 1000);
+        if (reminderTime > new Date()) {
+          await supabase.from("agenda_pro_scheduled_messages").insert({
+            law_firm_id: lawFirm.id,
+            appointment_id: id,
+            client_id: existingAppointment?.client_id,
+            message_type: "reminder",
+            message_content: "Lembrete automático de 24h (reagendado)",
+            scheduled_at: reminderTime.toISOString(),
+            channel: "whatsapp",
+            status: "pending",
+          });
+        }
+
+        // Create new pre-message if service has it enabled
+        const service = existingAppointment?.service as any;
+        if (service?.pre_message_enabled && service?.pre_message_hours_before) {
+          const preMessageTime = new Date(newStartTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
+          
+          if (preMessageTime > new Date()) {
+            await supabase.from("agenda_pro_scheduled_messages").insert({
+              law_firm_id: lawFirm.id,
+              appointment_id: id,
+              client_id: existingAppointment?.client_id,
+              message_type: "pre_message",
+              message_content: service.pre_message_text || "Mensagem pré-atendimento",
+              scheduled_at: preMessageTime.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
+        }
+      } catch (msgError) {
+        console.error("Error updating scheduled messages:", msgError);
+      }
 
       // Log activity
       await logActivity(id, "rescheduled", { 
@@ -457,6 +580,8 @@ export function useAgendaProAppointments(options?: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-custom-messages"] });
       toast({ title: "Agendamento reagendado com sucesso" });
     },
     onError: (error: Error) => {
