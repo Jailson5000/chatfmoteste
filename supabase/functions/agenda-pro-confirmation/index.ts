@@ -144,19 +144,24 @@ serve(async (req) => {
       .eq("law_firm_id", finalAppointment?.law_firm_id ?? appointment.law_firm_id)
       .maybeSingle();
 
+    const apt = finalAppointment ?? appointment;
+    // Supabase returns related records as arrays; extract first item
+    const serviceData = Array.isArray(apt.agenda_pro_services)
+      ? apt.agenda_pro_services[0]
+      : apt.agenda_pro_services;
+    const professionalData = Array.isArray(apt.agenda_pro_professionals)
+      ? apt.agenda_pro_professionals[0]
+      : apt.agenda_pro_professionals;
+
     const response = {
       appointment: {
-        id: (finalAppointment ?? appointment).id,
-        start_time: (finalAppointment ?? appointment).start_time,
-        end_time: (finalAppointment ?? appointment).end_time,
-        status: (finalAppointment ?? appointment).status,
-        confirmed_at: (finalAppointment ?? appointment).confirmed_at,
-        service: (finalAppointment ?? appointment).agenda_pro_services
-          ? { name: (finalAppointment ?? appointment).agenda_pro_services.name }
-          : null,
-        professional: (finalAppointment ?? appointment).agenda_pro_professionals
-          ? { name: (finalAppointment ?? appointment).agenda_pro_professionals.name }
-          : null,
+        id: apt.id,
+        start_time: apt.start_time,
+        end_time: apt.end_time,
+        status: apt.status,
+        confirmed_at: apt.confirmed_at,
+        service: serviceData ? { name: serviceData.name } : null,
+        professional: professionalData ? { name: professionalData.name } : null,
         settings: settings
           ? {
               business_name: settings.business_name ?? "",
