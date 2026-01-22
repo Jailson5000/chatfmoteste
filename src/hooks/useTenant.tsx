@@ -51,6 +51,9 @@ const MAIN_DOMAINS = [
   'www.miauchat.com.br',
   'staging.miauchat.com.br',
   'localhost',
+  // White-label public subdomains (treated as main domain)
+  'agendar.miauchat.com.br',
+  'widget.miauchat.com.br',
 ];
 const RESERVED_SUBDOMAINS = [
   'www',
@@ -69,6 +72,9 @@ const RESERVED_SUBDOMAINS = [
   'help',
   'docs',
   'blog',
+  // White-label subdomains for public access
+  'agendar',  // Public booking page (Agenda Pro)
+  'widget',   // Web chat widget
 ];
 
 /**
