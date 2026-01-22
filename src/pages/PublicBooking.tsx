@@ -163,7 +163,7 @@ export default function PublicBooking() {
             .select("start_time, end_time")
             .eq("professional_id", selectedProfessional.id)
             .eq("day_of_week", dayOfWeek)
-            .eq("is_active", true)
+            .eq("is_enabled", true)
             .single();
           
           workingHours = hours as { start_time: string; end_time: string } | null;
@@ -175,13 +175,19 @@ export default function PublicBooking() {
         }
         
         // @ts-ignore - Supabase type inference issue
-        const { data: existingAppointments } = await supabase
+        let appointmentsQuery = supabase
           .from("agenda_pro_appointments")
           .select("start_time, end_time")
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", `${dateStr}T00:00:00`)
           .lte("start_time", `${dateStr}T23:59:59`)
           .neq("status", "cancelled");
+
+        if (selectedProfessional) {
+          appointmentsQuery = appointmentsQuery.eq("professional_id", selectedProfessional.id);
+        }
+
+        const { data: existingAppointments } = await appointmentsQuery;
         
         // Generate time slots
         const slots: TimeSlot[] = [];
@@ -214,7 +220,8 @@ export default function PublicBooking() {
             available: !isPast && !hasConflict && slotEnd <= endTime,
           });
           
-          currentTime = addMinutes(currentTime, 30); // 30-minute intervals
+          // 15-minute increments allow bookings like 12:15 / 12:45
+          currentTime = addMinutes(currentTime, 15);
         }
         
         setAvailableSlots(slots);
@@ -238,34 +245,7 @@ export default function PublicBooking() {
     
     setSubmitting(true);
     try {
-      // Create or find client
       const cleanPhone = clientPhone.replace(/\D/g, "");
-      
-      let clientId: string;
-      const { data: existingClient } = await supabase
-        .from("agenda_pro_clients")
-        .select("id")
-        .eq("law_firm_id", lawFirmId)
-        .eq("phone", cleanPhone)
-        .single();
-      
-      if (existingClient) {
-        clientId = existingClient.id;
-      } else {
-        const { data: newClient, error: clientError } = await supabase
-          .from("agenda_pro_clients")
-          .insert({
-            law_firm_id: lawFirmId,
-            name: clientName,
-            phone: cleanPhone,
-            email: clientEmail || null,
-          })
-          .select("id")
-          .single();
-        
-        if (clientError) throw clientError;
-        clientId = newClient.id;
-      }
       
       // Create appointment
       const [hour, min] = selectedTime.split(":").map(Number);
@@ -280,13 +260,19 @@ export default function PublicBooking() {
       }
       
       // Generate confirmation token
-      const confirmationToken = crypto.randomUUID();
+      const confirmationToken =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       
       const { data: newAppointment, error: appointmentError } = await supabase
         .from("agenda_pro_appointments")
         .insert({
           law_firm_id: lawFirmId,
-          client_id: clientId,
+          client_id: null,
+          client_name: clientName,
+          client_phone: cleanPhone,
+          client_email: clientEmail || null,
           service_id: selectedService.id,
           professional_id: professionalId,
           start_time: startDateTime.toISOString(),
@@ -294,7 +280,8 @@ export default function PublicBooking() {
           duration_minutes: selectedService.duration_minutes,
           status: "scheduled",
           notes: notes || null,
-          source: "online",
+          // Required by backend policy for public booking inserts
+          source: "public_booking",
           confirmation_token: confirmationToken,
         })
         .select("id")
@@ -322,7 +309,8 @@ export default function PublicBooking() {
       
     } catch (error) {
       console.error("Booking error:", error);
-      toast.error("Erro ao realizar agendamento. Tente novamente.");
+      const msg = error instanceof Error ? error.message : "Erro ao realizar agendamento.";
+      toast.error(`${msg} Tente novamente.`);
     } finally {
       setSubmitting(false);
     }
