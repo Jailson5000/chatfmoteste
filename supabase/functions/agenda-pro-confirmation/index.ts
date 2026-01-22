@@ -1,5 +1,6 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,6 +26,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
 
     if (!supabaseUrl || !supabaseServiceKey) {
       console.error("[agenda-pro-confirmation] Missing SUPABASE env vars");
@@ -35,6 +37,7 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
     const url = new URL(req.url);
     let token = url.searchParams.get("token") ?? undefined;
@@ -75,8 +78,11 @@ serve(async (req) => {
           law_firm_id,
           professional_id,
           service_id,
+          client_name,
+          client_phone,
           agenda_pro_services(id, name, duration_minutes),
-          agenda_pro_professionals(id, name, phone, email)
+          agenda_pro_professionals(id, name, phone, email),
+          agenda_pro_clients(name, phone)
         `)
         .eq("confirmation_token", token)
         .maybeSingle();
@@ -203,6 +209,17 @@ serve(async (req) => {
       });
     }
 
+    // Helper to log activity
+    const logActivity = async (action: string, details?: Record<string, any>) => {
+      await supabase.from("agenda_pro_activity_log").insert({
+        law_firm_id: appointment.law_firm_id,
+        appointment_id: appointment.id,
+        user_id: null, // No user context in public link
+        action,
+        details: details || null,
+      });
+    };
+
     // Confirm appointment
     if (safeAction === "confirm") {
       const { error: updateError } = await supabase
@@ -222,8 +239,11 @@ serve(async (req) => {
         });
       }
 
+      // Log activity
+      await logActivity("confirmed", { source: "link" });
+
       // Notify professional about confirmation
-      await notifyProfessional(supabase, appointment, "confirmed");
+      await notifyProfessional(supabase, resend, appointment, "confirmed");
     }
 
     // Cancel appointment
@@ -245,8 +265,11 @@ serve(async (req) => {
         });
       }
 
+      // Log activity
+      await logActivity("cancelled", { source: "link", reason: "Cancelled via confirmation link" });
+
       // Notify professional about cancellation
-      await notifyProfessional(supabase, appointment, "cancelled");
+      await notifyProfessional(supabase, resend, appointment, "cancelled");
     }
 
     // Reschedule appointment
@@ -262,12 +285,14 @@ serve(async (req) => {
       
       const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000);
 
+      const oldStartTime = appointment.start_time;
+
       const { error: updateError } = await supabase
         .from("agenda_pro_appointments")
         .update({
           start_time: newStart.toISOString(),
           end_time: newEnd.toISOString(),
-          status: "pending", // Reset to pending for new confirmation
+          status: "scheduled", // Reset to scheduled for new confirmation
           confirmed_at: null,
           reminder_sent_at: null, // Reset reminders
           pre_message_sent_at: null,
@@ -282,8 +307,15 @@ serve(async (req) => {
         });
       }
 
+      // Log activity
+      await logActivity("rescheduled", { 
+        source: "link", 
+        from: oldStartTime, 
+        to: newStart.toISOString() 
+      });
+
       // Notify professional about reschedule
-      await notifyProfessional(supabase, { ...appointment, start_time: newStart.toISOString() }, "rescheduled");
+      await notifyProfessional(supabase, resend, { ...appointment, start_time: newStart.toISOString() }, "rescheduled");
 
       // Send notification to client about new date
       try {
@@ -346,6 +378,7 @@ serve(async (req) => {
 // Helper function to notify professional about status changes
 async function notifyProfessional(
   supabase: any,
+  resend: any,
   appointment: any,
   statusType: "confirmed" | "cancelled" | "rescheduled"
 ) {
@@ -354,29 +387,23 @@ async function notifyProfessional(
       ? appointment.agenda_pro_professionals[0]
       : appointment.agenda_pro_professionals;
 
-    if (!professional?.phone) {
-      console.log("[agenda-pro-confirmation] Professional has no phone, skipping notification");
+    if (!professional) {
+      console.log("[agenda-pro-confirmation] No professional data, skipping notification");
       return;
     }
 
     // Get client info
-    const { data: apt } = await supabase
-      .from("agenda_pro_appointments")
-      .select(`
-        client_name,
-        client_phone,
-        start_time,
-        agenda_pro_clients(name, phone),
-        agenda_pro_services(name)
-      `)
-      .eq("id", appointment.id)
-      .single();
-
-    if (!apt) return;
-
-    const clientName = apt.agenda_pro_clients?.name || apt.client_name || "Cliente";
-    const serviceName = apt.agenda_pro_services?.name || "Serviço";
-    const startTime = new Date(apt.start_time);
+    const clientData = Array.isArray(appointment.agenda_pro_clients)
+      ? appointment.agenda_pro_clients[0]
+      : appointment.agenda_pro_clients;
+    
+    const clientName = clientData?.name || appointment.client_name || "Cliente";
+    const serviceData = Array.isArray(appointment.agenda_pro_services)
+      ? appointment.agenda_pro_services[0]
+      : appointment.agenda_pro_services;
+    const serviceName = serviceData?.name || "Serviço";
+    
+    const startTime = new Date(appointment.start_time);
     
     const dateStr = startTime.toLocaleDateString("pt-BR", {
       weekday: "long",
@@ -389,53 +416,148 @@ async function notifyProfessional(
     });
 
     let message = "";
+    let emailSubject = "";
+    let emailContent = "";
+    
     if (statusType === "confirmed") {
       message = `✅ *Presença Confirmada*\n\n` +
         `O cliente *${clientName}* confirmou presença:\n\n` +
         `📅 ${dateStr}\n` +
         `🕐 ${timeStr}\n` +
         `📋 ${serviceName}`;
+      emailSubject = `✅ Presença Confirmada - ${clientName}`;
+      emailContent = `
+        <h2 style="color: #22c55e;">Presença Confirmada</h2>
+        <p>O cliente <strong>${clientName}</strong> confirmou presença para o agendamento:</p>
+        <ul>
+          <li><strong>Data:</strong> ${dateStr}</li>
+          <li><strong>Horário:</strong> ${timeStr}</li>
+          <li><strong>Serviço:</strong> ${serviceName}</li>
+        </ul>
+      `;
     } else if (statusType === "cancelled") {
       message = `❌ *Agendamento Cancelado*\n\n` +
         `O cliente *${clientName}* cancelou o agendamento:\n\n` +
         `📅 ${dateStr}\n` +
         `🕐 ${timeStr}\n` +
         `📋 ${serviceName}`;
+      emailSubject = `❌ Agendamento Cancelado - ${clientName}`;
+      emailContent = `
+        <h2 style="color: #ef4444;">Agendamento Cancelado</h2>
+        <p>O cliente <strong>${clientName}</strong> cancelou o agendamento:</p>
+        <ul>
+          <li><strong>Data:</strong> ${dateStr}</li>
+          <li><strong>Horário:</strong> ${timeStr}</li>
+          <li><strong>Serviço:</strong> ${serviceName}</li>
+        </ul>
+      `;
     } else if (statusType === "rescheduled") {
       message = `📅 *Agendamento Reagendado*\n\n` +
         `O cliente *${clientName}* reagendou para:\n\n` +
         `📅 ${dateStr}\n` +
         `🕐 ${timeStr}\n` +
         `📋 ${serviceName}`;
+      emailSubject = `📅 Agendamento Reagendado - ${clientName}`;
+      emailContent = `
+        <h2 style="color: #8b5cf6;">Agendamento Reagendado</h2>
+        <p>O cliente <strong>${clientName}</strong> reagendou para:</p>
+        <ul>
+          <li><strong>Nova Data:</strong> ${dateStr}</li>
+          <li><strong>Novo Horário:</strong> ${timeStr}</li>
+          <li><strong>Serviço:</strong> ${serviceName}</li>
+        </ul>
+      `;
     }
 
-    // Get WhatsApp instance
-    const { data: instance } = await supabase
-      .from("whatsapp_instances")
-      .select("instance_name, api_url, api_key")
-      .eq("law_firm_id", appointment.law_firm_id)
-      .eq("status", "connected")
-      .limit(1)
-      .maybeSingle();
+    // Send WhatsApp notification if professional has phone
+    if (professional.phone) {
+      const { data: instance } = await supabase
+        .from("whatsapp_instances")
+        .select("instance_name, api_url, api_key")
+        .eq("law_firm_id", appointment.law_firm_id)
+        .eq("status", "connected")
+        .limit(1)
+        .maybeSingle();
 
-    if (instance) {
-      const profPhone = professional.phone.replace(/\D/g, "");
-      const profJid = profPhone.startsWith("55") ? `${profPhone}@s.whatsapp.net` : `55${profPhone}@s.whatsapp.net`;
-      const apiUrl = (instance.api_url as string).replace(/\/$/, "");
+      if (instance) {
+        const profPhone = professional.phone.replace(/\D/g, "");
+        const profJid = profPhone.startsWith("55") ? `${profPhone}@s.whatsapp.net` : `55${profPhone}@s.whatsapp.net`;
+        const apiUrl = (instance.api_url as string).replace(/\/$/, "");
 
-      await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: instance.api_key as string,
-        },
-        body: JSON.stringify({
-          number: profJid,
-          text: message,
-        }),
-      });
+        try {
+          await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: instance.api_key as string,
+            },
+            body: JSON.stringify({
+              number: profJid,
+              text: message,
+            }),
+          });
+          console.log(`[agenda-pro-confirmation] WhatsApp sent to professional: ${statusType}`);
+        } catch (whatsappError) {
+          console.error("[agenda-pro-confirmation] WhatsApp error:", whatsappError);
+        }
+      }
+    }
 
-      console.log(`[agenda-pro-confirmation] Professional notified: ${statusType}`);
+    // Send Email notification if professional has email and Resend is configured
+    if (professional.email && resend) {
+      try {
+        // Get business settings for branding
+        const { data: bizSettings } = await supabase
+          .from("agenda_pro_settings")
+          .select("business_name")
+          .eq("law_firm_id", appointment.law_firm_id)
+          .maybeSingle();
+        
+        const businessName = bizSettings?.business_name || "Agenda Pro";
+
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+              .content { background: #f9fafb; padding: 20px; border-radius: 0 0 8px 8px; }
+              ul { list-style: none; padding: 0; }
+              li { padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+              li:last-child { border-bottom: none; }
+              .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1 style="margin: 0; font-size: 20px;">${businessName}</h1>
+              </div>
+              <div class="content">
+                ${emailContent}
+              </div>
+              <div class="footer">
+                <p>Esta é uma notificação automática do sistema de agendamentos.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+
+        await resend.emails.send({
+          from: `${businessName} <onboarding@resend.dev>`,
+          to: [professional.email],
+          subject: emailSubject,
+          html: emailHtml,
+        });
+
+        console.log(`[agenda-pro-confirmation] Email sent to professional: ${professional.email}`);
+      } catch (emailError) {
+        console.error("[agenda-pro-confirmation] Email error:", emailError);
+      }
     }
   } catch (e) {
     console.error("[agenda-pro-confirmation] Error notifying professional:", e);
