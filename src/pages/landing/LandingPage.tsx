@@ -22,6 +22,13 @@ import {
   HeartHandshake,
   Phone,
   HelpCircle,
+  Globe,
+  Calendar,
+  Bell,
+  UserCheck,
+  CalendarClock,
+  Link2,
+  Palette,
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { CheckoutModal } from "@/components/landing/CheckoutModal";
@@ -417,6 +424,158 @@ export function LandingPage() {
                 <span className="text-sm text-white/70 font-medium">{item.label}</span>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Seção - Integrações WhatsApp + Chat Web */}
+      <section className="relative z-10 py-16 md:py-24 border-t border-white/[0.06]">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
+              <Globe className="h-8 w-8 text-red-500" strokeWidth={1.5} />
+            </div>
+            <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
+              Multiplataforma
+            </p>
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight">
+              Atenda onde seus clientes estão:
+              <br />
+              <span className="text-red-500">WhatsApp e Site</span>
+            </h2>
+            <p className="mt-5 text-base md:text-lg text-white/50 max-w-2xl mx-auto leading-relaxed">
+              Unifique todos os seus canais de atendimento em uma única plataforma inteligente.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* WhatsApp Card */}
+            <div className="relative p-6 md:p-8 rounded-2xl border border-white/[0.06] bg-gradient-to-br from-green-500/5 to-transparent hover:border-green-500/20 transition-all duration-300">
+              <div className="absolute top-4 right-4 w-12 h-12 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center">
+                <MessageCircle className="h-6 w-6 text-green-500" strokeWidth={1.5} />
+              </div>
+              <Phone className="h-10 w-10 text-green-500 mb-4" strokeWidth={1.5} />
+              <h3 className="text-xl font-bold mb-3">WhatsApp Integrado</h3>
+              <p className="text-sm text-white/50 leading-relaxed mb-4">
+                Conecte múltiplos números de WhatsApp e gerencie todas as conversas em um só lugar. A IA responde automaticamente, qualifica leads e direciona para o atendente certo.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Múltiplos números conectados",
+                  "IA respondendo 24/7",
+                  "Transcrição de áudios",
+                  "Leitura de imagens",
+                  "Mensagens agendadas",
+                ].map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-white/60">
+                    <Check className="h-4 w-4 text-green-500 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Chat Web Card */}
+            <div className="relative p-6 md:p-8 rounded-2xl border border-white/[0.06] bg-gradient-to-br from-blue-500/5 to-transparent hover:border-blue-500/20 transition-all duration-300">
+              <div className="absolute top-4 right-4 w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                <Globe className="h-6 w-6 text-blue-500" strokeWidth={1.5} />
+              </div>
+              <Bot className="h-10 w-10 text-blue-500 mb-4" strokeWidth={1.5} />
+              <h3 className="text-xl font-bold mb-3">Chat Web para seu Site</h3>
+              <p className="text-sm text-white/50 leading-relaxed mb-4">
+                Instale um widget de chat em qualquer site com apenas uma linha de código. Capture leads, tire dúvidas e converta visitantes em clientes com IA ou atendente humano.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Instalação em 1 minuto",
+                  "Totalmente personalizável",
+                  "IA ou atendente humano",
+                  "Captura de leads automática",
+                  "Histórico unificado",
+                ].map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-white/60">
+                    <Check className="h-4 w-4 text-blue-500 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* Highlight */}
+          <div className="mt-8 p-5 rounded-xl border border-red-500/20 bg-red-500/5 text-center">
+            <p className="text-sm text-white/70">
+              <span className="text-red-500 font-semibold">Tudo integrado:</span> Conversas do WhatsApp e do Chat Web aparecem no mesmo painel, com histórico unificado e IA compartilhada.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Seção - Agenda Pro */}
+      <section className="relative z-10 py-16 md:py-24 border-t border-white/[0.06]">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
+            <div>
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
+                <Calendar className="h-7 w-7 text-red-500" strokeWidth={1.5} />
+              </div>
+              <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
+                Módulo Agenda Pro
+              </p>
+              <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight">
+                Agendamento online completo
+                <br />
+                <span className="text-red-500">integrado ao MiauChat</span>
+              </h2>
+              <p className="mt-5 text-base text-white/50 leading-relaxed">
+                Sistema profissional de agendamentos para clínicas, salões, consultórios e qualquer negócio que trabalhe com horários marcados.
+              </p>
+              <p className="mt-3 text-sm text-white/40 leading-relaxed">
+                A IA pode agendar, confirmar e remarcar automaticamente via WhatsApp. Seus clientes também podem agendar por um link público personalizado.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              {[
+                { icon: CalendarClock, title: "Múltiplas visualizações", desc: "Dia, semana e mês por profissional" },
+                { icon: UserCheck, title: "Gestão de Profissionais", desc: "Horários individuais e especialidades" },
+                { icon: Bell, title: "Lembretes automáticos", desc: "WhatsApp, e-mail e SMS" },
+                { icon: Link2, title: "Link público", desc: "Clientes agendam online 24/7" },
+                { icon: Calendar, title: "Google Calendar", desc: "Sincronização automática" },
+                { icon: Palette, title: "Personalizável", desc: "Cores e identidade visual" },
+              ].map((item, i) => (
+                <div
+                  key={i}
+                  className="p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-red-500/20 transition-all duration-300"
+                >
+                  <item.icon className="h-6 w-6 text-red-500 mb-2" strokeWidth={1.5} />
+                  <h4 className="text-sm font-semibold mb-1">{item.title}</h4>
+                  <p className="text-xs text-white/50">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Features list */}
+          <div className="mt-12 p-6 rounded-2xl border border-white/[0.06] bg-white/[0.02]">
+            <h3 className="text-lg font-bold mb-4 text-center">Recursos completos da Agenda Pro</h3>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                "Confirmação por link",
+                "Mensagens pré-atendimento",
+                "Bloqueio de feriados",
+                "Limite de agendamentos",
+                "Buffer entre atendimentos",
+                "Cadastro de clientes",
+                "Aniversariantes automático",
+                "Relatórios e métricas",
+              ].map((item, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm text-white/60">
+                  <Check className="h-4 w-4 text-red-500 shrink-0" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
