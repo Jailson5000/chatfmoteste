@@ -39,6 +39,7 @@ interface KanbanColumnProps {
   isDraggable?: boolean;
   draggedConversation: string | null;
   groupByStatus?: boolean;
+  isArchiveColumn?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onDrop: () => void;
@@ -59,6 +60,7 @@ export function KanbanColumn({
   isDraggable = false,
   draggedConversation,
   groupByStatus = false,
+  isArchiveColumn = false,
   onDragStart,
   onDragEnd,
   onDrop,
