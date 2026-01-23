@@ -152,7 +152,7 @@ serve(async (req) => {
 
     } else if (type === "reminder") {
       whatsappMessage = `Olá ${clientName}! 🔔\n\n` +
-        `Lembrete do seu agendamento para *amanhã*:\n\n` +
+        `Lembrete do seu agendamento:\n\n` +
         `📅 *${dateStr}*\n` +
         `🕐 *${timeRangeStr}*\n` +
         `📋 *${serviceName}*\n` +
@@ -161,12 +161,12 @@ serve(async (req) => {
         `🔗 *Confirme sua presença:*\n${confirmationLink}\n\n` +
         `Aguardamos você! 😊`;
 
-      emailSubject = `🔔 Lembrete: Seu agendamento é amanhã - ${companyName}`;
+      emailSubject = `🔔 Lembrete: Agendamento em ${dateStr} - ${companyName}`;
       emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h1 style="color: #3b82f6;">Lembrete de Agendamento 🔔</h1>
           <p>Olá <strong>${clientName}</strong>,</p>
-          <p>Passando para lembrar do seu agendamento para <strong>amanhã</strong>!</p>
+          <p>Passando para lembrar do seu agendamento!</p>
           <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
             <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>

@@ -35,7 +35,7 @@ export function AgendaProSettings() {
     reminder_2_unit: "hours" as "minutes" | "hours",
     respect_business_hours: true,
     confirmation_message_template: "Olá {client_name}! ✅ Seu agendamento de {service_name} foi confirmado para o dia {date} às {time}. Aguardamos você!",
-    reminder_message_template: "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!",
+    reminder_message_template: "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} em {date} às {time}. Confirme sua presença!",
     cancellation_message_template: "Olá {client_name}. Seu agendamento de {service_name} para o dia {date} às {time} foi cancelado. Entre em contato para reagendar.",
     // Birthday fields
     birthday_enabled: true,
