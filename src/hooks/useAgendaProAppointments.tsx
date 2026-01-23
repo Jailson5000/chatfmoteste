@@ -205,16 +205,37 @@ export function useAgendaProAppointments(options?: {
         const startTime = new Date(appointment.start_time);
         const now = new Date();
         
-        // Get settings for reminder configuration
+        // Get settings for reminder configuration including message template
         const { data: settings } = await supabase
           .from("agenda_pro_settings")
-          .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit")
+          .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit, reminder_message_template, business_name")
           .eq("law_firm_id", lawFirm.id)
           .single();
         
         const scheduledMessages = [];
         
-        // First reminder (24h before by default)
+        // Helper function to replace variables in message template
+        const formatMessage = (template: string | null, defaultMsg: string): string => {
+          if (!template) return defaultMsg;
+          const clientName = data.client_name || appointment.client?.name || "Cliente";
+          const serviceName = (appointment.service as any)?.name || "Serviço";
+          const professionalName = (appointment.professional as any)?.name || "Profissional";
+          const dateStr = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(startTime);
+          const timeStr = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(startTime);
+          
+          return template
+            .replace(/{client_name}/g, clientName)
+            .replace(/{service_name}/g, serviceName)
+            .replace(/{professional_name}/g, professionalName)
+            .replace(/{date}/g, dateStr)
+            .replace(/{time}/g, timeStr)
+            .replace(/{business_name}/g, settings?.business_name || "");
+        };
+        
+        // Default reminder message template
+        const defaultReminderTemplate = "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!";
+        
+        // First reminder (configurable hours)
         const reminder1Hours = settings?.reminder_hours_before || 24;
         const reminderTime = new Date(startTime.getTime() - reminder1Hours * 60 * 60 * 1000);
         
@@ -224,7 +245,7 @@ export function useAgendaProAppointments(options?: {
             appointment_id: appointment.id,
             client_id: appointment.client_id,
             message_type: "reminder",
-            message_content: `Lembrete automático de ${reminder1Hours}h`,
+            message_content: formatMessage(settings?.reminder_message_template, defaultReminderTemplate),
             scheduled_at: reminderTime.toISOString(),
             channel: "whatsapp",
             status: "pending",
@@ -239,15 +260,12 @@ export function useAgendaProAppointments(options?: {
           const reminder2Time = new Date(startTime.getTime() - reminder2Minutes * 60 * 1000);
           
           if (reminder2Time > now) {
-            const timeLabel = settings.reminder_2_unit === 'hours' 
-              ? `${settings.reminder_2_value}h` 
-              : `${settings.reminder_2_value}min`;
             scheduledMessages.push({
               law_firm_id: lawFirm.id,
               appointment_id: appointment.id,
               client_id: appointment.client_id,
               message_type: "reminder_2",
-              message_content: `Lembrete automático de ${timeLabel}`,
+              message_content: formatMessage(settings?.reminder_message_template, defaultReminderTemplate),
               scheduled_at: reminder2Time.toISOString(),
               channel: "whatsapp",
               status: "pending",
@@ -266,7 +284,7 @@ export function useAgendaProAppointments(options?: {
               appointment_id: appointment.id,
               client_id: appointment.client_id,
               message_type: "pre_message",
-              message_content: service.pre_message_text || "Mensagem pré-atendimento",
+              message_content: formatMessage(service.pre_message_text, "Mensagem pré-atendimento"),
               scheduled_at: preMessageTime.toISOString(),
               channel: "whatsapp",
               status: "pending",
