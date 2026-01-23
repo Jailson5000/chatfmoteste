@@ -133,7 +133,8 @@ export function useConversations() {
         .rpc('get_conversations_with_metadata', { 
           _law_firm_id: lawFirm.id,
           _limit: CONVERSATIONS_BATCH_SIZE,
-          _offset: 0
+          _offset: 0,
+          _include_archived: true
         });
 
       if (rpcError) {
@@ -207,7 +208,8 @@ export function useConversations() {
         .rpc('get_conversations_with_metadata', { 
           _law_firm_id: lawFirm.id,
           _limit: CONVERSATIONS_BATCH_SIZE,
-          _offset: offsetRef.current
+          _offset: offsetRef.current,
+          _include_archived: true
         });
 
       if (rpcError) {
