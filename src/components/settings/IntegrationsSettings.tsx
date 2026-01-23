@@ -63,6 +63,7 @@ export function IntegrationsSettings() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Active Integrations - Available first */}
         <AgendaProIntegration />
+        <TrayChatIntegration />
         
         {/* Google Calendar - Coming Soon */}
         <IntegrationCard
@@ -71,7 +72,6 @@ export function IntegrationsSettings() {
           description="Sincronize agendamentos com o Google Calendar. Permite que a IA visualize e crie eventos automaticamente."
           isComingSoon
         />
-        <TrayChatIntegration />
         
         {/* Coming Soon Integrations */}
         <IntegrationCard
