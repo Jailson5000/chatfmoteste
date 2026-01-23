@@ -126,10 +126,15 @@ export default function Kanban() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Apply all filters
+  // Separate archived conversations
+  const archivedConversations = useMemo(() => {
+    return conversations.filter(conv => (conv as any).archived_at);
+  }, [conversations]);
+
+  // Apply all filters (exclude archived - they go in their own column)
   const filteredConversations = useMemo(() => {
     return conversations.filter(conv => {
-      // Exclude archived conversations (those with archived_at set)
+      // Exclude archived conversations (they have their own column)
       if ((conv as any).archived_at) return false;
       
       // Search filter
@@ -476,6 +481,23 @@ export default function Kanban() {
                   />
                 );
               })}
+
+              {/* Archived column - always shown at the end */}
+              <KanbanColumn
+                id="archived"
+                name="Arquivado / Finalizado"
+                color="#dc2626"
+                conversations={archivedConversations}
+                customStatuses={customStatuses}
+                tags={tags}
+                automations={automations}
+                isDragging={false}
+                draggedConversation={draggedConversation}
+                isArchiveColumn={true}
+                onDrop={() => setDraggedConversation(null)}
+                onConversationDragStart={(id) => setDraggedConversation(id)}
+                onConversationClick={handleConversationClick}
+              />
             </>
           ) : (
             <>
@@ -531,6 +553,24 @@ export default function Kanban() {
                   />
                 );
               })}
+
+              {/* Archived column - always shown at the end */}
+              <KanbanColumn
+                id="archived"
+                name="Arquivado / Finalizado"
+                color="#dc2626"
+                conversations={archivedConversations}
+                customStatuses={customStatuses}
+                tags={tags}
+                automations={automations}
+                isDragging={false}
+                draggedConversation={draggedConversation}
+                groupByStatus={true}
+                isArchiveColumn={true}
+                onDrop={() => setDraggedConversation(null)}
+                onConversationDragStart={(id) => setDraggedConversation(id)}
+                onConversationClick={handleConversationClick}
+              />
             </>
           )}
 
