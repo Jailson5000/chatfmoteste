@@ -292,6 +292,102 @@ export default function PublicBooking() {
         throw appointmentError;
       }
       
+      // Create scheduled reminder messages based on settings
+      try {
+        const now = new Date();
+        
+        // Get settings for reminder configuration
+        const { data: reminderSettings } = await supabase
+          .from("agenda_pro_settings")
+          .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit")
+          .eq("law_firm_id", lawFirmId)
+          .single();
+        
+        // Get service details for pre-message
+        const { data: serviceDetails } = await supabase
+          .from("agenda_pro_services")
+          .select("pre_message_enabled, pre_message_hours_before, pre_message_text")
+          .eq("id", selectedService.id)
+          .single();
+        
+        const scheduledMessages: {
+          law_firm_id: string;
+          appointment_id: string;
+          client_id: string | null;
+          message_type: string;
+          message_content: string;
+          scheduled_at: string;
+          channel: string;
+          status: string;
+        }[] = [];
+        
+        // First reminder (configurable, default 24h)
+        const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
+        const reminderTime = new Date(startDateTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+        
+        if (reminderTime > now) {
+          scheduledMessages.push({
+            law_firm_id: lawFirmId,
+            appointment_id: newAppointment.id,
+            client_id: null,
+            message_type: "reminder",
+            message_content: `Lembrete automático de ${reminder1Hours}h`,
+            scheduled_at: reminderTime.toISOString(),
+            channel: "whatsapp",
+            status: "pending",
+          });
+        }
+
+        // Second reminder (configurable)
+        if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
+          const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
+            ? reminderSettings.reminder_2_value * 60 
+            : reminderSettings.reminder_2_value;
+          const reminder2Time = new Date(startDateTime.getTime() - reminder2Minutes * 60 * 1000);
+          
+          if (reminder2Time > now) {
+            const timeLabel = reminderSettings.reminder_2_unit === 'hours' 
+              ? `${reminderSettings.reminder_2_value}h` 
+              : `${reminderSettings.reminder_2_value}min`;
+            scheduledMessages.push({
+              law_firm_id: lawFirmId,
+              appointment_id: newAppointment.id,
+              client_id: null,
+              message_type: "reminder_2",
+              message_content: `Lembrete automático de ${timeLabel}`,
+              scheduled_at: reminder2Time.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
+        }
+
+        // Create pre-message if service has it enabled
+        if (serviceDetails?.pre_message_enabled && serviceDetails?.pre_message_hours_before) {
+          const preMessageTime = new Date(startDateTime.getTime() - (serviceDetails.pre_message_hours_before * 60 * 60 * 1000));
+          
+          if (preMessageTime > now) {
+            scheduledMessages.push({
+              law_firm_id: lawFirmId,
+              appointment_id: newAppointment.id,
+              client_id: null,
+              message_type: "pre_message",
+              message_content: serviceDetails.pre_message_text || "Mensagem pré-atendimento",
+              scheduled_at: preMessageTime.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
+        }
+
+        // Insert all scheduled messages at once
+        if (scheduledMessages.length > 0) {
+          await supabase.from("agenda_pro_scheduled_messages").insert(scheduledMessages);
+        }
+      } catch (msgError) {
+        console.error("Error creating scheduled messages:", msgError);
+      }
+
       // Send notification via Agenda Pro function
       try {
         await supabase.functions.invoke("agenda-pro-notification", {
