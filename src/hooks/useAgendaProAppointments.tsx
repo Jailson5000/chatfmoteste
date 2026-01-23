@@ -200,23 +200,59 @@ export function useAgendaProAppointments(options?: {
         client_name: data.client_name || appointment.client?.name 
       });
 
-      // Create scheduled reminder messages (24h before)
+      // Create scheduled reminder messages based on settings
       try {
         const startTime = new Date(appointment.start_time);
-        const reminderTime = new Date(startTime.getTime() - 24 * 60 * 60 * 1000);
+        const now = new Date();
         
-        // Only create if reminder time is in the future
-        if (reminderTime > new Date()) {
-          await supabase.from("agenda_pro_scheduled_messages").insert({
+        // Get settings for reminder configuration
+        const { data: settings } = await supabase
+          .from("agenda_pro_settings")
+          .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit")
+          .eq("law_firm_id", lawFirm.id)
+          .single();
+        
+        const scheduledMessages = [];
+        
+        // First reminder (24h before by default)
+        const reminder1Hours = settings?.reminder_hours_before || 24;
+        const reminderTime = new Date(startTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+        
+        if (reminderTime > now) {
+          scheduledMessages.push({
             law_firm_id: lawFirm.id,
             appointment_id: appointment.id,
             client_id: appointment.client_id,
             message_type: "reminder",
-            message_content: "Lembrete automático de 24h",
+            message_content: `Lembrete automático de ${reminder1Hours}h`,
             scheduled_at: reminderTime.toISOString(),
             channel: "whatsapp",
             status: "pending",
           });
+        }
+
+        // Second reminder (configurable)
+        if (settings?.reminder_2_enabled && settings?.reminder_2_value) {
+          const reminder2Minutes = settings.reminder_2_unit === 'hours' 
+            ? settings.reminder_2_value * 60 
+            : settings.reminder_2_value;
+          const reminder2Time = new Date(startTime.getTime() - reminder2Minutes * 60 * 1000);
+          
+          if (reminder2Time > now) {
+            const timeLabel = settings.reminder_2_unit === 'hours' 
+              ? `${settings.reminder_2_value}h` 
+              : `${settings.reminder_2_value}min`;
+            scheduledMessages.push({
+              law_firm_id: lawFirm.id,
+              appointment_id: appointment.id,
+              client_id: appointment.client_id,
+              message_type: "reminder_2",
+              message_content: `Lembrete automático de ${timeLabel}`,
+              scheduled_at: reminder2Time.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
         }
 
         // Create pre-message if service has it enabled
@@ -224,8 +260,8 @@ export function useAgendaProAppointments(options?: {
         if (service?.pre_message_enabled && service?.pre_message_hours_before) {
           const preMessageTime = new Date(startTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
           
-          if (preMessageTime > new Date()) {
-            await supabase.from("agenda_pro_scheduled_messages").insert({
+          if (preMessageTime > now) {
+            scheduledMessages.push({
               law_firm_id: lawFirm.id,
               appointment_id: appointment.id,
               client_id: appointment.client_id,
@@ -236,6 +272,11 @@ export function useAgendaProAppointments(options?: {
               status: "pending",
             });
           }
+        }
+
+        // Insert all scheduled messages at once
+        if (scheduledMessages.length > 0) {
+          await supabase.from("agenda_pro_scheduled_messages").insert(scheduledMessages);
         }
       } catch (msgError) {
         console.error("Error creating scheduled messages:", msgError);
