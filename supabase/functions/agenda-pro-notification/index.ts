@@ -52,10 +52,10 @@ serve(async (req) => {
       );
     }
 
-    // Get settings for business name
+    // Get settings for business name and reminder config
     const { data: settings } = await supabase
       .from("agenda_pro_settings")
-      .select("business_name, send_whatsapp_confirmation, send_email_confirmation")
+      .select("business_name, send_whatsapp_confirmation, send_email_confirmation, reminder_hours_before")
       .eq("law_firm_id", appointment.law_firm_id)
       .single();
 
@@ -100,6 +100,17 @@ serve(async (req) => {
     // Generate confirmation link
     const confirmationLink = `${APP_URL}/confirmar?token=${appointment.confirmation_token}`;
 
+    // Check if reminder will actually be sent (appointment is far enough in the future)
+    const now = new Date();
+    const reminderHoursBefore = settings?.reminder_hours_before || 24;
+    const hoursUntilAppointment = (startDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const willReceiveReminder = hoursUntilAppointment > reminderHoursBefore;
+    
+    // Build reminder message conditionally
+    const reminderNote = willReceiveReminder 
+      ? `\nVocê receberá um lembrete ${reminderHoursBefore}h antes.\n` 
+      : "";
+
     let whatsappMessage: string;
     let emailSubject: string;
     let emailHtml: string;
@@ -112,9 +123,9 @@ serve(async (req) => {
         `📋 *${serviceName}*\n` +
         (professionalName ? `👤 *${professionalName}*\n` : "") +
         `📍 *${companyName}*\n\n` +
-        `🔗 *Confirme sua presença:*\n${confirmationLink}\n\n` +
-        `Você receberá um lembrete 24h antes.\n\n` +
-        `Aguardamos você! 😊`;
+        `🔗 *Confirme sua presença:*\n${confirmationLink}` +
+        reminderNote +
+        `\nAguardamos você! 😊`;
 
       emailSubject = `✅ Confirme seu agendamento - ${companyName}`;
       emailHtml = `
@@ -138,7 +149,7 @@ serve(async (req) => {
           <p style="color: #6b7280; font-size: 14px;">Ou copie e cole este link no navegador:<br>
             <a href="${confirmationLink}">${confirmationLink}</a>
           </p>
-          <p>Você receberá um lembrete 24h antes do seu agendamento.</p>
+          ${willReceiveReminder ? `<p>Você receberá um lembrete ${reminderHoursBefore}h antes do seu agendamento.</p>` : ""}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
           <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
         </div>
