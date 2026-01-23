@@ -5292,7 +5292,12 @@ export type Database = {
       get_conversations_with_metadata:
         | { Args: { _law_firm_id: string }; Returns: Json[] }
         | {
-            Args: { _law_firm_id: string; _limit?: number; _offset?: number }
+            Args: {
+              _include_archived?: boolean
+              _law_firm_id: string
+              _limit?: number
+              _offset?: number
+            }
             Returns: {
               ai_audio_enabled: boolean
               ai_audio_enabled_by: string
