@@ -55,7 +55,7 @@ serve(async (req) => {
     // Get settings for business name and reminder config
     const { data: settings } = await supabase
       .from("agenda_pro_settings")
-      .select("business_name, send_whatsapp_confirmation, send_email_confirmation, reminder_hours_before")
+      .select("business_name, send_whatsapp_confirmation, send_email_confirmation, reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit")
       .eq("law_firm_id", appointment.law_firm_id)
       .single();
 
@@ -100,16 +100,41 @@ serve(async (req) => {
     // Generate confirmation link
     const confirmationLink = `${APP_URL}/confirmar?token=${appointment.confirmation_token}`;
 
-    // Check if reminder will actually be sent (appointment is far enough in the future)
+    // Check which reminders will actually be sent based on time until appointment
     const now = new Date();
-    const reminderHoursBefore = settings?.reminder_hours_before || 24;
-    const hoursUntilAppointment = (startDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-    const willReceiveReminder = hoursUntilAppointment > reminderHoursBefore;
+    const minutesUntilAppointment = (startDate.getTime() - now.getTime()) / (1000 * 60);
     
-    // Build reminder message conditionally
-    const reminderNote = willReceiveReminder 
-      ? `\nVocê receberá um lembrete ${reminderHoursBefore}h antes.\n` 
-      : "";
+    // First reminder (configurable hours, default 24h)
+    const reminder1Hours = settings?.reminder_hours_before || 24;
+    const reminder1Minutes = reminder1Hours * 60;
+    const willReceiveReminder1 = minutesUntilAppointment > reminder1Minutes;
+    
+    // Second reminder (configurable minutes or hours)
+    const reminder2Enabled = settings?.reminder_2_enabled !== false; // default true
+    const reminder2Value = settings?.reminder_2_value || 55;
+    const reminder2Unit = settings?.reminder_2_unit || "minutes";
+    const reminder2Minutes = reminder2Unit === "hours" ? reminder2Value * 60 : reminder2Value;
+    const willReceiveReminder2 = reminder2Enabled && minutesUntilAppointment > reminder2Minutes;
+    
+    // Build reminder message conditionally - show the most relevant reminder info
+    let reminderNote = "";
+    if (willReceiveReminder1 && willReceiveReminder2) {
+      // Both reminders will be sent
+      const reminder2Text = reminder2Unit === "hours" 
+        ? `${reminder2Value}h` 
+        : `${reminder2Value}min`;
+      reminderNote = `\nVocê receberá lembretes ${reminder1Hours}h e ${reminder2Text} antes.\n`;
+    } else if (willReceiveReminder1) {
+      // Only first reminder
+      reminderNote = `\nVocê receberá um lembrete ${reminder1Hours}h antes.\n`;
+    } else if (willReceiveReminder2) {
+      // Only second reminder (appointment is soon)
+      const reminder2Text = reminder2Unit === "hours" 
+        ? `${reminder2Value}h` 
+        : `${reminder2Value}min`;
+      reminderNote = `\nVocê receberá um lembrete ${reminder2Text} antes.\n`;
+    }
+    // If neither, reminderNote stays empty
 
     let whatsappMessage: string;
     let emailSubject: string;
@@ -149,7 +174,7 @@ serve(async (req) => {
           <p style="color: #6b7280; font-size: 14px;">Ou copie e cole este link no navegador:<br>
             <a href="${confirmationLink}">${confirmationLink}</a>
           </p>
-          ${willReceiveReminder ? `<p>Você receberá um lembrete ${reminderHoursBefore}h antes do seu agendamento.</p>` : ""}
+          ${reminderNote ? `<p>${reminderNote.trim()}</p>` : ""}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
           <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
         </div>
