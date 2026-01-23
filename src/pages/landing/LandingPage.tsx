@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,34 @@ export function LandingPage() {
     name: string;
     price: string;
   } | null>(null);
+
+  // Carrega o widget MiauChat
+  useEffect(() => {
+    // Configura o MiauChat
+    (window as any).MiauChat = {
+      tenant: "dc43d6dd6aaf4691",
+      source: "WIDGET"
+    };
+
+    // Carrega o script do widget
+    const script = document.createElement('script');
+    script.src = 'https://widget.miauchat.com.br/widget.js';
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      // Cleanup: remove o script quando o componente desmontar
+      const existingScript = document.querySelector('script[src="https://widget.miauchat.com.br/widget.js"]');
+      if (existingScript) {
+        existingScript.remove();
+      }
+      // Remove o widget container se existir
+      const widgetContainer = document.getElementById('miauchat-widget-container');
+      if (widgetContainer) {
+        widgetContainer.remove();
+      }
+    };
+  }, []);
 
   const plans = [
     {
