@@ -25,7 +25,9 @@ import {
   FolderOpen,
   Pencil,
   Volume2,
-  Sparkles
+  Sparkles,
+  ArrowRightLeft,
+  CalendarDays
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -296,6 +298,10 @@ export default function AIAgents() {
   // Voice settings
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceId, setVoiceId] = useState("renata");
+  
+  // Transfer and scheduling settings
+  const [notifyOnTransfer, setNotifyOnTransfer] = useState(false);
+  const [schedulingEnabled, setSchedulingEnabled] = useState(false);
 
   // Get version from selected agent
   const promptVersion = selectedAgent?.version || 1;
@@ -327,6 +333,10 @@ export default function AIAgents() {
       // Load voice settings
       setVoiceEnabled(Boolean(config?.voice_enabled));
       setVoiceId((config?.voice_id as string) || DEFAULT_VOICE_ID);
+      
+      // Load transfer and scheduling settings
+      setNotifyOnTransfer(selectedAgent.notify_on_transfer || false);
+      setSchedulingEnabled(selectedAgent.scheduling_enabled || false);
       
       setHasChanges(false);
     }
@@ -721,7 +731,9 @@ export default function AIAgents() {
         ai_prompt: prompt,
         is_active: isActive,
         trigger_config: triggerConfig,
-      });
+        notify_on_transfer: notifyOnTransfer,
+        scheduling_enabled: schedulingEnabled,
+      } as any);
 
       setHasChanges(false);
       setLastUpdated(new Date());
@@ -732,6 +744,8 @@ export default function AIAgents() {
         ai_prompt: prompt,
         is_active: isActive,
         trigger_config: triggerConfig,
+        notify_on_transfer: notifyOnTransfer,
+        scheduling_enabled: schedulingEnabled,
         version: (selectedAgent.version || 1) + 1,
       });
       
@@ -1795,6 +1809,52 @@ Regras:
                     </SelectContent>
                   </Select>
                 )}
+              </div>
+
+              {/* Notify on Transfer */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Avisar ao transferir
+                </Label>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium">Notificar cliente</p>
+                    <p className="text-xs text-muted-foreground">
+                      Avisa o cliente quando transferir para humano
+                    </p>
+                  </div>
+                  <Switch
+                    checked={notifyOnTransfer}
+                    onCheckedChange={(checked) => {
+                      setNotifyOnTransfer(checked);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Scheduling Enabled */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4" />
+                  Agendamento habilitado
+                </Label>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium">Agenda Pro</p>
+                    <p className="text-xs text-muted-foreground">
+                      Permite agendar via Agenda Pro
+                    </p>
+                  </div>
+                  <Switch
+                    checked={schedulingEnabled}
+                    onCheckedChange={(checked) => {
+                      setSchedulingEnabled(checked);
+                      setHasChanges(true);
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Voice Settings */}
