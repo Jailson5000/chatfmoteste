@@ -1149,7 +1149,7 @@ async function executeCrmTool(
   }
 }
 
-// Execute scheduling tool call
+// Execute scheduling tool call for Agenda Pro
 async function executeSchedulingTool(
   supabase: any,
   supabaseUrl: string,
@@ -1164,14 +1164,31 @@ async function executeSchedulingTool(
     
     console.log(`[Scheduling] Executing tool: ${toolCall.name}`, args);
     
+    // Check if Agenda Pro is enabled for this law firm
+    const { data: agendaSettings, error: settingsError } = await supabase
+      .from("agenda_pro_settings")
+      .select("is_enabled")
+      .eq("law_firm_id", lawFirmId)
+      .maybeSingle();
+    
+    if (settingsError || !agendaSettings?.is_enabled) {
+      console.log(`[Scheduling] Agenda Pro not enabled for law firm ${lawFirmId}`);
+      return JSON.stringify({
+        success: false,
+        error: "O módulo Agenda Pro não está ativado. Ative-o em Configurações > Integrações."
+      });
+    }
+    
     switch (toolCall.name) {
       case "list_services": {
+        // Use Agenda Pro services table
         const { data: services, error } = await supabase
-          .from("services")
-          .select("id, name, description, duration_minutes, price")
+          .from("agenda_pro_services")
+          .select("id, name, description, duration_minutes, price, color")
           .eq("law_firm_id", lawFirmId)
           .eq("is_active", true)
-          .order("name");
+          .eq("is_public", true)
+          .order("position", { ascending: true });
 
         if (error) {
           console.error("[Scheduling] Error listing services:", error);
@@ -1181,7 +1198,7 @@ async function executeSchedulingTool(
         if (!services || services.length === 0) {
           return JSON.stringify({
             success: true,
-            message: "Nenhum serviço cadastrado",
+            message: "Nenhum serviço disponível para agendamento",
             services: []
           });
         }
@@ -1208,101 +1225,140 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Data é obrigatória" });
         }
 
-        // Get service duration
+        // Get service duration from Agenda Pro
         let serviceDuration = 60; // Default 60 min
+        let serviceName = "Serviço";
+        let bufferBefore = 0;
+        let bufferAfter = 0;
+        
         if (service_id) {
           const { data: service } = await supabase
-            .from("services")
+            .from("agenda_pro_services")
             .select("duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
             .eq("id", service_id)
             .eq("law_firm_id", lawFirmId)
             .single();
           
           if (service) {
-            serviceDuration = service.duration_minutes + 
-              (service.buffer_before_minutes || 0) + 
-              (service.buffer_after_minutes || 0);
+            serviceDuration = service.duration_minutes;
+            serviceName = service.name;
+            bufferBefore = service.buffer_before_minutes || 0;
+            bufferAfter = service.buffer_after_minutes || 0;
           }
         }
+        
+        const totalDuration = serviceDuration + bufferBefore + bufferAfter;
 
-        // Get business hours for this day
-        const { data: lawFirm } = await supabase
-          .from("law_firms")
-          .select("business_hours")
-          .eq("id", lawFirmId)
-          .single();
+        // Get active professionals that offer this service
+        const { data: serviceProfessionals } = await supabase
+          .from("agenda_pro_service_professionals")
+          .select("professional_id")
+          .eq("service_id", service_id);
+        
+        const professionalIds = serviceProfessionals?.map((sp: any) => sp.professional_id) || [];
 
-        const businessHours = lawFirm?.business_hours as Record<string, any> || {};
-        const requestedDate = new Date(date + "T12:00:00Z"); // Noon to avoid timezone issues
-        const dayOfWeek = requestedDate.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-        const dayHours = businessHours[dayOfWeek];
-
-        if (!dayHours?.enabled) {
+        if (professionalIds.length === 0) {
           return JSON.stringify({
             success: true,
-            message: `Não há atendimento neste dia da semana (${dayOfWeek})`,
+            message: "Nenhum profissional oferece este serviço no momento",
             available_slots: []
           });
         }
 
-        // Generate all possible slots
-        const startHour = parseInt(dayHours.start?.split(":")[0] || "9");
-        const startMin = parseInt(dayHours.start?.split(":")[1] || "0");
-        const endHour = parseInt(dayHours.end?.split(":")[0] || "18");
-        const endMin = parseInt(dayHours.end?.split(":")[1] || "0");
+        // Get working hours for the requested day (0=Sunday, 1=Monday, etc.)
+        const requestedDate = new Date(date + "T12:00:00-03:00");
+        const dayOfWeek = requestedDate.getDay();
         
-        const slots: string[] = [];
-        let currentMinutes = startHour * 60 + startMin;
-        const endMinutes = endHour * 60 + endMin;
+        const dayNames: Record<number, string> = {
+          0: "domingo",
+          1: "segunda-feira",
+          2: "terça-feira",
+          3: "quarta-feira",
+          4: "quinta-feira",
+          5: "sexta-feira",
+          6: "sábado"
+        };
 
-        while (currentMinutes + serviceDuration <= endMinutes) {
-          const hour = Math.floor(currentMinutes / 60);
-          const min = currentMinutes % 60;
-          slots.push(`${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`);
-          currentMinutes += 30; // 30 minute intervals
+        // Get working hours for professionals on this day
+        const { data: workingHours } = await supabase
+          .from("agenda_pro_working_hours")
+          .select("professional_id, start_time, end_time, is_enabled")
+          .in("professional_id", professionalIds)
+          .eq("day_of_week", dayOfWeek)
+          .eq("is_enabled", true);
+
+        if (!workingHours || workingHours.length === 0) {
+          return JSON.stringify({
+            success: true,
+            message: `Não há atendimento disponível neste dia (${dayNames[dayOfWeek]})`,
+            available_slots: []
+          });
         }
 
-        // Get existing appointments for this date
+        // Collect all unique time slots across professionals
+        const allSlots = new Set<string>();
+        
+        for (const wh of workingHours) {
+          const startParts = wh.start_time.split(":");
+          const endParts = wh.end_time.split(":");
+          const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+          const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+          
+          let currentMinutes = startMinutes;
+          while (currentMinutes + totalDuration <= endMinutes) {
+            const hour = Math.floor(currentMinutes / 60);
+            const min = currentMinutes % 60;
+            allSlots.add(`${hour.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`);
+            currentMinutes += 15; // 15 minute intervals for Agenda Pro
+          }
+        }
+
+        // Get existing Agenda Pro appointments for this date
         const startOfDay = new Date(date + "T00:00:00.000-03:00");
         const endOfDay = new Date(date + "T23:59:59.999-03:00");
 
         const { data: existingAppointments } = await supabase
-          .from("appointments")
-          .select("start_time, end_time")
+          .from("agenda_pro_appointments")
+          .select("start_time, end_time, professional_id")
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", startOfDay.toISOString())
           .lte("start_time", endOfDay.toISOString())
           .not("status", "in", "(cancelled,no_show)");
 
-        // Filter out occupied slots
-        const availableSlots = slots.filter((slot) => {
-          // IMPORTANT: slot is in Brazil time, need to convert for comparison
+        // Filter available slots (must have at least one professional available)
+        const slotsArray = Array.from(allSlots).sort();
+        const availableSlots = slotsArray.filter((slot) => {
           const slotStart = new Date(`${date}T${slot}:00.000-03:00`);
-          const slotEnd = new Date(slotStart.getTime() + serviceDuration * 60000);
+          const slotEnd = new Date(slotStart.getTime() + totalDuration * 60000);
 
-          const isOccupied = existingAppointments?.some((apt: any) => {
-            const aptStart = new Date(apt.start_time);
-            const aptEnd = new Date(apt.end_time);
-            return slotStart < aptEnd && slotEnd > aptStart;
+          // Check if any professional is available at this time
+          const professionalAvailable = workingHours.some((wh: any) => {
+            // Check if slot is within this professional's hours
+            const whStart = new Date(`${date}T${wh.start_time}:00.000-03:00`);
+            const whEnd = new Date(`${date}T${wh.end_time}:00.000-03:00`);
+            if (slotStart < whStart || slotEnd > whEnd) return false;
+            
+            // Check if this professional is busy
+            const professionalBusy = existingAppointments?.some((apt: any) => {
+              if (apt.professional_id !== wh.professional_id) return false;
+              const aptStart = new Date(apt.start_time);
+              const aptEnd = new Date(apt.end_time);
+              return slotStart < aptEnd && slotEnd > aptStart;
+            });
+            
+            return !professionalBusy;
           });
 
-          return !isOccupied;
+          return professionalAvailable;
         });
 
         if (availableSlots.length === 0) {
           return JSON.stringify({
             success: true,
-            message: "Não há horários disponíveis nesta data",
+            message: `Não há horários disponíveis em ${dayNames[dayOfWeek]}, ${date}. Tente outra data.`,
             available_slots: []
           });
         }
-
-        // Get service info for the response
-        const { data: service } = await supabase
-          .from("services")
-          .select("name, duration_minutes")
-          .eq("id", service_id)
-          .single();
 
         // Group by period for better readability
         const morning = availableSlots.filter(s => parseInt(s.split(":")[0]) < 12);
@@ -1312,7 +1368,7 @@ async function executeSchedulingTool(
         });
         const evening = availableSlots.filter(s => parseInt(s.split(":")[0]) >= 18);
 
-        let summary = `📅 Horários disponíveis para ${date}:\n`;
+        let summary = `📅 Horários disponíveis para ${dayNames[dayOfWeek]}, ${date}:\n`;
         if (morning.length > 0) {
           summary += `• Manhã: ${morning[0]} até ${morning[morning.length - 1]} (${morning.length} horários)\n`;
         }
@@ -1326,17 +1382,16 @@ async function executeSchedulingTool(
         return JSON.stringify({
           success: true,
           message: summary,
-          service_name: service?.name,
-          duration_minutes: service?.duration_minutes,
-          business_hours: `${dayHours.start} às ${dayHours.end}`,
+          service_name: serviceName,
+          duration_minutes: serviceDuration,
           available_slots_summary: {
             morning: morning.length > 0 ? `${morning[0]} - ${morning[morning.length - 1]}` : null,
             afternoon: afternoon.length > 0 ? `${afternoon[0]} - ${afternoon[afternoon.length - 1]}` : null,
             evening: evening.length > 0 ? `${evening[0]} - ${evening[evening.length - 1]}` : null,
             total: availableSlots.length
           },
-          available_slots: availableSlots.length <= 8 ? availableSlots : undefined,
-          hint: availableSlots.length > 8 
+          available_slots: availableSlots.length <= 10 ? availableSlots : undefined,
+          hint: availableSlots.length > 10 
             ? "Há muitos horários. Pergunte em qual período o cliente prefere (manhã/tarde) para sugerir opções específicas."
             : "Apresente os horários disponíveis."
         });
@@ -1352,10 +1407,10 @@ async function executeSchedulingTool(
           });
         }
 
-        // Get service details
+        // Get service details from Agenda Pro
         const { data: service, error: serviceError } = await supabase
-          .from("services")
-          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes")
+          .from("agenda_pro_services")
+          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price")
           .eq("id", service_id)
           .eq("law_firm_id", lawFirmId)
           .single();
@@ -1373,16 +1428,63 @@ async function executeSchedulingTool(
         
         console.log(`[book_appointment] Booking at ${time} Brazil time = ${startTime.toISOString()} UTC`);
 
-        // Check if slot is still available
-        const { data: conflicts } = await supabase
-          .from("appointments")
-          .select("id")
-          .eq("law_firm_id", lawFirmId)
-          .neq("status", "cancelled")
-          .lt("start_time", endTime.toISOString())
-          .gt("end_time", startTime.toISOString());
+        // Get professionals that offer this service
+        const { data: serviceProfessionals } = await supabase
+          .from("agenda_pro_service_professionals")
+          .select("professional_id")
+          .eq("service_id", service_id);
+        
+        const professionalIds = serviceProfessionals?.map((sp: any) => sp.professional_id) || [];
+        
+        if (professionalIds.length === 0) {
+          return JSON.stringify({
+            success: false,
+            error: "Nenhum profissional está disponível para este serviço."
+          });
+        }
 
-        if (conflicts && conflicts.length > 0) {
+        // Get working hours for this day to find available professional
+        const dayOfWeek = startTime.getDay();
+        const { data: workingHours } = await supabase
+          .from("agenda_pro_working_hours")
+          .select("professional_id, start_time, end_time")
+          .in("professional_id", professionalIds)
+          .eq("day_of_week", dayOfWeek)
+          .eq("is_enabled", true);
+
+        if (!workingHours || workingHours.length === 0) {
+          return JSON.stringify({
+            success: false,
+            error: "Não há profissionais disponíveis neste dia."
+          });
+        }
+
+        // Find a professional that is available at this time
+        let selectedProfessionalId: string | null = null;
+        
+        for (const wh of workingHours) {
+          const whStart = new Date(`${date}T${wh.start_time}:00.000-03:00`);
+          const whEnd = new Date(`${date}T${wh.end_time}:00.000-03:00`);
+          
+          // Check if slot is within working hours
+          if (startTime < whStart || endTime > whEnd) continue;
+          
+          // Check if professional has conflicts
+          const { data: conflicts } = await supabase
+            .from("agenda_pro_appointments")
+            .select("id")
+            .eq("professional_id", wh.professional_id)
+            .neq("status", "cancelled")
+            .lt("start_time", endTime.toISOString())
+            .gt("end_time", startTime.toISOString());
+          
+          if (!conflicts || conflicts.length === 0) {
+            selectedProfessionalId = wh.professional_id;
+            break;
+          }
+        }
+
+        if (!selectedProfessionalId) {
           return JSON.stringify({
             success: false,
             error: "Este horário não está mais disponível. Por favor, escolha outro horário."
@@ -1392,122 +1494,113 @@ async function executeSchedulingTool(
         // Normalize phone for lookup
         const normalizedPhone = client_phone.replace(/\D/g, '');
 
-        // Try to find existing client by phone, or create/update one
-        let agendaClientId = clientId;
+        // Try to find or create Agenda Pro client
+        let agendaProClientId: string | null = null;
         
-        const { data: existingClient } = await supabase
-          .from("clients")
+        const { data: existingAgendaClient } = await supabase
+          .from("agenda_pro_clients")
           .select("id")
           .eq("law_firm_id", lawFirmId)
           .or(`phone.ilike.%${normalizedPhone}%,phone.ilike.%${normalizedPhone.slice(-9)}%`)
           .maybeSingle();
 
-        if (existingClient) {
-          agendaClientId = existingClient.id;
+        if (existingAgendaClient) {
+          agendaProClientId = existingAgendaClient.id;
+          // Update client info
           await supabase
-            .from("clients")
+            .from("agenda_pro_clients")
             .update({
-              is_agenda_client: true,
               name: client_name,
               email: client_email || undefined,
               updated_at: new Date().toISOString()
             })
-            .eq("id", existingClient.id);
-          console.log(`[book_appointment] Updated existing client ${existingClient.id} as agenda client`);
+            .eq("id", existingAgendaClient.id);
+          console.log(`[book_appointment] Updated existing Agenda Pro client ${existingAgendaClient.id}`);
         } else {
+          // Create new Agenda Pro client
           const { data: newClient, error: clientError } = await supabase
-            .from("clients")
+            .from("agenda_pro_clients")
             .insert({
               law_firm_id: lawFirmId,
               name: client_name,
               phone: client_phone,
               email: client_email || null,
-              is_agenda_client: true,
-              lgpd_consent: true,
-              lgpd_consent_date: new Date().toISOString()
+              notes: notes || null,
+              origin: "ai_chat"
             })
             .select("id")
             .single();
 
           if (!clientError && newClient) {
-            agendaClientId = newClient.id;
-            console.log(`[book_appointment] Created new agenda client ${newClient.id}`);
+            agendaProClientId = newClient.id;
+            console.log(`[book_appointment] Created new Agenda Pro client ${newClient.id}`);
           } else {
-            console.error("[book_appointment] Failed to create client:", clientError);
+            console.error("[book_appointment] Failed to create Agenda Pro client:", clientError);
           }
         }
 
-        // Create appointment
+        // Generate confirmation token
+        const confirmationToken = crypto.randomUUID();
+
+        // Create Agenda Pro appointment
         const { data: appointment, error: createError } = await supabase
-          .from("appointments")
+          .from("agenda_pro_appointments")
           .insert({
             law_firm_id: lawFirmId,
             service_id,
+            professional_id: selectedProfessionalId,
             start_time: startTime.toISOString(),
             end_time: endTime.toISOString(),
-            client_id: agendaClientId,
+            duration_minutes: service.duration_minutes,
+            client_id: agendaProClientId,
             client_name,
             client_phone,
             client_email: client_email || null,
             notes: notes || null,
-            conversation_id: conversationId,
+            price: service.price,
             status: "scheduled",
-            created_by: "ai"
+            source: "ai_chat",
+            confirmation_token: confirmationToken
           })
-          .select()
+          .select("id")
           .single();
 
         if (createError) {
-          console.error("[Scheduling] Error creating appointment:", createError);
+          console.error("[Scheduling] Error creating Agenda Pro appointment:", createError);
           return JSON.stringify({ success: false, error: "Erro ao criar agendamento" });
         }
 
-        // Try to create Google Calendar event
+        // Send confirmation notification via Agenda Pro notification system
         try {
-          const calendarResponse = await fetch(`${supabaseUrl}/functions/v1/google-calendar-actions`, {
+          await fetch(`${supabaseUrl}/functions/v1/agenda-pro-notification`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${supabaseKey}`,
             },
             body: JSON.stringify({
-              action: "create_event",
-              law_firm_id: lawFirmId,
-              conversation_id: conversationId,
-              client_id: clientId,
-              event_data: {
-                title: `${service.name} - ${client_name}`,
-                description: [
-                  `Cliente: ${client_name}`,
-                  `Telefone: ${client_phone}`,
-                  client_email && `E-mail: ${client_email}`,
-                  notes && `Obs: ${notes}`
-                ].filter(Boolean).join("\n"),
-                start_time: startTime.toISOString(),
-                end_time: endTime.toISOString(),
-                duration_minutes: service.duration_minutes
-              }
+              appointment_id: appointment.id,
+              type: "confirmation"
             }),
           });
-
-          const calendarResult = await calendarResponse.json();
-          if (calendarResult.success && calendarResult.event?.id) {
-            await supabase
-              .from("appointments")
-              .update({ google_event_id: calendarResult.event.id })
-              .eq("id", appointment.id);
-          }
         } catch (e) {
-          console.error("[Scheduling] Failed to create Google Calendar event:", e);
+          console.error("[Scheduling] Failed to send confirmation notification:", e);
         }
 
-        // Get company name for the message
+        // Get company name and professional name for the message
         const { data: lawFirmData } = await supabase
           .from("law_firms")
           .select("name")
           .eq("id", lawFirmId)
           .single();
         const companyName = lawFirmData?.name || "";
+
+        const { data: professionalData } = await supabase
+          .from("agenda_pro_professionals")
+          .select("name")
+          .eq("id", selectedProfessionalId)
+          .single();
+        const professionalName = professionalData?.name || "";
 
         // Format date and time nicely
         const dateObj = new Date(`${date}T${time}:00.000-03:00`);
@@ -1531,12 +1624,15 @@ async function executeSchedulingTool(
           timeZone: "America/Sao_Paulo"
         });
 
+        const priceText = service.price ? `\n💰 *Valor:* R$ ${service.price.toFixed(2)}` : "";
+
         return JSON.stringify({
           success: true,
-          message: `Olá ${client_name}!\n\nSeu agendamento foi confirmado! ✅\n\n📅 *Data:* ${formattedDate}\n⏰ *Horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nCaso tenha dúvidas, entre em contato.\n\nAguardamos você! 😊`,
+          message: `Olá ${client_name}!\n\nSeu agendamento foi confirmado! ✅\n\n📅 *Data:* ${formattedDate}\n⏰ *Horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${professionalName ? `\n👤 *Profissional:* ${professionalName}` : ""}${priceText}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nVocê receberá uma mensagem para confirmar sua presença.\n\nAguardamos você! 😊`,
           appointment: {
             id: appointment.id,
             service: service.name,
+            professional: professionalName,
             date: formattedDate,
             time: formattedStartTime,
             end_time: formattedEndTime,
@@ -1551,9 +1647,14 @@ async function executeSchedulingTool(
         
         console.log(`[Scheduling] list_client_appointments - clientId: ${clientId}, conversationId: ${conversationId}, client_phone arg: ${client_phone}`);
         
+        // Query Agenda Pro appointments
         let query = supabase
-          .from("appointments")
-          .select("id, start_time, end_time, status, client_name, client_phone, client_id, conversation_id, service:services(name, duration_minutes)")
+          .from("agenda_pro_appointments")
+          .select(`
+            id, start_time, end_time, status, client_name, client_phone, client_id,
+            service:agenda_pro_services(name, duration_minutes),
+            professional:agenda_pro_professionals(name)
+          `)
           .eq("law_firm_id", lawFirmId)
           .order("start_time", { ascending: true });
 
@@ -1570,38 +1671,26 @@ async function executeSchedulingTool(
         const { data: allAppointments, error } = await query;
 
         if (error) {
-          console.error("[Scheduling] Error listing appointments:", error);
+          console.error("[Scheduling] Error listing Agenda Pro appointments:", error);
           return JSON.stringify({ success: false, error: "Erro ao buscar agendamentos" });
         }
 
         let filteredAppointments = allAppointments || [];
         
-        if (clientId) {
-          const byClientId = filteredAppointments.filter((apt: any) => apt.client_id === clientId);
-          if (byClientId.length > 0) {
-            filteredAppointments = byClientId;
-          }
-        }
-        
-        if (filteredAppointments.length === 0 || !clientId) {
-          const byConversation = (allAppointments || []).filter((apt: any) => apt.conversation_id === conversationId);
-          if (byConversation.length > 0) {
-            filteredAppointments = byConversation;
-          }
-        }
-        
-        if (client_phone && filteredAppointments.length === 0) {
+        // Try to filter by phone (primary method for AI chat)
+        if (client_phone) {
           const normalizedPhone = client_phone.replace(/\D/g, '');
-          const byPhone = (allAppointments || []).filter((apt: any) => {
+          const byPhone = filteredAppointments.filter((apt: any) => {
             const aptPhone = apt.client_phone?.replace(/\D/g, '') || '';
-            return aptPhone.includes(normalizedPhone) || normalizedPhone.includes(aptPhone);
+            return aptPhone.includes(normalizedPhone) || normalizedPhone.includes(aptPhone) ||
+                   aptPhone.slice(-9) === normalizedPhone.slice(-9);
           });
           if (byPhone.length > 0) {
             filteredAppointments = byPhone;
           }
         }
 
-        console.log(`[Scheduling] Found ${filteredAppointments.length} appointments for client`);
+        console.log(`[Scheduling] Found ${filteredAppointments.length} Agenda Pro appointments for client`);
 
         if (filteredAppointments.length === 0) {
           return JSON.stringify({
@@ -1614,6 +1703,7 @@ async function executeSchedulingTool(
         const formattedAppointments = filteredAppointments.map((apt: any) => ({
           id: apt.id,
           service: apt.service?.name || "Serviço",
+          professional: apt.professional?.name || "",
           date: new Date(apt.start_time).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
           time: new Date(apt.start_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
           end_time: new Date(apt.end_time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
@@ -1639,9 +1729,14 @@ async function executeSchedulingTool(
           });
         }
 
+        // Get existing Agenda Pro appointment
         const { data: existingApt, error: aptError } = await supabase
-          .from("appointments")
-          .select("*, service:services(id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes)")
+          .from("agenda_pro_appointments")
+          .select(`
+            *, 
+            service:agenda_pro_services(id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes),
+            professional:agenda_pro_professionals(name)
+          `)
           .eq("id", appointment_id)
           .eq("law_firm_id", lawFirmId)
           .single();
@@ -1663,10 +1758,11 @@ async function executeSchedulingTool(
         
         console.log(`[reschedule_appointment] Rescheduling to ${new_time} Brazil time = ${newStartTime.toISOString()} UTC`);
 
+        // Check for conflicts with same professional
         const { data: conflicts } = await supabase
-          .from("appointments")
+          .from("agenda_pro_appointments")
           .select("id")
-          .eq("law_firm_id", lawFirmId)
+          .eq("professional_id", existingApt.professional_id)
           .neq("id", appointment_id)
           .neq("status", "cancelled")
           .lt("start_time", newEndTime.toISOString())
@@ -1679,8 +1775,9 @@ async function executeSchedulingTool(
           });
         }
 
+        // Update the appointment
         const { error: updateError } = await supabase
-          .from("appointments")
+          .from("agenda_pro_appointments")
           .update({
             start_time: newStartTime.toISOString(),
             end_time: newEndTime.toISOString(),
@@ -1698,9 +1795,10 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Erro ao reagendar" });
         }
 
+        // Send reschedule notification
         if (existingApt.client_phone) {
           try {
-            await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
+            await fetch(`${supabaseUrl}/functions/v1/agenda-pro-notification`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1708,7 +1806,7 @@ async function executeSchedulingTool(
               },
               body: JSON.stringify({
                 appointment_id,
-                type: "updated"
+                type: "rescheduled"
               }),
             });
           } catch (e) {
@@ -1746,7 +1844,7 @@ async function executeSchedulingTool(
 
         return JSON.stringify({
           success: true,
-          message: `Seu agendamento foi reagendado com sucesso! 📅\n\n📅 *Nova data:* ${formattedDate}\n⏰ *Novo horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nAguardamos você! 😊`,
+          message: `Seu agendamento foi reagendado com sucesso! 📅\n\n📅 *Nova data:* ${formattedDate}\n⏰ *Novo horário:* ${formattedStartTime} às ${formattedEndTime}\n📋 *Serviço:* ${service.name}${existingApt.professional?.name ? `\n👤 *Profissional:* ${existingApt.professional.name}` : ""}${companyName ? `\n📍 *Local:* ${companyName}` : ""}\n\nAguardamos você! 😊`,
           appointment: {
             id: appointment_id,
             service: service.name,
@@ -1768,8 +1866,8 @@ async function executeSchedulingTool(
         }
 
         const { data: existingApt, error: aptError } = await supabase
-          .from("appointments")
-          .select("*, service:services(name)")
+          .from("agenda_pro_appointments")
+          .select("*, service:agenda_pro_services(name)")
           .eq("id", appointment_id)
           .eq("law_firm_id", lawFirmId)
           .single();
@@ -1783,11 +1881,12 @@ async function executeSchedulingTool(
         }
 
         const { error: updateError } = await supabase
-          .from("appointments")
+          .from("agenda_pro_appointments")
           .update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
-            cancel_reason: reason || "Cancelado pelo cliente via chat"
+            cancellation_reason: reason || "Cancelado pelo cliente via chat",
+            cancelled_by: "client"
           })
           .eq("id", appointment_id);
 
@@ -1796,9 +1895,17 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Erro ao cancelar" });
         }
 
+        // Cancel associated scheduled messages
+        await supabase
+          .from("agenda_pro_scheduled_messages")
+          .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+          .eq("appointment_id", appointment_id)
+          .eq("status", "pending");
+
+        // Send cancellation notification
         if (existingApt.client_phone) {
           try {
-            await fetch(`${supabaseUrl}/functions/v1/send-appointment-notification`, {
+            await fetch(`${supabaseUrl}/functions/v1/agenda-pro-notification`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -1835,8 +1942,8 @@ async function executeSchedulingTool(
         }
 
         const { data: existingApt, error: aptError } = await supabase
-          .from("appointments")
-          .select("*, service:services(name)")
+          .from("agenda_pro_appointments")
+          .select("*, service:agenda_pro_services(name), professional:agenda_pro_professionals(name)")
           .eq("id", appointment_id)
           .eq("law_firm_id", lawFirmId)
           .single();
@@ -1854,10 +1961,11 @@ async function executeSchedulingTool(
         }
 
         const { error: updateError } = await supabase
-          .from("appointments")
+          .from("agenda_pro_appointments")
           .update({
             status: "confirmed",
-            confirmed_at: new Date().toISOString()
+            confirmed_at: new Date().toISOString(),
+            confirmed_via: "ai_chat"
           })
           .eq("id", appointment_id);
 
@@ -1880,7 +1988,7 @@ async function executeSchedulingTool(
 
         return JSON.stringify({
           success: true,
-          message: `Agendamento confirmado com sucesso! ✅\n\nEsperamos você no dia ${formattedDate} às ${formattedTime}.\n\nServiço: ${existingApt.service?.name}`,
+          message: `Agendamento confirmado com sucesso! ✅\n\nEsperamos você no dia ${formattedDate} às ${formattedTime}.\n\nServiço: ${existingApt.service?.name}${existingApt.professional?.name ? `\nProfissional: ${existingApt.professional.name}` : ""}`,
           confirmed_appointment: {
             id: appointment_id,
             service: existingApt.service?.name,
@@ -2963,10 +3071,22 @@ serve(async (req) => {
     // Get notify_on_transfer setting (default false)
     const notifyOnTransfer = (automation as any).notify_on_transfer ?? false;
 
-    // Check if this agent has scheduling capabilities enabled
+    // Check if this agent has scheduling capabilities enabled AND Agenda Pro is active
     const triggerType = (automation as any).trigger_type;
     const schedulingEnabled = (automation as any).scheduling_enabled === true;
-    const isSchedulingAgent = triggerType === "scheduling" || schedulingEnabled;
+    
+    // Also check if Agenda Pro is enabled for this law firm
+    let agendaProEnabled = false;
+    if (schedulingEnabled || triggerType === "scheduling") {
+      const { data: agendaSettings } = await supabase
+        .from("agenda_pro_settings")
+        .select("is_enabled")
+        .eq("law_firm_id", agentLawFirmId)
+        .maybeSingle();
+      agendaProEnabled = agendaSettings?.is_enabled === true;
+    }
+    
+    const isSchedulingAgent = (triggerType === "scheduling" || schedulingEnabled) && agendaProEnabled;
 
     // Extract AI role from trigger_config for audit purposes
     const triggerConfig = (automation as any).trigger_config as Record<string, unknown> | null;
