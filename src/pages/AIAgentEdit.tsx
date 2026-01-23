@@ -48,6 +48,7 @@ import {
   AtSign,
   BookOpen,
   Volume2,
+  CalendarDays,
   Play,
   Square,
   AlertTriangle,
@@ -97,6 +98,7 @@ export default function AIAgentEdit() {
   const [editedTriggerType, setEditedTriggerType] = useState("new_message");
   const [isActive, setIsActive] = useState(true);
   const [notifyOnTransfer, setNotifyOnTransfer] = useState(false);
+  const [schedulingEnabled, setSchedulingEnabled] = useState(false);
   // Response delay
   const [editedResponseDelay, setEditedResponseDelay] = useState(2);
   // Voice settings
@@ -125,6 +127,7 @@ export default function AIAgentEdit() {
       editedTriggerType !== automation.trigger_type ||
       isActive !== automation.is_active ||
       notifyOnTransfer !== (automation.notify_on_transfer || false) ||
+      schedulingEnabled !== (automation.scheduling_enabled || false) ||
       editedResponseDelay !== currentResponseDelay ||
       voiceEnabled !== Boolean(currentTriggerConfig?.voice_enabled) ||
       voiceId !== ((currentTriggerConfig?.voice_id as string) || DEFAULT_VOICE_ID));
@@ -142,6 +145,7 @@ export default function AIAgentEdit() {
         setEditedTriggerType(found.trigger_type);
         setIsActive(found.is_active);
         setNotifyOnTransfer(found.notify_on_transfer || false);
+        setSchedulingEnabled(found.scheduling_enabled || false);
         setLastSaved(new Date(found.updated_at));
 
         // Load voice and delay settings from trigger_config
@@ -287,6 +291,7 @@ export default function AIAgentEdit() {
         is_active: isActive,
         trigger_config: updatedTriggerConfig,
         notify_on_transfer: notifyOnTransfer,
+        scheduling_enabled: schedulingEnabled,
       } as any);
 
       // Sync prompt with N8N
@@ -327,6 +332,7 @@ export default function AIAgentEdit() {
         ai_temperature: editedTemperature,
         is_active: isActive,
         notify_on_transfer: notifyOnTransfer,
+        scheduling_enabled: schedulingEnabled,
         updated_at: new Date().toISOString(),
         last_prompt: automation.ai_prompt, // Previous prompt is now last_prompt
         version: (automation.version || 1) + 1, // Increment version
@@ -752,6 +758,23 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
               </div>
               <p className="text-xs text-muted-foreground">
                 Se ativado, a IA envia uma mensagem ao cliente quando transferir para outro departamento ou humano.
+              </p>
+            </div>
+
+            {/* Scheduling Enabled Toggle */}
+            <div className="space-y-2 mb-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4" />
+                  Agendamento habilitado
+                </Label>
+                <Switch
+                  checked={schedulingEnabled}
+                  onCheckedChange={setSchedulingEnabled}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Permite ao agente agendar, reagendar e cancelar atendimentos via Agenda Pro.
               </p>
             </div>
 

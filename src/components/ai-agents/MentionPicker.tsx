@@ -166,18 +166,20 @@ export function MentionPicker({
       items: toolItems,
     });
 
-    // Google Calendar
-    const calendarItems: MentionItem[] = [
-      { key: "@Criar evento", label: "Criar evento", description: "Criar evento no calendário" },
-      { key: "@Listar eventos", label: "Listar eventos", description: "Listar próximos eventos" },
-      { key: "@Verificar disponibilidade", label: "Verificar disponibilidade", description: "Verificar disponibilidade de horário" },
-      { key: "@Cancelar evento", label: "Cancelar evento", description: "Cancelar evento existente" },
+    // Agenda Pro (Agendamento)
+    const agendaProItems: MentionItem[] = [
+      { key: "@Listar serviços", label: "Listar serviços", description: "Listar serviços disponíveis" },
+      { key: "@Verificar disponibilidade", label: "Verificar disponibilidade", description: "Verificar horários disponíveis" },
+      { key: "@Agendar atendimento", label: "Agendar atendimento", description: "Criar novo agendamento" },
+      { key: "@Reagendar atendimento", label: "Reagendar atendimento", description: "Remarcar agendamento existente" },
+      { key: "@Cancelar agendamento", label: "Cancelar agendamento", description: "Cancelar agendamento" },
+      { key: "@Confirmar agendamento", label: "Confirmar agendamento", description: "Confirmar presença no agendamento" },
     ];
     cats.push({
-      id: "google_calendar",
-      label: "Google Calendar",
+      id: "agenda_pro",
+      label: "Agenda Pro",
       icon: Calendar,
-      items: calendarItems,
+      items: agendaProItems,
     });
 
     // Templates/Mensagens - always show
