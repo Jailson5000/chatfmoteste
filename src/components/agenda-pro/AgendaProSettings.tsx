@@ -301,23 +301,30 @@ export function AgendaProSettings() {
             </div>
           </div>
 
-          {/* Reminder 1 - Fixed 24h */}
+          {/* Reminder 1 - Configurable hours */}
           <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" />
-              <Label className="font-medium">1º Lembrete - 24 horas antes</Label>
+              <Label className="font-medium">1º Lembrete</Label>
             </div>
             <p className="text-xs text-muted-foreground">
-              Lembrete fixo enviado 24 horas antes do agendamento
+              Enviar lembrete antes do agendamento (1 a 72 horas)
             </p>
-            <Input
-              type="number"
-              min={1}
-              value={formData.reminder_hours_before}
-              onChange={(e) => setFormData({ ...formData, reminder_hours_before: parseInt(e.target.value) || 24 })}
-              className="w-24"
-              disabled
-            />
+            <div className="flex items-center gap-3">
+              <Input
+                type="number"
+                min={1}
+                max={72}
+                value={formData.reminder_hours_before}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value) || 24;
+                  const clampedValue = Math.min(72, Math.max(1, value));
+                  setFormData({ ...formData, reminder_hours_before: clampedValue });
+                }}
+                className="w-24"
+              />
+              <span className="text-sm text-muted-foreground">horas antes</span>
+            </div>
           </div>
 
           {/* Reminder 2 - Configurable */}
