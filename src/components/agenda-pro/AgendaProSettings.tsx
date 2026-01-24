@@ -343,14 +343,11 @@ export function AgendaProSettings() {
               <div className="flex items-center gap-3">
                 <Input
                   type="number"
-                  min={5}
-                  max={formData.reminder_2_unit === "hours" ? 24 : 120}
+                  min={1}
                   value={formData.reminder_2_value}
                   onChange={(e) => {
                     const value = parseInt(e.target.value);
-                    const minValue = 5;
-                    const maxValue = formData.reminder_2_unit === "hours" ? 24 : 120;
-                    if (!isNaN(value) && value >= minValue && value <= maxValue) {
+                    if (!isNaN(value) && value >= 1) {
                       setFormData({ ...formData, reminder_2_value: value });
                     }
                   }}
