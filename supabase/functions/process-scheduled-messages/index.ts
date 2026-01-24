@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const MAX_RETRY_COUNT = 3;
+const RETRY_DELAY_MINUTES = 5;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -22,7 +25,7 @@ serve(async (req) => {
     const now = new Date();
     const nowIso = now.toISOString();
 
-    // Get all pending scheduled messages that are due
+    // Get pending messages that are due OR failed messages that can be retried
     const { data: pendingMessages, error: fetchError } = await supabase
       .from("agenda_pro_scheduled_messages")
       .select(`
@@ -35,6 +38,8 @@ serve(async (req) => {
         channel,
         scheduled_at,
         status,
+        retry_count,
+        last_attempt_at,
         agenda_pro_appointments(
           id,
           client_name,
@@ -50,7 +55,7 @@ serve(async (req) => {
         ),
         agenda_pro_clients(name, phone, email)
       `)
-      .eq("status", "pending")
+      .or(`status.eq.pending,and(status.eq.failed,retry_count.lt.${MAX_RETRY_COUNT})`)
       .lte("scheduled_at", nowIso)
       .order("scheduled_at", { ascending: true })
       .limit(50);
@@ -60,23 +65,38 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    console.log(`[process-scheduled-messages] Found ${pendingMessages?.length || 0} pending messages to process`);
+    // Filter out failed messages that haven't waited long enough for retry
+    const messagesToProcess = (pendingMessages || []).filter(msg => {
+      if (msg.status === "failed" && msg.last_attempt_at) {
+        const lastAttempt = new Date(msg.last_attempt_at);
+        const retryAfter = new Date(lastAttempt.getTime() + RETRY_DELAY_MINUTES * 60 * 1000);
+        if (now < retryAfter) {
+          return false; // Not ready for retry yet
+        }
+      }
+      return true;
+    });
+
+    console.log(`[process-scheduled-messages] Found ${pendingMessages?.length || 0} messages, ${messagesToProcess.length} ready to process`);
 
     const results = {
       processed: 0,
       success: 0,
       failed: 0,
       skipped: 0,
+      retried: 0,
       errors: [] as string[],
     };
 
-    for (const message of pendingMessages || []) {
+    for (const message of messagesToProcess) {
       results.processed++;
+      const isRetry = message.status === "failed";
+      if (isRetry) results.retried++;
 
       try {
         const appointment = message.agenda_pro_appointments as any;
         
-        // Skip if appointment was cancelled
+        // Skip if appointment was cancelled or completed
         if (appointment?.status === "cancelled" || appointment?.status === "completed") {
           console.log(`[process-scheduled-messages] Skipping ${message.id} - appointment is ${appointment?.status}`);
           await supabase
@@ -99,7 +119,10 @@ serve(async (req) => {
           console.log(`[process-scheduled-messages] Skipping ${message.id} - no contact info`);
           await supabase
             .from("agenda_pro_scheduled_messages")
-            .update({ status: "skipped" })
+            .update({ 
+              status: "skipped",
+              last_error: "Sem informações de contato (telefone ou email)"
+            })
             .eq("id", message.id);
           results.skipped++;
           continue;
@@ -108,6 +131,8 @@ serve(async (req) => {
         // If we have an appointment, call the notification function
         if (message.appointment_id && appointment) {
           const notificationType = message.message_type === "pre_message" ? "pre_message" : "reminder";
+          
+          console.log(`[process-scheduled-messages] Sending ${notificationType} for appointment ${message.appointment_id} (attempt ${(message.retry_count || 0) + 1})`);
           
           const response = await fetch(`${supabaseUrl}/functions/v1/agenda-pro-notification`, {
             method: "POST",
@@ -124,11 +149,16 @@ serve(async (req) => {
           if (response.ok) {
             await supabase
               .from("agenda_pro_scheduled_messages")
-              .update({ status: "sent", sent_at: nowIso })
+              .update({ 
+                status: "sent", 
+                sent_at: nowIso,
+                last_attempt_at: nowIso,
+                last_error: null
+              })
               .eq("id", message.id);
             
             results.success++;
-            console.log(`[process-scheduled-messages] Sent ${message.message_type} for ${message.id}`);
+            console.log(`[process-scheduled-messages] ✅ Sent ${message.message_type} for ${message.id}`);
           } else {
             const errorData = await response.text();
             throw new Error(`Notification failed: ${errorData}`);
@@ -137,13 +167,17 @@ serve(async (req) => {
           // Custom message without appointment - send directly via WhatsApp
           if (message.channel === "whatsapp" && clientPhone) {
             // Get WhatsApp instance for this law firm
-            const { data: instance } = await supabase
+            const { data: instance, error: instanceError } = await supabase
               .from("whatsapp_instances")
               .select("id, instance_name, connection_status")
               .eq("law_firm_id", message.law_firm_id)
               .eq("connection_status", "open")
               .limit(1)
-              .single();
+              .maybeSingle();
+
+            if (instanceError) {
+              throw new Error(`Database error: ${instanceError.message}`);
+            }
 
             if (instance) {
               const evolutionApiUrl = Deno.env.get("EVOLUTION_API_URL");
@@ -152,6 +186,8 @@ serve(async (req) => {
               if (evolutionApiUrl && evolutionApiKey) {
                 const formattedPhone = clientPhone.replace(/\D/g, "");
                 const phoneWithCountry = formattedPhone.startsWith("55") ? formattedPhone : `55${formattedPhone}`;
+
+                console.log(`[process-scheduled-messages] Sending custom message to ${phoneWithCountry} (attempt ${(message.retry_count || 0) + 1})`);
 
                 const whatsappResponse = await fetch(
                   `${evolutionApiUrl}/message/sendText/${instance.instance_name}`,
@@ -171,40 +207,62 @@ serve(async (req) => {
                 if (whatsappResponse.ok) {
                   await supabase
                     .from("agenda_pro_scheduled_messages")
-                    .update({ status: "sent", sent_at: nowIso })
+                    .update({ 
+                      status: "sent", 
+                      sent_at: nowIso,
+                      last_attempt_at: nowIso,
+                      last_error: null
+                    })
                     .eq("id", message.id);
                   
                   results.success++;
-                  console.log(`[process-scheduled-messages] Sent custom message ${message.id} to ${phoneWithCountry}`);
+                  console.log(`[process-scheduled-messages] ✅ Sent custom message ${message.id} to ${phoneWithCountry}`);
                 } else {
                   const errorText = await whatsappResponse.text();
                   throw new Error(`WhatsApp API error: ${errorText}`);
                 }
               } else {
-                throw new Error("Evolution API not configured");
+                throw new Error("Evolution API not configured (missing EVOLUTION_API_URL or EVOLUTION_API_KEY)");
               }
             } else {
-              throw new Error("No active WhatsApp instance found");
+              throw new Error("No active WhatsApp instance found for this company");
             }
+          } else if (message.channel === "email" && clientEmail) {
+            // Email channel - would be handled by a different service
+            throw new Error("Email channel not implemented yet");
           } else {
-            throw new Error(`Unsupported channel: ${message.channel}`);
+            throw new Error(`Unsupported channel "${message.channel}" or missing contact (phone: ${!!clientPhone}, email: ${!!clientEmail})`);
           }
         }
       } catch (err) {
         results.failed++;
         const errorMsg = err instanceof Error ? err.message : "Unknown error";
         results.errors.push(`${message.id}: ${errorMsg}`);
-        console.error(`[process-scheduled-messages] Error processing ${message.id}:`, err);
+        console.error(`[process-scheduled-messages] ❌ Error processing ${message.id}:`, errorMsg);
 
-        // Update status to failed
+        const newRetryCount = (message.retry_count || 0) + 1;
+        const isFinalAttempt = newRetryCount >= MAX_RETRY_COUNT;
+
+        // Update with error info and retry count
         await supabase
           .from("agenda_pro_scheduled_messages")
-          .update({ status: "failed" })
+          .update({ 
+            status: isFinalAttempt ? "failed" : "failed",
+            retry_count: newRetryCount,
+            last_error: errorMsg.substring(0, 500), // Limit error message length
+            last_attempt_at: nowIso
+          })
           .eq("id", message.id);
+
+        if (isFinalAttempt) {
+          console.log(`[process-scheduled-messages] ⚠️ Message ${message.id} permanently failed after ${MAX_RETRY_COUNT} attempts`);
+        } else {
+          console.log(`[process-scheduled-messages] 🔄 Message ${message.id} will retry (attempt ${newRetryCount}/${MAX_RETRY_COUNT})`);
+        }
       }
     }
 
-    console.log("[process-scheduled-messages] Processing complete:", results);
+    console.log("[process-scheduled-messages] Processing complete:", JSON.stringify(results));
 
     return new Response(JSON.stringify(results), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

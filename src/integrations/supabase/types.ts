@@ -661,9 +661,12 @@ export type Database = {
           client_id: string | null
           created_at: string
           id: string
+          last_attempt_at: string | null
+          last_error: string | null
           law_firm_id: string
           message_content: string
           message_type: string
+          retry_count: number | null
           scheduled_at: string
           sent_at: string | null
           status: string
@@ -676,9 +679,12 @@ export type Database = {
           client_id?: string | null
           created_at?: string
           id?: string
+          last_attempt_at?: string | null
+          last_error?: string | null
           law_firm_id: string
           message_content: string
           message_type?: string
+          retry_count?: number | null
           scheduled_at: string
           sent_at?: string | null
           status?: string
@@ -691,9 +697,12 @@ export type Database = {
           client_id?: string | null
           created_at?: string
           id?: string
+          last_attempt_at?: string | null
+          last_error?: string | null
           law_firm_id?: string
           message_content?: string
           message_type?: string
+          retry_count?: number | null
           scheduled_at?: string
           sent_at?: string | null
           status?: string
