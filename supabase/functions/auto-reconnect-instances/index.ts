@@ -402,14 +402,30 @@ serve(async (req) => {
           })
           .eq("id", instance.id);
       } else if (result.success) {
+        // Check if the connection returned "already connected" state
+        const isFullyConnected = result.message.includes("reconnected automatically") || 
+                                 result.message.includes("already connected");
+        
         // Update instance status based on result
         await supabaseClient
           .from("whatsapp_instances")
           .update({
-            status: "connecting", // Will be updated by webhook when fully connected
+            status: isFullyConnected ? "connected" : "connecting",
+            // If fully connected, reset all reconnection-related fields
+            ...(isFullyConnected && {
+              disconnected_since: null,
+              reconnect_attempts_count: 0,
+              manual_disconnect: false,
+              awaiting_qr: false,
+              alert_sent_for_current_disconnect: false,
+            }),
             updated_at: now.toISOString(),
           })
           .eq("id", instance.id);
+
+        if (isFullyConnected) {
+          console.log(`[Auto-Reconnect] Instance ${instance.instance_name} marked as connected in database`);
+        }
       }
 
       // Small delay between instances to avoid overwhelming the API

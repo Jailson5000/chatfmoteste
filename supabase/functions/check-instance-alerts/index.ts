@@ -9,6 +9,8 @@ const corsHeaders = {
 
 // Configuration - alert after 5 minutes of disconnection
 const ALERT_THRESHOLD_MINUTES = 5;
+// Threshold for "connecting" status - should be longer as it might be in progress
+const CONNECTING_ALERT_THRESHOLD_MINUTES = 30;
 // NO COOLDOWN - We only send ONE alert per disconnection cycle
 // The alert_sent_for_current_disconnect flag is reset when instance reconnects
 
@@ -18,12 +20,13 @@ interface DisconnectedInstance {
   display_name: string | null;
   status: string;
   phone_number: string | null;
-  disconnected_since: string;
+  disconnected_since: string | null;
   last_alert_sent_at: string | null;
   alert_sent_for_current_disconnect: boolean | null;
   law_firm_id: string;
   manual_disconnect: boolean | null;
   awaiting_qr: boolean | null;
+  updated_at: string;
 }
 
 interface CompanyInfo {
@@ -65,27 +68,40 @@ serve(async (req) => {
 
     const resend = new Resend(resendApiKey);
     const thresholdTime = new Date(Date.now() - ALERT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    const connectingThresholdTime = new Date(Date.now() - CONNECTING_ALERT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
 
     console.log("[Check Instance Alerts] Checking for disconnected instances...");
-    console.log(`[Check Instance Alerts] Threshold: ${ALERT_THRESHOLD_MINUTES} minutes`);
+    console.log(`[Check Instance Alerts] Threshold: ${ALERT_THRESHOLD_MINUTES} min (disconnected), ${CONNECTING_ALERT_THRESHOLD_MINUTES} min (connecting)`);
 
     // Find instances that:
-    // 1. Are disconnected or error status (NOT connecting or awaiting_qr)
-    // 2. Have been in that state for more than ALERT_THRESHOLD_MINUTES
+    // 1. Are disconnected/error status for more than ALERT_THRESHOLD_MINUTES
+    // 2. OR are stuck in "connecting" status for more than CONNECTING_ALERT_THRESHOLD_MINUTES
     // 3. Were NOT manually disconnected
     // 4. Are NOT awaiting QR scan
     // 5. Have NOT already received an alert for THIS disconnection cycle
-    const { data: rawInstances, error: fetchError } = await supabaseClient
+    
+    // First, get disconnected/error instances
+    const { data: disconnectedInstances, error: fetchError1 } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr")
-      .in("status", ["disconnected", "error"]) // Only truly disconnected, not "connecting" or "awaiting_qr"
+      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr, updated_at")
+      .in("status", ["disconnected", "error"])
       .not("disconnected_since", "is", null)
       .lt("disconnected_since", thresholdTime);
 
-    if (fetchError) {
-      console.error("[Check Instance Alerts] Error fetching instances:", fetchError);
-      throw fetchError;
+    // Also get instances stuck in "connecting" status for too long
+    const { data: connectingInstances, error: fetchError2 } = await supabaseClient
+      .from("whatsapp_instances")
+      .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr, updated_at")
+      .eq("status", "connecting")
+      .lt("updated_at", connectingThresholdTime);
+
+    if (fetchError1 || fetchError2) {
+      console.error("[Check Instance Alerts] Error fetching instances:", fetchError1 || fetchError2);
+      throw fetchError1 || fetchError2;
     }
+
+    // Combine and deduplicate
+    const rawInstances = [...(disconnectedInstances || []), ...(connectingInstances || [])];
 
     // Filter out manually disconnected, awaiting QR, or already alerted instances
     const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
@@ -217,7 +233,8 @@ serve(async (req) => {
 
       // Calculate duration for each instance
       const instancesWithDuration = companyInstances.map((instance: DisconnectedInstance) => {
-        const disconnectedAt = new Date(instance.disconnected_since);
+        // Use disconnected_since if available, otherwise use updated_at (for "connecting" status)
+        const disconnectedAt = new Date(instance.disconnected_since || instance.updated_at);
         const durationMs = Date.now() - disconnectedAt.getTime();
         const durationMinutes = Math.floor(durationMs / 60000);
         const durationHours = Math.floor(durationMinutes / 60);
@@ -235,19 +252,40 @@ serve(async (req) => {
       // Sort by duration (longest first)
       instancesWithDuration.sort((a, b) => b.durationMinutes - a.durationMinutes);
 
+      // Helper to get status display
+      const getStatusDisplay = (status: string) => {
+        switch (status) {
+          case 'error': return { text: 'Erro', bg: '#fee2e2', color: '#dc2626' };
+          case 'connecting': return { text: 'Conectando', bg: '#dbeafe', color: '#2563eb' };
+          default: return { text: 'Desconectada', bg: '#fef3c7', color: '#d97706' };
+        }
+      };
+
       // Build email HTML
-      const instanceList = instancesWithDuration.map((instance) => `
-        <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.display_name || instance.instance_name}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.phone_number || "-"}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #eee;">
-            <span style="background: ${instance.status === 'error' ? '#fee2e2' : '#fef3c7'}; color: ${instance.status === 'error' ? '#dc2626' : '#d97706'}; padding: 4px 8px; border-radius: 4px; font-weight: 500;">
-              ${instance.status === 'error' ? 'Erro' : 'Desconectada'}
-            </span>
-          </td>
-          <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: 500; color: #dc2626;">${instance.duration}</td>
-        </tr>
-      `).join("");
+      const instanceList = instancesWithDuration.map((instance) => {
+        const statusDisplay = getStatusDisplay(instance.status);
+        return `
+          <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.display_name || instance.instance_name}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">${instance.phone_number || "-"}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+              <span style="background: ${statusDisplay.bg}; color: ${statusDisplay.color}; padding: 4px 8px; border-radius: 4px; font-weight: 500;">
+                ${statusDisplay.text}
+              </span>
+            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #eee; font-weight: 500; color: #dc2626;">${instance.duration}</td>
+          </tr>
+        `;
+      }).join("");
+
+      // Check if any instances are stuck in "connecting"
+      const hasConnectingIssue = instancesWithDuration.some(i => i.status === 'connecting');
+      const alertTitle = hasConnectingIssue 
+        ? '⚠️ Alerta: WhatsApp com Problema de Conexão'
+        : '⚠️ Alerta: WhatsApp Desconectado';
+      const alertDescription = hasConnectingIssue
+        ? `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está com problema' : 'algumas de suas conexões WhatsApp estão com problema'}`
+        : `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está desconectada' : 'algumas de suas conexões WhatsApp estão desconectadas'}`;
 
       const emailHtml = `
         <!DOCTYPE html>
@@ -260,7 +298,7 @@ serve(async (req) => {
           <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
             
             <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 24px;">
-              <h1 style="margin: 0; font-size: 22px;">⚠️ Alerta: WhatsApp Desconectado</h1>
+              <h1 style="margin: 0; font-size: 22px;">${alertTitle}</h1>
               <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 14px;">${companyName}</p>
             </div>
             
@@ -268,7 +306,7 @@ serve(async (req) => {
               <p style="margin: 0 0 16px 0;">Olá, ${adminName}!</p>
               
               <p style="margin: 0 0 20px 0;">
-                Detectamos que ${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está desconectada' : 'algumas de suas conexões WhatsApp estão desconectadas'} há mais de <strong>${ALERT_THRESHOLD_MINUTES} minutos</strong>:
+                Detectamos que ${alertDescription}:
               </p>
               
               <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
