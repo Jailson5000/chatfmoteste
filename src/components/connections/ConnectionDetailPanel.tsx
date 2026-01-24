@@ -536,16 +536,6 @@ export function ConnectionDetailPanel({
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <Server className="h-4 w-4 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="font-medium">Servidor</p>
-                      <p className="text-sm text-muted-foreground">
-                        {instance.api_url ? new URL(instance.api_url).hostname : "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
                     <Hash className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <div className="flex-1">
                       <p className="font-medium">ID da Instância</p>
