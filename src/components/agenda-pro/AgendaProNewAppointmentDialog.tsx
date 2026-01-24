@@ -120,7 +120,9 @@ export function AgendaProNewAppointmentDialog({
     setIsSubmitting(true);
     try {
       const [hours, minutes] = selectedTime.split(":").map(Number);
-      const startTime = setMinutes(setHours(selectedDate, hours), minutes);
+      // Create a clean date with exact time (no inherited seconds/milliseconds)
+      const baseDate = startOfDay(selectedDate);
+      const startTime = addMinutes(setHours(baseDate, hours), minutes);
       const duration = selectedService?.duration_minutes || 30;
       const endTime = addMinutes(startTime, duration);
 
