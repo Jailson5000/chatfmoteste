@@ -9,8 +9,8 @@ const corsHeaders = {
 
 // Configuration - alert after 5 minutes of disconnection
 const ALERT_THRESHOLD_MINUTES = 5;
-// Threshold for "connecting" status - should be longer as it might be in progress
-const CONNECTING_ALERT_THRESHOLD_MINUTES = 30;
+// Threshold for "connecting" status - alert if stuck connecting
+const CONNECTING_ALERT_THRESHOLD_MINUTES = 10;
 // NO COOLDOWN - We only send ONE alert per disconnection cycle
 // The alert_sent_for_current_disconnect flag is reset when instance reconnects
 
