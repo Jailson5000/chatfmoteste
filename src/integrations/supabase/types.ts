@@ -4932,6 +4932,57 @@ export type Database = {
           },
         ]
       }
+      tutorials: {
+        Row: {
+          category: string
+          context: string | null
+          created_at: string
+          description: string | null
+          duration: string | null
+          id: string
+          is_active: boolean
+          is_featured: boolean
+          position: number
+          prerequisites: string[] | null
+          thumbnail_url: string | null
+          title: string
+          updated_at: string
+          youtube_id: string
+        }
+        Insert: {
+          category?: string
+          context?: string | null
+          created_at?: string
+          description?: string | null
+          duration?: string | null
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean
+          position?: number
+          prerequisites?: string[] | null
+          thumbnail_url?: string | null
+          title: string
+          updated_at?: string
+          youtube_id: string
+        }
+        Update: {
+          category?: string
+          context?: string | null
+          created_at?: string
+          description?: string | null
+          duration?: string | null
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean
+          position?: number
+          prerequisites?: string[] | null
+          thumbnail_url?: string | null
+          title?: string
+          updated_at?: string
+          youtube_id?: string
+        }
+        Relationships: []
+      }
       usage_history_monthly: {
         Row: {
           ai_conversations: number | null

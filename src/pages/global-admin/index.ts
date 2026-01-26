@@ -15,3 +15,4 @@ export { default as GlobalAdminAlertHistory } from "./GlobalAdminAlertHistory";
 export { default as GlobalAdminTemplateBase } from "./GlobalAdminTemplateBase";
 export { default as GlobalAdminAgentTemplates } from "./GlobalAdminAgentTemplates";
 export { default as GlobalAdminTickets } from "./GlobalAdminTickets";
+export { default as GlobalAdminTutorials } from "./GlobalAdminTutorials";
