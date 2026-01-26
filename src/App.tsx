@@ -57,6 +57,7 @@ import {
   GlobalAdminTickets,
 } from "./pages/global-admin";
 import Support from "./pages/Support";
+import Tutorials from "./pages/Tutorials";
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
 const queryClient = new QueryClient();
@@ -241,6 +242,17 @@ const App = () => (
             }
           >
             <Route index element={<Support />} />
+          </Route>
+          
+          <Route
+            path="/tutoriais"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Tutorials />} />
           </Route>
           
           {/* Client Admin Routes - Protected by role (admin of law firm) */}
