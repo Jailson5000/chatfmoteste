@@ -260,11 +260,11 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
+    <div className="p-6 space-y-6 bg-background min-h-screen animate-fade-in">
       {/* Header */}
       <div>
-        <h1 className="font-display text-3xl font-bold">Configurações</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-2xl font-bold text-foreground">Configurações</h1>
+        <p className="text-sm text-muted-foreground">
           Gerencie seu escritório, equipe e preferências
         </p>
       </div>
