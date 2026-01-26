@@ -23,10 +23,11 @@ export function useAdminNotifications() {
     queryFn: async () => {
       if (!user) return [];
 
+      // Fetch notifications for this admin or broadcast notifications (admin_user_id is null)
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .or(`admin_user_id.eq.${user.id},user_id.is.null`)
+        .or(`admin_user_id.eq.${user.id},admin_user_id.is.null`)
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -34,6 +35,7 @@ export function useAdminNotifications() {
       return data as Notification[];
     },
     enabled: !!user,
+    refetchInterval: 30000, // Poll every 30 seconds for new notifications
   });
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
