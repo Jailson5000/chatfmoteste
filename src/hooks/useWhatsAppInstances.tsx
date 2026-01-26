@@ -52,8 +52,9 @@ export function useWhatsAppInstances() {
       if (!lawFirm?.id) return [];
 
       console.log("[useWhatsAppInstances] Fetching instances...");
+      // Use safe view that excludes api_key for security
       const { data, error } = await supabase
-        .from("whatsapp_instances")
+        .from("whatsapp_instances_safe")
         .select("*")
         .eq("law_firm_id", lawFirm.id)
         .order("created_at", { ascending: false });

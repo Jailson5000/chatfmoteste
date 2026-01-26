@@ -1646,6 +1646,13 @@ export type Database = {
             referencedRelation: "whatsapp_instances"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "appointments_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
+            referencedColumns: ["id"]
+          },
         ]
       }
       audit_logs: {
@@ -2143,6 +2150,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "clients_last_whatsapp_instance_id_fkey"
+            columns: ["last_whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "clients_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
@@ -2154,6 +2168,13 @@ export type Database = {
             columns: ["whatsapp_instance_id"]
             isOneToOne: false
             referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clients_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
             referencedColumns: ["id"]
           },
         ]
@@ -2491,6 +2512,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "conversations_last_whatsapp_instance_id_fkey"
+            columns: ["last_whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "conversations_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: false
@@ -2502,6 +2530,13 @@ export type Database = {
             columns: ["whatsapp_instance_id"]
             isOneToOne: false
             referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
             referencedColumns: ["id"]
           },
           {
@@ -3061,6 +3096,13 @@ export type Database = {
             columns: ["instance_id"]
             isOneToOne: false
             referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instance_status_history_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
             referencedColumns: ["id"]
           },
         ]
@@ -5420,6 +5462,120 @@ export type Database = {
             foreignKeyName: "google_calendar_integrations_law_firm_id_fkey"
             columns: ["law_firm_id"]
             isOneToOne: true
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_instances_safe: {
+        Row: {
+          alert_sent_for_current_disconnect: boolean | null
+          api_url: string | null
+          awaiting_qr: boolean | null
+          created_at: string | null
+          default_assigned_to: string | null
+          default_automation_id: string | null
+          default_department_id: string | null
+          default_status_id: string | null
+          disconnected_since: string | null
+          display_name: string | null
+          id: string | null
+          instance_id: string | null
+          instance_name: string | null
+          last_alert_sent_at: string | null
+          last_reconnect_attempt_at: string | null
+          last_webhook_at: string | null
+          last_webhook_event: string | null
+          law_firm_id: string | null
+          manual_disconnect: boolean | null
+          phone_number: string | null
+          reconnect_attempts_count: number | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          alert_sent_for_current_disconnect?: boolean | null
+          api_url?: string | null
+          awaiting_qr?: boolean | null
+          created_at?: string | null
+          default_assigned_to?: string | null
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_status_id?: string | null
+          disconnected_since?: string | null
+          display_name?: string | null
+          id?: string | null
+          instance_id?: string | null
+          instance_name?: string | null
+          last_alert_sent_at?: string | null
+          last_reconnect_attempt_at?: string | null
+          last_webhook_at?: string | null
+          last_webhook_event?: string | null
+          law_firm_id?: string | null
+          manual_disconnect?: boolean | null
+          phone_number?: string | null
+          reconnect_attempts_count?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          alert_sent_for_current_disconnect?: boolean | null
+          api_url?: string | null
+          awaiting_qr?: boolean | null
+          created_at?: string | null
+          default_assigned_to?: string | null
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_status_id?: string | null
+          disconnected_since?: string | null
+          display_name?: string | null
+          id?: string | null
+          instance_id?: string | null
+          instance_name?: string | null
+          last_alert_sent_at?: string | null
+          last_reconnect_attempt_at?: string | null
+          last_webhook_at?: string | null
+          last_webhook_event?: string | null
+          law_firm_id?: string | null
+          manual_disconnect?: boolean | null
+          phone_number?: string | null
+          reconnect_attempts_count?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_instances_default_assigned_to_fkey"
+            columns: ["default_assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_default_automation_id_fkey"
+            columns: ["default_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_default_department_id_fkey"
+            columns: ["default_department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_default_status_id_fkey"
+            columns: ["default_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
             referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
