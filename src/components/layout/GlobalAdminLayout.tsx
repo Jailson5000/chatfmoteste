@@ -19,7 +19,8 @@ import {
   FileText,
   HeartPulse,
   Bot,
-  Sparkles
+  Sparkles,
+  Ticket
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +64,7 @@ const adminNavItems = [
   { icon: CreditCard, label: "Planos", path: "/global-admin/plans", roles: ["super_admin", "admin_financeiro"] },
   { icon: CreditCard, label: "Pagamentos", path: "/global-admin/payments", roles: ["super_admin", "admin_financeiro"] },
   { icon: Settings, label: "Config. Pagamentos", path: "/global-admin/settings", roles: ["super_admin", "admin_financeiro"] },
+  { icon: Ticket, label: "Tickets", path: "/global-admin/tickets", roles: ["super_admin", "admin_operacional"] },
   { icon: Bell, label: "Histórico de Alertas", path: "/global-admin/alert-history", roles: ["super_admin", "admin_operacional"] },
   { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
 ];
@@ -89,6 +91,7 @@ const breadcrumbMap: Record<string, string> = {
   "alert-history": "Histórico de Alertas",
   "template-base": "Template Base",
   "agent-templates": "Templates de Agentes",
+  tickets: "Tickets",
 };
 
 export function GlobalAdminLayout() {

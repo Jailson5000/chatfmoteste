@@ -54,7 +54,9 @@ import {
   GlobalAdminAlertHistory,
   GlobalAdminTemplateBase,
   GlobalAdminAgentTemplates,
+  GlobalAdminTickets,
 } from "./pages/global-admin";
+import Support from "./pages/Support";
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
 const queryClient = new QueryClient();
@@ -230,6 +232,17 @@ const App = () => (
             <Route index element={<Profile />} />
           </Route>
           
+          <Route
+            path="/suporte"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Support />} />
+          </Route>
+          
           {/* Client Admin Routes - Protected by role (admin of law firm) */}
           {/* Redirect /admin to /settings for backwards compatibility */}
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
@@ -291,6 +304,7 @@ const App = () => (
               }
             />
             <Route path="agent-templates" element={<GlobalAdminAgentTemplates />} />
+            <Route path="tickets" element={<GlobalAdminTickets />} />
           </Route>
           
             {/* Catch-all route */}
