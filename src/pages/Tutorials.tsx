@@ -168,21 +168,18 @@ export default function Tutorials() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6 bg-background min-h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-primary" />
-            Central de Tutoriais
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <h1 className="text-2xl font-bold text-foreground">Central de Tutoriais</h1>
+          <p className="text-sm text-muted-foreground">
             Aprenda a usar todas as funcionalidades da plataforma
           </p>
         </div>
         
         {/* Search */}
-        <div className="relative w-64">
+        <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar tutoriais..."
