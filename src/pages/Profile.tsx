@@ -281,53 +281,6 @@ export default function Profile() {
         </p>
       </div>
 
-      {/* Avatar Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Foto de Perfil</CardTitle>
-          <CardDescription>
-            Sua foto será exibida em conversas e no sistema
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-6">
-            <div className="relative">
-              <Avatar className="h-24 w-24">
-                <AvatarImage src={avatarUrl || undefined} alt={fullName} />
-                <AvatarFallback className="text-2xl bg-primary/10 text-primary">
-                  {getInitials(fullName || "U")}
-                </AvatarFallback>
-              </Avatar>
-              {isUploadingAvatar && (
-                <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-full">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="avatar-upload" className="cursor-pointer">
-                <Button variant="outline" asChild disabled={isUploadingAvatar}>
-                  <span>
-                    <Camera className="h-4 w-4 mr-2" />
-                    Alterar foto
-                  </span>
-                </Button>
-              </Label>
-              <input
-                id="avatar-upload"
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleAvatarUpload}
-                disabled={isUploadingAvatar}
-              />
-              <p className="text-xs text-muted-foreground">
-                JPG, PNG ou GIF. Máximo 2MB.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Profile Info */}
       <Card>
