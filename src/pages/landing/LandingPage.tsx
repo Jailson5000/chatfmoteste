@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,12 +32,45 @@ import {
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { CheckoutModal } from "@/components/landing/CheckoutModal";
+import { supabase } from "@/integrations/supabase/client";
+
+// Interface for database plans
+interface DbPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  max_users: number;
+  max_instances: number;
+  max_ai_conversations: number;
+  max_tts_minutes: number;
+  max_agents: number;
+  features: string[];
+  is_active: boolean;
+}
 
 export function LandingPage() {
   const [selectedPlan, setSelectedPlan] = useState<{
     name: string;
     price: string;
   } | null>(null);
+  const [dbPlans, setDbPlans] = useState<DbPlan[]>([]);
+
+  // Fetch plans from database
+  useEffect(() => {
+    const fetchPlans = async () => {
+      const { data, error } = await supabase
+        .from("plans")
+        .select("*")
+        .eq("is_active", true)
+        .order("price", { ascending: true });
+      
+      if (!error && data) {
+        setDbPlans(data as DbPlan[]);
+      }
+    };
+    fetchPlans();
+  }, []);
 
   // Carrega o widget MiauChat
   useEffect(() => {
@@ -67,75 +100,44 @@ export function LandingPage() {
     };
   }, []);
 
-  const plans = [
-    {
-      name: "BASIC",
-      price: "197",
-      description: "Para pequenos negócios que estão começando com automação e IA.",
-      items: [
-        "200 conversas com IA",
-        "10 minutos de áudio",
-        "1 WhatsApp conectado",
-        "3 usuários",
-        "1 agente de IA",
-        "Automação essencial",
-        "Mensagens rápidas",
-        "Respostas automáticas",
-      ],
-      cta: "Começar agora",
-    },
-    {
-      name: "STARTER",
-      price: "497",
-      description: "Mais organização e produtividade para equipes em crescimento.",
-      items: [
-        "300 conversas com IA",
-        "25 minutos de áudio",
-        "2 WhatsApps conectados",
-        "4 usuários",
-        "2 agentes de IA",
-        "Tudo do plano Basic",
-        "Transcrição de áudio e imagens",
-        "Mensagens agendadas",
-      ],
-      cta: "Começar agora",
-    },
-    {
-      name: "PROFESSIONAL",
-      price: "897",
-      description: "Mais volume, performance e flexibilidade para escalar o atendimento.",
-      items: [
-        "500 conversas com IA",
-        "40 minutos de áudio",
-        "4 WhatsApps conectados",
-        "5 usuários",
-        "4 agentes de IA",
-        "Tudo do plano Starter",
-        "IA avançada para conversação",
-        "Maior capacidade operacional",
-      ],
-      cta: "Escalar meu atendimento",
-      popular: true,
-    },
-    {
-      name: "ENTERPRISE",
-      price: "1.497",
-      startingFrom: true,
-      description: "Para operações estruturadas que precisam escalar rápido, com controle total.",
-      items: [
-        "600 conversas com IA",
-        "60 minutos de áudio",
-        "6 WhatsApps conectados",
-        "10 usuários",
-        "10 agentes de IA",
-        "Onboarding assistido",
-        "SLA e suporte prioritário",
-        "Modelo flexível de consumo",
-      ],
-      cta: "Falar com especialista",
-      isEnterprise: true,
-    },
-  ];
+  // Format price for display (e.g., 1697 -> "1.697")
+  const formatPrice = (price: number): string => {
+    return price.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+  };
+
+  // Transform database plans into display format
+  const plans = useMemo(() => {
+    if (dbPlans.length === 0) {
+      // Fallback while loading
+      return [];
+    }
+
+    return dbPlans.map((plan) => {
+      const isEnterprise = plan.name.toUpperCase() === "ENTERPRISE";
+      const isProfessional = plan.name.toUpperCase() === "PROFESSIONAL";
+      
+      return {
+        name: plan.name.toUpperCase(),
+        price: formatPrice(plan.price),
+        description: plan.description || "",
+        items: plan.features || [],
+        cta: isEnterprise 
+          ? "Falar com especialista" 
+          : isProfessional 
+            ? "Escalar meu atendimento" 
+            : "Começar agora",
+        popular: isProfessional,
+        isEnterprise,
+        startingFrom: isEnterprise,
+      };
+    });
+  }, [dbPlans]);
+
+  // Get professional plan price for CTA buttons
+  const professionalPrice = useMemo(() => {
+    const prof = dbPlans.find(p => p.name.toUpperCase() === "PROFESSIONAL");
+    return prof ? formatPrice(prof.price) : "897";
+  }, [dbPlans]);
 
   const additionalPricing = [
     { item: "Conversa adicional com IA", price: "R$ 0,47 / conversa" },
@@ -241,7 +243,7 @@ export function LandingPage() {
             </Link>
             <Button
               className="bg-red-600 hover:bg-red-500 text-white h-10 px-6 rounded-xl"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: professionalPrice })}
             >
               Começar
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -302,7 +304,7 @@ export function LandingPage() {
             <Button
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: professionalPrice })}
             >
               Quero conhecer o MIAUCHAT
               <ArrowRight className="ml-2 h-4 w-4" />
@@ -796,7 +798,7 @@ export function LandingPage() {
             <Button
               size="lg"
               className="bg-red-600 hover:bg-red-500 text-white h-12 px-8 rounded-xl text-sm font-semibold shadow-lg shadow-red-600/25"
-              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: "897" })}
+              onClick={() => handlePlanClick({ name: "PROFESSIONAL", price: professionalPrice })}
             >
               Começar agora
               <ArrowRight className="ml-2 h-4 w-4" />
