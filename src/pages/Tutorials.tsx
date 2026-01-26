@@ -168,23 +168,21 @@ export default function Tutorials() {
   };
 
   return (
-    <div className="container mx-auto py-6 px-4 max-w-7xl">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-primary/10 rounded-lg">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">Central de Tutoriais</h1>
-            <p className="text-muted-foreground">
-              Aprenda a usar todas as funcionalidades da plataforma
-            </p>
-          </div>
+            Central de Tutoriais
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Aprenda a usar todas as funcionalidades da plataforma
+          </p>
         </div>
         
         {/* Search */}
-        <div className="relative max-w-md">
+        <div className="relative w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar tutoriais..."
