@@ -163,7 +163,9 @@ serve(async (req) => {
       .replace(/^-+|-+$/g, "")
       .substring(0, 30);
 
-    // Create law_firm
+    // ========================================
+    // STEP 1: Create law_firm (tenant)
+    // ========================================
     console.log("[VERIFY-PAYMENT] Creating law_firm");
     const { data: lawFirm, error: lawFirmError } = await supabase
       .from("law_firms")
@@ -184,7 +186,9 @@ serve(async (req) => {
 
     console.log("[VERIFY-PAYMENT] Law firm created:", lawFirm.id);
 
-    // Create law_firm_settings
+    // ========================================
+    // STEP 2: Create law_firm_settings
+    // ========================================
     const { error: settingsError } = await supabase
       .from("law_firm_settings")
       .insert({
@@ -194,57 +198,12 @@ serve(async (req) => {
 
     if (settingsError) {
       console.error("[VERIFY-PAYMENT] Error creating settings:", settingsError);
+      // Non-critical, continue
     }
 
-    // Generate random password
-    const tempPassword = Math.random().toString(36).slice(-10) + 
-                         Math.random().toString(36).slice(-2).toUpperCase() + 
-                         "!";
-
-    // Create admin user in auth
-    console.log("[VERIFY-PAYMENT] Creating admin user");
-    const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-      email: adminEmail,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: {
-        full_name: adminName,
-        law_firm_id: lawFirm.id,
-      },
-    });
-
-    if (authError) {
-      console.error("[VERIFY-PAYMENT] Error creating auth user:", authError);
-      // Rollback law_firm
-      await supabase.from("law_firms").delete().eq("id", lawFirm.id);
-      throw new Error(`Erro ao criar usuário: ${authError.message}`);
-    }
-
-    console.log("[VERIFY-PAYMENT] Auth user created:", authUser.user.id);
-
-    // Update profile with law_firm_id
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .update({ law_firm_id: lawFirm.id })
-      .eq("id", authUser.user.id);
-
-    if (profileError) {
-      console.error("[VERIFY-PAYMENT] Error updating profile:", profileError);
-    }
-
-    // Create user role (admin)
-    const { error: roleError } = await supabase
-      .from("user_roles")
-      .insert({
-        user_id: authUser.user.id,
-        role: "admin",
-      });
-
-    if (roleError) {
-      console.error("[VERIFY-PAYMENT] Error creating role:", roleError);
-    }
-
-    // Create company record
+    // ========================================
+    // STEP 3: Create company record
+    // ========================================
     console.log("[VERIFY-PAYMENT] Creating company record");
     const { data: company, error: companyError } = await supabase
       .from("companies")
@@ -254,12 +213,12 @@ serve(async (req) => {
         phone: adminPhone || null,
         document: document || null,
         law_firm_id: lawFirm.id,
-        admin_user_id: authUser.user.id,
         plan_id: planId,
         status: "active",
         approval_status: "approved",
         approved_at: new Date().toISOString(),
-        provisioning_status: "completed",
+        provisioning_status: "pending",
+        client_app_status: "created",
         ...planLimits,
       })
       .select()
@@ -267,51 +226,106 @@ serve(async (req) => {
 
     if (companyError) {
       console.error("[VERIFY-PAYMENT] Error creating company:", companyError);
+      // Rollback law_firm
+      await supabase.from("law_firms").delete().eq("id", lawFirm.id);
+      throw new Error(`Erro ao criar empresa: ${companyError.message}`);
     }
 
-    // Clone template for the company
+    console.log("[VERIFY-PAYMENT] Company created:", company.id);
+
+    // ========================================
+    // STEP 4: Clone template for the company
+    // ========================================
     console.log("[VERIFY-PAYMENT] Cloning template");
     const { data: cloneResult } = await supabase.rpc("clone_template_for_company", {
       _law_firm_id: lawFirm.id,
-      _company_id: company?.id,
+      _company_id: company.id,
     });
 
     console.log("[VERIFY-PAYMENT] Template clone result:", cloneResult);
 
-    // Send welcome email with credentials
-    console.log("[VERIFY-PAYMENT] Sending welcome email");
-    const baseUrl = Deno.env.get("SUPABASE_URL");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    // ========================================
+    // STEP 5: Create admin user via create-company-admin
+    // (Uses secure crypto.getRandomValues for password generation)
+    // ========================================
+    console.log("[VERIFY-PAYMENT] Creating admin user via create-company-admin");
+    
+    let adminUserResult = null;
+    let adminError: string | null = null;
     
     try {
-      await fetch(`${baseUrl}/functions/v1/send-auth-email`, {
+      const createAdminResponse = await fetch(`${supabaseUrl}/functions/v1/create-company-admin`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${anonKey}`,
+          "Authorization": `Bearer ${supabaseServiceKey}`,
         },
         body: JSON.stringify({
-          type: "initial_access",
-          email: adminEmail,
-          name: adminName,
-          companyName: companyName,
+          company_id: company.id,
+          company_name: companyName,
+          law_firm_id: lawFirm.id,
           subdomain: subdomain,
-          tempPassword: tempPassword,
+          admin_email: adminEmail,
+          admin_name: adminName || companyName,
         }),
       });
-      console.log("[VERIFY-PAYMENT] Welcome email sent");
-    } catch (emailError) {
-      console.error("[VERIFY-PAYMENT] Error sending email:", emailError);
+
+      if (createAdminResponse.ok) {
+        adminUserResult = await createAdminResponse.json();
+        console.log("[VERIFY-PAYMENT] Admin user created successfully:", adminUserResult.user_id);
+        
+        // Update company with admin_user_id and provisioning status
+        await supabase
+          .from("companies")
+          .update({
+            admin_user_id: adminUserResult.user_id,
+            provisioning_status: "completed",
+            initial_access_email_sent: adminUserResult.email_sent,
+            initial_access_email_sent_at: adminUserResult.email_sent ? new Date().toISOString() : null,
+            initial_access_email_error: adminUserResult.email_error,
+          })
+          .eq("id", company.id);
+      } else {
+        const errorText = await createAdminResponse.text();
+        adminError = `Failed to create admin: ${errorText}`;
+        console.error("[VERIFY-PAYMENT] Error creating admin user:", errorText);
+        
+        // Update company with error status
+        await supabase
+          .from("companies")
+          .update({
+            provisioning_status: "partial",
+            initial_access_email_error: adminError,
+          })
+          .eq("id", company.id);
+      }
+    } catch (error) {
+      adminError = error instanceof Error ? error.message : "Unknown error";
+      console.error("[VERIFY-PAYMENT] Exception creating admin:", error);
+      
+      await supabase
+        .from("companies")
+        .update({
+          provisioning_status: "partial",
+          initial_access_email_error: adminError,
+        })
+        .eq("id", company.id);
     }
 
+    // Return success even if admin creation had issues (company is created)
     return new Response(
       JSON.stringify({
         success: true,
-        companyId: company?.id,
+        companyId: company.id,
         companyName: companyName,
         subdomain: subdomain,
         loginUrl: `https://${subdomain}.miauchat.com.br/auth`,
-        message: "Empresa criada com sucesso! Verifique seu e-mail para as credenciais de acesso.",
+        adminUserId: adminUserResult?.user_id || null,
+        emailSent: adminUserResult?.email_sent || false,
+        adminError: adminError,
+        message: adminUserResult?.email_sent 
+          ? "Empresa criada com sucesso! Verifique seu e-mail para as credenciais de acesso."
+          : "Empresa criada. Entre em contato com o suporte para obter suas credenciais.",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
     );
