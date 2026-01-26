@@ -103,9 +103,9 @@ export function useGlobalAdminInstances() {
     queryFn: async () => {
       console.log("[useGlobalAdminInstances] Fetching all instances...");
 
-      // Fetch instances
+      // Fetch instances using safe view that excludes api_key
       const { data: instancesData, error: instancesError } = await supabase
-        .from("whatsapp_instances")
+        .from("whatsapp_instances_safe")
         .select("*")
         .order("created_at", { ascending: false });
 
