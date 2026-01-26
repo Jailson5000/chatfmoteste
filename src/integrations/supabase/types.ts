@@ -3924,6 +3924,62 @@ export type Database = {
           },
         ]
       }
+      support_tickets: {
+        Row: {
+          content: string
+          created_at: string
+          created_by: string | null
+          id: string
+          law_firm_id: string
+          priority: number | null
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: Database["public"]["Enums"]["ticket_status"]
+          title: string
+          type: Database["public"]["Enums"]["ticket_type"]
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          law_firm_id: string
+          priority?: number | null
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: Database["public"]["Enums"]["ticket_status"]
+          title: string
+          type?: Database["public"]["Enums"]["ticket_type"]
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          law_firm_id?: string
+          priority?: number | null
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: Database["public"]["Enums"]["ticket_status"]
+          title?: string
+          type?: Database["public"]["Enums"]["ticket_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_tickets_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       system_metrics: {
         Row: {
           id: string
@@ -4121,6 +4177,44 @@ export type Database = {
             columns: ["law_firm_id"]
             isOneToOne: false
             referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ticket_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_internal: boolean | null
+          sender_id: string | null
+          sender_type: string
+          ticket_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          sender_id?: string | null
+          sender_type?: string
+          ticket_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          sender_id?: string | null
+          sender_type?: string
+          ticket_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_messages_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
             referencedColumns: ["id"]
           },
         ]
@@ -5442,6 +5536,13 @@ export type Database = {
         | "ambiental"
         | "outros"
       message_handler: "ai" | "human"
+      ticket_status:
+        | "aberto"
+        | "em_andamento"
+        | "aguardando_cliente"
+        | "resolvido"
+        | "fechado"
+      ticket_type: "bug" | "duvida" | "sugestao" | "outro"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -5591,6 +5692,14 @@ export const Constants = {
         "outros",
       ],
       message_handler: ["ai", "human"],
+      ticket_status: [
+        "aberto",
+        "em_andamento",
+        "aguardando_cliente",
+        "resolvido",
+        "fechado",
+      ],
+      ticket_type: ["bug", "duvida", "sugestao", "outro"],
     },
   },
 } as const
