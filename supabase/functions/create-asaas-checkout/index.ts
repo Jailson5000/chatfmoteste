@@ -6,19 +6,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Plan prices in cents (BRL)
+// Plan prices in cents (BRL) - Updated 2026
 const PLAN_PRICES = {
   basic: {
-    monthly: 19900, // R$ 199,00
-    yearly: 218900, // R$ 2.189,00 (11 meses)
+    monthly: 19700, // R$ 197,00
+    yearly: 216700, // R$ 2.167,00 (11 meses)
   },
   starter: {
     monthly: 49700, // R$ 497,00
     yearly: 546700, // R$ 5.467,00 (11 meses)
   },
   professional: {
-    monthly: 69700, // R$ 697,00
-    yearly: 766700, // R$ 7.667,00 (11 meses)
+    monthly: 89700, // R$ 897,00
+    yearly: 986700, // R$ 9.867,00 (11 meses)
   },
   enterprise: {
     monthly: 149700, // R$ 1.497,00
