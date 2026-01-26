@@ -89,14 +89,15 @@ export function AppSidebar() {
   const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
 
   // Build bottom menu items based on user role (profileItem is in Footer already)
-  // Order: Agenda Pro, Agenda, Conexões, Configurações, Suporte, Tutoriais
+  // Order: Agenda Pro, Agenda, Conexões, Configurações, Suporte
+  // Note: tutorialsItem temporarily disabled until videos are recorded
   const bottomMenuItems = isAttendant
     ? showAgenda
-      ? [agendaProItem, agendaItem, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, settingsItem, supportItem, tutorialsItem]
+      ? [agendaProItem, agendaItem, settingsItem, supportItem]
+      : [agendaProItem, settingsItem, supportItem]
     : showAgenda
-      ? [agendaProItem, agendaItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
+      ? [agendaProItem, agendaItem, ...adminOnlyItems, settingsItem, supportItem]
+      : [agendaProItem, ...adminOnlyItems, settingsItem, supportItem];
 
   // Open sections if on one of their pages
   useEffect(() => {
