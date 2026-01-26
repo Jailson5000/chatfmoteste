@@ -40,7 +40,7 @@ export default function GlobalAdminTickets() {
     queryKey: ["admin-tickets", statusFilter],
     queryFn: async () => {
       let query = supabase.from("support_tickets").select("*, law_firm:law_firms(name)").order("created_at", { ascending: false });
-      if (statusFilter !== "all") query = query.eq("status", statusFilter);
+      if (statusFilter !== "all") query = query.eq("status", statusFilter as TicketStatus);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -61,7 +61,7 @@ export default function GlobalAdminTickets() {
   });
 
   const updateStatus = useMutation({
-    mutationFn: async ({ ticketId, status }: { ticketId: string; status: string }) => {
+    mutationFn: async ({ ticketId, status }: { ticketId: string; status: TicketStatus }) => {
       const { error } = await supabase.from("support_tickets").update({ status }).eq("id", ticketId);
       if (error) throw error;
     },
@@ -107,7 +107,7 @@ export default function GlobalAdminTickets() {
         <SheetContent className="w-full sm:max-w-2xl bg-[#1a1a1a] border-white/10 text-white overflow-y-auto">
           {selectedTicket && (<><SheetHeader><SheetTitle className="text-white flex items-center gap-2"><Ticket className="h-5 w-5 text-red-500" />{selectedTicket.title}</SheetTitle></SheetHeader>
             <div className="space-y-6 mt-6">
-              <div className="grid grid-cols-2 gap-4"><div><Label className="text-white/60">Empresa</Label><p className="text-white">{selectedTicket.law_firm?.name || "—"}</p></div><div><Label className="text-white/60">Status</Label><Select value={selectedTicket.status} onValueChange={v => updateStatus.mutate({ ticketId: selectedTicket.id, status: v })}><SelectTrigger className="mt-1 bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(statusConfig).map(([s, c]) => <SelectItem key={s} value={s}>{c.label}</SelectItem>)}</SelectContent></Select></div></div>
+              <div className="grid grid-cols-2 gap-4"><div><Label className="text-white/60">Empresa</Label><p className="text-white">{selectedTicket.law_firm?.name || "—"}</p></div><div><Label className="text-white/60">Status</Label><Select value={selectedTicket.status} onValueChange={v => updateStatus.mutate({ ticketId: selectedTicket.id, status: v as TicketStatus })}><SelectTrigger className="mt-1 bg-white/5 border-white/10 text-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(statusConfig).map(([s, c]) => <SelectItem key={s} value={s}>{c.label}</SelectItem>)}</SelectContent></Select></div></div>
               <Separator className="bg-white/10" />
               <div><Label className="text-white/60">Descrição</Label><p className="text-white mt-1 bg-white/5 p-3 rounded-lg whitespace-pre-wrap">{selectedTicket.content}</p></div>
               <Separator className="bg-white/10" />
