@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 
 // Available voices
 import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
+import { MAX_PROMPT_LENGTH } from "@/lib/agentConstants";
 
 const TRIGGER_TYPES = [
   { value: "new_message", label: "Nova Mensagem Recebida" },
@@ -70,8 +71,6 @@ const TRIGGER_TYPES = [
   { value: "status_change", label: "Mudança de Status" },
   { value: "new_client", label: "Novo Cliente" },
 ];
-
-const MAX_PROMPT_CHARS = 10000;
 
 export default function AIAgentEdit() {
   const { id } = useParams<{ id: string }>();
@@ -253,8 +252,8 @@ export default function AIAgentEdit() {
   }
 
   const promptLength = editedPrompt.length;
-  const promptPercentage = Math.round((promptLength / MAX_PROMPT_CHARS) * 100);
-  const isOverLimit = promptLength > MAX_PROMPT_CHARS;
+  const promptPercentage = Math.round((promptLength / MAX_PROMPT_LENGTH) * 100);
+  const isOverLimit = promptLength > MAX_PROMPT_LENGTH;
 
   // hasChanges/currentTriggerConfig são calculados acima (usados por navegação + UI)
 
@@ -262,7 +261,7 @@ export default function AIAgentEdit() {
     if (isOverLimit) {
       toast({
         title: "Prompt muito longo",
-        description: `O prompt excede o limite de ${MAX_PROMPT_CHARS} caracteres.`,
+        description: `O prompt excede o limite de ${MAX_PROMPT_LENGTH} caracteres.`,
         variant: "destructive",
       });
       return;
@@ -628,7 +627,7 @@ REGRAS DE COMUNICAÇÃO
 • Forneça orientações gerais e faça a triagem inicial
 
 Você é uma atendente da empresa @Nome da empresa, especializada em atender e direcionar os clientes."
-              maxLength={MAX_PROMPT_CHARS}
+              maxLength={MAX_PROMPT_LENGTH}
               className={cn(isOverLimit && "text-destructive")}
               departments={departments || []}
               statuses={statuses || []}
@@ -657,7 +656,7 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                   "font-mono",
                   isOverLimit ? "text-destructive" : "text-muted-foreground"
                 )}>
-                  {promptLength}/{MAX_PROMPT_CHARS}
+                  {promptLength}/{MAX_PROMPT_LENGTH}
                 </span>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden">

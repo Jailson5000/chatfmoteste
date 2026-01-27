@@ -270,34 +270,34 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="classes">
-        <TabsList className="grid w-full max-w-4xl grid-cols-7">
-          <TabsTrigger value="classes" className="gap-2">
+        <TabsList className="grid w-full max-w-4xl grid-cols-7 overflow-x-auto">
+          <TabsTrigger value="classes" className="gap-1.5 text-xs sm:text-sm">
             <Layers className="h-4 w-4" />
-            <span className="hidden sm:inline">Classes</span>
+            <span className="hidden xs:inline sm:inline">Classes</span>
           </TabsTrigger>
-          <TabsTrigger value="templates" className="gap-2">
+          <TabsTrigger value="templates" className="gap-1.5 text-xs sm:text-sm">
             <MessageSquareText className="h-4 w-4" />
-            <span className="hidden sm:inline">Templates</span>
+            <span className="hidden xs:inline sm:inline">Templates</span>
           </TabsTrigger>
-          <TabsTrigger value="team" className="gap-2">
+          <TabsTrigger value="team" className="gap-1.5 text-xs sm:text-sm">
             <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">Membros</span>
+            <span className="hidden xs:inline sm:inline">Membros</span>
           </TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2">
+          <TabsTrigger value="integrations" className="gap-1.5 text-xs sm:text-sm">
             <Plug className="h-4 w-4" />
-            <span className="hidden sm:inline">Integrações</span>
+            <span className="hidden xs:inline sm:inline">Integrações</span>
           </TabsTrigger>
-          <TabsTrigger value="office" className="gap-2">
+          <TabsTrigger value="office" className="gap-1.5 text-xs sm:text-sm">
             <Building2 className="h-4 w-4" />
-            <span className="hidden sm:inline">Info. Gerais</span>
+            <span className="hidden xs:inline sm:inline">Info.</span>
           </TabsTrigger>
-          <TabsTrigger value="myplan" className="gap-2">
+          <TabsTrigger value="myplan" className="gap-1.5 text-xs sm:text-sm">
             <CreditCard className="h-4 w-4" />
-            <span className="hidden sm:inline">Meu Plano</span>
+            <span className="hidden xs:inline sm:inline">Plano</span>
           </TabsTrigger>
-          <TabsTrigger value="security" className="gap-2">
+          <TabsTrigger value="security" className="gap-1.5 text-xs sm:text-sm">
             <Shield className="h-4 w-4" />
-            <span className="hidden sm:inline">Segurança</span>
+            <span className="hidden xs:inline sm:inline">Segurança</span>
           </TabsTrigger>
         </TabsList>
 

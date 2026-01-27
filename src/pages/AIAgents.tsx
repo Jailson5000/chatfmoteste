@@ -118,8 +118,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-
-const MAX_PROMPT_LENGTH = 10000;
+import { MAX_PROMPT_LENGTH } from "@/lib/agentConstants";
 
 type ChannelType = "all" | "instance" | "department";
 type ViewMode = "list" | "editor";
