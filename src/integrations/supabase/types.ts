@@ -5117,34 +5117,40 @@ export type Database = {
           avatar_url: string | null
           bio: string | null
           color: string | null
+          created_at: string | null
           id: string | null
           is_active: boolean | null
           law_firm_id: string | null
           name: string | null
           position: number | null
           specialty: string | null
+          updated_at: string | null
         }
         Insert: {
           avatar_url?: string | null
           bio?: string | null
           color?: string | null
+          created_at?: string | null
           id?: string | null
           is_active?: boolean | null
           law_firm_id?: string | null
           name?: string | null
           position?: number | null
           specialty?: string | null
+          updated_at?: string | null
         }
         Update: {
           avatar_url?: string | null
           bio?: string | null
           color?: string | null
+          created_at?: string | null
           id?: string | null
           is_active?: boolean | null
           law_firm_id?: string | null
           name?: string | null
           position?: number | null
           specialty?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
