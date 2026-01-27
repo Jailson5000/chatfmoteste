@@ -1,344 +1,140 @@
 
-# Plano de Implementacao: Sistema de Tarefas Internas
+# Plano: Limpeza Automatica de webhook_logs
 
-## Resumo Executivo
+## Resumo
 
-Este plano implementa uma pagina completa de gerenciamento de tarefas internas para a equipe, com funcionalidades de Kanban, calendario, filtros avancados e historico de alteracoes. O sistema segue a arquitetura multi-tenant existente e as regras de seguranca RLS.
-
----
-
-## Arquitetura da Solucao
-
-```text
-+-----------------------------------------------------------------------------------+
-|                           SISTEMA DE TAREFAS INTERNAS                             |
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|  +------------------+     +----------------------------------------------------+  |
-|  |   AppSidebar     |     |                    Tabelas                         |  |
-|  |  --------------  |     |  ------------------------------------------------  |  |
-|  |                  |     |  internal_tasks           - Tarefas principais     |  |
-|  |  + Tarefas       |---->|  task_assignees           - Atribuicoes multiplas  |  |
-|  |    (novo item)   |     |  task_comments            - Comentarios/progresso  |  |
-|  |                  |     |  task_categories          - Categorias             |  |
-|  +------------------+     |  task_attachments         - Anexos (opcional)      |  |
-|                           |  task_activity_log        - Historico alteracoes   |  |
-|                           +----------------------------------------------------+  |
-|                                           |                                       |
-|                                           v                                       |
-|  +------------------------------------------------------------------------+      |
-|  |                         Frontend Components                             |      |
-|  |  --------------------------------------------------------------------  |      |
-|  |  Tasks.tsx               - Pagina principal com tabs                   |      |
-|  |  TaskKanbanView.tsx      - Visualizacao Kanban                        |      |
-|  |  TaskListView.tsx        - Visualizacao em lista                      |      |
-|  |  TaskCalendarView.tsx    - Visualizacao calendario                    |      |
-|  |  TaskDashboard.tsx       - Dashboard com metricas                     |      |
-|  |  TaskDetailSheet.tsx     - Sheet lateral com detalhes                 |      |
-|  |  NewTaskDialog.tsx       - Modal de criacao/edicao                    |      |
-|  +------------------------------------------------------------------------+      |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
-```
+Implementar um cron job que executa diariamente as 3h da manha para remover registros da tabela `webhook_logs` com mais de 30 dias, otimizando performance do banco de dados.
 
 ---
 
-## Modelo de Dados
+## Analise da Situacao Atual
 
-### Tabela: internal_tasks
-| Coluna | Tipo | Descricao |
-|--------|------|-----------|
-| id | uuid | Chave primaria |
-| law_firm_id | uuid | FK para law_firms (tenant) |
-| title | text | Titulo da tarefa (obrigatorio) |
-| description | text | Descricao detalhada |
-| status | enum | 'todo', 'in_progress', 'done' |
-| priority | enum | 'low', 'medium', 'high', 'urgent' |
-| category_id | uuid | FK para task_categories |
-| due_date | timestamptz | Data/hora para realizacao |
-| created_by | uuid | FK para profiles |
-| completed_at | timestamptz | Quando foi concluida |
-| position | integer | Ordem no kanban |
-| created_at | timestamptz | Timestamp criacao |
-| updated_at | timestamptz | Timestamp atualizacao |
-
-### Tabela: task_assignees
-| Coluna | Tipo | Descricao |
-|--------|------|-----------|
-| id | uuid | Chave primaria |
-| task_id | uuid | FK para internal_tasks |
-| user_id | uuid | FK para profiles (atendente) |
-| assigned_at | timestamptz | Quando foi atribuido |
-
-### Tabela: task_categories
-| Coluna | Tipo | Descricao |
-|--------|------|-----------|
-| id | uuid | Chave primaria |
-| law_firm_id | uuid | FK para law_firms |
-| name | text | Nome (Administrativo, Suporte, etc) |
-| color | text | Cor para exibicao |
-| position | integer | Ordem de exibicao |
-
-### Tabela: task_comments
-| Coluna | Tipo | Descricao |
-|--------|------|-----------|
-| id | uuid | Chave primaria |
-| task_id | uuid | FK para internal_tasks |
-| user_id | uuid | FK para profiles |
-| content | text | Conteudo do comentario |
-| created_at | timestamptz | Timestamp |
-
-### Tabela: task_activity_log
-| Coluna | Tipo | Descricao |
-|--------|------|-----------|
-| id | uuid | Chave primaria |
-| task_id | uuid | FK para internal_tasks |
-| user_id | uuid | FK para profiles |
-| action | text | Tipo da acao (created, updated, etc) |
-| old_values | jsonb | Valores anteriores |
-| new_values | jsonb | Novos valores |
-| created_at | timestamptz | Timestamp |
+| Metrica | Valor |
+|---------|-------|
+| Total de registros | 47.374 |
+| Registros > 30 dias | 577 |
+| Tamanho da tabela | 50 MB |
+| Cron jobs existentes | 8 |
 
 ---
 
-## Fluxo de Funcionamento
+## Garantia de Seguranca dos Dados
 
-```text
-Usuario                    Frontend                      Backend
-   |                          |                             |
-   |--[Acessa /tarefas]------>|                             |
-   |                          |--[Fetch tarefas]----------->|
-   |                          |                             |
-   |                          |<--[Lista filtrada por      -|
-   |                          |    law_firm_id via RLS]     |
-   |                          |                             |
-   |--[Cria nova tarefa]----->|                             |
-   |                          |--[INSERT internal_tasks]--->|
-   |                          |--[INSERT task_assignees]--->|
-   |                          |--[INSERT task_activity_log]-|
-   |                          |                             |
-   |<--[Tarefa criada]--------|                             |
-   |                          |                             |
-   |--[Arrasta no Kanban]---->|                             |
-   |                          |--[UPDATE status]----------->|
-   |                          |--[INSERT activity_log]----->|
-   |                          |                             |
-   |--[Adiciona comentario]-->|                             |
-   |                          |--[INSERT task_comments]---->|
-   |                          |                             |
-```
+A tabela `webhook_logs` contem APENAS dados tecnicos de debug:
+
+| Coluna | Tipo | Conteudo |
+|--------|------|----------|
+| id | uuid | Identificador do log |
+| automation_id | uuid | Referencia a automacao |
+| direction | text | Direcao (in/out) |
+| payload | jsonb | Payload do webhook |
+| response | jsonb | Resposta recebida |
+| status_code | integer | Codigo HTTP |
+| error_message | text | Mensagem de erro |
+| created_at | timestamp | Data de criacao |
+
+**NAO AFETA:**
+- Mensagens de clientes (tabela `messages`)
+- Conversas (tabela `conversations`)
+- Dados de clientes (tabela `clients`)
+- Agendamentos (tabelas `appointments`, `agenda_pro_*`)
+- Qualquer dado de negocio
 
 ---
 
-## Componentes Frontend
+## Implementacao
 
-### 1. Pagina Principal: src/pages/Tasks.tsx
-- Tabs para alternar entre visualizacoes (Kanban, Lista, Calendario, Dashboard)
-- Barra de filtros (responsavel, data, prioridade, categoria, status)
-- Campo de busca por palavras-chave
-- Botao "Nova Tarefa"
+### Opcao 1: SQL Direto via pg_cron (Recomendada)
 
-### 2. Visualizacao Kanban: TaskKanbanView.tsx
-- 3 colunas: "A Fazer", "Em Progresso", "Concluido"
-- Drag and drop para mover tarefas entre colunas
-- Cards com indicador de prioridade por cor:
-  - Baixa: Cinza
-  - Media: Azul
-  - Alta: Laranja
-  - Urgente: Vermelho
-- Avatar dos atribuidos no card
-- Data de vencimento com indicador de atraso
+Criar um cron job que executa DELETE diretamente no PostgreSQL:
 
-### 3. Visualizacao Lista: TaskListView.tsx
-- Tabela ordenavel por colunas
-- Checkbox para marcar como concluida
-- Acoes rapidas (editar, excluir)
-- Paginacao
-
-### 4. Visualizacao Calendario: TaskCalendarView.tsx
-- Calendario mensal com tarefas por data
-- Alternancia dia/semana/mes
-- Clique para ver detalhes
-
-### 5. Dashboard: TaskDashboard.tsx
-- Cards de resumo:
-  - Tarefas pendentes por atendente
-  - Tarefas atrasadas
-  - Tarefas concluidas no periodo
-  - Distribuicao por categoria
-
-### 6. Sheet de Detalhes: TaskDetailSheet.tsx
-- Edicao inline de campos
-- Lista de comentarios/progresso
-- Historico de alteracoes
-- Anexos (se implementado)
-- Botoes de acao: Editar, Excluir, Marcar como Concluida
-
-### 7. Dialog de Criacao/Edicao: NewTaskDialog.tsx
-- Formulario com:
-  - Titulo (obrigatorio)
-  - Descricao (textarea)
-  - Atribuidos (multiselect com atendentes)
-  - Data/hora (datepicker + timepicker)
-  - Prioridade (select)
-  - Categoria (select)
-
----
-
-## Hooks React
-
-### useTasks.tsx
-```typescript
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  status: 'todo' | 'in_progress' | 'done';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  category_id: string | null;
-  due_date: string | null;
-  created_by: string;
-  completed_at: string | null;
-  position: number;
-  assignees: { id: string; user_id: string; profile: Profile }[];
-  category: TaskCategory | null;
-  comments_count: number;
-}
-
-// Funcoes:
-// - tasks: Task[]
-// - createTask
-// - updateTask
-// - deleteTask
-// - updateTaskStatus
-// - reorderTasks
-```
-
-### useTaskCategories.tsx
-```typescript
-// CRUD de categorias
-// - categories: TaskCategory[]
-// - createCategory
-// - updateCategory
-// - deleteCategory
-```
-
-### useTaskComments.tsx
-```typescript
-// Comentarios de uma tarefa
-// - comments: TaskComment[]
-// - addComment
-// - deleteComment
-```
-
----
-
-## Seguranca e Isolamento Multi-Tenant
-
-### Politicas RLS para internal_tasks
 ```sql
--- SELECT: Usuarios veem apenas tarefas do seu law_firm
-CREATE POLICY "Users can view own law_firm tasks"
-ON internal_tasks FOR SELECT
-USING (law_firm_id = get_user_law_firm_id(auth.uid()));
-
--- INSERT: Usuarios criam tarefas no seu law_firm
-CREATE POLICY "Users can create tasks in own law_firm"
-ON internal_tasks FOR INSERT
-WITH CHECK (law_firm_id = get_user_law_firm_id(auth.uid()));
-
--- UPDATE: Usuarios atualizam tarefas do seu law_firm
-CREATE POLICY "Users can update own law_firm tasks"
-ON internal_tasks FOR UPDATE
-USING (law_firm_id = get_user_law_firm_id(auth.uid()));
-
--- DELETE: Usuarios deletam tarefas do seu law_firm
-CREATE POLICY "Users can delete own law_firm tasks"
-ON internal_tasks FOR DELETE
-USING (law_firm_id = get_user_law_firm_id(auth.uid()));
+SELECT cron.schedule(
+  'cleanup-webhook-logs-daily',
+  '0 3 * * *',  -- 3h da manha, todos os dias
+  $$
+  DELETE FROM public.webhook_logs
+  WHERE created_at < NOW() - INTERVAL '30 days';
+  $$
+);
 ```
 
-### Validacoes no Frontend
-- Hooks sempre filtram por `law_firm_id` do usuario logado
-- Mutacoes incluem `law_firm_id` nas queries
-- Atendentes podem ver todas as tarefas, mas o sidebar mostra indicador de "novas atribuidas"
+**Vantagens:**
+- Execucao local no banco (sem overhead de Edge Function)
+- Mais eficiente para operacoes de limpeza
+- Padrao ja usado em outros sistemas
 
----
+### Opcao 2: Edge Function (Alternativa)
 
-## Integracao com Sidebar
+Criar uma Edge Function `cleanup-webhook-logs` chamada via cron job.
 
-### Alteracao em AppSidebar.tsx
-```typescript
-// Novo item no menu
-const tasksItem = { 
-  icon: CheckSquare, 
-  label: "Tarefas", 
-  path: "/tarefas" 
-};
-
-// Adicionar na lista bottomMenuItems ou criar nova secao
-```
-
----
-
-## Categorias Padrao
-
-Na migracao, inserir categorias iniciais:
-- Administrativo (cor: azul)
-- Suporte (cor: verde)
-- Financeiro (cor: amarelo)
-- Comercial (cor: roxo)
-- Outros (cor: cinza)
+**Desvantagens:**
+- Overhead de HTTP request
+- Mais complexo sem necessidade
 
 ---
 
 ## Sequencia de Implementacao
 
-| Fase | Descricao | Complexidade |
-|------|-----------|--------------|
-| 1 | Migracao do banco (tabelas + RLS + enums) | Media |
-| 2 | Hook useTasks + useTaskCategories | Media |
-| 3 | Pagina Tasks.tsx com estrutura de tabs | Baixa |
-| 4 | TaskKanbanView com drag-and-drop | Alta |
-| 5 | NewTaskDialog (criar/editar) | Media |
-| 6 | TaskDetailSheet (detalhes + comentarios) | Media |
-| 7 | TaskListView (tabela) | Baixa |
-| 8 | TaskCalendarView | Media |
-| 9 | TaskDashboard (metricas) | Media |
-| 10 | Integracao Sidebar + rota | Baixa |
-| 11 | Hook useTaskComments + activity log | Media |
-| 12 | Notificacoes visuais (opcional) | Baixa |
+| Etapa | Descricao | Complexidade |
+|-------|-----------|--------------|
+| 1 | Criar indice em `created_at` (se nao existir) | Baixa |
+| 2 | Registrar cron job no pg_cron | Baixa |
+| 3 | Testar execucao manual | Baixa |
+| 4 | Monitorar via `cron.job_run_details` | Baixa |
 
 ---
 
-## Garantias de Nao-Regressao
+## Migracao SQL
 
-1. **Tabelas Novas**: Apenas CREATE TABLE, nenhuma alteracao em tabelas existentes
-2. **RLS Isolado**: Politicas seguem padrao existente com `get_user_law_firm_id()`
-3. **Rota Independente**: `/tarefas` nao interfere em rotas existentes
-4. **Componentes Isolados**: Novos componentes em pasta dedicada `src/components/tasks/`
-5. **Hooks Dedicados**: Novos hooks nao alteram hooks existentes
+```sql
+-- Garantir indice para otimizar DELETE
+CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at 
+ON public.webhook_logs(created_at);
+
+-- Registrar cron job para limpeza diaria as 3h
+SELECT cron.schedule(
+  'cleanup-webhook-logs-daily',
+  '0 3 * * *',
+  $$
+  DELETE FROM public.webhook_logs
+  WHERE created_at < NOW() - INTERVAL '30 days';
+  $$
+);
+```
 
 ---
 
-## Resultado Esperado
+## Monitoramento
 
-### Interface Principal
-- Acesso via sidebar "Tarefas"
-- Visualizacao Kanban como padrao
-- Alternancia facil entre visualizacoes
-- Filtros persistentes
+Apos implementacao, verificar execucao:
 
-### Funcionalidades
-- Criar tarefa com titulo, descricao, atribuidos, data, prioridade, categoria
-- Arrastar tarefas entre colunas do Kanban
-- Marcar como concluida
-- Adicionar comentarios/progresso
-- Ver historico de alteracoes
-- Dashboard com metricas
+```sql
+-- Ver ultimas execucoes
+SELECT jobid, runid, job_pid, status, return_message, start_time, end_time
+FROM cron.job_run_details
+WHERE jobid = (SELECT jobid FROM cron.job WHERE jobname = 'cleanup-webhook-logs-daily')
+ORDER BY start_time DESC
+LIMIT 10;
+```
 
-### Indicadores Visuais
-- Cores de prioridade (vermelho urgente, laranja alta, azul media, cinza baixa)
-- Badge de tarefas atrasadas
-- Avatares dos atribuidos
-- Contagem de comentarios
+---
+
+## Impacto Esperado
+
+| Antes | Depois (30 dias) |
+|-------|------------------|
+| 47.374 registros | ~46.800 registros |
+| 50 MB | ~48 MB |
+| Crescimento ilimitado | Maximo ~30 dias de dados |
+
+**Estimativa de economia mensal:** ~1.5 MB/mes de dados removidos automaticamente, evitando acumulo excessivo.
+
+---
+
+## Garantia de Nao-Regressao
+
+1. **Tabela isolada**: `webhook_logs` nao tem FKs para outras tabelas
+2. **Dados tecnicos**: Apenas logs de debug, nao dados de negocio
+3. **Cron independente**: Novo job nao interfere nos 8 existentes
+4. **Horario off-peak**: Execucao as 3h minimiza impacto
