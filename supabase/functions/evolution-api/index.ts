@@ -616,6 +616,8 @@ serve(async (req) => {
         // Auto-configure settings to ignore groups by default
         try {
           const settingsPayload = {
+            rejectCall: false,    // Required by Evolution API v2
+            msgCall: "",
             groupsIgnore: true,
             alwaysOnline: false,
             readMessages: false,
@@ -735,6 +737,8 @@ serve(async (req) => {
               // CRITICAL: Configure groupsIgnore=true to prevent AI from responding in groups
               try {
                 const settingsPayload = {
+                  rejectCall: false,    // Required by Evolution API v2
+                  msgCall: "",
                   groupsIgnore: true,
                   alwaysOnline: false,
                   readMessages: false,
@@ -1434,6 +1438,8 @@ serve(async (req) => {
                 // CRITICAL: Configure groupsIgnore=true to prevent AI from responding in groups
                 try {
                   const settingsPayload = {
+                    rejectCall: false,    // Required by Evolution API v2
+                    msgCall: "",
                     groupsIgnore: true,
                     alwaysOnline: false,
                     readMessages: false,
@@ -2383,6 +2389,8 @@ serve(async (req) => {
         // Auto-configure settings to ignore groups by default
         try {
           const settingsPayload = {
+            rejectCall: false,    // Required by Evolution API v2
+            msgCall: "",
             groupsIgnore: true,
             alwaysOnline: false,
             readMessages: false,

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Search,
   Plus,
@@ -98,15 +99,15 @@ export default function Connections() {
   const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
 
   const MAX_POLLS = 60;
-  const BASE_POLL_INTERVAL = 2000; // 2 seconds base
-  const MAX_POLL_INTERVAL = 10000; // 10 seconds max
+  const BASE_POLL_INTERVAL = 1000; // 1 second base - more responsive
+  const MAX_POLL_INTERVAL = 5000; // 5 seconds max
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pollCountRef = useRef(0);
 
-  // Calculate polling interval with exponential backoff
+  // Calculate polling interval with slower exponential backoff
   const getPollingInterval = useCallback((count: number): number => {
-    // Increase interval every 10 polls, up to MAX_POLL_INTERVAL
-    const multiplier = Math.pow(1.5, Math.floor(count / 10));
+    // Increase interval every 10 polls, up to MAX_POLL_INTERVAL - slower backoff
+    const multiplier = Math.pow(1.3, Math.floor(count / 10));
     return Math.min(BASE_POLL_INTERVAL * multiplier, MAX_POLL_INTERVAL);
   }, []);
 
@@ -129,6 +130,51 @@ export default function Connections() {
     }
     pollCountRef.current = 0;
   }, []);
+
+  // Realtime subscription for instant connection detection
+  useEffect(() => {
+    if (!isQRDialogOpen || !currentInstanceId) return;
+
+    console.log("[Connections] Setting up Realtime subscription for:", currentInstanceId);
+
+    const channel = supabase
+      .channel(`qr-connect-${currentInstanceId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'whatsapp_instances',
+          filter: `id=eq.${currentInstanceId}`,
+        },
+        (payload) => {
+          const newStatus = (payload.new as { status?: string })?.status;
+          console.log("[Connections] Realtime update received:", newStatus);
+
+          if (newStatus === 'connected') {
+            console.log("[Connections] Instance connected via Realtime! Stopping poll.");
+            stopPolling();
+            setConnectionStatus("Conectado!");
+            setCurrentQRCode(null);
+            refetch();
+
+            setTimeout(() => {
+              setIsQRDialogOpen(false);
+              setConnectionStatus(null);
+              setPollCount(0);
+            }, 1000);
+          } else if (newStatus === 'awaiting_qr') {
+            setConnectionStatus("Escaneie o QR Code");
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log("[Connections] Cleaning up Realtime channel");
+      supabase.removeChannel(channel);
+    };
+  }, [isQRDialogOpen, currentInstanceId, stopPolling, refetch]);
 
   // Poll once and schedule next poll with backoff
   const pollOnce = useCallback(async (instanceId: string) => {
@@ -155,12 +201,12 @@ export default function Connections() {
         setCurrentQRCode(null); // Hide QR code
         await refetch(); // Refresh instance list
         
-        // Close dialog after showing success
+        // Close dialog after showing success (reduced delay)
         setTimeout(() => {
           setIsQRDialogOpen(false);
           setConnectionStatus(null);
           setPollCount(0);
-        }, 1500);
+        }, 1000);
         return;
       } else if (result.qrCode && result.qrCode !== currentQRCode) {
         // QR code updated (e.g., expired and regenerated)

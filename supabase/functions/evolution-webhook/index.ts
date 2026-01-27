@@ -3544,6 +3544,8 @@ serve(async (req) => {
             try {
               const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
               const settingsPayload = {
+                rejectCall: false,    // Required by Evolution API v2
+                msgCall: "",
                 groupsIgnore: true,
                 alwaysOnline: false,
                 readMessages: false,
