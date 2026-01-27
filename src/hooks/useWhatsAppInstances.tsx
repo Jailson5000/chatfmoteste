@@ -69,31 +69,7 @@ export function useWhatsAppInstances() {
     enabled: !!lawFirm?.id,
   });
 
-  // Real-time subscription for instant updates
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-
-    const channel = supabase
-      .channel('whatsapp-instances-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'whatsapp_instances',
-          filter: `law_firm_id=eq.${lawFirm.id}`,
-        },
-        (payload) => {
-          console.log("[useWhatsAppInstances] Realtime update:", payload.eventType);
-          queryClient.invalidateQueries({ queryKey: ["whatsapp-instances", lawFirm.id] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirm?.id, queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   const instancesQueryKey = ["whatsapp-instances", lawFirm?.id] as const;
 

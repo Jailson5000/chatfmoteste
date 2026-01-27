@@ -41,29 +41,7 @@ export function useAgendaClients() {
     },
   });
 
-  // Realtime subscription for clients changes
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-    const channel = supabase
-      .channel("agenda-clients-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "clients",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["agenda-clients"] });
-          queryClient.invalidateQueries({ queryKey: ["clients"] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   const createClient = useMutation({
     mutationFn: async (client: Partial<AgendaClient>) => {

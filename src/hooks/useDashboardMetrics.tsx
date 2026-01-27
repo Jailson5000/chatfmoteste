@@ -1,7 +1,6 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "./useLawFirm";
-import { useEffect } from "react";
 import { startOfDay, endOfDay, subDays, startOfMonth, parseISO, format } from "date-fns";
 import { DateRange } from "react-day-picker";
 
@@ -44,7 +43,6 @@ export interface TimeSeriesData {
 
 export function useDashboardMetrics(filters: DashboardFilters) {
   const { lawFirm } = useLawFirm();
-  const queryClient = useQueryClient();
 
   // Calculate date range
   const getDateRange = () => {
@@ -330,48 +328,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
     staleTime: 30000,
   });
 
-  // Real-time subscription
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-
-    const channel = supabase
-      .channel("dashboard-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "messages",
-        },
-        () => {
-          // Debounce refetch
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ["dashboard-message-metrics", lawFirm.id] });
-            queryClient.invalidateQueries({ queryKey: ["dashboard-attendant-metrics", lawFirm.id] });
-            queryClient.invalidateQueries({ queryKey: ["dashboard-time-series", lawFirm.id] });
-          }, 1000);
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "conversations",
-        },
-        () => {
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ["dashboard-message-metrics", lawFirm.id] });
-            queryClient.invalidateQueries({ queryKey: ["dashboard-attendant-metrics", lawFirm.id] });
-          }, 1000);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirm?.id, queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   return {
     messageMetrics: messageMetrics || { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 },

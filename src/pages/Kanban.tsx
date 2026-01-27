@@ -116,15 +116,7 @@ export default function Kanban() {
     return [...humans, ...aiAgents];
   }, [members, automations]);
 
-  // Real-time subscription
-  useEffect(() => {
-    const channel = supabase
-      .channel('conversations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {})
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   // Separate archived conversations
   const archivedConversations = useMemo(() => {

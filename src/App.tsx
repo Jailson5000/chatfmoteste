@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import { TenantProvider } from "@/hooks/useTenant";
+import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
@@ -68,11 +69,12 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TenantProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
+      <RealtimeSyncProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
           {/* Public routes */}
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Navigate to="/auth" replace />} />
@@ -331,11 +333,12 @@ const App = () => (
             <Route path="tutorials" element={<GlobalAdminTutorials />} />
           </Route>
           
-            {/* Catch-all route */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
+              {/* Catch-all route */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </RealtimeSyncProvider>
     </TenantProvider>
   </QueryClientProvider>
 );
