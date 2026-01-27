@@ -1822,20 +1822,7 @@ export function KanbanChatPanel({
       const fileName = `audio_${Date.now()}.webm`;
       const mediaBase64 = await blobToBase64(audioBlob);
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("chat-media")
-        .upload(getChatMediaPath(fileName), audioBlob);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: urlData } = supabase.storage
-        .from("chat-media")
-        .getPublicUrl(getChatMediaPath(fileName));
-      
-      // Auto-assign to current user if:
-      // 1. Handler is AI, or
-      // 2. No responsible assigned, or
-      // 3. Another attendant is assigned (transfer to current user)
+      // Auto-assign to current user
       const { data: userData } = await supabase.auth.getUser();
       const currentUserId = userData.user?.id;
       
@@ -1855,8 +1842,19 @@ export function KanbanChatPanel({
       
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
-        // Widget/Tray: save audio message directly to database
+        // Widget/Tray: upload to storage and save to database
         console.log('[Kanban] Widget/Tray channel - saving audio directly to DB');
+        
+        const { error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(getChatMediaPath(fileName), audioBlob);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(getChatMediaPath(fileName));
+        
         const { error: insertError } = await supabase
           .from("messages")
           .insert({
@@ -1867,12 +1865,11 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
-            status: "sent", // Ensure status is set for proper Realtime detection
+            status: "sent",
           });
         
         if (insertError) throw insertError;
         
-        // Update conversation timestamp
         await supabase
           .from("conversations")
           .update({ 
@@ -1882,12 +1879,12 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: use Evolution API
+        // WhatsApp: send directly via Evolution API (no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending audio via Evolution API');
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_media",
             conversationId,
-            mediaUrl: urlData.publicUrl,
             mediaBase64,
             mediaType: "audio",
             mimeType: audioBlob.type || "audio/webm",
@@ -1895,7 +1892,15 @@ export function KanbanChatPanel({
           },
         });
         
-        if (response.error) throw response.error;
+        if (response.error) {
+          console.error('[Kanban] Evolution API error:', response.error);
+          throw new Error(response.error.message || "Falha ao enviar áudio");
+        }
+        
+        if (!response.data?.success) {
+          console.error('[Kanban] Evolution API failed:', response.data);
+          throw new Error(response.data?.error || "Falha ao enviar áudio");
+        }
       }
       
       toast({ title: "Áudio enviado" });
@@ -1904,6 +1909,7 @@ export function KanbanChatPanel({
       console.error("Erro ao enviar áudio:", error);
       toast({
         title: "Erro ao enviar áudio",
+        description: error instanceof Error ? error.message : "Falha ao enviar",
         variant: "destructive",
       });
     } finally {
@@ -1921,21 +1927,8 @@ export function KanbanChatPanel({
     setIsSending(true);
     try {
       const mediaBase64 = await blobToBase64(file);
-      const fileName = `${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("chat-media")
-        .upload(getChatMediaPath(fileName), file);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: urlData } = supabase.storage
-        .from("chat-media")
-        .getPublicUrl(getChatMediaPath(fileName));
-      
-      // Auto-assign to current user if:
-      // 1. Handler is AI, or
-      // 2. No responsible assigned, or
-      // 3. Another attendant is assigned (transfer to current user)
+
+      // Auto-assign to current user
       const { data: userData } = await supabase.auth.getUser();
       const currentUserId = userData.user?.id;
       
@@ -1955,8 +1948,20 @@ export function KanbanChatPanel({
       
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
-        // Widget/Tray: save file directly to database
+        // Widget/Tray: upload to storage and save to database
         console.log('[Kanban] Widget/Tray channel - saving file directly to DB');
+        
+        const fileName = `${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(getChatMediaPath(fileName), file);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(getChatMediaPath(fileName));
+        
         const { error: insertError } = await supabase
           .from("messages")
           .insert({
@@ -1967,12 +1972,11 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
-            status: "sent", // Ensure status is set for proper Realtime detection
+            status: "sent",
           });
         
         if (insertError) throw insertError;
         
-        // Update conversation timestamp
         await supabase
           .from("conversations")
           .update({ 
@@ -1982,12 +1986,12 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: use Evolution API
+        // WhatsApp: send directly via Evolution API (no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending file via Evolution API');
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_media",
             conversationId,
-            mediaUrl: urlData.publicUrl,
             mediaBase64,
             mediaType: mediaType === "image" ? "image" : "document",
             mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
@@ -1995,17 +1999,23 @@ export function KanbanChatPanel({
           },
         });
         
-        if (response.error) throw response.error;
+        if (response.error) {
+          console.error('[Kanban] Evolution API error:', response.error);
+          throw new Error(response.error.message || "Falha ao enviar arquivo");
+        }
+        
+        if (!response.data?.success) {
+          console.error('[Kanban] Evolution API failed:', response.data);
+          throw new Error(response.data?.error || "Falha ao enviar arquivo");
+        }
       }
-      
-      // Do NOT add optimistic message - backend already inserted via send_media
-      // Realtime will bring the message with correct whatsapp_message_id
       
       toast({ title: `${mediaType === "image" ? "Imagem" : "Documento"} enviado` });
     } catch (error) {
       console.error("Erro ao enviar arquivo:", error);
       toast({
         title: "Erro ao enviar arquivo",
+        description: error instanceof Error ? error.message : "Falha ao enviar",
         variant: "destructive",
       });
     } finally {
@@ -2030,22 +2040,8 @@ export function KanbanChatPanel({
 
     try {
       const mediaBase64 = await blobToBase64(mediaPreview.file);
-      // Upload file to storage
-      const fileName = `${Date.now()}_${mediaPreview.file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("chat-media")
-        .upload(getChatMediaPath(fileName), mediaPreview.file);
 
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
-        .from("chat-media")
-        .getPublicUrl(getChatMediaPath(fileName));
-
-      // Auto-assign to current user if:
-      // 1. Handler is AI, or
-      // 2. No responsible assigned, or
-      // 3. Another attendant is assigned (transfer to current user)
+      // Auto-assign to current user
       const { data: userData } = await supabase.auth.getUser();
       const currentUserId = userData.user?.id;
       
@@ -2065,8 +2061,20 @@ export function KanbanChatPanel({
 
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
-        // Widget/Tray: save media directly to database
+        // Widget/Tray: upload to storage and save to database
         console.log('[Kanban] Widget/Tray channel - saving preview media directly to DB');
+        
+        const fileName = `${Date.now()}_${mediaPreview.file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(getChatMediaPath(fileName), mediaPreview.file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(getChatMediaPath(fileName));
+        
         const { error: insertError } = await supabase
           .from("messages")
           .insert({
@@ -2077,12 +2085,11 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
-            status: "sent", // Ensure status is set for proper Realtime detection
+            status: "sent",
           });
         
         if (insertError) throw insertError;
         
-        // Update conversation timestamp
         await supabase
           .from("conversations")
           .update({ 
@@ -2092,12 +2099,12 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: use Evolution API
+        // WhatsApp: send directly via Evolution API (no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending media via Evolution API');
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_media",
             conversationId,
-            mediaUrl: urlData.publicUrl,
             mediaBase64,
             mediaType: mediaPreview.mediaType,
             mimeType: mediaPreview.file.type || "application/octet-stream",
@@ -2106,17 +2113,23 @@ export function KanbanChatPanel({
           },
         });
 
-        if (response.error) throw response.error;
+        if (response.error) {
+          console.error('[Kanban] Evolution API error:', response.error);
+          throw new Error(response.error.message || "Falha ao enviar mídia");
+        }
+        
+        if (!response.data?.success) {
+          console.error('[Kanban] Evolution API failed:', response.data);
+          throw new Error(response.data?.error || "Falha ao enviar mídia");
+        }
       }
-
-      // Do NOT add optimistic message - backend already inserted via send_media
-      // Realtime will bring the message with correct whatsapp_message_id
 
       toast({ title: "Mídia enviada" });
     } catch (error) {
       console.error("Erro ao enviar mídia:", error);
       toast({
         title: "Erro ao enviar mídia",
+        description: error instanceof Error ? error.message : "Falha ao enviar",
         variant: "destructive",
       });
     } finally {
@@ -2128,21 +2141,8 @@ export function KanbanChatPanel({
     setIsSending(true);
     try {
       const mediaBase64 = await blobToBase64(file);
-      const fileName = `${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("chat-media")
-        .upload(getChatMediaPath(fileName), file);
 
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage
-        .from("chat-media")
-        .getPublicUrl(getChatMediaPath(fileName));
-
-      // Auto-assign to current user if:
-      // 1. Handler is AI, or
-      // 2. No responsible assigned, or
-      // 3. Another attendant is assigned (transfer to current user)
+      // Auto-assign to current user
       const { data: userData } = await supabase.auth.getUser();
       const currentUserId = userData.user?.id;
       
@@ -2162,8 +2162,20 @@ export function KanbanChatPanel({
 
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
-        // Widget/Tray: save media directly to database
+        // Widget/Tray: upload to storage and save to database
         console.log('[Kanban] Widget/Tray channel - saving media directly to DB');
+        
+        const fileName = `${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(getChatMediaPath(fileName), file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(getChatMediaPath(fileName));
+        
         const { error: insertError } = await supabase
           .from("messages")
           .insert({
@@ -2174,12 +2186,11 @@ export function KanbanChatPanel({
             sender_type: "human",
             sender_id: currentUserId,
             ai_generated: false,
-            status: "sent", // Ensure status is set for proper Realtime detection
+            status: "sent",
           });
         
         if (insertError) throw insertError;
         
-        // Update conversation timestamp
         await supabase
           .from("conversations")
           .update({ 
@@ -2189,12 +2200,12 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: use Evolution API
+        // WhatsApp: send directly via Evolution API (no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending media via Evolution API');
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_media",
             conversationId,
-            mediaUrl: urlData.publicUrl,
             mediaBase64,
             mediaType: type,
             mimeType: file.type || "application/octet-stream",
@@ -2202,7 +2213,15 @@ export function KanbanChatPanel({
           },
         });
 
-        if (response.error) throw response.error;
+        if (response.error) {
+          console.error('[Kanban] Evolution API error:', response.error);
+          throw new Error(response.error.message || "Falha ao enviar arquivo");
+        }
+        
+        if (!response.data?.success) {
+          console.error('[Kanban] Evolution API failed:', response.data);
+          throw new Error(response.data?.error || "Falha ao enviar arquivo");
+        }
       }
 
       toast({ title: type === "audio" ? "Áudio enviado" : "Documento enviado" });
@@ -2210,6 +2229,7 @@ export function KanbanChatPanel({
       console.error("Erro ao enviar arquivo:", error);
       toast({
         title: "Erro ao enviar arquivo",
+        description: error instanceof Error ? error.message : "Falha ao enviar",
         variant: "destructive",
       });
     } finally {
