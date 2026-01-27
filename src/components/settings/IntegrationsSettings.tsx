@@ -1,4 +1,4 @@
-import { Link2, PenTool, ShoppingCart } from "lucide-react";
+import { Link2, PenTool } from "lucide-react";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { AgendaProIntegration } from "./integrations/AgendaProIntegration";
 import { IntegrationCard } from "./IntegrationCard";
@@ -37,13 +37,6 @@ function DocuSignIcon() {
   );
 }
 
-function TrayCommerceIcon() {
-  return (
-    <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
-      <ShoppingCart className="h-5 w-5 text-white" />
-    </div>
-  );
-}
 
 export function IntegrationsSettings() {
   return (
@@ -94,12 +87,6 @@ export function IntegrationsSettings() {
           isComingSoon
         />
         
-        <IntegrationCard
-          icon={<TrayCommerceIcon />}
-          title="Tray Commerce"
-          description="Integre pedidos, produtos, cupons e frete do seu e-commerce Tray."
-          isComingSoon
-        />
       </div>
     </div>
   );
