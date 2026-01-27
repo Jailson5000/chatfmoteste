@@ -72,7 +72,7 @@ export function MediaPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
-      <DialogContent className="sm:max-w-md fixed left-[50%] top-[50%] translate-x-[-50%] translate-y-[-50%] z-[100]">
+      <DialogContent className="z-[100] w-[min(92vw,640px)] sm:max-w-xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {mediaType === "image" && "Enviar imagem"}
@@ -105,7 +105,10 @@ export function MediaPreviewDialog({
             ) : (
               <div className="p-8 flex flex-col items-center gap-3">
                 {getMediaIcon()}
-                <p className="text-sm font-medium text-center truncate max-w-full">
+                <p
+                  className="text-sm font-medium text-center break-words"
+                  title={file?.name || undefined}
+                >
                   {file?.name || "Arquivo"}
                 </p>
                 {file && (
@@ -120,7 +123,9 @@ export function MediaPreviewDialog({
           {/* File info */}
           {file && mediaType !== "document" && (
             <div className="text-sm text-muted-foreground text-center">
-              <p className="truncate">{file.name}</p>
+              <p className="break-words" title={file.name}>
+                {file.name}
+              </p>
               <p>{formatFileSize(file.size)}</p>
             </div>
           )}
