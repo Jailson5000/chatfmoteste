@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { format, addMinutes, setHours, setMinutes, isBefore, startOfDay, parseISO } from "date-fns";
+import { format, addMinutes, setHours, setMinutes, isBefore, startOfDay, parseISO, addWeeks, addMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, Loader2, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -17,6 +17,8 @@ import { useAgendaProServices } from "@/hooks/useAgendaProServices";
 import { useAgendaProProfessionals } from "@/hooks/useAgendaProProfessionals";
 import { useAgendaProClients } from "@/hooks/useAgendaProClients";
 import { useAgendaProAppointments } from "@/hooks/useAgendaProAppointments";
+import { RecurrenceSelector, RecurrenceConfig, generateRecurrenceRule, generateRecurringDates } from "./RecurrenceSelector";
+import { useToast } from "@/hooks/use-toast";
 
 interface AgendaProNewAppointmentDialogProps {
   open: boolean;
@@ -45,6 +47,13 @@ export function AgendaProNewAppointmentDialog({
   const [clientEmail, setClientEmail] = useState("");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceConfig>({
+    enabled: false,
+    frequency: "weekly",
+    count: 4,
+  });
+  
+  const { toast } = useToast();
 
   const { activeServices } = useAgendaProServices();
   const { activeProfessionals } = useAgendaProProfessionals();
@@ -64,6 +73,7 @@ export function AgendaProNewAppointmentDialog({
       setClientPhone("");
       setClientEmail("");
       setNotes("");
+      setRecurrence({ enabled: false, frequency: "weekly", count: 4 });
     }
   }, [open, defaultDate]);
 
@@ -126,19 +136,70 @@ export function AgendaProNewAppointmentDialog({
       const duration = selectedService?.duration_minutes || 30;
       const endTime = addMinutes(startTime, duration);
 
-      await createAppointment.mutateAsync({
-        service_id: selectedServiceId,
-        professional_id: selectedProfessionalId,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
-        duration_minutes: duration,
-        client_name: clientName,
-        client_phone: clientPhone || null,
-        client_email: clientEmail || null,
-        notes: notes || null,
-        status: "scheduled",
-        source: "manual",
-      });
+      // Handle recurring appointments
+      if (recurrence.enabled) {
+        const recurrenceRule = generateRecurrenceRule(recurrence);
+        const dates = generateRecurringDates(startTime, recurrence);
+        
+        // Create the first appointment as parent
+        const parentResult = await createAppointment.mutateAsync({
+          service_id: selectedServiceId,
+          professional_id: selectedProfessionalId,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          duration_minutes: duration,
+          client_name: clientName,
+          client_phone: clientPhone || null,
+          client_email: clientEmail || null,
+          notes: notes || null,
+          status: "scheduled",
+          source: "manual",
+          is_recurring: true,
+          recurrence_rule: recurrenceRule,
+        });
+
+        // Create child appointments (skip first one which is the parent)
+        const childPromises = dates.slice(1).map(async (date) => {
+          const childEndTime = addMinutes(date, duration);
+          return createAppointment.mutateAsync({
+            service_id: selectedServiceId,
+            professional_id: selectedProfessionalId,
+            start_time: date.toISOString(),
+            end_time: childEndTime.toISOString(),
+            duration_minutes: duration,
+            client_name: clientName,
+            client_phone: clientPhone || null,
+            client_email: clientEmail || null,
+            notes: notes || null,
+            status: "scheduled",
+            source: "manual",
+            is_recurring: true,
+            recurrence_rule: recurrenceRule,
+            parent_appointment_id: parentResult.id,
+          });
+        });
+
+        await Promise.all(childPromises);
+        toast({ 
+          title: `${recurrence.count} agendamentos criados`,
+          description: `Série recorrente criada com sucesso`,
+        });
+      } else {
+        // Single appointment
+        await createAppointment.mutateAsync({
+          service_id: selectedServiceId,
+          professional_id: selectedProfessionalId,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          duration_minutes: duration,
+          client_name: clientName,
+          client_phone: clientPhone || null,
+          client_email: clientEmail || null,
+          notes: notes || null,
+          status: "scheduled",
+          source: "manual",
+        });
+      }
 
       onOpenChange(false);
     } finally {
@@ -277,6 +338,15 @@ export function AgendaProNewAppointmentDialog({
               </ScrollArea>
             </div>
 
+            {/* Recurrence Options */}
+            {selectedTime && (
+              <RecurrenceSelector
+                value={recurrence}
+                onChange={setRecurrence}
+                startDate={selectedDate}
+              />
+            )}
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setStep("service")}>
                 Voltar
@@ -366,6 +436,14 @@ export function AgendaProNewAppointmentDialog({
               <div className="text-muted-foreground">
                 {format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR })} às {selectedTime}
               </div>
+              {recurrence.enabled && (
+                <div className="text-primary font-medium mt-1">
+                  🔄 Série de {recurrence.count} agendamentos ({
+                    recurrence.frequency === "weekly" ? "semanal" :
+                    recurrence.frequency === "biweekly" ? "quinzenal" : "mensal"
+                  })
+                </div>
+              )}
             </div>
 
             <DialogFooter>
@@ -376,10 +454,10 @@ export function AgendaProNewAppointmentDialog({
                 {isSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Salvando...
+                    {recurrence.enabled ? `Criando ${recurrence.count} agendamentos...` : "Salvando..."}
                   </>
                 ) : (
-                  "Criar Agendamento"
+                  recurrence.enabled ? `Criar ${recurrence.count} Agendamentos` : "Criar Agendamento"
                 )}
               </Button>
             </DialogFooter>

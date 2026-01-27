@@ -12,7 +12,8 @@ import {
   MessageSquare,
   Loader2,
   History,
-  CalendarClock
+  CalendarClock,
+  Repeat
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
 
 export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProAppointmentSheetProps) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelSeriesDialogOpen, setCancelSeriesDialogOpen] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -76,7 +78,7 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
 
   const { lawFirm } = useLawFirm();
   const { settings } = useAgendaPro();
-  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow, rescheduleAppointment } = useAgendaProAppointments();
+  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow, rescheduleAppointment, cancelSeries } = useAgendaProAppointments();
 
   const status = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
   const StatusIcon = status.icon;
@@ -233,6 +235,17 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
     }
   };
 
+  const handleCancelSeries = async () => {
+    setIsUpdating(true);
+    try {
+      await cancelSeries.mutateAsync({ parentId: appointment.id, reason: cancelReason });
+      setCancelSeriesDialogOpen(false);
+      onClose();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <>
       <Sheet open={true} onOpenChange={onClose}>
@@ -248,6 +261,17 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
           </SheetHeader>
 
           <div className="space-y-6">
+            {/* Recurring Badge */}
+            {appointment.is_recurring && (
+              <div className="flex items-center gap-2 text-sm bg-primary/10 text-primary rounded-lg px-3 py-2">
+                <Repeat className="h-4 w-4" />
+                <span className="font-medium">
+                  Agendamento Recorrente
+                  {appointment.parent_appointment_id ? " (parte de série)" : " (início da série)"}
+                </span>
+              </div>
+            )}
+
             {/* Service Info */}
             <div className="space-y-2">
               <h3 className="text-lg font-semibold" style={{ color: appointment.service?.color }}>
@@ -390,6 +414,20 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
                   >
                     <XCircle className="h-4 w-4 mr-2" />
                     Cancelar
+                  </Button>
+                )}
+
+                {/* Cancel Series Option - only for recurring appointments */}
+                {appointment.is_recurring && !appointment.parent_appointment_id && 
+                 appointment.status !== "cancelled" && appointment.status !== "completed" && (
+                  <Button 
+                    variant="outline"
+                    className="w-full col-span-2 text-destructive hover:text-destructive border-destructive/30"
+                    onClick={() => setCancelSeriesDialogOpen(true)}
+                    disabled={isUpdating}
+                  >
+                    <Repeat className="h-4 w-4 mr-2" />
+                    Cancelar Toda a Série
                   </Button>
                 )}
               </div>
@@ -541,6 +579,42 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Series Dialog */}
+      <AlertDialog open={cancelSeriesDialogOpen} onOpenChange={setCancelSeriesDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Repeat className="h-5 w-5 text-destructive" />
+              Cancelar Série de Agendamentos
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso cancelará <strong>todos os agendamentos</strong> desta série, incluindo os futuros. 
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Motivo do cancelamento (opcional)</label>
+            <Textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Informe o motivo..."
+              rows={2}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleCancelSeries} 
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isUpdating}
+            >
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Cancelar Toda a Série
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
