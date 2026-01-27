@@ -1463,11 +1463,13 @@ export function MessageBubble({
   };
 
   const renderMedia = () => {
+    // Allow fetching media via get_media API for all media types when URL is missing
     const canFetchWithoutUrl =
       !mediaUrl &&
       !!whatsappMessageId &&
       !!conversationId &&
-      (messageType === "image" || messageType === "document");
+      (messageType === "image" || messageType === "document" || 
+       messageType === "audio" || messageType === "video" || messageType === "ptt");
 
     const srcForMedia = mediaUrl || "";
 
@@ -1487,7 +1489,8 @@ export function MessageBubble({
       );
     }
 
-    if (isAudio && mediaUrl) {
+    // Allow audio to render with fallback fetch when URL is missing
+    if (isAudio && (mediaUrl || canFetchWithoutUrl)) {
       return (
         <AudioPlayer
           src={srcForMedia}
@@ -1499,7 +1502,8 @@ export function MessageBubble({
       );
     }
 
-    if (isVideo && mediaUrl) {
+    // Allow video to render with fallback fetch when URL is missing
+    if (isVideo && (mediaUrl || canFetchWithoutUrl)) {
       return (
         <VideoPlayer
           src={srcForMedia}
@@ -1526,11 +1530,13 @@ export function MessageBubble({
     return null;
   };
 
+  // Also update the outer canFetchWithoutUrl for hasMedia detection
   const canFetchWithoutUrl =
     !mediaUrl &&
     !!whatsappMessageId &&
     !!conversationId &&
-    (messageType === "image" || messageType === "document");
+    (messageType === "image" || messageType === "document" || 
+     messageType === "audio" || messageType === "video" || messageType === "ptt");
 
   const hasMedia =
     (!!mediaUrl &&
