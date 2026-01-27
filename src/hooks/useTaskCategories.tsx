@@ -63,7 +63,7 @@ export function useTaskCategories() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["task_categories", lawFirm?.id] });
       toast({ title: "Categoria criada" });
     },
     onError: (error) => {
@@ -93,7 +93,7 @@ export function useTaskCategories() {
       return { id };
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["task_categories", lawFirm?.id] });
     },
   });
 
@@ -108,7 +108,7 @@ export function useTaskCategories() {
       return categoryId;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["task_categories", lawFirm?.id] });
       toast({ title: "Categoria excluída" });
     },
     onError: (error) => {
@@ -131,7 +131,7 @@ export function useTaskCategories() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["task_categories"] });
+      queryClient.invalidateQueries({ queryKey: ["task_categories", lawFirm?.id] });
     },
   });
 

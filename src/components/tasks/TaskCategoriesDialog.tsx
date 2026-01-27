@@ -153,8 +153,8 @@ export function TaskCategoriesDialog({
             )}
 
             {/* Categories List */}
-            <ScrollArea className="max-h-[300px]">
-              <div className="space-y-2">
+            <ScrollArea className="h-[280px] pr-3">
+              <div className="space-y-2 pb-2">
                 {categories.map((category) => (
                   <div
                     key={category.id}
