@@ -114,30 +114,7 @@ export function useAgendaProAppointments(options?: {
     enabled: !!lawFirm?.id,
   });
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-
-    const channel = supabase
-      .channel('agenda-pro-appointments-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'agenda_pro_appointments',
-          filter: `law_firm_id=eq.${lawFirm.id}`,
-        },
-        () => {
-          refetch();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirm?.id, refetch]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   // Helper to log activity
   const logActivity = async (appointmentId: string, action: string, details?: Record<string, any>) => {

@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "./useLawFirm";
@@ -38,30 +37,7 @@ export function useCustomStatuses() {
     enabled: !!lawFirm?.id,
   });
 
-  // Real-time subscription for custom_statuses table
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-
-    const channel = supabase
-      .channel(`custom-statuses-realtime-${lawFirm.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'custom_statuses',
-          filter: `law_firm_id=eq.${lawFirm.id}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["custom_statuses", lawFirm.id] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirm?.id, queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   const createStatus = useMutation({
     mutationFn: async (status: { name: string; color: string }) => {

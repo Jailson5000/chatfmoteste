@@ -140,30 +140,7 @@ export function useAppointments(date?: Date) {
     enabled: !!lawFirm?.id,
   });
 
-  // Realtime subscription for appointments changes
-  useEffect(() => {
-    const channel = supabase
-      .channel("appointments-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "appointments",
-        },
-        () => {
-          // Invalidate queries to refresh data
-          queryClient.invalidateQueries({ queryKey: ["appointments"] });
-          queryClient.invalidateQueries({ queryKey: ["google-calendar-events"] });
-          queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   const createAppointment = useMutation({
     mutationFn: async (appointment: Partial<Appointment>) => {

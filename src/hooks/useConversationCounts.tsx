@@ -1,8 +1,7 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useAuth } from "@/hooks/useAuth";
-import { useEffect } from "react";
 
 interface TabCounts {
   chat: number;
@@ -15,11 +14,11 @@ interface TabCounts {
 /**
  * Hook to fetch conversation tab counts directly from the database.
  * This ensures consistent counts regardless of pagination state.
+ * Real-time updates are handled by centralized useRealtimeSync.
  */
 export function useConversationCounts() {
   const { lawFirm } = useLawFirm();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
 
   const { data: counts, isLoading, refetch } = useQuery({
     queryKey: ["conversation-counts", lawFirm?.id, user?.id],
@@ -55,33 +54,7 @@ export function useConversationCounts() {
     refetchInterval: 30000, // Refetch every 30 seconds as fallback
   });
 
-  // Subscribe to realtime changes to invalidate counts
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-
-    const channel = supabase
-      .channel('conversation-counts-sync')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations',
-          filter: `law_firm_id=eq.${lawFirm.id}`
-        },
-        () => {
-          // Debounce: wait a bit before refetching to batch rapid changes
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
-          }, 500);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirm?.id, queryClient]);
+  // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   return {
     counts: counts || { chat: 0, ai: 0, queue: 0, all: 0, archived: 0 },
