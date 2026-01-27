@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -801,6 +802,7 @@ export default function GlobalAdminCompanies() {
                       <TableHead>Subdomínio</TableHead>
                       <TableHead>Contato</TableHead>
                       <TableHead>Plano Escolhido</TableHead>
+                      <TableHead className="text-center">Trial 7 dias</TableHead>
                       <TableHead>Cadastrada em</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
@@ -810,6 +812,7 @@ export default function GlobalAdminCompanies() {
                       const currentPlanId = pendingPlanChanges[company.id] || company.plan_id;
                       const selectedPlan = plans.find(p => p.id === currentPlanId);
                       const hasChangedPlan = pendingPlanChanges[company.id] && pendingPlanChanges[company.id] !== company.plan_id;
+                      const isTrialEnabled = pendingTrialChanges[company.id] ?? false;
                       
                       return (
                         <TableRow key={company.id}>
@@ -865,6 +868,21 @@ export default function GlobalAdminCompanies() {
                               {hasChangedPlan && (
                                 <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
                                   Plano alterado
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <Checkbox
+                                id={`trial-${company.id}`}
+                                checked={isTrialEnabled}
+                                onCheckedChange={(checked) => handleTrialChange(company.id, checked === true)}
+                              />
+                              {isTrialEnabled && (
+                                <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400">
+                                  <Clock className="h-3 w-3 mr-1" />
+                                  7 dias
                                 </Badge>
                               )}
                             </div>
