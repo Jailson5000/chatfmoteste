@@ -279,6 +279,17 @@ export function LandingPage() {
             </div>
           </div>
 
+          {/* Badge de Trial */}
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-green-500/20 to-green-600/10 border border-green-500/30 mb-6">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+            <span className="text-sm font-medium text-green-400">
+              Teste grátis por 7 dias
+            </span>
+          </div>
+
           {/* Headline - Reduzida */}
           <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight tracking-tight">
             Amplie sua equipe,
