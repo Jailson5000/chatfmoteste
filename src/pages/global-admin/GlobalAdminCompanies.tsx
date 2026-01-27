@@ -68,6 +68,8 @@ export default function GlobalAdminCompanies() {
   const [activeTab, setActiveTab] = useState("pending");
   // State to track plan changes for pending companies
   const [pendingPlanChanges, setPendingPlanChanges] = useState<Record<string, string>>({});
+  // State to track trial checkbox for pending companies
+  const [pendingTrialChanges, setPendingTrialChanges] = useState<Record<string, boolean>>({});
   // Advanced filters state
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPlan, setFilterPlan] = useState<string>("all");
@@ -354,20 +356,34 @@ export default function GlobalAdminCompanies() {
   const handleApprove = async (company: typeof companies[0]) => {
     const selectedPlanId = pendingPlanChanges[company.id] || company.plan_id;
     const selectedPlan = plans.find(p => p.id === selectedPlanId);
+    const enableTrial = pendingTrialChanges[company.id] || false;
     
+    const trialInfo = enableTrial ? '\n🕐 Trial: 7 dias ativado' : '';
     const confirmApprove = confirm(
-      `Aprovar empresa "${company.name}"?\n\nPlano: ${selectedPlan?.name || 'Não definido'}\n\nIsso irá provisionar o APP do cliente, criar workflow n8n e enviar email de acesso.`
+      `Aprovar empresa "${company.name}"?\n\nPlano: ${selectedPlan?.name || 'Não definido'}${trialInfo}\n\nIsso irá provisionar o APP do cliente, criar workflow n8n e enviar email de acesso.`
     );
     if (!confirmApprove) return;
     await approveCompany.mutateAsync({ 
       companyId: company.id,
       planId: selectedPlanId || undefined,
+      enableTrial,
     });
-    // Clear the pending change after approval
+    // Clear the pending changes after approval
     setPendingPlanChanges(prev => {
       const { [company.id]: _, ...rest } = prev;
       return rest;
     });
+    setPendingTrialChanges(prev => {
+      const { [company.id]: _, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const handleTrialChange = (companyId: string, enabled: boolean) => {
+    setPendingTrialChanges(prev => ({
+      ...prev,
+      [companyId]: enabled,
+    }));
   };
 
   const handlePlanChange = (companyId: string, planId: string) => {

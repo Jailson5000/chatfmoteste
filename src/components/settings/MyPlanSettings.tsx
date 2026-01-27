@@ -58,7 +58,7 @@ export function MyPlanSettings() {
         .from("companies")
         .select(`
           *,
-          plan:plans(*)
+          plan:plans!companies_plan_id_fkey(*)
         `)
         .eq("law_firm_id", lawFirm.id)
         .maybeSingle();

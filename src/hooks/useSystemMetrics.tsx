@@ -50,7 +50,7 @@ export function useSystemMetrics() {
       ] = await Promise.all([
         supabase.from("companies").select("id, status", { count: "exact" }),
         supabase.from("company_usage_summary").select("*"),
-        supabase.from("companies").select("plan:plans(price)"),
+        supabase.from("companies").select("plan:plans!companies_plan_id_fkey(price)"),
       ]);
 
       // Calculate totals from usage summary (already aggregated per company)

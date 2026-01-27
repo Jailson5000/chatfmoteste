@@ -25,6 +25,7 @@ interface ApproveRequest {
   max_users?: number;
   max_instances?: number;
   auto_activate_workflow?: boolean;
+  enable_trial?: boolean;
 }
 
 serve(async (req) => {
@@ -79,7 +80,7 @@ serve(async (req) => {
 
     // Parse request body
     const body: ApproveRequest = await req.json();
-    const { company_id, action, rejection_reason, plan_id, auto_activate_workflow = true } = body;
+    const { company_id, action, rejection_reason, plan_id, auto_activate_workflow = true, enable_trial = false } = body;
     let { max_users = 5, max_instances = 2 } = body;
 
     if (!company_id || !action) {
@@ -258,6 +259,20 @@ serve(async (req) => {
     // ========================================
     console.log('[approve-company] Starting full provisioning...');
 
+    // Calculate trial dates if enable_trial is true
+    let trialType = 'none';
+    let trialStartedAt: string | null = null;
+    let trialEndsAt: string | null = null;
+    
+    if (enable_trial) {
+      trialType = 'manual';
+      trialStartedAt = new Date().toISOString();
+      const trialEndDate = new Date();
+      trialEndDate.setDate(trialEndDate.getDate() + 7);
+      trialEndsAt = trialEndDate.toISOString();
+      console.log('[approve-company] Trial enabled: 7 days until', trialEndsAt);
+    }
+
     // Update company to approved status
     await supabase
       .from('companies')
@@ -271,6 +286,10 @@ serve(async (req) => {
         client_app_status: 'creating',
         n8n_workflow_status: 'pending',
         provisioning_status: 'pending',
+        trial_type: trialType,
+        trial_started_at: trialStartedAt,
+        trial_ends_at: trialEndsAt,
+        trial_plan_id: plan_id || company.plan_id,
       })
       .eq('id', company_id);
 
