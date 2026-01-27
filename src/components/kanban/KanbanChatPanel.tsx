@@ -3103,24 +3103,28 @@ export function KanbanChatPanel({
                   </PopoverTrigger>
                   <PopoverContent className="w-48 p-2" align="start">
                     <div className="space-y-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start"
-                        onClick={() => imageInputRef.current?.click()}
-                      >
-                        <ImageIcon className="h-4 w-4 mr-2" />
-                        Enviar imagem
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start"
-                        onClick={() => documentInputRef.current?.click()}
-                      >
-                        <Paperclip className="h-4 w-4 mr-2" />
-                        Enviar documento
-                      </Button>
+                      {isWhatsAppConversation && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => imageInputRef.current?.click()}
+                          >
+                            <ImageIcon className="h-4 w-4 mr-2" />
+                            Enviar imagem
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-start"
+                            onClick={() => documentInputRef.current?.click()}
+                          >
+                            <Paperclip className="h-4 w-4 mr-2" />
+                            Enviar documento
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
