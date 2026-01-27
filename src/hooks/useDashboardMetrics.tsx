@@ -131,7 +131,8 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         .select("is_from_me, created_at, conversation_id")
         .in("conversation_id", convIds)
         .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+        .lte("created_at", endDate.toISOString())
+        .order("created_at", { ascending: true });
       
       if (error) {
         console.error("[useDashboardMetrics] Error fetching messages:", error);
@@ -142,6 +143,45 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       const received = messages?.filter(m => m.is_from_me === false).length || 0;
       const sent = messages?.filter(m => m.is_from_me === true).length || 0;
       const uniqueConversations = new Set(messages?.map(m => m.conversation_id) || []).size;
+
+      // Calculate average response time
+      let totalResponseTime = 0;
+      let responseCount = 0;
+      
+      if (messages && messages.length > 0) {
+        // Group messages by conversation
+        const messagesByConv: Record<string, typeof messages> = {};
+        for (const msg of messages) {
+          if (!messagesByConv[msg.conversation_id]) {
+            messagesByConv[msg.conversation_id] = [];
+          }
+          messagesByConv[msg.conversation_id].push(msg);
+        }
+        
+        // For each conversation, calculate response times
+        for (const convId in messagesByConv) {
+          const convMessages = messagesByConv[convId];
+          for (let i = 0; i < convMessages.length - 1; i++) {
+            const current = convMessages[i];
+            const next = convMessages[i + 1];
+            
+            // If current is from client (is_from_me = false) and next is from us (is_from_me = true)
+            if (current.is_from_me === false && next.is_from_me === true) {
+              const clientTime = new Date(current.created_at).getTime();
+              const responseTime = new Date(next.created_at).getTime();
+              const diffMinutes = (responseTime - clientTime) / (1000 * 60);
+              
+              // Only count reasonable response times (< 24 hours)
+              if (diffMinutes > 0 && diffMinutes < 1440) {
+                totalResponseTime += diffMinutes;
+                responseCount++;
+              }
+            }
+          }
+        }
+      }
+      
+      const avgResponseTime = responseCount > 0 ? Math.round(totalResponseTime / responseCount) : 0;
 
       // Get active conversations count
       let activeQuery = supabase
@@ -164,7 +204,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         totalSent: sent,
         totalConversations: uniqueConversations,
         activeConversations: activeCount || 0,
-        avgResponseTime: 0, // TODO: Calculate real response time
+        avgResponseTime,
       };
     },
     enabled: !!lawFirm?.id,

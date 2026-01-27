@@ -98,14 +98,23 @@ export default function Connections() {
   const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
 
   const MAX_POLLS = 60;
-  const POLL_INTERVAL = 2000; // 2 seconds
+  const BASE_POLL_INTERVAL = 2000; // 2 seconds base
+  const MAX_POLL_INTERVAL = 10000; // 10 seconds max
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollCountRef = useRef(0);
+
+  // Calculate polling interval with exponential backoff
+  const getPollingInterval = useCallback((count: number): number => {
+    // Increase interval every 10 polls, up to MAX_POLL_INTERVAL
+    const multiplier = Math.pow(1.5, Math.floor(count / 10));
+    return Math.min(BASE_POLL_INTERVAL * multiplier, MAX_POLL_INTERVAL);
+  }, []);
 
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
       if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
+        clearTimeout(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
     };
@@ -115,58 +124,70 @@ export default function Connections() {
   const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
       console.log("[Connections] Stopping status polling");
-      clearInterval(pollIntervalRef.current);
+      clearTimeout(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    pollCountRef.current = 0;
   }, []);
+
+  // Poll once and schedule next poll with backoff
+  const pollOnce = useCallback(async (instanceId: string) => {
+    pollCountRef.current++;
+    const count = pollCountRef.current;
+    setPollCount(count);
+    
+    if (count >= MAX_POLLS) {
+      console.log("[Connections] Max polls reached, stopping");
+      stopPolling();
+      setQrError("Tempo esgotado. Tente novamente.");
+      return;
+    }
+
+    try {
+      console.log(`[Connections] Polling status (${count}/${MAX_POLLS})...`);
+      const result = await getStatus.mutateAsync(instanceId);
+      console.log("[Connections] Poll result:", result);
+      
+      if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
+        console.log("[Connections] Instance connected! Stopping poll.");
+        stopPolling();
+        setConnectionStatus("Conectado!");
+        setCurrentQRCode(null); // Hide QR code
+        await refetch(); // Refresh instance list
+        
+        // Close dialog after showing success
+        setTimeout(() => {
+          setIsQRDialogOpen(false);
+          setConnectionStatus(null);
+          setPollCount(0);
+        }, 1500);
+        return;
+      } else if (result.qrCode && result.qrCode !== currentQRCode) {
+        // QR code updated (e.g., expired and regenerated)
+        console.log("[Connections] QR code updated");
+        setCurrentQRCode(result.qrCode);
+      }
+    } catch (error) {
+      console.error("[Connections] Poll error:", error);
+      // Continue polling despite errors
+    }
+
+    // Schedule next poll with backoff
+    const nextInterval = getPollingInterval(count);
+    console.log(`[Connections] Next poll in ${nextInterval}ms`);
+    pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
+  }, [stopPolling, getStatus, refetch, currentQRCode, getPollingInterval]);
 
   // Start polling for connection status
   const startPolling = useCallback((instanceId: string) => {
     stopPolling();
-    let count = 0;
+    pollCountRef.current = 0;
     
     console.log("[Connections] Starting status polling for:", instanceId);
     
-    pollIntervalRef.current = setInterval(async () => {
-      count++;
-      setPollCount(count);
-      
-      if (count >= MAX_POLLS) {
-        console.log("[Connections] Max polls reached, stopping");
-        stopPolling();
-        setQrError("Tempo esgotado. Tente novamente.");
-        return;
-      }
-
-      try {
-        console.log(`[Connections] Polling status (${count}/${MAX_POLLS})...`);
-        const result = await getStatus.mutateAsync(instanceId);
-        console.log("[Connections] Poll result:", result);
-        
-        if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
-          console.log("[Connections] Instance connected! Stopping poll.");
-          stopPolling();
-          setConnectionStatus("Conectado!");
-          setCurrentQRCode(null); // Hide QR code
-          await refetch(); // Refresh instance list
-          
-          // Close dialog after showing success
-          setTimeout(() => {
-            setIsQRDialogOpen(false);
-            setConnectionStatus(null);
-            setPollCount(0);
-          }, 1500);
-        } else if (result.qrCode && result.qrCode !== currentQRCode) {
-          // QR code updated (e.g., expired and regenerated)
-          console.log("[Connections] QR code updated");
-          setCurrentQRCode(result.qrCode);
-        }
-      } catch (error) {
-        console.error("[Connections] Poll error:", error);
-        // Continue polling despite errors
-      }
-    }, POLL_INTERVAL);
-  }, [stopPolling, getStatus, refetch, currentQRCode]);
+    // Start first poll immediately
+    pollOnce(instanceId);
+  }, [stopPolling, pollOnce]);
 
   const filteredInstances = useMemo(() => {
     if (!searchQuery.trim()) return instances;
