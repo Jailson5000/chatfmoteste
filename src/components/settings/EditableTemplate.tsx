@@ -10,6 +10,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Pencil, Trash2, MessageSquareText, Image, Video, Mic } from "lucide-react";
 
 interface EditableTemplateProps {
@@ -41,6 +51,7 @@ export function EditableTemplate({
   isPending,
 }: EditableTemplateProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editName, setEditName] = useState(name);
   const [editShortcut, setEditShortcut] = useState(shortcut);
   const [editContent, setEditContent] = useState(content);
@@ -100,7 +111,7 @@ export function EditableTemplate({
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-destructive hover:text-destructive"
-            onClick={() => onDelete(id)}
+            onClick={() => setDeleteDialogOpen(true)}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -174,6 +185,32 @@ export function EditableTemplate({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir o template <strong>"{name}"</strong>?
+              <br />
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onDelete(id);
+                setDeleteDialogOpen(false);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

@@ -323,23 +323,22 @@ export default function Dashboard() {
     return result;
   }, [departments, filteredClients]);
 
-  // Team members activity - Feature flag: disabled until real metrics are implemented
-  // TODO: Implement real conversation metrics from conversations table
-  const TEAM_METRICS_ENABLED = false;
+  // Team members activity - Uses real metrics from attendantMetrics
+  const TEAM_METRICS_ENABLED = true;
   
   const teamActivity = useMemo(() => {
-    if (!TEAM_METRICS_ENABLED) {
-      return []; // Return empty to show placeholder
+    if (!TEAM_METRICS_ENABLED || attendantMetrics.length === 0) {
+      return [];
     }
-    return teamMembers.slice(0, 5).map((member) => ({
-      name: member.full_name,
-      avatar: member.avatar_url,
-      conversations: 0, // Placeholder for real data
-      resolved: 0,
-      pending: 0,
-      lastActivity: '-',
+    return attendantMetrics.slice(0, 8).map((metric) => ({
+      name: metric.name,
+      avatar: metric.avatarUrl,
+      conversations: metric.conversationsHandled,
+      messagesSent: metric.messagesSent,
+      messagesReceived: metric.messagesReceived,
+      avgResponseTime: metric.avgResponseTime,
     }));
-  }, [teamMembers]);
+  }, [attendantMetrics]);
 
   // Clients by state (from phone DDD)
   const clientsByState = useMemo(() => {

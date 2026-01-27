@@ -458,9 +458,28 @@ export default function KnowledgeBase() {
                       <GripVertical className="h-4 w-4 text-muted-foreground/50 cursor-grab" />
                     </TableCell>
                     <TableCell>
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="text-sm text-muted-foreground">há {timeAgo}</p>
+                            <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{item.title}</p>
+                          {item.item_type === 'document' && item.file_type && (
+                            <Badge variant="outline" className="text-xs uppercase">
+                              {item.file_type.split('/').pop() || 'doc'}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>há {timeAgo}</span>
+                          {item.item_type === 'document' && item.file_size && (
+                            <span className="text-xs">
+                              • {(item.file_size / 1024).toFixed(0)}KB
+                            </span>
+                          )}
+                          {item.item_type === 'text' && item.content && (
+                            <span className="text-xs">
+                              • {item.content.length} chars
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>
