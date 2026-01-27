@@ -1,99 +1,169 @@
 
+# Correção do Bloqueio de Áudio para Chat Web
 
-## Correção do Envio de Áudio para WhatsApp
+## Problema Identificado
 
-### Diagnóstico Confirmado
+A partir da análise do código e das screenshots, identifiquei dois problemas distintos:
 
-Os logs da edge function mostram que o erro 400 "Owned media must be a url, base64, or valid file with buffer" **ainda está ocorrendo**:
+### 1. Kanban: Áudio sendo enviado para conversa de Site
+- O botão de microfone aparece em conversa de **origem "Site"** (destacado em verde na imagem)
+- A mensagem aparece como "Mensagem de áudio - Áudio enviado via WhatsApp" 
+- **Causa**: A lógica `isWhatsAppConversation` tem um fallback que assume WhatsApp quando `origin` está vazio:
+  ```typescript
+  conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
+  ```
+- Além disso, pode haver inconsistência no valor de `origin` recebido pelo componente
 
-```
-sendWhatsAppAudio failed (400)
-audioDataUriLength: 117094  ← Data URI com prefixo
-```
+### 2. Conversas: Mensagem de erro técnica
+- O `AudioRecorder` é renderizado **sempre** (linha 4299), sem verificar o canal
+- Quando o usuário tenta enviar áudio para Chat Web, aparece o erro técnico: "Evolution API retornou erro 400..."
+- O erro vem da API porque não existe instância WhatsApp para conversa de Site
 
-### Causa Raiz
+## Correções Propostas
 
-Na linha 2335 do arquivo `evolution-api/index.ts`:
+### Arquivo 1: `src/components/kanban/KanbanChatPanel.tsx`
+
+**Alteração 1**: Remover o fallback que assume WhatsApp quando origin vazio (linhas 1042-1046)
+
+De:
 ```typescript
-const audioPayload = {
-  number: targetNumber,
-  audio: audioDataUri,  // ← INCORRETO: envia "data:audio/ogg;base64,XXXX"
-  delay: 500,
-};
+const isWhatsAppConversation = !isNonWhatsAppConversation && (
+  conversationOrigin === 'WHATSAPP' ||
+  (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
+  conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
+);
 ```
 
-A Evolution API exige **base64 puro** no campo `audio`, mas o código está enviando um **Data URI completo** (com prefixo `data:mime;base64,`).
-
-### Plano de Correção
-
-#### 1. Backend: Corrigir payload do sendWhatsAppAudio
-**Arquivo:** `supabase/functions/evolution-api/index.ts`
-
-**Alterações:**
-- Remover a construção de `audioDataUri` (linha 2329)
-- Limpar o base64 de espaços e quebras de linha
-- Enviar `audio: cleanedBase64` em vez de `audio: audioDataUri`
-- Atualizar logs para refletir a mudança
-
-**Código atual (linhas 2329-2338):**
+Para:
 ```typescript
-const audioDataUri = `data:${audioPureMime};base64,${audioBase64}`;
-const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
-const audioPayload = {
-  number: targetNumber,
-  audio: audioDataUri,
-  delay: 500,
-};
+// IMPORTANTE: Não assumir WhatsApp se origin vazio - requer confirmação explícita
+const isWhatsAppConversation = !isNonWhatsAppConversation && (
+  conversationOrigin === 'WHATSAPP' ||
+  (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
+  !!whatsappInstanceId // Usar whatsappInstanceId como critério mais seguro
+);
 ```
 
-**Código corrigido:**
+**Alteração 2**: Melhorar mensagem de erro no `handleSendAudio` (linha 1890)
+
+De:
 ```typescript
-// Clean base64: remove whitespace and newlines that may corrupt the payload
-const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
-
-const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
-const audioPayload = {
-  number: targetNumber,
-  audio: cleanedAudioBase64,  // RAW base64, NOT Data URI
-  delay: 500,
-};
+throw new Error("Chat Web aceita apenas mensagens de texto e imagens (sem áudio).");
 ```
 
-#### 2. Atualizar logs de diagnóstico
-Alterar o log para mostrar `audioBase64Length` em vez de `audioDataUriLength`:
-
+Para:
 ```typescript
-console.log(`[Evolution API] Sending audio via sendWhatsAppAudio to ${targetNumber}`, {
-  endpoint: audioEndpoint,
-  audioBase64Length: cleanedAudioBase64.length,
-  estimatedKB: Math.round((cleanedAudioBase64.length * 3) / 4 / 1024),
-  pureMime: audioPureMime,
-});
+throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
 ```
 
-#### 3. Deploy e Validação
-Após o deploy, verificar nos logs:
-- `sendWhatsAppAudio` deve retornar status **200/201** (não 400)
-- Não deve mais aparecer "Owned media must be..." 
-- `methodUsed` deve ser `sendWhatsAppAudio` (não fallback)
-- Áudio deve chegar no destinatário e ser reproduzível
+---
 
-### Resumo das Alterações
+### Arquivo 2: `src/pages/Conversations.tsx`
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `supabase/functions/evolution-api/index.ts` | Enviar base64 puro no campo `audio` (sem prefixo Data URI) |
+**Alteração 1**: Adicionar variável `isWhatsAppConversation` usando `useMemo` 
 
-### Risco e Mitigação
+Adicionar logo após a declaração de `selectedConversation` (aproximadamente linha 437):
+```typescript
+// Robust WhatsApp detection for audio button visibility
+const isWhatsAppConversation = useMemo(() => {
+  if (!selectedConversation) return false;
+  const origin = (selectedConversation.origin || '').toUpperCase();
+  const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+  if (nonWhatsAppOrigins.includes(origin)) return false;
+  
+  // Positive check: must be explicitly WhatsApp
+  return origin === 'WHATSAPP' || 
+    (selectedConversation.remote_jid?.endsWith('@s.whatsapp.net')) ||
+    !!selectedConversation.whatsapp_instance_id;
+}, [selectedConversation]);
+```
 
-- **Risco:** Baixo - alteração isolada ao case `audio`
-- **Mitigação:** Fallback para `sendMedia` continua funcionando como backup
-- **Zero regressão:** Não afeta imagem, documento, vídeo ou outros fluxos
+**Alteração 2**: Esconder `AudioRecorder` para conversas não-WhatsApp (linhas 4050-4057 e 4298-4303)
 
-### Critério de Sucesso
+De:
+```tsx
+{showAudioRecorder ? (
+  <div className="w-full px-3 lg:px-4">
+    <AudioRecorder
+      onSend={handleSendAudioRecording}
+      onCancel={() => setShowAudioRecorder(false)}
+      disabled={isSending}
+    />
+  </div>
+) : (
+```
 
-1. Logs mostram `sendWhatsAppAudio` retornando 200/201 (sem erro 400)
-2. Áudio chega no WhatsApp do destinatário
-3. Player exibe duração correta (não "0:00")
-4. Status muda de PENDING para delivered
+Para:
+```tsx
+{showAudioRecorder && isWhatsAppConversation ? (
+  <div className="w-full px-3 lg:px-4">
+    <AudioRecorder
+      onSend={handleSendAudioRecording}
+      onCancel={() => setShowAudioRecorder(false)}
+      disabled={isSending}
+    />
+  </div>
+) : (
+```
 
+E na seção mobile (linha 4298-4303):
+
+De:
+```tsx
+<div className="flex gap-1">
+  <AudioRecorder
+    onSend={handleSendAudioRecording}
+    onCancel={() => {}}
+    disabled={isSending}
+  />
+```
+
+Para:
+```tsx
+<div className="flex gap-1">
+  {isWhatsAppConversation && (
+    <AudioRecorder
+      onSend={handleSendAudioRecording}
+      onCancel={() => {}}
+      disabled={isSending}
+    />
+  )}
+```
+
+**Alteração 3**: Melhorar mensagem de erro no `handleSendAudioRecording` (linha 2225)
+
+De:
+```typescript
+throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio). Use texto ou imagens.");
+```
+
+Para:
+```typescript
+throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
+```
+
+---
+
+## Resumo das Alterações
+
+| Arquivo | Linha(s) | Alteração |
+|---------|----------|-----------|
+| `KanbanChatPanel.tsx` | 1042-1046 | Remover fallback que assume WhatsApp quando origin vazio |
+| `KanbanChatPanel.tsx` | 1890 | Mensagem amigável de bloqueio |
+| `Conversations.tsx` | ~437 | Adicionar `isWhatsAppConversation` com useMemo |
+| `Conversations.tsx` | 4050 | Condicionar `showAudioRecorder` ao canal WhatsApp |
+| `Conversations.tsx` | 4298-4303 | Esconder `AudioRecorder` mobile para não-WhatsApp |
+| `Conversations.tsx` | 2225 | Mensagem amigável de bloqueio |
+
+## Critério de Sucesso
+
+1. Botão de microfone **não aparece** para conversas de Site/Widget/Tray
+2. Se por algum motivo o áudio for enviado para Chat Web, mensagem amigável: "Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens."
+3. Envio de áudio para WhatsApp continua funcionando normalmente
+4. Zero regressões em texto, imagens e documentos
+
+## Risco
+
+- **Baixo**: Alterações focadas apenas na visibilidade do `AudioRecorder` e mensagens de erro
+- Não afeta o fluxo de envio de áudio para WhatsApp (que já foi corrigido)
+- Não afeta envio de texto/imagens para nenhum canal
