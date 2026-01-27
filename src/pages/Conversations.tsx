@@ -2220,68 +2220,16 @@ export default function Conversations() {
         });
       }
       
+      // CRITICAL: Chat Web é somente texto
+      if (isNonWhatsAppConversation) {
+        throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio).");
+      }
+
       // CRITICAL: Generate unique filename to prevent overwrites
+      // We'll send an explicit filename so the provider doesn't reject unnamed audio.
       const uniqueFileName = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.webm`;
 
-      if (isNonWhatsAppConversation) {
-        // ============ CHAT WEB PATH (Widget/Tray/Site) ============
-        // Upload to Supabase Storage directly, then insert message record
-        console.log("[Audio] Non-WhatsApp conversation detected, using direct storage path");
-        
-        // Get law_firm_id for storage path RLS compliance
-        const { data: convData } = await supabase
-          .from("conversations")
-          .select("law_firm_id")
-          .eq("id", selectedConversationId)
-          .single();
-        
-        const lawFirmId = convData?.law_firm_id;
-        if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
-        
-        // RLS-compliant path: {law_firm_id}/{conversation_id}/{fileName}
-        const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
-        
-        // Upload to storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from("chat-media")
-          .upload(storagePath, audioBlob, {
-            contentType: audioBlob.type || "audio/webm",
-            upsert: false,
-          });
-        
-        if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
-        
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from("chat-media")
-          .getPublicUrl(storagePath);
-        
-        const mediaUrl = urlData?.publicUrl;
-        
-        // Insert message record directly
-        const { error: insertError } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: selectedConversationId,
-            law_firm_id: lawFirmId,
-            content: "[Áudio]",
-            message_type: "audio",
-            media_url: mediaUrl,
-            media_mime_type: audioBlob.type || "audio/webm",
-            is_from_me: true,
-            sender_type: "human",
-            ai_generated: false,
-          });
-        
-        if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
-        
-        // Update conversation timestamp
-        await supabase
-          .from("conversations")
-          .update({ last_message_at: new Date().toISOString() })
-          .eq("id", selectedConversationId);
-          
-      } else {
+      {
         // ============ WHATSAPP PATH ============
         // Use Evolution API for WhatsApp delivery
         console.log("[AudioSend] WhatsApp conversation, using Evolution API");
