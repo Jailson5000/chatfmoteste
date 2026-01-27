@@ -1561,18 +1561,28 @@ export function MessageBubble({
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
-    // For audio/ptt messages, hide the filename (e.g., "audio.webm", "audio.ogg")
-    // since the audio player is rendered separately
-    if (messageType === "audio" || messageType === "ptt") {
-      const singleLine = !normalized.includes("\n");
-      const looksLikeAudioFileName =
-        singleLine && /^audio\.(webm|ogg|mp3|m4a|wav|oga)$/i.test(normalized);
+    // For media messages, WhatsApp often sets the content as just a filename.
+    // We render the player/preview separately, so avoid duplicating the filename.
+    const isSingleLine = !normalized.includes("\n");
+    const looksLikeFileName =
+      isSingleLine &&
+      /\.(pdf|doc|docx|xls|xlsx|png|jpg|jpeg|webp|mp3|wav|m4a|oga|ogg|webm|mp4|mov)$/i.test(normalized);
 
-      if (looksLikeAudioFileName) return "";
+    // Audio/PTT: also accept dynamic names like audio_173....webm
+    if (messageType === "audio" || messageType === "ptt") {
+      const looksLikeAudioFileName =
+        isSingleLine &&
+        /^(audio(_\d+)?|ptt(_\d+)?)\.(webm|ogg|mp3|m4a|wav|oga)$/i.test(normalized);
+
+      if (looksLikeAudioFileName || looksLikeFileName) return "";
     }
 
-    // For document messages, WhatsApp often sets the content as just the filename.
-    // We already render the filename in the document card, so avoid duplicating it.
+    // Images/videos: hide a pure filename when there's no real caption
+    if (messageType === "image" || messageType === "video") {
+      if (looksLikeFileName) return "";
+    }
+
+    // Documents: we already render the filename in the document card
     if (messageType === "document") {
       const singleLine = !normalized.includes("\n");
       const looksLikeFileName =
