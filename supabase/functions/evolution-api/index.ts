@@ -2168,12 +2168,13 @@ serve(async (req) => {
         let targetRemoteJid = body.remoteJid;
         let conversationId = body.conversationId;
         let instanceId = body.instanceId;
+        let contactPhone: string | null = null;
 
         // If we have a conversationId, get the remoteJid and instanceId from it
         if (conversationId && !targetRemoteJid) {
           const { data: conversation, error: convError } = await supabaseClient
             .from("conversations")
-            .select("remote_jid, whatsapp_instance_id")
+            .select("remote_jid, whatsapp_instance_id, contact_phone")
             .eq("id", conversationId)
             .eq("law_firm_id", lawFirmId)
             .single();
@@ -2185,6 +2186,7 @@ serve(async (req) => {
 
           targetRemoteJid = conversation.remote_jid;
           instanceId = conversation.whatsapp_instance_id;
+          contactPhone = conversation.contact_phone || null;
         }
 
         // Fallback: old conversations may not have whatsapp_instance_id set.
@@ -2219,7 +2221,10 @@ serve(async (req) => {
         console.log(`[Evolution API] Sending ${body.mediaType} to ${targetRemoteJid} via ${instance.instance_name}`);
 
         // Determine the endpoint based on media type
-        const targetNumber = (targetRemoteJid || "").split("@")[0];
+        // IMPORTANT: Some WhatsApp JIDs can include non-digit suffixes (e.g. ":76");
+        // always sanitize to digits only. Prefer contact_phone when available.
+        const jidPart = (targetRemoteJid || "").split("@")[0];
+        const targetNumber = ((contactPhone || jidPart) || "").replace(/\D/g, "");
         if (!targetNumber) {
           throw new Error("remoteJid inválido para envio de mídia");
         }
