@@ -4132,28 +4132,32 @@ export default function Conversations() {
                             <Smile className="h-4 w-4 mr-2" />
                             Emoji
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full justify-start"
-                            onClick={() => {
-                              documentInputRef.current?.click();
-                            }}
-                          >
-                            <Paperclip className="h-4 w-4 mr-2" />
-                            Selecionar arquivo
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="w-full justify-start"
-                            onClick={() => {
-                              imageInputRef.current?.click();
-                            }}
-                          >
-                            <Image className="h-4 w-4 mr-2" />
-                            Enviar imagem
-                          </Button>
+                          {isWhatsAppConversation && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start"
+                                onClick={() => {
+                                  documentInputRef.current?.click();
+                                }}
+                              >
+                                <Paperclip className="h-4 w-4 mr-2" />
+                                Selecionar arquivo
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start"
+                                onClick={() => {
+                                  imageInputRef.current?.click();
+                                }}
+                              >
+                                <Image className="h-4 w-4 mr-2" />
+                                Enviar imagem
+                              </Button>
+                            </>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
