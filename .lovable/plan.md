@@ -1,93 +1,89 @@
 
-Objetivo (urgente)
-- Fazer o áudio enviado pelo sistema chegar de fato no WhatsApp do cliente.
-- Manter separação total: Chat Web (texto apenas) não interfere em WhatsApp (texto + mídia).
-- Reduzir retrabalho adicionando diagnósticos e validação “fail-fast” (se falhar, falha claramente e com logs úteis).
+Objetivo
+- Fazer o envio de áudio para WhatsApp realmente chegar ao destinatário (não apenas “PENDING”).
+- Garantir que Chat Web/Widget não permita áudio (somente texto e imagens), sem regressões nas demais mídias.
 
-O que já sabemos (a partir do que foi observado no código/logs)
-- O frontend envia o áudio para a função “evolution-api” com:
-  - mediaBase64 (sem prefixo data:)
-  - fileName (hoje fixo como .webm, mesmo quando o Blob pode ser ogg)
-  - mimeType (audioBlob.type; frequentemente “audio/ogg;codecs=opus”)
-- A função “evolution-api” atualmente envia áudio via endpoint `/message/sendMedia/{instance}` com `mediatype:"audio"`, `mimetype:"audio/ogg;codecs=opus"`, `fileName` e `media` (base64).
-- Logs mostram “Media sent successfully” e o webhook registra evento `send.message` com `status:"PENDING"` para áudio.
-- No banco, mensagens de áudio ficam sem `delivered_at`/`read_at` (diferente de textos), sinalizando que não estamos recebendo confirmação/ACK de entrega para áudio — e isso bate com “cliente não recebe”.
+O que os logs mostram (e por que o áudio não chega)
+1) A função de backend “evolution-api” está tentando enviar áudio via endpoint dedicado:
+   - POST /message/sendWhatsAppAudio/{instance}
+2) Essa tentativa está falhando com HTTP 400:
+   - “Owned media must be a url, base64, or valid file with buffer”
+3) Em seguida, o código faz fallback para:
+   - POST /message/sendMedia/{instance} (mediatype: "audio")
+   - Esse fallback retorna HTTP 201, gera whatsapp_message_id e a UI marca como “sent”, mas:
+     - Nenhum ACK (messages.update) chega para esses áudios
+     - delivered_at/read_at permanecem nulos no banco
+     - Resultado prático: o destinatário não recebe o áudio
 
-Hipótese principal (mais provável)
-- O envio via `sendMedia` para áudio está aceitando o payload (retorna PENDING e um audioMessage url), mas não está realmente entregando no WhatsApp do destinatário por incompatibilidade do formato/payload esperado para áudio (voice note) pelo provedor.
-- A documentação do provedor possui endpoint específico para áudio: `/message/sendWhatsAppAudio/{instance}` com campo `audio` (geralmente aceitando URL ou data URI/base64). Esse endpoint tende a setar `ptt: true` e ter pipeline de áudio mais confiável que o sendMedia genérico.
+Causa raiz (confirmada por documentação)
+- O endpoint sendWhatsAppAudio aceita o campo “audio” como “url or base64”.
+- Hoje estamos enviando “audio” como Data URI (data:audio/...;base64,XXXX).
+- A Evolution API (neste endpoint) NÃO aceita Data URI; ela espera base64 “puro” (sem “data:...base64,”) ou uma URL.
+- Portanto, o envio “correto” (PTT/voice note) está falhando sempre e caindo no fallback que não entrega.
 
-Estratégia de correção (sem mexer no Chat Web)
-1) Frontend (Conversations.tsx) – normalização do nome/extension do arquivo
-   - Manter Chat Web = texto apenas (já está).
-   - Para WhatsApp:
-     - Gerar fileName coerente com o tipo real do Blob:
-       - Se Blob inclui “ogg” -> `.ogg`
-       - Se inclui “mp4” -> `.m4a`
-       - Se inclui “webm” -> `.webm`
-     - Enviar sempre fileName “com extensão correta” (isso ajuda o backend e evita pipeline errada).
-     - Enviar mimeType “limpo” quando necessário:
-       - Normalizar `"audio/ogg;codecs=opus"` para `"audio/ogg"` quando a API exigir formato sem parâmetros (manteremos também o original para logs; mas payload vai com o que for mais compatível).
+Sobre a hipótese “áudio descriptografado”
+- Não é o problema aqui: a criptografia/descriptografia (.enc) ocorre no fluxo de download/mídia do WhatsApp (mmg.whatsapp.net).
+- Para envio, o provedor recebe o arquivo “normal” (base64) e ele mesmo faz o pipeline WhatsApp (incluindo criptografia). O ponto quebrado é o formato do payload no sendWhatsAppAudio (Data URI vs base64 puro).
 
-2) Backend function (supabase/functions/evolution-api/index.ts) – trocar a estratégia de envio de áudio
-   - Implementar envio prioritário por `/message/sendWhatsAppAudio/{instance}` quando `mediaType === "audio"`.
-   - Como montar o campo `audio`:
-     - Se vier base64 “puro” do frontend, converter para data URI:
-       - `audio: "data:<mime>;base64,<base64>"`
-     - Onde `<mime>` será preferencialmente:
-       - `"audio/ogg"` (ou `"audio/ogg;codecs=opus"` se a API aceitar; mas começaremos com `"audio/ogg"` por compatibilidade)
-   - Manter fallback seguro:
-     - Se `sendWhatsAppAudio` retornar erro HTTP, fazer fallback para `sendMedia` (como está hoje) e logar claramente que caiu no fallback.
-   - “Fail-fast” e validações:
-     - Se base64 muito pequeno (ex.: < 1KB) ou vazio: rejeitar antes de chamar o provedor (evita “PENDING” com áudio inválido).
-     - Logar (mas mascarando PII): instance_name, instance_id, targetNumber mascarado, endpoint usado, mime final, tamanho do base64 e tamanho em bytes estimado.
-   - (Opcional, mas recomendado) Verificação de status da instância antes de enviar:
-     - Fazer um GET rápido em `/instance/connectionState/{instance}` e, se não estiver “connected”, retornar erro claro (“instância desconectada”) em vez de tentar enviar e ficar PENDING para sempre.
+Plano de correção (mudanças mínimas, sem regressões)
+1) Corrigir o envio de áudio no backend (supabase/functions/evolution-api/index.ts)
+   1.1) Ajustar a chamada ao endpoint sendWhatsAppAudio para enviar:
+       - audio: "<base64 puro>" (sem prefixo data:)
+       - manter number: "<digits>"
+       - manter delay (opcional)
+   1.2) Remover a lógica de “audioDataUri” do sendWhatsAppAudio (ou deixar apenas como fallback de compatibilidade, mas NÃO como payload principal).
+   1.3) Garantir que o base64 esteja “limpo”:
+       - trim e remoção de quebras de linha (alguns encoders inserem \n)
+   1.4) Logging “diagnóstico” (sem dados sensíveis):
+       - endpoint usado, status HTTP, tamanho base64 (len/KB estimado), instance_name, messageId retornado.
+   1.5) Manter fallback para sendMedia apenas se sendWhatsAppAudio falhar, mas com transparência:
+       - Retornar no response um campo como methodUsed: "sendWhatsAppAudio" | "sendMedia"
+       - Assim o frontend pode mostrar “Enviado (fallback)” quando necessário (evita falsa sensação de sucesso total).
 
-3) Webhook (supabase/functions/evolution-webhook/index.ts) – rastrear entrega de áudio “fromMe”
-   - Ajustar o handler de `messages.update` para também processar atualizações “fromMe: true” e setar:
-     - `delivered_at` quando status indicar entregue/servidor ack (ex.: DELIVERY_ACK / SERVER_ACK / DELIVERED)
-     - `read_at` quando status for READ
-   - Isso não “garante” que o cliente recebeu, mas nos dá telemetria objetiva:
-     - Se áudio ficar sempre sem delivered_at, sabemos que o problema é entrega/ACK no provedor, não UI.
+2) Alinhar o formato “audio.webm” (pedido do usuário) sem quebrar compatibilidade
+   - No frontend já estamos gerando fileName .webm quando o Blob é webm.
+   - No backend, sendWhatsAppAudio não recebe fileName/mimetype na spec, mas deve aceitar base64 do arquivo e detectar o tipo.
+   - Para minimizar risco:
+     - Se mimeType indicar webm, manter o base64 como está (não tentar “forçar” audio/ogg).
+     - O fallback sendMedia continuará enviando com mimetype e fileName coerentes (audio/webm + *.webm).
 
-4) Teste controlado (roteiro de validação)
-   - Passo A: enviar áudio curto (2–5s) para um número real fora do próprio aparelho.
-   - Passo B: checar logs da função evolution-api:
-     - Confirmar que tentou `sendWhatsAppAudio` (sem cair no fallback).
-     - Confirmar status HTTP 200/201.
-   - Passo C: checar logs do webhook:
-     - Confirmar eventos `send.message` e depois `messages.update` para a mesma conversa/instância.
-   - Passo D: checar no app:
-     - A mensagem deve aparecer.
-     - Em poucos segundos/minutos, `delivered_at` deve preencher (se o provedor emitir).
-   - Critério final: o áudio precisa aparecer e tocar no WhatsApp do cliente.
+3) Garantir bloqueio total de áudio para Chat Web/Widget (sem depender só do origin)
+   Problema potencial: alguns registros podem vir com origin nulo/inconsistente, permitindo que o botão apareça.
+   3.1) Frontend (src/pages/Conversations.tsx + onde o AudioRecorder é renderizado):
+       - Definir “isWhatsAppConversation” com critérios mais robustos:
+         - origin === 'whatsapp' (case-insensitive) OU
+         - remote_jid termina com '@s.whatsapp.net' OU
+         - whatsapp_instance_id não nulo
+       - Mostrar o AudioRecorder somente quando isWhatsAppConversation === true.
+       - Manter a validação “fail-fast” no handler (mesmo se UI esconder, ainda bloqueia caso chegue).
+   3.2) (Opcional) Repetir o mesmo critério no KanbanChatPanel (se existir gravação lá), para evitar regressões.
 
-Riscos e mitigação (para evitar regressões)
-- Risco: alterar rota de envio de áudio pode afetar imagens/documentos.
-  - Mitigação: mudanças ficam restritas ao branch `mediaType === "audio"`; demais tipos permanecem intactos.
-- Risco: divergência de mime/extension.
-  - Mitigação: logs + fallback para `sendMedia` se `sendWhatsAppAudio` falhar.
-- Risco: “PENDING” continuar.
-  - Mitigação: instrumentação no webhook e checagem de conexão da instância para separar “instância off” vs “pipeline de áudio”.
+4) Validação controlada (roteiro rápido e objetivo)
+   4.1) Enviar um áudio curto (2–5s) para um número externo (já confirmado).
+   4.2) Conferir logs do backend “evolution-api”:
+       - Não pode mais aparecer o erro 400 “Owned media…”
+       - methodUsed deve ser “sendWhatsAppAudio”
+       - status HTTP deve ser 200/201 e retornar messageId
+   4.3) Conferir no WhatsApp do destinatário: áudio chegou e toca.
+   4.4) Conferir “messages.update” no webhook e/ou coluna delivered_at:
+       - Se o áudio chegar, normalmente veremos delivered_at preencher depois.
+       - Mesmo que o ACK demore, o critério principal é “chegou no WhatsApp”.
+
+Risco e mitigação (prioridade: zero regressão)
+- Alterações isoladas ao branch mediaType === "audio" na função evolution-api; imagem/documento/vídeo ficam intactos.
+- UI: apenas esconder/impedir AudioRecorder em canais não-WhatsApp, sem alterar envio de texto/imagens do Widget.
+- Fallback preservado para resiliência, mas com indicação do método usado.
 
 Entregáveis (o que será alterado quando você aprovar)
-- src/pages/Conversations.tsx
-  - fileName de áudio baseado no tipo real do Blob (ogg/webm/m4a)
-  - mimeType normalizado (quando aplicável)
-  - manter bloqueio de áudio para Chat Web (texto only)
 - supabase/functions/evolution-api/index.ts
-  - áudio enviado preferencialmente via `/message/sendWhatsAppAudio/{instance}`
-  - fallback para `/message/sendMedia/{instance}`
-  - validações e logs úteis
-  - (opcional) verificação de instância conectada antes do envio
-- supabase/functions/evolution-webhook/index.ts
-  - atualizar delivered_at/read_at também para mensagens “fromMe” em eventos `messages.update` (incluindo áudio)
+  - sendWhatsAppAudio: enviar base64 puro em “audio”
+  - logs melhores + retorno com methodUsed
+- src/pages/Conversations.tsx
+  - esconder AudioRecorder fora do WhatsApp com detecção robusta (não só origin)
+  - manter bloqueio fail-fast ao tentar enviar
+- (Se aplicável) src/components/kanban/KanbanChatPanel.tsx
+  - mesma regra de bloqueio/ocultação do gravador
 
-Como isso atende seu pedido
-- “Ainda não envio áudios para WhatsApp”: troca para endpoint específico de áudio + data URI + validação deve destravar entrega real.
-- “Separar Chat Web do WhatsApp”: Chat Web permanece texto-only e o áudio só roda na rota WhatsApp.
-- “Sem retrabalho”: instrumentação e rastreio de entrega/ACK deixa claro onde falha, sem tentativas cegas.
-
-Próximo passo
-- Aprovar este plano para eu implementar as mudanças em modo edição e já deixar um roteiro de teste rápido para você validar em produção/teste.
+Critério de sucesso
+- Áudio enviado pela interface chega no WhatsApp do cliente (número externo) consistentemente.
+- No Chat Web/Widget não é possível gravar/enviar áudio (somente texto e imagens).
