@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
+import { useState, useRef } from "react";
+import { format, addDays, startOfWeek, addWeeks, subWeeks, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAppointments, Appointment } from "@/hooks/useAppointments";
 import { useServices } from "@/hooks/useServices";
-import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 import { cn } from "@/lib/utils";
 import { NewAppointmentDialog } from "./NewAppointmentDialog";
 import { AppointmentDetailsSheet } from "./AppointmentDetailsSheet";
@@ -19,19 +18,9 @@ export function AgendaCalendar() {
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const hasSyncedRef = useRef(false);
 
   const { appointments, isLoading } = useAppointments(selectedDate);
   const { services } = useServices();
-  const { integration, syncNow } = useGoogleCalendar();
-
-  // Auto-sync Google Calendar on mount (once)
-  useEffect(() => {
-    if (integration?.is_active && !hasSyncedRef.current && !syncNow.isPending) {
-      hasSyncedRef.current = true;
-      syncNow.mutate();
-    }
-  }, [integration?.is_active]);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 

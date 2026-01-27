@@ -30,7 +30,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useUserRole } from "@/hooks/useUserRole";
-import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 import {
   Tooltip,
   TooltipContent,
@@ -68,8 +67,7 @@ const aiItems = [
 
 const settingsItem = { icon: Settings, label: "Configurações", path: "/settings" };
 const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
-const agendaItem = { icon: CalendarDays, label: "Agenda", path: "/agenda" };
-const agendaProItem = { icon: CalendarDays, label: "Agenda Pro", path: "/agenda-pro" };
+const agendaProItem = { icon: CalendarDays, label: "Agenda", path: "/agenda-pro" };
 const tasksItem = { icon: CheckSquare, label: "Tarefas", path: "/tarefas" };
 const supportItem = { icon: HelpCircle, label: "Suporte", path: "/suporte" };
 const tutorialsItem = { icon: PlayCircle, label: "Tutoriais", path: "/tutoriais" };
@@ -83,22 +81,12 @@ export function AppSidebar() {
   const { toast } = useToast();
   const { lawFirm } = useLawFirm();
   const { isAttendant } = useUserRole();
-  const {
-    integration: googleCalendarIntegration,
-    isConnected: isGoogleCalendarConnected,
-  } = useGoogleCalendar();
 
-  const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
-
-  // Build bottom menu items based on user role (profileItem is in Footer already)
-  // Order: Agenda Pro, Agenda, Tarefas, Conexões, Configurações, Suporte, Tutoriais
+  // Build bottom menu items based on user role
+  // Order: Agenda Pro, Tarefas, Conexões (admin only), Configurações, Suporte, Tutoriais
   const bottomMenuItems = isAttendant
-    ? showAgenda
-      ? [agendaProItem, agendaItem, tasksItem, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, tasksItem, settingsItem, supportItem, tutorialsItem]
-    : showAgenda
-      ? [agendaProItem, agendaItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
+    ? [agendaProItem, tasksItem, settingsItem, supportItem, tutorialsItem]
+    : [agendaProItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
 
   // Open sections if on one of their pages
   useEffect(() => {

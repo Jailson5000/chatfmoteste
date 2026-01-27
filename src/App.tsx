@@ -31,12 +31,9 @@ import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
-// Calendar import removed - route redirects to /agenda
-import Agenda from "./pages/Agenda";
 import AgendaPro from "./pages/AgendaPro";
 import PublicBooking from "./pages/PublicBooking";
 import ConfirmAppointment from "./pages/ConfirmAppointment";
-import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
 import Tasks from "./pages/Tasks";
 // Admin pages removed - functionality moved to Settings
 import {
@@ -84,7 +81,7 @@ const App = () => (
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
-          <Route path="/integrations/google-calendar/callback" element={<GoogleCalendarCallback />} />
+          
           <Route path="/privacidade" element={<PrivacyPolicy />} />
           <Route path="/termos" element={<TermsOfService />} />
           <Route path="/agendar/:slug" element={<PublicBooking />} />
@@ -201,19 +198,9 @@ const App = () => (
             <Route index element={<AIVoice />} />
           </Route>
           
-          {/* Legacy route: /calendar → redirect to /agenda (backwards compatibility) */}
-          <Route path="/calendar" element={<Navigate to="/agenda" replace />} />
-          
-          <Route
-            path="/agenda"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Agenda />} />
-          </Route>
+          {/* Legacy routes: redirect old calendar/agenda routes to agenda-pro */}
+          <Route path="/calendar" element={<Navigate to="/agenda-pro" replace />} />
+          <Route path="/agenda" element={<Navigate to="/agenda-pro" replace />} />
           
           <Route
             path="/agenda-pro"

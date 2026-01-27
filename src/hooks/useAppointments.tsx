@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO, startOfDay, endOfDay, addMinutes, isBefore, isAfter, isEqual } from "date-fns";
@@ -51,65 +50,6 @@ const DAY_MAP: Record<string, keyof BusinessHours> = {
   "5": "friday",
   "6": "saturday",
 };
-
-// Helper to create Google Calendar event
-async function createGoogleCalendarEvent(
-  lawFirmId: string,
-  appointment: Appointment & { service?: Service }
-): Promise<string | null> {
-  try {
-    // Check if Google Calendar integration exists and is active
-    const { data: integration } = await supabase
-      .from("google_calendar_integrations")
-      .select("id, is_active, allow_create_events")
-      .eq("law_firm_id", lawFirmId)
-      .eq("is_active", true)
-      .single();
-
-    if (!integration || !integration.allow_create_events) {
-      console.log("[Appointment] Google Calendar not connected or no create permission");
-      return null;
-    }
-
-    const serviceName = appointment.service?.name || "Agendamento";
-    const clientInfo = appointment.client_name 
-      ? ` - ${appointment.client_name}` 
-      : "";
-
-    const { data, error } = await supabase.functions.invoke("google-calendar-actions", {
-      body: {
-        law_firm_id: lawFirmId,
-        action: "create_event",
-        event_data: {
-          title: `${serviceName}${clientInfo}`,
-          description: [
-            appointment.client_name && `Cliente: ${appointment.client_name}`,
-            appointment.client_phone && `Telefone: ${appointment.client_phone}`,
-            appointment.client_email && `E-mail: ${appointment.client_email}`,
-            appointment.notes && `Observações: ${appointment.notes}`,
-          ].filter(Boolean).join("\n"),
-          start_time: appointment.start_time,
-          end_time: appointment.end_time,
-          duration_minutes: appointment.service?.duration_minutes,
-        },
-      },
-    });
-
-    if (error) {
-      console.error("[Appointment] Failed to create Google Calendar event:", error);
-      return null;
-    }
-
-    if (data?.success && data?.event?.id) {
-      return data.event.id;
-    }
-
-    return null;
-  } catch (err) {
-    console.error("[Appointment] Error creating Google Calendar event:", err);
-    return null;
-  }
-}
 
 export function useAppointments(date?: Date) {
   const { toast } = useToast();
@@ -182,20 +122,6 @@ export function useAppointments(date?: Date) {
 
       if (error) throw error;
 
-      // Create Google Calendar event (async, non-blocking)
-      const googleEventId = await createGoogleCalendarEvent(
-        profile.law_firm_id,
-        { ...data, service } as Appointment & { service?: Service }
-      );
-
-      // Update appointment with Google event ID if created
-      if (googleEventId) {
-        await supabase
-          .from("appointments")
-          .update({ google_event_id: googleEventId })
-          .eq("id", data.id);
-      }
-
       // Send immediate WhatsApp notification (async, non-blocking)
       if (data.client_phone) {
         supabase.functions.invoke("send-appointment-notification", {
@@ -210,7 +136,6 @@ export function useAppointments(date?: Date) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
-      queryClient.invalidateQueries({ queryKey: ["google-calendar-events"] });
       toast({ title: "Agendamento criado com sucesso" });
     },
     onError: (error: Error) => {

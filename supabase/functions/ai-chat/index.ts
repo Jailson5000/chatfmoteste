@@ -156,126 +156,6 @@ interface ChatRequest {
   };
 }
 
-// Google Calendar tools definition for function calling
-const CALENDAR_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "check_availability",
-      description: "Verifica os horários disponíveis para agendamento em uma data específica",
-      parameters: {
-        type: "object",
-        properties: {
-          date: {
-            type: "string",
-            description: "Data para verificar disponibilidade no formato YYYY-MM-DD (ex: 2025-01-15)"
-          }
-        },
-        required: ["date"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_event",
-      description: "Agenda um novo compromisso/consulta no calendário",
-      parameters: {
-        type: "object",
-        properties: {
-          title: {
-            type: "string",
-            description: "Título do evento (ex: 'Consulta com João Silva')"
-          },
-          start_time: {
-            type: "string",
-            description: "Data e hora de início no formato ISO 8601 (ex: 2025-01-15T14:00:00)"
-          },
-          duration_minutes: {
-            type: "number",
-            description: "Duração em minutos (padrão: 60)"
-          },
-          description: {
-            type: "string",
-            description: "Descrição ou observações do evento"
-          },
-          location: {
-            type: "string",
-            description: "Local do evento (opcional)"
-          }
-        },
-        required: ["title", "start_time"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_events",
-      description: "Lista os próximos eventos/compromissos agendados",
-      parameters: {
-        type: "object",
-        properties: {
-          time_min: {
-            type: "string",
-            description: "Data inicial no formato ISO 8601"
-          },
-          time_max: {
-            type: "string",
-            description: "Data final no formato ISO 8601"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "update_event",
-      description: "Atualiza/remarca um evento existente",
-      parameters: {
-        type: "object",
-        properties: {
-          event_id: {
-            type: "string",
-            description: "ID do evento a ser atualizado"
-          },
-          title: {
-            type: "string",
-            description: "Novo título (opcional)"
-          },
-          start_time: {
-            type: "string",
-            description: "Nova data/hora de início no formato ISO 8601"
-          },
-          duration_minutes: {
-            type: "number",
-            description: "Nova duração em minutos"
-          }
-        },
-        required: ["event_id"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_event",
-      description: "Cancela/remove um evento do calendário",
-      parameters: {
-        type: "object",
-        properties: {
-          event_id: {
-            type: "string",
-            description: "ID do evento a ser cancelado"
-          }
-        },
-        required: ["event_id"]
-      }
-    }
-  }
-];
-
 // Template sending tool definition
 const TEMPLATE_TOOL = {
   type: "function",
@@ -567,74 +447,15 @@ const SCHEDULING_TOOLS = [
   }
 ];
 
-// Check if Google Calendar integration is active for law firm
-async function checkCalendarIntegration(supabase: any, lawFirmId: string): Promise<{
-  active: boolean;
-  permissions: {
-    read: boolean;
-    create: boolean;
-    edit: boolean;
-    delete: boolean;
-  };
-}> {
-  const { data: integration } = await supabase
-    .from("google_calendar_integrations")
-    .select("is_active, allow_read_events, allow_create_events, allow_edit_events, allow_delete_events")
-    .eq("law_firm_id", lawFirmId)
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (!integration) {
-    return { active: false, permissions: { read: false, create: false, edit: false, delete: false } };
-  }
-
-  return {
-    active: true,
-    permissions: {
-      read: integration.allow_read_events ?? false,
-      create: integration.allow_create_events ?? false,
-      edit: integration.allow_edit_events ?? false,
-      delete: integration.allow_delete_events ?? false,
-    }
-  };
-}
-
-// Filter calendar tools based on permissions
-function getCalendarTools(permissions: { read: boolean; create: boolean; edit: boolean; delete: boolean }) {
-  const tools: typeof CALENDAR_TOOLS = [];
-  
-  if (permissions.read) {
-    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "check_availability")!);
-    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "list_events")!);
-  }
-  if (permissions.create) {
-    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "create_event")!);
-  }
-  if (permissions.edit) {
-    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "update_event")!);
-  }
-  if (permissions.delete) {
-    tools.push(CALENDAR_TOOLS.find(t => t.function.name === "delete_event")!);
-  }
-  
-  return tools.filter(Boolean);
-}
-
-// Get all available tools (calendar + CRM + scheduling + templates)
+// Get all available tools (CRM + scheduling + templates)
 function getAllAvailableTools(
-  calendarPermissions: { read: boolean; create: boolean; edit: boolean; delete: boolean } | null,
   includeCrmTools: boolean = true,
   includeSchedulingTools: boolean = false,
   includeTemplateTools: boolean = true
 ) {
   const tools: any[] = [];
   
-  // Add calendar tools if integration is active
-  if (calendarPermissions) {
-    tools.push(...getCalendarTools(calendarPermissions));
-  }
-  
-  // Add scheduling tools if enabled (for scheduling agents)
+  // Add scheduling tools if enabled (for scheduling agents using Agenda Pro)
   if (includeSchedulingTools) {
     tools.push(...SCHEDULING_TOOLS);
   }
@@ -650,107 +471,6 @@ function getAllAvailableTools(
   }
   
   return tools;
-}
-
-// Execute calendar tool call
-async function executeCalendarTool(
-  supabase: any,
-  supabaseUrl: string,
-  supabaseKey: string,
-  lawFirmId: string,
-  conversationId: string,
-  clientId: string | undefined,
-  automationId: string,
-  toolCall: { name: string; arguments: string }
-): Promise<string> {
-  try {
-    const args = JSON.parse(toolCall.arguments);
-    
-    console.log(`[AI Chat] Executing calendar tool: ${toolCall.name}`, args);
-    
-    const response = await fetch(`${supabaseUrl}/functions/v1/google-calendar-actions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${supabaseKey}`,
-      },
-      body: JSON.stringify({
-        action: toolCall.name,
-        law_firm_id: lawFirmId,
-        conversation_id: conversationId,
-        client_id: clientId,
-        agent_id: automationId,
-        event_data: toolCall.name === "create_event" || toolCall.name === "update_event" || toolCall.name === "delete_event" 
-          ? {
-              title: args.title,
-              start_time: args.start_time,
-              end_time: args.end_time,
-              duration_minutes: args.duration_minutes || 60,
-              description: args.description,
-              location: args.location,
-              event_id: args.event_id,
-            }
-          : undefined,
-        query: toolCall.name === "check_availability" || toolCall.name === "list_events"
-          ? {
-              date: args.date,
-              time_min: args.time_min,
-              time_max: args.time_max,
-            }
-          : undefined,
-      }),
-    });
-
-    const result = await response.json();
-    
-    if (!result.success) {
-      return JSON.stringify({ error: result.error || "Falha na operação" });
-    }
-
-    // Format response for the AI
-    switch (toolCall.name) {
-      case "check_availability":
-        if (result.available_slots?.length > 0) {
-          return JSON.stringify({
-            available_slots: result.available_slots,
-            message: `Horários disponíveis: ${result.available_slots.join(", ")}`
-          });
-        }
-        return JSON.stringify({ message: "Não há horários disponíveis nesta data." });
-        
-      case "create_event":
-        return JSON.stringify({
-          success: true,
-          event_id: result.event?.id,
-          event_link: result.event?.htmlLink,
-          message: `Evento "${args.title}" criado com sucesso para ${args.start_time}`
-        });
-        
-      case "list_events":
-        return JSON.stringify({
-          events: result.events,
-          count: result.events?.length || 0
-        });
-        
-      case "update_event":
-        return JSON.stringify({
-          success: true,
-          message: "Evento atualizado com sucesso"
-        });
-        
-      case "delete_event":
-        return JSON.stringify({
-          success: true,
-          message: "Evento cancelado com sucesso"
-        });
-        
-      default:
-        return JSON.stringify(result);
-    }
-  } catch (error) {
-    console.error(`[AI Chat] Calendar tool error:`, error);
-    return JSON.stringify({ error: "Erro ao executar ação do calendário" });
-  }
 }
 
 // Execute CRM/internal action tool call
@@ -3333,20 +3053,10 @@ serve(async (req) => {
     // Add current message (wrapped for injection protection)
     messages.push({ role: "user", content: wrapUserInput(message) });
 
-    // Check for calendar integration
-    let calendarPermissions = null;
-    if (agentLawFirmId) {
-      const calendarCheck = await checkCalendarIntegration(supabase, agentLawFirmId);
-      if (calendarCheck.active) {
-        calendarPermissions = calendarCheck.permissions;
-      }
-    }
-
-    // Get available tools
+    // Get available tools (CRM, Scheduling, Templates)
     const tools = getAllAvailableTools(
-      calendarPermissions,
       true, // CRM tools
-      isSchedulingAgent, // Scheduling tools only for scheduling agents
+      isSchedulingAgent, // Scheduling tools only for scheduling agents (Agenda Pro)
       true // Template tools
     );
 
@@ -3410,12 +3120,7 @@ serve(async (req) => {
         let toolResult: string;
 
         // Route to appropriate tool executor
-        if (["check_availability", "create_event", "list_events", "update_event", "delete_event"].includes(toolName)) {
-          toolResult = await executeCalendarTool(
-            supabase, supabaseUrl, supabaseKey, agentLawFirmId, conversationId,
-            context?.clientId, automationId, { name: toolName, arguments: toolCall.function.arguments }
-          );
-        } else if (["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"].includes(toolName)) {
+        if (["transfer_to_department", "change_status", "add_tag", "remove_tag", "transfer_to_responsible"].includes(toolName)) {
           toolResult = await executeCrmTool(
             supabase, agentLawFirmId, conversationId, context?.clientId,
             automationId, automationName, { name: toolName, arguments: toolCall.function.arguments },
