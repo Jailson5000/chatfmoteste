@@ -1,307 +1,199 @@
 
-# Plano: Melhorias Completas no Modulo de Tarefas
+# Plano: Remoção Completa da Integração Google Calendar
 
 ## Resumo
 
-Implementar edicao completa de tarefas (titulo, descricao, data, responsaveis), menu de acoes rapidas nos cards Kanban, e gestao completa de categorias (criar, editar, excluir) - tudo em uma interface intuitiva e profissional.
+Remover todos os arquivos, hooks, componentes e referências ao Google Calendar, já que o sistema agora utiliza a Agenda Pro como solução de agendamento. A remoção deve ser feita de forma cuidadosa para não afetar outras funcionalidades.
 
 ---
 
-## Funcionalidades a Implementar
+## Mapeamento Completo de Arquivos a Remover/Modificar
 
-### 1. Edicao de Tarefa no TaskDetailSheet
+### Arquivos a DELETAR
 
-| Campo | Tipo de Edicao | Interacao |
-|-------|----------------|-----------|
-| Titulo | Input inline | Click para editar, blur para salvar |
-| Descricao | Textarea inline | Click para editar, botoes salvar/cancelar |
-| Data de Vencimento | Date Picker | Popover com calendario + limpar |
-| Responsaveis | Multi-select Popover | Checkboxes com busca |
+| Arquivo | Tipo | Razão |
+|---------|------|-------|
+| src/hooks/useGoogleCalendar.tsx | Hook | Hook principal da integração |
+| src/components/settings/GoogleCalendarCard.tsx | Componente | Card de configuração obsoleto |
+| src/components/settings/integrations/GoogleCalendarIntegration.tsx | Componente | Card de integração obsoleto |
+| src/pages/GoogleCalendarCallback.tsx | Página | Callback do OAuth |
+| src/pages/Calendar.tsx | Página | Visualização de eventos Google |
+| src/pages/Agenda.tsx | Página | Agenda antiga baseada em Google Calendar |
+| src/assets/google-calendar-icon.png | Asset | Ícone não mais utilizado |
+| supabase/functions/google-calendar-auth/ | Edge Function | Autenticação OAuth |
+| supabase/functions/google-calendar-actions/ | Edge Function | Ações de calendário |
+| supabase/functions/google-calendar-sync/ | Edge Function | Sincronização |
 
-### 2. Menu de Acoes Rapidas no Card Kanban
+### Arquivos a MODIFICAR
 
-Menu de 3 pontos com:
-- Alterar Status (A Fazer, Em Progresso, Concluido)
-- Alterar Prioridade (Baixa, Media, Alta, Urgente)
-- Excluir (com confirmacao)
-
-### 3. Gestao de Categorias
-
-Novo componente/dialog para:
-- Listar categorias existentes
-- Criar nova categoria (nome + cor)
-- Editar categoria (nome + cor)
-- Excluir categoria
-- Acessivel via botao de configuracoes na pagina de Tarefas
-
----
-
-## Arquivos a Criar
-
-| Arquivo | Descricao |
+| Arquivo | Alteração |
 |---------|-----------|
-| src/components/tasks/TaskCategoriesDialog.tsx | Dialog para gerenciar categorias |
-| src/components/tasks/EditableAssigneesPopover.tsx | Popover para editar responsaveis |
-
-## Arquivos a Modificar
-
-| Arquivo | Alteracao |
-|---------|-----------|
-| src/components/tasks/TaskDetailSheet.tsx | Adicionar edicao inline de titulo, descricao, data e responsaveis |
-| src/components/tasks/TaskKanbanCard.tsx | Adicionar menu dropdown de acoes rapidas |
-| src/pages/Tasks.tsx | Adicionar botao de configuracoes para gerenciar categorias |
+| src/App.tsx | Remover rota /integrations/google-calendar/callback e import |
+| src/components/layout/AppSidebar.tsx | Remover useGoogleCalendar e lógica showAgenda |
+| src/components/settings/IntegrationsSettings.tsx | Remover menção ao Google Calendar |
+| src/hooks/useAppointments.tsx | Remover função createGoogleCalendarEvent e referências |
+| supabase/functions/ai-chat/index.ts | Remover CALENDAR_TOOLS e funções relacionadas |
+| src/pages/landing/LandingPage.tsx | Atualizar texto (opcional - pode manter como "em breve") |
 
 ---
 
-## Implementacao Detalhada
+## Análise de Impacto
 
-### TaskDetailSheet - Edicao de Titulo
+### Funcionalidades que NÃO serão afetadas
 
-Transformar o titulo em campo editavel:
-- Exibe como texto normal com icone de lapis ao hover
-- Ao clicar, transforma em Input
-- Salva automaticamente ao perder foco (onBlur)
-- Feedback visual de salvamento
+| Funcionalidade | Razão |
+|----------------|-------|
+| Agenda Pro | Sistema independente com tabelas próprias (agenda_pro_*) |
+| Agendamento Público | Usa Agenda Pro, não Google Calendar |
+| Confirmações e Lembretes | Usa Edge Functions próprias (agenda-pro-*) |
+| Chat com IA | Mantém SCHEDULING_TOOLS para Agenda Pro |
+| Kanban | Independente |
+| Conversas | Independente |
+| Dashboard | Métricas não dependem de Google Calendar |
 
-### TaskDetailSheet - Edicao de Descricao
+### Funcionalidades que SERÃO removidas
 
-Adicionar modo de edicao:
-- Exibe descricao atual ou "Clique para adicionar descricao"
-- Ao clicar, abre Textarea editavel
-- Botoes Salvar/Cancelar abaixo
-- Suporte a texto longo com scroll
-
-### TaskDetailSheet - Edicao de Data
-
-Substituir exibicao simples por Date Picker:
-- Se tem data: mostra data com botao de editar
-- Se nao tem: mostra "Adicionar data de vencimento"
-- Popover com calendario para selecionar
-- Botao "Limpar" para remover data
-
-### TaskDetailSheet - Edicao de Responsaveis
-
-Novo componente EditableAssigneesPopover:
-- Botao "Editar" ao lado do titulo "Responsaveis"
-- Popover com lista de membros da equipe
-- Checkboxes para selecionar/deselecionar
-- Campo de busca por nome
-- Salva automaticamente ao fechar
-
-### TaskKanbanCard - Menu de Acoes
-
-Adicionar DropdownMenu (3 pontos) no canto superior direito:
-- Submenu Status: A Fazer, Em Progresso, Concluido
-- Submenu Prioridade: Baixa, Media, Alta, Urgente
-- Separador
-- Excluir (abre AlertDialog de confirmacao)
-
-### TaskCategoriesDialog - Gestao de Categorias
-
-Dialog completo para gerenciar categorias:
-- Lista de categorias com cor e nome
-- Botao "Nova Categoria" no topo
-- Cada categoria tem botoes Editar/Excluir
-- Dialog de edicao usa ColorPicker existente
-- Confirmacao ao excluir
-
-### Tasks.tsx - Botao de Configuracoes
-
-Adicionar botao ao lado do header:
-- Icone de engrenagem (Settings)
-- Abre TaskCategoriesDialog
-- Tooltip "Gerenciar Categorias"
+| Funcionalidade | Substituição |
+|----------------|--------------|
+| Visualizar Google Calendar | Usar Agenda Pro |
+| Criar eventos no Google | Usar Agenda Pro |
+| Sync com Google Calendar | Não necessário - Agenda Pro é autônoma |
+| Página /agenda | Redirecionar para /agenda-pro |
+| Página /calendar | Remover completamente |
 
 ---
 
-## Fluxo Visual
+## Detalhamento das Modificações
 
-```text
-+-------------------------------------------+
-|  TAREFAS                    [+Nova] [⚙️]  |  <-- Botao config abre dialog categorias
-+-------------------------------------------+
-|                                           |
-|  +-------------+  +-------------+         |
-|  |  A Fazer    |  | Em Progresso|         |
-|  +-------------+  +-------------+         |
-|  | [Card] [⋮]  |  |             |         |  <-- Menu 3 pontos no card
-|  | [Card] [⋮]  |  |             |         |
-|  +-------------+  +-------------+         |
-+-------------------------------------------+
+### 1. src/App.tsx
 
-Ao clicar no card -> TaskDetailSheet:
-+-------------------------------------------+
-|  [✏️ Titulo editavel]                     |  <-- Click para editar
-|  Criado em 27/01/2026                     |
-+-------------------------------------------+
-|  Status: [Select]  Prioridade: [Select]   |
-|  Categoria: [Select]                      |
-|                                           |
-|  📅 Vencimento: 30/01/2026 [Editar]       |  <-- Date Picker
-|                                           |
-|  Descricao                                |
-|  [Clique para editar descricao...]        |  <-- Click abre textarea
-|                                           |
-|  Responsaveis [Editar]                    |  <-- Abre popover
-|  [Avatar1] [Avatar2] [Avatar3]            |
-+-------------------------------------------+
-```
+Remover:
+- Import do GoogleCalendarCallback
+- Rota /integrations/google-calendar/callback
+- Import do Agenda (página antiga)
+- Rota /agenda que usa a página antiga
 
----
+Manter redirecionamento /agenda -> /agenda-pro para não quebrar links existentes.
 
-## Componentes Reutilizados
-
-- ColorPicker (ja existe em src/components/ui/color-picker.tsx)
-- EditableItem (padrao similar para categorias)
-- Dialog, Popover, Button, Input, Textarea (shadcn/ui)
-- Calendar (DatePicker)
-- DropdownMenu
-
----
-
-## Hooks Utilizados
-
-| Hook | Uso |
-|------|-----|
-| useTasks | updateTask.mutate para todas as edicoes |
-| useTaskCategories | createCategory, updateCategory, deleteCategory |
-| useTeamMembers | Lista de membros para popover de responsaveis |
-
-O hook useTasks ja suporta:
-- updateTask com title, description, due_date, assignee_ids
-- Todos os campos necessarios ja estao implementados
-
-O hook useTaskCategories ja suporta:
-- createCategory (name, color)
-- updateCategory (id, name, color)
-- deleteCategory (id)
-
----
-
-## Sequencia de Implementacao
-
-| Fase | Descricao | Risco |
-|------|-----------|-------|
-| 1 | TaskDetailSheet - Edicao de titulo inline | Baixo |
-| 2 | TaskDetailSheet - Edicao de descricao | Baixo |
-| 3 | TaskDetailSheet - Edicao de data | Baixo |
-| 4 | EditableAssigneesPopover - Componente | Medio |
-| 5 | TaskDetailSheet - Integrar popover de responsaveis | Baixo |
-| 6 | TaskKanbanCard - Menu de acoes rapidas | Baixo |
-| 7 | TaskCategoriesDialog - Novo componente | Medio |
-| 8 | Tasks.tsx - Botao de configuracoes | Baixo |
-
----
-
-## Detalhes Tecnicos
-
-### Edicao Inline de Titulo
+### 2. src/components/layout/AppSidebar.tsx
 
 ```typescript
-const [isEditingTitle, setIsEditingTitle] = useState(false);
-const [editedTitle, setEditedTitle] = useState(task.title);
+// REMOVER
+import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 
-const handleSaveTitle = () => {
-  if (editedTitle.trim() && editedTitle !== task.title) {
-    updateTask.mutate({ id: task.id, title: editedTitle.trim() });
-  }
-  setIsEditingTitle(false);
-};
+// REMOVER
+const {
+  integration: googleCalendarIntegration,
+  isConnected: isGoogleCalendarConnected,
+} = useGoogleCalendar();
 
-// No render:
-{isEditingTitle ? (
-  <Input
-    value={editedTitle}
-    onChange={(e) => setEditedTitle(e.target.value)}
-    onBlur={handleSaveTitle}
-    onKeyDown={(e) => e.key === "Enter" && handleSaveTitle()}
-    autoFocus
-  />
-) : (
-  <h2 onClick={() => setIsEditingTitle(true)} className="cursor-pointer group">
-    {task.title}
-    <Pencil className="opacity-0 group-hover:opacity-100" />
-  </h2>
-)}
+const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
+
+// SIMPLIFICAR bottomMenuItems para sempre mostrar apenas Agenda Pro
+const bottomMenuItems = isAttendant
+  ? [agendaProItem, tasksItem, settingsItem, supportItem, tutorialsItem]
+  : [agendaProItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
 ```
 
-### Popover de Responsaveis
+### 3. src/components/settings/IntegrationsSettings.tsx
+
+Remover o card de Google Calendar "Coming Soon" - já que removemos a funcionalidade.
+
+### 4. src/hooks/useAppointments.tsx
 
 ```typescript
-const [selectedIds, setSelectedIds] = useState(task.assignees.map(a => a.user_id));
+// REMOVER linhas 55-112 (função createGoogleCalendarEvent)
 
-const handleToggle = (userId: string) => {
-  setSelectedIds(prev => 
-    prev.includes(userId) 
-      ? prev.filter(id => id !== userId)
-      : [...prev, userId]
-  );
-};
+// REMOVER linha 186-197 no createAppointment:
+// const googleEventId = await createGoogleCalendarEvent(...)
+// if (googleEventId) { ... }
 
-const handleSave = () => {
-  updateTask.mutate({ id: task.id, assignee_ids: selectedIds });
-  setOpen(false);
-};
+// REMOVER linha 213:
+// queryClient.invalidateQueries({ queryKey: ["google-calendar-events"] });
 ```
 
-### Menu de Acoes no Card
+### 5. supabase/functions/ai-chat/index.ts
 
 ```typescript
-<DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button variant="ghost" size="icon" className="h-6 w-6">
-      <MoreHorizontal className="h-4 w-4" />
-    </Button>
-  </DropdownMenuTrigger>
-  <DropdownMenuContent>
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>Status</DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuItem onClick={() => handleStatusChange("todo")}>A Fazer</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange("in_progress")}>Em Progresso</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange("done")}>Concluido</DropdownMenuItem>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-    // ... priority submenu
-    <DropdownMenuSeparator />
-    <DropdownMenuItem className="text-destructive">Excluir</DropdownMenuItem>
-  </DropdownMenuContent>
-</DropdownMenu>
+// REMOVER linhas 159-300 (CALENDAR_TOOLS definition)
+// REMOVER linhas 575-600 (checkGoogleCalendarIntegration function)
+// REMOVER linhas 602-620 (getCalendarTools function)
+// REMOVER linhas 655-750 (executeCalendarTool function)
+// MODIFICAR getAllAvailableTools para não incluir calendar tools
 ```
 
 ---
 
-## Testes de Regressao
+## Sequência de Implementação
 
-1. **Edicao de Tarefa**
-   - Editar titulo e verificar salvamento
-   - Editar descricao longa
-   - Alterar e limpar data de vencimento
-   - Adicionar/remover responsaveis
-
-2. **Kanban**
-   - Drag-and-drop continua funcionando
-   - Menu de acoes executa corretamente
-   - Cards atualizam apos alteracao
-
-3. **Categorias**
-   - Criar nova categoria
-   - Editar nome e cor
-   - Excluir categoria
-   - Tarefas com categoria excluida ficam sem categoria
-
-4. **Navegacao**
-   - Click no card abre detalhes
-   - ESC fecha modais
-   - Filtros continuam funcionando
+| Fase | Ação | Risco |
+|------|------|-------|
+| 1 | Remover hooks e componentes de UI | Baixo |
+| 2 | Remover páginas obsoletas | Baixo |
+| 3 | Modificar AppSidebar | Baixo |
+| 4 | Modificar useAppointments | Baixo |
+| 5 | Modificar IntegrationsSettings | Baixo |
+| 6 | Modificar App.tsx (rotas) | Baixo |
+| 7 | Modificar ai-chat edge function | Médio |
+| 8 | Deletar edge functions do Google | Baixo |
+| 9 | Remover asset (ícone) | Baixo |
 
 ---
 
-## Garantias de Nao-Regressao
+## Rotas a Atualizar
 
-1. Hook useTasks ja suporta todos os campos (title, description, due_date, assignee_ids)
-2. Hook useTaskCategories ja tem CRUD completo
-3. Componentes shadcn/ui sao estaveis
-4. ColorPicker ja existe e funciona
-5. Invalidacao de queries ja configurada nos hooks
-6. Activity log registra todas as alteracoes automaticamente
+| Rota Antiga | Ação |
+|-------------|------|
+| /calendar | Remover completamente |
+| /agenda | Redirecionar para /agenda-pro |
+| /integrations/google-calendar/callback | Remover |
+
+---
+
+## Edge Functions a Deletar
+
+As seguintes Edge Functions serão deletadas do Supabase:
+
+1. google-calendar-auth
+2. google-calendar-actions
+3. google-calendar-sync
+
+**Nota:** As tabelas do banco de dados (google_calendar_integrations, google_calendar_events, google_calendar_ai_logs) podem ser mantidas temporariamente para preservar histórico, ou removidas via migração separada.
+
+---
+
+## Testes de Regressão
+
+Após a remoção, verificar:
+
+1. **Agenda Pro** - Criar, editar, cancelar agendamentos funciona
+2. **Agendamento Público** - /agendar/:slug funciona normalmente
+3. **Confirmação** - /confirmar funciona normalmente
+4. **IA com Agendamento** - SCHEDULING_TOOLS continua funcionando
+5. **Sidebar** - Agenda Pro aparece para todos os usuários
+6. **Settings** - Página de integrações não mostra Google Calendar ativo
+7. **useAppointments** - Criar agendamento não tenta criar evento Google
+
+---
+
+## Garantias de Não-Regressão
+
+1. Agenda Pro é completamente independente do Google Calendar
+2. SCHEDULING_TOOLS no ai-chat são separados de CALENDAR_TOOLS
+3. Tabelas agenda_pro_* não têm relação com google_calendar_*
+4. Edge Functions agenda-pro-* não dependem de google-calendar-*
+5. Rota /agenda será redirecionada para /agenda-pro
+
+---
+
+## Observações sobre Banco de Dados
+
+As seguintes tabelas/views relacionadas ao Google Calendar existem mas NÃO serão removidas nesta operação (podem ser limpas posteriormente via migração):
+
+- google_calendar_integrations
+- google_calendar_integrations_safe (view)
+- google_calendar_integration_status (view)
+- google_calendar_events
+- google_calendar_ai_logs
+
+**Razão:** Remover tabelas requer migração separada e pode conter dados históricos que o cliente deseje preservar.
