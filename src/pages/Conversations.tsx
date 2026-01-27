@@ -1992,18 +1992,31 @@ export default function Conversations() {
   const handleMediaPreviewSend = async (caption: string) => {
     // Support both file (local upload) and previewUrl (template media)
     if (!mediaPreview.file && !mediaPreview.previewUrl) return;
+    if (!selectedConversationId || !selectedConversation) return;
     
     setIsSending(true);
     
     try {
       // Auto-assign conversation to current user if handler is AI or no responsible assigned
-      if (selectedConversation?.current_handler === "ai" || !selectedConversation?.assigned_to) {
+      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
         await transferHandler.mutateAsync({
-          conversationId: selectedConversationId!,
+          conversationId: selectedConversationId,
           handlerType: "human",
           assignedTo: user?.id,
         });
       }
+
+      // CRITICAL: Determine channel routing - WhatsApp vs Chat Web
+      const conversationOrigin = selectedConversation.origin?.toUpperCase();
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+      
+      console.log('[MediaPreviewSend] Channel routing:', {
+        conversationId: selectedConversationId,
+        origin: conversationOrigin,
+        isNonWhatsApp: isNonWhatsAppConversation,
+        mediaType: mediaPreview.mediaType,
+      });
 
       let mediaBase64: string | undefined;
       let mediaUrl: string | undefined;
@@ -2043,24 +2056,111 @@ export default function Conversations() {
         mimeType = mimeMap[ext || ''] || "application/octet-stream";
       }
 
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId: selectedConversationId,
-          mediaType: mediaPreview.mediaType,
-          ...(mediaBase64 ? { mediaBase64 } : { mediaUrl }),
-          fileName,
-          caption,
-          mimeType,
-        },
-      });
+      // Generate unique filename to prevent overwrites
+      const ext = fileName.split('.').pop() || 'bin';
+      const uniqueFileName = `${mediaPreview.mediaType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-      if (response.error) {
-        throw new Error(response.error.message || "Falha ao enviar mídia");
-      }
+      if (isNonWhatsAppConversation) {
+        // ============ CHAT WEB PATH (Widget/Tray/Site) ============
+        console.log('[MediaPreviewSend] Non-WhatsApp conversation, using direct storage path');
+        
+        // Get law_firm_id for storage path RLS compliance
+        const { data: convData } = await supabase
+          .from("conversations")
+          .select("law_firm_id")
+          .eq("id", selectedConversationId)
+          .single();
+        
+        const lawFirmId = convData?.law_firm_id;
+        if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
+        
+        // RLS-compliant path: {law_firm_id}/{conversation_id}/{fileName}
+        const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
+        
+        // Upload to storage
+        if (mediaPreview.file) {
+          const { error: uploadError } = await supabase.storage
+            .from("chat-media")
+            .upload(storagePath, mediaPreview.file, {
+              contentType: mimeType,
+              upsert: false,
+            });
+          
+          if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+        } else if (mediaUrl) {
+          // For template URLs, fetch and upload
+          const resp = await fetch(mediaUrl);
+          const blob = await resp.blob();
+          const { error: uploadError } = await supabase.storage
+            .from("chat-media")
+            .upload(storagePath, blob, {
+              contentType: mimeType,
+              upsert: false,
+            });
+          
+          if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+        }
+        
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(storagePath);
+        
+        const publicMediaUrl = urlData?.publicUrl;
+        
+        // Insert message record directly
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: selectedConversationId,
+            law_firm_id: lawFirmId,
+            content: caption || `[${fileName}]`,
+            message_type: mediaPreview.mediaType,
+            media_url: publicMediaUrl,
+            media_mime_type: mimeType,
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+          });
+        
+        if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", selectedConversationId);
+          
+        console.log('[MediaPreviewSend] Widget media saved successfully');
+      } else {
+        // ============ WHATSAPP PATH ============
+        console.log('[MediaPreviewSend] WhatsApp conversation, using Evolution API');
+        
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId: selectedConversationId,
+            mediaType: mediaPreview.mediaType,
+            ...(mediaBase64 ? { mediaBase64 } : { mediaUrl }),
+            fileName: uniqueFileName,
+            caption,
+            mimeType,
+          },
+        });
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || "Falha ao enviar mídia");
+        console.log('[MediaPreviewSend] Evolution API response:', {
+          error: response.error,
+          success: response.data?.success,
+          errorMsg: response.data?.error,
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar mídia");
+        }
+
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar mídia");
+        }
       }
 
       // Do NOT add optimistic message - backend already inserted via send_media
@@ -2089,6 +2189,19 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
+      // CRITICAL: Determine channel routing FIRST - WhatsApp vs Chat Web
+      const conversationOrigin = selectedConversation.origin?.toUpperCase();
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+      
+      console.log('[AudioSend] Channel routing:', {
+        conversationId: selectedConversationId,
+        origin: conversationOrigin,
+        isNonWhatsApp: isNonWhatsAppConversation,
+        blobSize: audioBlob.size,
+        blobType: audioBlob.type,
+      });
+      
       // Auto-assign to current user if:
       // 1. Handler is AI, or
       // 2. No responsible assigned, or
@@ -2109,25 +2222,6 @@ export default function Conversations() {
       
       // CRITICAL: Generate unique filename to prevent overwrites
       const uniqueFileName = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.webm`;
-      
-      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
-      const conversationOrigin = selectedConversation.origin?.toUpperCase();
-      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
-      
-      // Convert blob to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64 = result.split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(audioBlob);
-      
-      const mediaBase64 = await base64Promise;
 
       if (isNonWhatsAppConversation) {
         // ============ CHAT WEB PATH (Widget/Tray/Site) ============
@@ -2190,7 +2284,22 @@ export default function Conversations() {
       } else {
         // ============ WHATSAPP PATH ============
         // Use Evolution API for WhatsApp delivery
-        console.log("[Audio] WhatsApp conversation, using Evolution API");
+        console.log("[AudioSend] WhatsApp conversation, using Evolution API");
+        
+        // Convert blob to base64 for WhatsApp path
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(audioBlob);
+        
+        const mediaBase64 = await base64Promise;
+        console.log("[AudioSend] Base64 prepared, length:", mediaBase64.length);
         
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
@@ -2201,6 +2310,12 @@ export default function Conversations() {
             fileName: uniqueFileName,
             mimeType: audioBlob.type || "audio/webm",
           },
+        });
+
+        console.log("[AudioSend] Evolution API response:", {
+          error: response.error,
+          success: response.data?.success,
+          errorMsg: response.data?.error,
         });
 
         if (response.error) {

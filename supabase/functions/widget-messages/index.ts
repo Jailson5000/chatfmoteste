@@ -102,10 +102,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build query for messages
+    // Build query for messages - include media fields for audio/image/video/document
     let query = supabase
       .from("messages")
-      .select("id, content, sender_type, is_from_me, created_at, message_type")
+      .select("id, content, sender_type, is_from_me, created_at, message_type, media_url, media_mime_type")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true })
       .limit(100);
