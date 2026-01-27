@@ -2222,12 +2222,21 @@ export default function Conversations() {
       
       // CRITICAL: Chat Web é somente texto
       if (isNonWhatsAppConversation) {
-        throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio).");
+        throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio). Use texto ou imagens.");
       }
 
-      // CRITICAL: Generate unique filename to prevent overwrites
-      // We'll send an explicit filename so the provider doesn't reject unnamed audio.
-      const uniqueFileName = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.webm`;
+      // Fail-fast: do not attempt to send empty/near-empty blobs
+      if (!audioBlob || audioBlob.size < 1024) {
+        throw new Error("Áudio vazio/muito pequeno. Grave novamente antes de enviar.");
+      }
+
+      // Generate unique filename with extension coherent with the real Blob type
+      const blobMime = (audioBlob.type || "audio/webm").toLowerCase();
+      const ext = blobMime.includes("ogg") ? "ogg"
+        : blobMime.includes("mp4") || blobMime.includes("m4a") ? "m4a"
+        : blobMime.includes("webm") ? "webm"
+        : "webm";
+      const uniqueFileName = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
       {
         // ============ WHATSAPP PATH ============
@@ -2247,6 +2256,11 @@ export default function Conversations() {
         reader.readAsDataURL(audioBlob);
         
         const mediaBase64 = await base64Promise;
+
+        if (!mediaBase64 || mediaBase64.length < 1000) {
+          throw new Error("Falha ao preparar o áudio (base64 vazio). Tente gravar novamente.");
+        }
+
         console.log("[AudioSend] Base64 prepared, length:", mediaBase64.length);
         
         const response = await supabase.functions.invoke("evolution-api", {
@@ -2256,7 +2270,8 @@ export default function Conversations() {
             mediaType: "audio",
             mediaBase64,
             fileName: uniqueFileName,
-            mimeType: audioBlob.type || "audio/webm",
+            // Keep original mimeType (including codecs) to maximize provider compatibility
+            mimeType: audioBlob.type || "audio/webm;codecs=opus",
           },
         });
 
