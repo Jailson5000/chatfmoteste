@@ -2246,28 +2246,79 @@ serve(async (req) => {
             };
             break;
           case "audio":
-            // Use sendMedia with mediatype audio instead of sendWhatsAppAudio
-            // This allows the Evolution API to handle webm format conversion
+            // ==============================================================
+            // AUDIO: send as WEBM (as requested) with fail-fast validation
+            // ==============================================================
             endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-            // WhatsApp is most compatible with Opus in OGG for voice notes.
-            // When the browser records as webm (common), request OGG so the provider can convert.
-            // Keep original for non-webm uploads like mp3/m4a.
-            const isWebmAudio =
-              body.mimeType?.toLowerCase().includes("webm") ||
-              body.fileName?.toLowerCase().endsWith(".webm");
-            const normalizedAudioMimeType = isWebmAudio
-              ? "audio/ogg;codecs=opus"
-              : (body.mimeType || "audio/ogg;codecs=opus");
-            const safeAudioFileName = (() => {
-              const raw = body.fileName || "audio.ogg";
-              if (isWebmAudio) return raw.replace(/\.webm$/i, ".ogg");
-              return raw;
-            })();
+
+            // Fail-fast: prefer base64 for audio; if present, validate size
+            if (typeof body.mediaBase64 === "string") {
+              const base64Len = body.mediaBase64.length;
+              const estimatedBytes = Math.floor((base64Len * 3) / 4);
+              const estimatedKB = Math.round(estimatedBytes / 1024);
+              if (!body.mediaBase64 || base64Len < 1000) {
+                console.error("[Evolution API] Audio rejected (base64 vazio/muito pequeno)", {
+                  base64Len,
+                  estimatedKB,
+                });
+                throw new Error("Áudio inválido/muito pequeno para enviar.");
+              }
+              console.log("[Evolution API] Audio payload prepared", {
+                estimatedKB,
+                mimeType: body.mimeType,
+                fileName: body.fileName,
+              });
+            }
+
+            // Optional (recommended): check instance state before sending to avoid endless PENDING
+            try {
+              const stateResp = await fetchWithTimeout(
+                `${apiUrl}/instance/connectionState/${instance.instance_name}`,
+                {
+                  method: "GET",
+                  headers: {
+                    apikey: instance.api_key || "",
+                    "Content-Type": "application/json",
+                  },
+                },
+                DEFAULT_TIMEOUT_MS,
+              );
+
+              if (stateResp.ok) {
+                const stateData = await stateResp.json().catch(() => null);
+                const stateText = JSON.stringify(stateData || {}).toLowerCase();
+                // Heuristic: if it looks disconnected, fail fast
+                if (stateText.includes("disconnected") || stateText.includes("close") || stateText.includes("connecting")) {
+                  console.error("[Evolution API] Instance not connected for media send", { stateData });
+                  throw new Error("Instância WhatsApp desconectada. Reconecte e tente novamente.");
+                }
+              } else {
+                const t = await safeReadResponseText(stateResp);
+                console.warn("[Evolution API] connectionState check failed (continuando) ", {
+                  status: stateResp.status,
+                  body: t.slice(0, 200),
+                });
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message.includes("Instância WhatsApp desconectada")) {
+                throw e;
+              }
+              console.warn("[Evolution API] connectionState check skipped due to error", {
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }
+
+            // Keep WEBM and codecs params as-is (requested)
+            const requestedMime = body.mimeType || "audio/webm;codecs=opus";
+            const fileNameRaw = body.fileName || "audio.webm";
+            const safeAudioFileName = fileNameRaw.toLowerCase().endsWith(".webm")
+              ? fileNameRaw
+              : `${fileNameRaw}.webm`;
+
             payload = {
               ...payload,
               mediatype: "audio",
-              mimetype: normalizedAudioMimeType,
-              // Some providers require an explicit filename even for audio.
+              mimetype: requestedMime,
               fileName: safeAudioFileName,
               media: body.mediaBase64 || body.mediaUrl,
             };

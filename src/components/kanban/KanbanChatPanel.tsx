@@ -1824,6 +1824,18 @@ export function KanbanChatPanel({
 
   const handleSendAudio = async (audioBlob: Blob) => {
     setIsSending(true);
+
+    // Fail-fast: do not attempt to send empty/near-empty blobs
+    if (!audioBlob || audioBlob.size < 1024) {
+      toast({
+        title: "Áudio inválido",
+        description: "Áudio vazio/muito pequeno. Grave novamente antes de enviar.",
+        variant: "destructive",
+      });
+      setIsSending(false);
+      setIsRecordingAudio(false);
+      return;
+    }
     
     // Determine best file extension based on actual mime type
     const blobMimeType = audioBlob.type || "audio/webm";
@@ -1864,42 +1876,8 @@ export function KanbanChatPanel({
       
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
-        // Widget/Tray: upload to storage and save to database
-        console.log('[Kanban] Widget/Tray channel - saving audio directly to DB');
-        
-        const { error: uploadError } = await supabase.storage
-          .from("chat-media")
-          .upload(getChatMediaPath(fileName), audioBlob);
-        
-        if (uploadError) throw uploadError;
-        
-        const { data: urlData } = supabase.storage
-          .from("chat-media")
-          .getPublicUrl(getChatMediaPath(fileName));
-        
-        const { error: insertError } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: conversationId,
-            content: urlData.publicUrl,
-            message_type: "audio",
-            is_from_me: true,
-            sender_type: "human",
-            sender_id: currentUserId,
-            ai_generated: false,
-            status: "sent",
-          });
-        
-        if (insertError) throw insertError;
-        
-        await supabase
-          .from("conversations")
-          .update({ 
-            last_message_at: new Date().toISOString(),
-            archived_at: null,
-            archived_reason: null,
-          })
-          .eq("id", conversationId);
+        // CRITICAL: Chat Web/Widget não permite áudio (somente texto + imagens)
+        throw new Error("Chat Web aceita apenas mensagens de texto e imagens (sem áudio).");
       } else {
         // WhatsApp: send directly via Evolution API (no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending audio via Evolution API', { 
