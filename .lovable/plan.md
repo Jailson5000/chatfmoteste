@@ -1,168 +1,194 @@
 
-# Plano: Remoção Completa da Integração Tray Commerce
+# Plano: Otimização de Performance do Conversations.tsx
 
-## Resumo
+## Diagnóstico Atual
 
-Remover toda a infraestrutura do Tray Commerce do sistema, incluindo frontend, backend (edge functions), banco de dados e tipos. O **Chat Web (Tray Chat)** permanece **intacto**.
+### Tamanho das Tabelas (Produção Atual)
+| Tabela | Registros | Tamanho |
+|--------|-----------|---------|
+| messages | 1.964 | 1.1 MB |
+| conversations | 133 | 288 KB |
+| clients | 138 | 200 KB |
 
----
+**Projeção para 50 empresas (2.500-5.000 conversas/dia):**
+- Messages: ~500.000+/mês → 50-100 MB
+- Conversations: ~5.000-10.000 ativas
 
-## Arquivos a DELETAR
+### Gargalos Identificados
 
-### Frontend (5 arquivos)
-
-| Arquivo | Descrição |
-|---------|-----------|
-| `src/hooks/useTrayCommerceIntegration.tsx` | Hook completo (~457 linhas) |
-| `src/components/settings/integrations/TrayCommerceIntegration.tsx` | Componente de UI (~626 linhas) |
-
-### Edge Functions (2 pastas)
-
-| Pasta | Descrição |
-|-------|-----------|
-| `supabase/functions/tray-commerce-api/` | API de conexão, sync, CRUD |
-| `supabase/functions/tray-commerce-webhook/` | Recepção de webhooks da Tray |
-
----
-
-## Arquivos a MODIFICAR
-
-### 1. `src/components/settings/IntegrationsSettings.tsx`
-
-**Remover:**
-- Linhas 40-46: Função `TrayCommerceIcon()`
-- Linhas 97-102: O card do Tray Commerce no grid
-
-**Resultado:** O grid de integrações mostrará apenas AgendaPro, Chat Web e os "Coming Soon" (ADV BOX, Custom Tool, PDF, Assinatura Digital)
-
----
-
-## Migração de Banco de Dados
-
-**Tabelas a DROPAR (com CASCADE para dependências):**
-
+**1. Índice Crítico Faltante**
+A query de mensagens (`useMessagesWithPagination`) usa:
 ```sql
--- Ordem de remoção (respeitando FK constraints)
-DROP TABLE IF EXISTS public.tray_commerce_webhook_logs CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_audit_logs CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_sync_state CASCADE;
-DROP TABLE IF EXISTS public.tray_coupon_map CASCADE;
-DROP TABLE IF EXISTS public.tray_order_map CASCADE;
-DROP TABLE IF EXISTS public.tray_product_map CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_connections CASCADE;
+SELECT ... FROM messages 
+WHERE conversation_id = ? 
+ORDER BY created_at DESC LIMIT 35
+```
+**Problema:** Não existe índice `(conversation_id, created_at)`. O planner usa `idx_messages_is_internal` que não é otimizado para ordenação.
 
--- Remover funções/triggers relacionados
-DROP FUNCTION IF EXISTS public.create_tray_sync_state() CASCADE;
-DROP FUNCTION IF EXISTS public.ensure_single_default_tray_connection() CASCADE;
+**2. Arquivo Monolítico**
+`Conversations.tsx` tem 4.423 linhas com:
+- 40+ estados (`useState`)
+- 15+ refs (`useRef`)
+- 20+ handlers de eventos
+- Múltiplos dialogs inline
+
+**3. Canais Realtime Duplicados**
+O `useConversations.tsx` ainda cria 5 canais Realtime próprios (linhas 247-340), duplicando o trabalho do `RealtimeSyncContext` recém-implementado.
+
+---
+
+## Fase 1: Índices de Banco (Impacto Alto, Risco Baixo)
+
+### 1.1 Índice Composto para Messages
+```sql
+CREATE INDEX CONCURRENTLY idx_messages_conv_created 
+ON public.messages (conversation_id, created_at DESC);
+```
+**Impacto:** Query de mensagens 5-10x mais rápida em volumes altos.
+
+### 1.2 Índice para Ordenação de Conversations
+```sql
+CREATE INDEX CONCURRENTLY idx_conversations_law_firm_order 
+ON public.conversations (law_firm_id, COALESCE(last_message_at, created_at) DESC);
+```
+**Impacto:** RPC `get_conversations_with_metadata` otimizado para ordenação.
+
+---
+
+## Fase 2: Remover Canais Realtime Duplicados
+
+**Arquivo:** `src/hooks/useConversations.tsx`
+
+**Remover linhas 243-341** (5 canais criados manualmente):
+- `conversations-realtime`
+- `messages-for-conversations`
+- `clients-for-conversations`
+- `statuses-for-conversations`
+- `departments-for-conversations`
+
+**Substituir por:** Uso do `RealtimeSyncContext` já configurado, que consolida tudo em 3-4 canais globais.
+
+```tsx
+// ANTES: 5 canais separados criados no hook
+const conversationsChannel = supabase.channel('conversations-realtime')...
+const messagesChannel = supabase.channel('messages-for-conversations')...
+// ... etc
+
+// DEPOIS: Usa o contexto centralizado (já invalida queries automaticamente)
+// Nenhum código de canal necessário - RealtimeSyncProvider já faz isso
 ```
 
-**Tabelas afetadas (total: 7):**
-1. `tray_commerce_connections` - Conexões OAuth
-2. `tray_commerce_sync_state` - Estado de sincronização
-3. `tray_commerce_audit_logs` - Logs de auditoria
-4. `tray_commerce_webhook_logs` - Logs de webhooks
-5. `tray_product_map` - Produtos sincronizados
-6. `tray_order_map` - Pedidos sincronizados
-7. `tray_coupon_map` - Cupons sincronizados
-
 ---
 
-## Verificação de Dados
+## Fase 3: Refatoração do Conversations.tsx (Modular)
 
-**Antes de executar**, verificar se há dados em produção:
-
-```sql
-SELECT 
-  (SELECT COUNT(*) FROM tray_commerce_connections) AS connections,
-  (SELECT COUNT(*) FROM tray_product_map) AS products,
-  (SELECT COUNT(*) FROM tray_order_map) AS orders,
-  (SELECT COUNT(*) FROM tray_coupon_map) AS coupons;
+### Estrutura Proposta
+```text
+src/pages/Conversations/
+├── index.tsx                    # Componente principal (orquestrador)
+├── ConversationsSidebar.tsx     # Lista lateral de conversas
+├── ConversationsChat.tsx        # Área de mensagens
+├── ConversationsHeader.tsx      # Header com filtros e ações
+├── dialogs/
+│   ├── ArchiveDialog.tsx
+│   ├── SummaryDialog.tsx
+│   ├── EditNameDialog.tsx
+│   └── InstanceChangeDialog.tsx
+└── hooks/
+    ├── useConversationsState.tsx     # Estados centralizados
+    ├── useConversationsFilters.tsx   # Lógica de filtros
+    └── useConversationsHandlers.tsx  # Event handlers
 ```
 
-Se houver dados, será necessário backup antes da remoção.
+### Benefícios
+- Componentes menores = re-renders mais granulares
+- Melhor tree-shaking e code splitting
+- Facilita manutenção e testes
+- React.memo efetivo por componente
 
 ---
 
-## Resumo de Mudanças
+## Fase 4: Otimizações de Rendering
 
-| Categoria | Ação | Itens |
-|-----------|------|-------|
-| **Frontend** | Deletar | 2 arquivos |
-| **Edge Functions** | Deletar | 2 pastas |
-| **UI Component** | Modificar | 1 arquivo (IntegrationsSettings) |
-| **Database** | Dropar | 7 tabelas + 2 funções |
-| **Types** | Auto-regenerado | `types.ts` será atualizado automaticamente |
+### 4.1 Memoização de Listas
+```tsx
+// ConversationsSidebar.tsx
+const MemoizedConversationCard = React.memo(ConversationSidebarCard);
+
+const filteredConversations = useMemo(() => {
+  // Aplicar filtros apenas quando dependências mudam
+}, [conversations, filters, activeTab]);
+```
+
+### 4.2 Virtualização para Listas Grandes
+Para 500+ conversas, considerar `react-window` ou `@tanstack/virtual`:
+```tsx
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+// Renderiza apenas conversas visíveis na viewport
+```
 
 ---
 
-## NÃO AFETADOS (Chat Web / Tray Chat)
+## Resumo de Impacto
 
-Estes arquivos permanecem **intactos**:
-- `src/components/settings/integrations/TrayChatIntegration.tsx` ✅
-- `src/hooks/useTrayIntegration.tsx` ✅
-- `supabase/functions/widget-messages/` ✅
-- Tabelas `tray_chat_*` ✅
+| Otimização | Impacto | Esforço | Risco |
+|------------|---------|---------|-------|
+| Índice messages | Alto | Baixo | Mínimo |
+| Índice conversations | Médio | Baixo | Mínimo |
+| Remover canais duplicados | Médio | Baixo | Baixo |
+| Refatoração modular | Alto | Alto | Médio |
+| Virtualização | Médio | Médio | Baixo |
 
 ---
 
-## Ordem de Execução
+## Ordem de Execução Recomendada
 
-1. **Migração SQL** - Dropar tabelas e funções
-2. **Deletar Edge Functions** - `tray-commerce-api/` e `tray-commerce-webhook/`
-3. **Deletar arquivos frontend** - Hook e componente
-4. **Modificar IntegrationsSettings.tsx** - Remover card e ícone
-5. **Types.ts** - Será regenerado automaticamente
+1. **Índices SQL** (15 min) - Impacto imediato, zero risco
+2. **Remover canais duplicados** (30 min) - Reduz overhead de WebSocket
+3. **Refatoração modular** (2-4h) - Melhora manutenibilidade
+4. **Virtualização** (futuro) - Quando houver 500+ conversas por tenant
 
 ---
 
 ## Detalhes Técnicos
 
-### Modificação em `IntegrationsSettings.tsx`
-
-```tsx
-// REMOVER: linhas 40-46
-function TrayCommerceIcon() {
-  return (
-    <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
-      <ShoppingCart className="h-5 w-5 text-white" />
-    </div>
-  );
-}
-
-// REMOVER: linhas 97-102
-<IntegrationCard
-  icon={<TrayCommerceIcon />}
-  title="Tray Commerce"
-  description="Integre pedidos, produtos, cupons e frete do seu e-commerce Tray."
-  isComingSoon
-/>
-
-// REMOVER import não utilizado: ShoppingCart
-```
-
-### SQL Migration Completa
-
+### Migração SQL Completa
 ```sql
 -- =============================================
--- REMOÇÃO COMPLETA DO TRAY COMMERCE
+-- ÍNDICES DE PERFORMANCE PARA CONVERSAS
 -- =============================================
 
--- 1. Dropar políticas RLS primeiro
-DROP POLICY IF EXISTS "Admins can view tray connections" ON public.tray_commerce_connections;
-DROP POLICY IF EXISTS "Admins can manage tray connections" ON public.tray_commerce_connections;
-DROP POLICY IF EXISTS "Only service role can insert tray_commerce_audit_logs" ON public.tray_commerce_audit_logs;
-DROP POLICY IF EXISTS "Only service role can insert tray_commerce_webhook_logs" ON public.tray_commerce_webhook_logs;
+-- 1. Índice crítico para paginação de mensagens
+-- Query: WHERE conversation_id = ? ORDER BY created_at DESC
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_conv_created 
+ON public.messages (conversation_id, created_at DESC);
 
--- 2. Dropar tabelas em ordem (respeitando FKs)
-DROP TABLE IF EXISTS public.tray_commerce_webhook_logs CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_audit_logs CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_sync_state CASCADE;
-DROP TABLE IF EXISTS public.tray_coupon_map CASCADE;
-DROP TABLE IF EXISTS public.tray_order_map CASCADE;
-DROP TABLE IF EXISTS public.tray_product_map CASCADE;
-DROP TABLE IF EXISTS public.tray_commerce_connections CASCADE;
+-- 2. Índice para ordenação de conversas no RPC
+-- Query: WHERE law_firm_id = ? ORDER BY COALESCE(last_message_at, created_at) DESC
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_law_firm_order 
+ON public.conversations (law_firm_id, last_message_at DESC NULLS LAST, created_at DESC);
 
--- 3. Dropar funções/triggers
-DROP FUNCTION IF EXISTS public.create_tray_sync_state() CASCADE;
-DROP FUNCTION IF EXISTS public.ensure_single_default_tray_connection() CASCADE;
+-- 3. Índice para count de mensagens não lidas (usado no RPC)
+-- Query: COUNT(*) WHERE conversation_id = ? AND is_from_me = false AND read_at IS NULL
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_unread 
+ON public.messages (conversation_id) 
+WHERE is_from_me = false AND read_at IS NULL;
+```
+
+### Cleanup do useConversations.tsx
+```tsx
+// REMOVER estas linhas (243-341):
+useEffect(() => {
+  if (!lawFirm?.id) return;
+  
+  const conversationsChannel = supabase.channel('conversations-realtime')...
+  const messagesChannel = supabase.channel('messages-for-conversations')...
+  const clientsChannel = supabase.channel('clients-for-conversations')...
+  const statusesChannel = supabase.channel('statuses-for-conversations')...
+  const departmentsChannel = supabase.channel('departments-for-conversations')...
+  // ... todo o bloco de cleanup
+}, [queryClient, lawFirm?.id]);
+
+// O RealtimeSyncContext já faz tudo isso automaticamente!
 ```
