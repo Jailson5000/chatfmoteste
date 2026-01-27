@@ -635,7 +635,7 @@ export function LandingPage() {
             {/* Trial Info */}
             <div className="py-3 px-4 rounded-lg border border-white/[0.06] bg-white/[0.01] flex items-center justify-center gap-2 text-white/50 text-xs">
               <Clock className="h-3.5 w-3.5" />
-              <span>Experimente por 7 dias. Pagamento apenas após o período de avaliação.</span>
+              <span>Faça seu cadastro e solicite a avaliação de 7 dias. Pagamento apenas após o período de teste.</span>
             </div>
 
             {/* Banner Plano Anual */}
