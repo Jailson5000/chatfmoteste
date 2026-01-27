@@ -2253,30 +2253,32 @@ serve(async (req) => {
               media: body.mediaBase64 || body.mediaUrl,
             };
             break;
-          case "audio":
+          case "audio": {
             // ==============================================================
-            // AUDIO: send as WEBM (as requested) with fail-fast validation
+            // AUDIO: Use sendWhatsAppAudio (voice note / PTT) for delivery
+            // This endpoint sets ptt:true and uses the proper WhatsApp audio pipeline
             // ==============================================================
-            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
 
             // Fail-fast: prefer base64 for audio; if present, validate size
-            if (typeof body.mediaBase64 === "string") {
-              const base64Len = body.mediaBase64.length;
-              const estimatedBytes = Math.floor((base64Len * 3) / 4);
-              const estimatedKB = Math.round(estimatedBytes / 1024);
-              if (!body.mediaBase64 || base64Len < 1000) {
-                console.error("[Evolution API] Audio rejected (base64 vazio/muito pequeno)", {
-                  base64Len,
-                  estimatedKB,
-                });
-                throw new Error("Áudio inválido/muito pequeno para enviar.");
-              }
-              console.log("[Evolution API] Audio payload prepared", {
-                estimatedKB,
-                mimeType: body.mimeType,
-                fileName: body.fileName,
+            const audioBase64 = body.mediaBase64 || "";
+            const audioBase64Len = audioBase64.length;
+            const audioEstimatedBytes = Math.floor((audioBase64Len * 3) / 4);
+            const audioEstimatedKB = Math.round(audioEstimatedBytes / 1024);
+            
+            if (!audioBase64 || audioBase64Len < 1000) {
+              console.error("[Evolution API] Audio rejected (base64 vazio/muito pequeno)", {
+                base64Len: audioBase64Len,
+                estimatedKB: audioEstimatedKB,
               });
+              throw new Error("Áudio inválido/muito pequeno para enviar.");
             }
+            
+            console.log("[Evolution API] Audio payload prepared for sendWhatsAppAudio", {
+              estimatedKB: audioEstimatedKB,
+              mimeType: body.mimeType,
+              fileName: body.fileName,
+              targetNumber,
+            });
 
             // Optional (recommended): check instance state before sending to avoid endless PENDING
             try {
@@ -2297,7 +2299,7 @@ serve(async (req) => {
                 const stateText = JSON.stringify(stateData || {}).toLowerCase();
                 // Heuristic: if it looks disconnected, fail fast
                 if (stateText.includes("disconnected") || stateText.includes("close") || stateText.includes("connecting")) {
-                  console.error("[Evolution API] Instance not connected for media send", { stateData });
+                  console.error("[Evolution API] Instance not connected for audio send", { stateData });
                   throw new Error("Instância WhatsApp desconectada. Reconecte e tente novamente.");
                 }
               } else {
@@ -2316,21 +2318,148 @@ serve(async (req) => {
               });
             }
 
-            // Keep WEBM and codecs params as-is (requested)
-            const requestedMime = body.mimeType || "audio/webm;codecs=opus";
-            const fileNameRaw = body.fileName || "audio.webm";
-            const safeAudioFileName = fileNameRaw.toLowerCase().endsWith(".webm")
-              ? fileNameRaw
-              : `${fileNameRaw}.webm`;
+            // Build data URI for the audio (audio/ogg works best for voice notes)
+            // Strip codec params for compatibility: "audio/ogg;codecs=opus" -> "audio/ogg"
+            const rawMime = (body.mimeType || "audio/ogg").toLowerCase();
+            const audioPureMime = rawMime.includes("ogg") ? "audio/ogg" 
+              : rawMime.includes("mp4") || rawMime.includes("m4a") ? "audio/mp4"
+              : rawMime.includes("mpeg") || rawMime.includes("mp3") ? "audio/mpeg"
+              : "audio/ogg"; // default to ogg for best PTT compatibility
+            
+            const audioDataUri = `data:${audioPureMime};base64,${audioBase64}`;
 
-            payload = {
-              ...payload,
-              mediatype: "audio",
-              mimetype: requestedMime,
-              fileName: safeAudioFileName,
-              media: body.mediaBase64 || body.mediaUrl,
+            // Use dedicated audio endpoint with PTT (voice note) support
+            const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+            const audioPayload = {
+              number: targetNumber,
+              audio: audioDataUri,
+              // delay for natural feel (optional)
+              delay: 500,
             };
-            break;
+
+            console.log(`[Evolution API] Sending audio via sendWhatsAppAudio to ${targetNumber}`, {
+              endpoint: audioEndpoint,
+              audioDataUriLength: audioDataUri.length,
+              pureMime: audioPureMime,
+            });
+
+            // Try the dedicated audio endpoint first
+            let audioSendResponse = await fetchWithTimeout(audioEndpoint, {
+              method: "POST",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(audioPayload),
+            });
+
+            // If sendWhatsAppAudio fails, fallback to sendMedia
+            if (!audioSendResponse.ok) {
+              const audioErrorText = await safeReadResponseText(audioSendResponse);
+              console.warn(`[Evolution API] sendWhatsAppAudio failed (${audioSendResponse.status}), falling back to sendMedia`, {
+                error: audioErrorText.slice(0, 300),
+              });
+
+              // Fallback to sendMedia with mediatype audio
+              const fallbackEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+              const fallbackPayload = {
+                number: targetNumber,
+                mediatype: "audio",
+                mimetype: body.mimeType || "audio/ogg;codecs=opus",
+                fileName: body.fileName || "audio.ogg",
+                media: audioBase64,
+              };
+
+              console.log(`[Evolution API] Fallback: sending audio via sendMedia`);
+              
+              audioSendResponse = await fetchWithTimeout(fallbackEndpoint, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(fallbackPayload),
+              });
+            }
+
+            console.log(`[Evolution API] Audio send response status: ${audioSendResponse.status}`);
+
+            if (!audioSendResponse.ok) {
+              const errorText = await safeReadResponseText(audioSendResponse);
+              console.error(`[Evolution API] Audio send failed:`, errorText);
+              throw new Error(simplifyEvolutionError(audioSendResponse.status, errorText));
+            }
+
+            const audioSendData = await audioSendResponse.json();
+            console.log(`[Evolution API] Audio sent successfully:`, JSON.stringify(audioSendData));
+
+            const audioWhatsappMessageId = audioSendData.key?.id || audioSendData.messageId || audioSendData.id || crypto.randomUUID();
+
+            // Extract mimetype from response (may differ from request)
+            let audioExtractedMimeType =
+              audioSendData.message?.audioMessage?.mimetype ||
+              body.mimeType ||
+              "audio/ogg";
+
+            // Normalize provider quirk: audioMessage mimetype may come as video/webm
+            if (typeof audioExtractedMimeType === "string") {
+              const mt = audioExtractedMimeType.toLowerCase();
+              if (mt === "video/webm") audioExtractedMimeType = "audio/webm";
+            }
+
+            // Extract media URL from response
+            const audioExtractedMediaUrl = 
+              audioSendData.message?.audioMessage?.url ||
+              body.mediaUrl || 
+              null;
+
+            console.log(`[Evolution API] Audio extracted: messageId=${audioWhatsappMessageId}, mimeType=${audioExtractedMimeType}, url=${audioExtractedMediaUrl ? 'present' : 'null'}`);
+
+            // Save audio message to database
+            if (conversationId) {
+              const { data: savedAudioMessage, error: audioMsgError } = await supabaseClient
+                .from("messages")
+                .insert({
+                  conversation_id: conversationId,
+                  whatsapp_message_id: audioWhatsappMessageId,
+                  content: "[Áudio]",
+                  message_type: "audio",
+                  media_url: audioExtractedMediaUrl,
+                  media_mime_type: audioExtractedMimeType,
+                  is_from_me: true,
+                  sender_type: "human",
+                  ai_generated: false,
+                })
+                .select()
+                .single();
+
+              if (audioMsgError) {
+                console.error("[Evolution API] Failed to save audio message to DB:", audioMsgError);
+              } else {
+                console.log(`[Evolution API] Audio message saved to DB with ID: ${savedAudioMessage.id}`);
+              }
+
+              await supabaseClient
+                .from("conversations")
+                .update({
+                  last_message_at: new Date().toISOString(),
+                  archived_at: null,
+                  archived_reason: null,
+                  archived_next_responsible_type: null,
+                  archived_next_responsible_id: null,
+                })
+                .eq("id", conversationId);
+            }
+
+            return new Response(
+              JSON.stringify({
+                success: true,
+                messageId: audioWhatsappMessageId,
+                message: "Audio sent successfully",
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
           case "video":
             endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
             payload = {
@@ -2380,24 +2509,19 @@ serve(async (req) => {
         // Prefer mimetype returned by provider; fallback to requested.
         let extractedMimeType =
           sendData.message?.imageMessage?.mimetype ||
-          sendData.message?.audioMessage?.mimetype ||
           sendData.message?.videoMessage?.mimetype ||
           sendData.message?.documentMessage?.mimetype ||
           sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
           body.mimeType ||
           null;
 
-        // Normalize provider quirk for audio: audioMessage mimetype may come as video/webm
-        if (body.mediaType === "audio" && typeof extractedMimeType === "string") {
-          const mt = extractedMimeType.toLowerCase();
-          if (mt === "video/webm") extractedMimeType = "audio/webm";
-        }
-
         // Extract media URL from Evolution API response
         // The API returns the uploaded media URL in message.[mediaType]Message.url
+        // Extract media URL from Evolution API response
+        // The API returns the uploaded media URL in message.[mediaType]Message.url
+        // Note: audio is handled separately now, but we keep audioMessage.url for legacy/fallback
         const extractedMediaUrl = 
           sendData.message?.imageMessage?.url ||
-          sendData.message?.audioMessage?.url ||
           sendData.message?.videoMessage?.url ||
           sendData.message?.documentMessage?.url ||
           sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.url ||
