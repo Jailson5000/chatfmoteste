@@ -438,7 +438,28 @@ export default function AIAgentEdit() {
     }
   };
 
+  // Validate if URL is valid
+  const isValidUrl = (url: string): boolean => {
+    if (!url || url.trim() === "") return false;
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handleTestConnection = async () => {
+    // Validate URL before testing
+    if (!isValidUrl(editedWebhookUrl)) {
+      toast({
+        title: "URL inválida",
+        description: "Por favor, insira uma URL válida começando com http:// ou https://",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsTestingConnection(true);
     setConnectionStatus('idle');
     
