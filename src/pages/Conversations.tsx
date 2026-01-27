@@ -442,6 +442,19 @@ export default function Conversations() {
     return (selectedConversation as any).ai_audio_enabled === true;
   }, [selectedConversation]);
 
+  // Robust WhatsApp detection for audio button visibility
+  const isWhatsAppConversation = useMemo(() => {
+    if (!selectedConversation) return false;
+    const origin = (selectedConversation.origin || '').toUpperCase();
+    const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+    if (nonWhatsAppOrigins.includes(origin)) return false;
+    
+    // Positive check: must be explicitly WhatsApp
+    return origin === 'WHATSAPP' || 
+      (selectedConversation.remote_jid?.endsWith('@s.whatsapp.net')) ||
+      !!selectedConversation.whatsapp_instance_id;
+  }, [selectedConversation]);
+
   // Show audio indicator if: voice is globally enabled AND conversation has audio mode active
   const showAudioIndicator = globalVoiceConfig?.enabled && conversationAudioEnabled;
 
@@ -2222,7 +2235,7 @@ export default function Conversations() {
       
       // CRITICAL: Chat Web é somente texto
       if (isNonWhatsAppConversation) {
-        throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio). Use texto ou imagens.");
+        throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
       }
 
       // Fail-fast: do not attempt to send empty/near-empty blobs
@@ -4047,7 +4060,7 @@ export default function Conversations() {
                 onChange={handleInternalFileUpload}
               />
               
-              {showAudioRecorder ? (
+              {showAudioRecorder && isWhatsAppConversation ? (
                 <div className="w-full px-3 lg:px-4">
                   <AudioRecorder
                     onSend={handleSendAudioRecording}
@@ -4296,11 +4309,13 @@ export default function Conversations() {
                     />
                   </div>
                   <div className="flex gap-1">
-                    <AudioRecorder
-                      onSend={handleSendAudioRecording}
-                      onCancel={() => {}}
-                      disabled={isSending}
-                    />
+                    {isWhatsAppConversation && (
+                      <AudioRecorder
+                        onSend={handleSendAudioRecording}
+                        onCancel={() => {}}
+                        disabled={isSending}
+                      />
+                    )}
                     <Button 
                       size="icon" 
                       onClick={handleSendMessage}
