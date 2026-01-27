@@ -1777,20 +1777,8 @@ export default function Conversations() {
 
     if (error) throw error;
 
-    // Find the original message being replied to for the reply_to data
-    const originalMessage = messages.find(m => m.id === noteTargetMessage.id);
-
-    // Add the new note to local state for immediate UI feedback
-    if (insertedNote) {
-      setMessages(prev => [...prev, {
-        ...insertedNote,
-        reply_to: originalMessage ? {
-          id: originalMessage.id,
-          content: originalMessage.content,
-          is_from_me: originalMessage.is_from_me,
-        } : null,
-      }]);
-    }
+    // Note: Don't manually add to state here - Realtime subscription will handle it
+    // This prevents duplicate notes from appearing in the UI
 
     toast({
       title: "Nota adicionada",
