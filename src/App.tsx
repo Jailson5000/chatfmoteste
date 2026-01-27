@@ -36,6 +36,7 @@ import AgendaPro from "./pages/AgendaPro";
 import PublicBooking from "./pages/PublicBooking";
 import ConfirmAppointment from "./pages/ConfirmAppointment";
 import GoogleCalendarCallback from "./pages/GoogleCalendarCallback";
+import Tasks from "./pages/Tasks";
 // Admin pages removed - functionality moved to Settings
 import {
   GlobalAdminAuth,
@@ -253,10 +254,19 @@ const App = () => (
               </ProtectedRoute>
             }
           >
-            <Route index element={<Tutorials />} />
+          <Route index element={<Tutorials />} />
           </Route>
           
-          {/* Client Admin Routes - Protected by role (admin of law firm) */}
+          <Route
+            path="/tarefas"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Tasks />} />
+          </Route>
           {/* Redirect /admin to /settings for backwards compatibility */}
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
           <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
