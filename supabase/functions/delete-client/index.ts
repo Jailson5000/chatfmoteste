@@ -91,11 +91,7 @@ Deno.serve(async (req) => {
         .in("conversation_id", conversationIds);
       if (googleEventsConvError) throw googleEventsConvError;
 
-      const { error: trayOrderMapError } = await supabase
-        .from("tray_order_map")
-        .delete()
-        .in("local_conversation_id", conversationIds);
-      if (trayOrderMapError) throw trayOrderMapError;
+      // tray_order_map removed - table does not exist
     }
 
     const { error: googleLogsError } = await supabase
