@@ -1764,9 +1764,10 @@ serve(async (req) => {
                   break;
                 }
                 case 'AUDIO': {
-                  // WhatsApp audio uses a special endpoint
-                  mediaEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
-                  mediaPayload = { ...mediaPayload, audio: mediaUrl };
+                  // Use sendMedia with mediatype audio for better format compatibility
+                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                  const audioMime = urlLower.includes('.ogg') ? 'audio/ogg' : urlLower.includes('.mp3') ? 'audio/mpeg' : 'audio/ogg';
+                  mediaPayload = { ...mediaPayload, mediatype: "audio", mimetype: audioMime, media: mediaUrl };
                   break;
                 }
                 case 'DOCUMENT': {
@@ -2234,10 +2235,14 @@ serve(async (req) => {
             };
             break;
           case "audio":
-            endpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+            // Use sendMedia with mediatype audio instead of sendWhatsAppAudio
+            // This allows the Evolution API to handle webm format conversion
+            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
             payload = {
               ...payload,
-              audio: body.mediaBase64 || body.mediaUrl,
+              mediatype: "audio",
+              mimetype: body.mimeType || "audio/ogg",
+              media: body.mediaBase64 || body.mediaUrl,
             };
             break;
           case "video":

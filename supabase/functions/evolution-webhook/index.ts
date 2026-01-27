@@ -1729,9 +1729,10 @@ async function sendAudioToWhatsApp(
   audioBase64: string
 ): Promise<{ success: boolean; messageId?: string }> {
   try {
-    const sendUrl = `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`;
+    // Use sendMedia with mediatype audio for better format compatibility (webm, ogg, mp3)
+    const sendUrl = `${apiUrl}/message/sendMedia/${instanceName}`;
     
-    logDebug('SEND_AUDIO', 'Sending audio to WhatsApp', { remoteJid });
+    logDebug('SEND_AUDIO', 'Sending audio to WhatsApp via sendMedia', { remoteJid });
 
     const response = await fetch(sendUrl, {
       method: 'POST',
@@ -1739,12 +1740,12 @@ async function sendAudioToWhatsApp(
         'Content-Type': 'application/json',
         'apikey': apiKey,
       },
-      // Evolution API expects "audio" at the root level (url or base64)
       body: JSON.stringify({
         number: remoteJid,
-        audio: audioBase64,
+        mediatype: "audio",
+        mimetype: "audio/ogg",
+        media: audioBase64,
         delay: 1200,
-        encoding: true,
       }),
     });
 
@@ -2082,12 +2083,15 @@ async function sendAIResponseToWhatsApp(
           break;
           
         case "AUDIO":
-          endpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+          // Use sendMedia with mediatype audio for better format compatibility
+          endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
           dbMessageType = "audio";
-          dbMimeType = "audio/mpeg";
+          dbMimeType = "audio/ogg";
           payload = {
             ...payload,
-            audio: mediaUrl,
+            mediatype: "audio",
+            mimetype: "audio/ogg",
+            media: mediaUrl,
           };
           break;
           
