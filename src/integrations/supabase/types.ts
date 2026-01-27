@@ -4106,6 +4106,7 @@ export type Database = {
       }
       support_tickets: {
         Row: {
+          client_last_read_at: string | null
           content: string
           created_at: string
           created_by: string | null
@@ -4121,6 +4122,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          client_last_read_at?: string | null
           content: string
           created_at?: string
           created_by?: string | null
@@ -4136,6 +4138,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          client_last_read_at?: string | null
           content?: string
           created_at?: string
           created_by?: string | null
