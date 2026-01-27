@@ -141,8 +141,10 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
     const queryKeys = TABLE_TO_QUERY_KEYS[table] || [];
     
     // Use shorter debounce for critical tables
-    const criticalTables = ['messages', 'conversations'];
-    const debounceMs = criticalTables.includes(table) ? 300 : 500;
+    // Messages: 100ms for near-instant feedback
+    // Conversations: 300ms to avoid spam during typing indicators
+    const debounceMs = table === 'messages' ? 100 : 
+                       table === 'conversations' ? 300 : 500;
     
     debouncedInvalidate(queryKeys, debounceMs);
     
@@ -229,7 +231,8 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
       });
 
     // ========================================================================
-    // CHANNEL 2: tenant-messages - All messages for the tenant
+    // CHANNEL 2: tenant-messages - All messages for the tenant (FILTERED)
+    // Now uses law_firm_id column for efficient Realtime filtering
     // ========================================================================
     messagesChannelRef.current = supabase
       .channel(`tenant-messages-${lawFirmId}`)
@@ -237,11 +240,13 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
+        filter: `law_firm_id=eq.${lawFirmId}`,
       }, (payload) => handleTableChange('messages', payload))
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'messages',
+        filter: `law_firm_id=eq.${lawFirmId}`,
       }, (payload) => handleTableChange('messages', payload))
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
