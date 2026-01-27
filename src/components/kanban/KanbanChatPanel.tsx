@@ -1039,10 +1039,10 @@ export function KanbanChatPanel({
   const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
   
   // isWhatsAppConversation: used to show/hide audio recorder
+  // IMPORTANTE: Não assumir WhatsApp se origin vazio - requer confirmação explícita via remoteJid
   const isWhatsAppConversation = !isNonWhatsAppConversation && (
     conversationOrigin === 'WHATSAPP' ||
-    (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
-    conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
+    (remoteJid && remoteJid.endsWith('@s.whatsapp.net'))
   );
   
   const { toast } = useToast();
@@ -1887,7 +1887,7 @@ export function KanbanChatPanel({
       // Check if this is a non-WhatsApp conversation
       if (isNonWhatsAppConversation) {
         // CRITICAL: Chat Web/Widget não permite áudio (somente texto + imagens)
-        throw new Error("Chat Web aceita apenas mensagens de texto e imagens (sem áudio).");
+        throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
       } else {
         // WhatsApp: send directly via Evolution API (no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending audio via Evolution API', { 
