@@ -10,6 +10,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Plus,
   Search,
   LayoutGrid,
@@ -18,6 +24,7 @@ import {
   BarChart3,
   Filter,
   X,
+  Settings,
 } from "lucide-react";
 import { useTasks, TaskStatus, TaskPriority } from "@/hooks/useTasks";
 import { useTaskCategories } from "@/hooks/useTaskCategories";
@@ -28,6 +35,7 @@ import { TaskCalendarView } from "@/components/tasks/TaskCalendarView";
 import { TaskDashboard } from "@/components/tasks/TaskDashboard";
 import { NewTaskDialog } from "@/components/tasks/NewTaskDialog";
 import { TaskDetailSheet } from "@/components/tasks/TaskDetailSheet";
+import { TaskCategoriesDialog } from "@/components/tasks/TaskCategoriesDialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -41,6 +49,7 @@ export default function Tasks() {
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
 
   const { tasks, isLoading } = useTasks();
   const { categories, initializeDefaultCategories } = useTaskCategories();
@@ -133,10 +142,26 @@ export default function Tasks() {
             Gerencie as tarefas da equipe
           </p>
         </div>
-        <Button onClick={() => setIsNewTaskOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nova Tarefa
-        </Button>
+        <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsCategoriesOpen(true)}
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Gerenciar Categorias</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Button onClick={() => setIsNewTaskOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Tarefa
+          </Button>
+        </div>
       </div>
 
       {/* Search and Filters */}
@@ -298,6 +323,12 @@ export default function Tasks() {
         onOpenChange={(open) => !open && setSelectedTaskId(null)}
         categories={categories}
         teamMembers={teamMembers}
+      />
+
+      {/* Categories Dialog */}
+      <TaskCategoriesDialog
+        open={isCategoriesOpen}
+        onOpenChange={setIsCategoriesOpen}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -19,13 +19,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Select,
   SelectContent,
@@ -34,19 +41,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Calendar,
+  Calendar as CalendarIcon,
   CheckCircle2,
   Clock,
   MessageSquare,
   Trash2,
   History,
   Send,
-  User,
+  Pencil,
+  X,
+  Check,
 } from "lucide-react";
 import { Task, TaskPriority, TaskStatus, useTasks } from "@/hooks/useTasks";
 import { useTaskComments } from "@/hooks/useTaskComments";
 import { useTaskActivityLog } from "@/hooks/useTaskActivityLog";
 import { TaskCategory } from "@/hooks/useTaskCategories";
+import { EditableAssigneesPopover } from "./EditableAssigneesPopover";
 import { cn } from "@/lib/utils";
 
 interface TeamMember {
@@ -68,13 +78,6 @@ const priorityLabels: Record<TaskPriority, string> = {
   medium: "Média",
   high: "Alta",
   urgent: "Urgente",
-};
-
-const priorityStyles: Record<TaskPriority, string> = {
-  low: "bg-muted text-muted-foreground",
-  medium: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  high: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  urgent: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 };
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -101,6 +104,23 @@ export function TaskDetailSheet({
   const { updateTask, updateTaskStatus, deleteTask } = useTasks();
   const { comments, addComment } = useTaskComments(task?.id || null);
   const { activities } = useTaskActivityLog(task?.id || null);
+
+  // Inline editing states
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [editedDescription, setEditedDescription] = useState("");
+  const [dueDateOpen, setDueDateOpen] = useState(false);
+
+  // Reset editing states when task changes
+  useEffect(() => {
+    if (task) {
+      setEditedTitle(task.title);
+      setEditedDescription(task.description || "");
+      setIsEditingTitle(false);
+      setIsEditingDescription(false);
+    }
+  }, [task?.id]);
 
   if (!task) return null;
 
@@ -130,11 +150,80 @@ export function TaskDetailSheet({
     onOpenChange(false);
   };
 
+  // Title editing
+  const handleSaveTitle = () => {
+    if (editedTitle.trim() && editedTitle !== task.title) {
+      updateTask.mutate({ id: task.id, title: editedTitle.trim() });
+    }
+    setIsEditingTitle(false);
+  };
+
+  // Description editing
+  const handleSaveDescription = () => {
+    if (editedDescription !== (task.description || "")) {
+      updateTask.mutate({ id: task.id, description: editedDescription || null });
+    }
+    setIsEditingDescription(false);
+  };
+
+  // Due date editing
+  const handleDueDateChange = (date: Date | undefined) => {
+    updateTask.mutate({
+      id: task.id,
+      due_date: date ? date.toISOString().split("T")[0] : null,
+    });
+    setDueDateOpen(false);
+  };
+
+  // Assignees editing
+  const handleAssigneesChange = (selectedIds: string[]) => {
+    updateTask.mutate({ id: task.id, assignee_ids: selectedIds });
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle className="pr-8">{task.title}</SheetTitle>
+        <SheetHeader className="pr-8">
+          {/* Editable Title */}
+          {isEditingTitle ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={editedTitle}
+                onChange={(e) => setEditedTitle(e.target.value)}
+                onBlur={handleSaveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveTitle();
+                  if (e.key === "Escape") {
+                    setEditedTitle(task.title);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                autoFocus
+                className="text-lg font-semibold"
+              />
+              <Button size="icon" variant="ghost" onClick={handleSaveTitle}>
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => {
+                  setEditedTitle(task.title);
+                  setIsEditingTitle(false);
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <SheetTitle
+              className="pr-8 cursor-pointer group flex items-center gap-2 hover:text-primary transition-colors"
+              onClick={() => setIsEditingTitle(true)}
+            >
+              {task.title}
+              <Pencil className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
+            </SheetTitle>
+          )}
           <SheetDescription>
             Criado em{" "}
             {format(new Date(task.created_at), "dd/MM/yyyy 'às' HH:mm", {
@@ -212,18 +301,52 @@ export function TaskDetailSheet({
               </Select>
             </div>
 
-            {/* Due Date */}
-            {task.due_date && (
-              <div className="flex items-center gap-2 text-sm">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span>
-                  Vencimento:{" "}
-                  {format(new Date(task.due_date), "dd/MM/yyyy", {
-                    locale: ptBR,
-                  })}
-                </span>
-              </div>
-            )}
+            {/* Due Date - Editable */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Data de Vencimento
+              </label>
+              <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !task.due_date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {task.due_date
+                      ? format(new Date(task.due_date), "dd/MM/yyyy", {
+                          locale: ptBR,
+                        })
+                      : "Adicionar data"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={task.due_date ? new Date(task.due_date) : undefined}
+                    onSelect={handleDueDateChange}
+                    locale={ptBR}
+                    className="pointer-events-auto"
+                  />
+                  {task.due_date && (
+                    <div className="p-2 border-t">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full text-destructive hover:text-destructive"
+                        onClick={() => handleDueDateChange(undefined)}
+                      >
+                        <X className="h-4 w-4 mr-2" />
+                        Remover data
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </div>
 
             {/* Completed info */}
             {task.completed_at && (
@@ -238,23 +361,63 @@ export function TaskDetailSheet({
               </div>
             )}
 
-            {/* Description */}
-            {task.description && (
-              <div>
-                <label className="text-sm font-medium mb-2 block">
-                  Descrição
-                </label>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                  {task.description}
-                </p>
-              </div>
-            )}
-
-            {/* Assignees */}
+            {/* Description - Editable */}
             <div>
-              <label className="text-sm font-medium mb-2 block">
-                Responsáveis
-              </label>
+              <label className="text-sm font-medium mb-2 block">Descrição</label>
+              {isEditingDescription ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={editedDescription}
+                    onChange={(e) => setEditedDescription(e.target.value)}
+                    placeholder="Adicione uma descrição..."
+                    rows={4}
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditedDescription(task.description || "");
+                        setIsEditingDescription(false);
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button size="sm" onClick={handleSaveDescription}>
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[80px]",
+                    !task.description && "text-muted-foreground"
+                  )}
+                  onClick={() => setIsEditingDescription(true)}
+                >
+                  <div className="flex items-start justify-between">
+                    <p className="text-sm whitespace-pre-wrap flex-1">
+                      {task.description || "Clique para adicionar descrição..."}
+                    </p>
+                    <Pencil className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity shrink-0 ml-2" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Assignees - Editable */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Responsáveis</label>
+                <EditableAssigneesPopover
+                  selectedIds={task.assignees.map((a) => a.user_id)}
+                  teamMembers={teamMembers}
+                  onSave={handleAssigneesChange}
+                  isPending={updateTask.isPending}
+                />
+              </div>
               {task.assignees.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {task.assignees.map((assignee) => (
