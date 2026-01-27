@@ -122,15 +122,15 @@ export default function PublicBooking() {
         
         setServices(servicesData || []);
         
-        // Load active professionals
+        // Load active professionals from safe view (excludes PII like email/phone)
         const { data: professionalsData } = await supabase
-          .from("agenda_pro_professionals")
+          .from("agenda_pro_professionals_public" as any)
           .select("id, name, specialty, avatar_url")
           .eq("law_firm_id", firmId)
           .eq("is_active", true)
           .order("name");
         
-        setProfessionals(professionalsData || []);
+        setProfessionals((professionalsData as unknown as PublicProfessional[] | null) || []);
         
       } catch (error) {
         console.error("Error loading business data:", error);

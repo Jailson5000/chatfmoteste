@@ -315,6 +315,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "agenda_pro_appointments_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "agenda_pro_appointments_resource_id_fkey"
             columns: ["resource_id"]
             isOneToOne: false
@@ -370,6 +377,13 @@ export type Database = {
             columns: ["professional_id"]
             isOneToOne: false
             referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_breaks_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
             referencedColumns: ["id"]
           },
         ]
@@ -493,6 +507,13 @@ export type Database = {
             columns: ["preferred_professional_id"]
             isOneToOne: false
             referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_clients_preferred_professional_id_fkey"
+            columns: ["preferred_professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
             referencedColumns: ["id"]
           },
         ]
@@ -763,6 +784,13 @@ export type Database = {
             columns: ["professional_id"]
             isOneToOne: false
             referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_service_professionals_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
             referencedColumns: ["id"]
           },
           {
@@ -1070,6 +1098,13 @@ export type Database = {
             referencedRelation: "agenda_pro_professionals"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "agenda_pro_time_off_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       agenda_pro_working_hours: {
@@ -1109,6 +1144,13 @@ export type Database = {
             columns: ["professional_id"]
             isOneToOne: false
             referencedRelation: "agenda_pro_professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_working_hours_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "agenda_pro_professionals_public"
             referencedColumns: ["id"]
           },
         ]
@@ -5567,6 +5609,50 @@ export type Database = {
       }
     }
     Views: {
+      agenda_pro_professionals_public: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          color: string | null
+          id: string | null
+          is_active: boolean | null
+          law_firm_id: string | null
+          name: string | null
+          position: number | null
+          specialty: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          color?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          law_firm_id?: string | null
+          name?: string | null
+          position?: number | null
+          specialty?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          color?: string | null
+          id?: string | null
+          is_active?: boolean | null
+          law_firm_id?: string | null
+          name?: string | null
+          position?: number | null
+          specialty?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agenda_pro_professionals_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_usage_summary: {
         Row: {
           allow_ai_overage: boolean | null
