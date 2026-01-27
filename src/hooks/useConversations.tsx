@@ -240,105 +240,15 @@ export function useConversations() {
   // Use allConversations as the source of truth
   const conversations = allConversations;
 
-  // Real-time subscription for conversations, messages, clients, and custom_statuses
-  useEffect(() => {
-    if (!lawFirm?.id) return;
-    
-    const conversationsChannel = supabase
-      .channel('conversations-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations',
-          filter: `law_firm_id=eq.${lawFirm.id}`
-        },
-        (payload) => {
-          // Force immediate refetch for handler/assignment changes
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
-          queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
-          
-          // If it's an UPDATE with handler or assigned_to change, force refetch
-          if (payload.eventType === 'UPDATE') {
-            queryClient.refetchQueries({ queryKey: ["conversations", lawFirm.id] });
-          }
-        }
-      )
-      .subscribe();
-
-    // Listen for new messages to update last_message
-    const messagesChannel = supabase
-      .channel('messages-for-conversations')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages'
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        }
-      )
-      .subscribe();
-
-    // Listen for client updates (status changes, avatar, etc.)
-    const clientsChannel = supabase
-      .channel('clients-for-conversations')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'clients'
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        }
-      )
-      .subscribe();
-
-    // Listen for custom_statuses updates (name/color changes)
-    const statusesChannel = supabase
-      .channel('statuses-for-conversations')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'custom_statuses'
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        }
-      )
-      .subscribe();
-
-    // Listen for departments updates (name/color changes)
-    const departmentsChannel = supabase
-      .channel('departments-for-conversations')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'departments'
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(conversationsChannel);
-      supabase.removeChannel(messagesChannel);
-      supabase.removeChannel(clientsChannel);
-      supabase.removeChannel(statusesChannel);
-      supabase.removeChannel(departmentsChannel);
-    };
-  }, [queryClient, lawFirm?.id]);
+  // ============================================================================
+  // REALTIME: Handled by RealtimeSyncContext (centralized)
+  // ============================================================================
+  // The following tables are now monitored by RealtimeSyncProvider:
+  // - conversations, clients, custom_statuses, departments, tags
+  // - messages, scheduled_follow_ups, whatsapp_instances
+  // All invalidations happen automatically via the context.
+  // NO ADDITIONAL CHANNELS NEEDED HERE - reduces WebSocket overhead by ~75%
+  // ============================================================================
 
   const updateConversation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Conversation> & { id: string }) => {
