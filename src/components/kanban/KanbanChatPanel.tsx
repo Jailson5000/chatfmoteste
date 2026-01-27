@@ -1666,7 +1666,9 @@ export function KanbanChatPanel({
     setIsPontualMode(false);
     setReplyToMessage(null);
     
-    // Optimistically add message to local state with "sending" status
+    // For external messages: use optimistic updates with reconciliation
+    // For internal notes: skip optimistic update - let Realtime be the single source of truth
+    // This prevents duplicate notes from appearing in the UI
     const tempId = crypto.randomUUID();
     const tempWhatsAppId = `temp_${tempId}`;
     const messageTimestamp = new Date().toISOString();
@@ -1674,26 +1676,30 @@ export function KanbanChatPanel({
     // Increment client order for stable sorting (prevents visual shuffle)
     const clientOrder = clientOrderRef.current++;
     
-    const optimisticMessage = {
-      id: tempId,
-      content: messageToSend,
-      created_at: messageTimestamp,
-      is_from_me: true,
-      sender_type: "human",
-      ai_generated: false,
-      status: wasInternalMode ? "sent" : "sending",
-      is_internal: wasInternalMode,
-      is_pontual: wasPontualMode,
-      whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
-      message_type: "text",
-      reply_to: null,
-      // Client-side ordering fields for stable visual order during reconciliation
-      _clientOrder: clientOrder,
-      _clientTempId: tempId,
-    };
-    
-    // Add message - no sorting needed, _clientOrder ensures stable order
-    setMessages(prev => [...prev, optimisticMessage]);
+    // CRITICAL: Only add optimistic message for EXTERNAL messages, NOT internal notes
+    // Internal notes will appear via Realtime subscription after DB insert
+    if (!wasInternalMode) {
+      const optimisticMessage = {
+        id: tempId,
+        content: messageToSend,
+        created_at: messageTimestamp,
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+        status: "sending",
+        is_internal: false,
+        is_pontual: wasPontualMode,
+        whatsapp_message_id: tempWhatsAppId,
+        message_type: "text",
+        reply_to: null,
+        // Client-side ordering fields for stable visual order during reconciliation
+        _clientOrder: clientOrder,
+        _clientTempId: tempId,
+      };
+      
+      // Add message - no sorting needed, _clientOrder ensures stable order
+      setMessages(prev => [...prev, optimisticMessage]);
+    }
 
     // Enqueue message send to ensure strict ordering PER CONVERSATION
     // Messages within the same conversation are sent sequentially
@@ -1701,6 +1707,7 @@ export function KanbanChatPanel({
     enqueueMessage(conversationId, async () => {
       if (wasInternalMode) {
         // Internal message - save directly to database
+        // NO optimistic update - Realtime subscription handles display
         const { data: userData } = await supabase.auth.getUser();
         const { error } = await supabase.from("messages").insert({
           conversation_id: conversationId,
@@ -1717,10 +1724,8 @@ export function KanbanChatPanel({
         
         if (error) throw error;
         
-        // Update optimistic message status
-        setMessages(prev => prev.map(m => 
-          m.id === tempId ? { ...m, status: "sent" } : m
-        ));
+        // Note: Don't manually add to state - Realtime subscription will handle it
+        // This prevents duplicate internal notes from appearing in the UI
       } else {
         // External message - route based on channel (WhatsApp vs Widget/Tray)
         const { data: userData } = await supabase.auth.getUser();
