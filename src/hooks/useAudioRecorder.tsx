@@ -35,14 +35,21 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       streamRef.current = stream;
       chunksRef.current = [];
       
-      // Try to use webm/opus, fallback to whatever is supported
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      // Prefer formats that are most compatible with WhatsApp pipelines.
+      // NOTE: browser support varies; we pick the best supported option.
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'
-        : 'audio/mp4';
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : '';
       
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       
       mediaRecorder.ondataavailable = (event) => {
@@ -51,8 +58,8 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
       };
       
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+       mediaRecorder.onstop = () => {
+         const blob = new Blob(chunksRef.current, { type: mimeType || mediaRecorder.mimeType || "audio/webm" });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         
