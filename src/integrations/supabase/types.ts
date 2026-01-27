@@ -3543,6 +3543,7 @@ export type Database = {
           is_pontual: boolean | null
           is_revoked: boolean | null
           is_starred: boolean | null
+          law_firm_id: string | null
           media_mime_type: string | null
           media_url: string | null
           message_type: string
@@ -3569,6 +3570,7 @@ export type Database = {
           is_pontual?: boolean | null
           is_revoked?: boolean | null
           is_starred?: boolean | null
+          law_firm_id?: string | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
@@ -3595,6 +3597,7 @@ export type Database = {
           is_pontual?: boolean | null
           is_revoked?: boolean | null
           is_starred?: boolean | null
+          law_firm_id?: string | null
           media_mime_type?: string | null
           media_url?: string | null
           message_type?: string
@@ -3620,6 +3623,13 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
             referencedColumns: ["id"]
           },
           {

@@ -345,6 +345,7 @@ Deno.serve(async (req) => {
         // Save message to database
         await supabase.from("messages").insert({
           conversation_id: followUp.conversation_id,
+          law_firm_id: followUp.law_firm_id,
           content: messageContent,
           message_type: messageType,
           media_url: mediaUrl,

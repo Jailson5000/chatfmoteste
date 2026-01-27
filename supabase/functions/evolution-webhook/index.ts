@@ -1842,6 +1842,7 @@ async function sendTextFallbackWithWarning(
         .from('messages')
         .insert({
           conversation_id: context.conversationId,
+          law_firm_id: context.lawFirmId,
           whatsapp_message_id: warnResult?.key?.id,
           content: warningText,
           message_type: 'text',
@@ -2027,6 +2028,7 @@ async function sendAIResponseToWhatsApp(
             .from('messages')
             .insert({
               conversation_id: context.conversationId,
+              law_firm_id: context.lawFirmId,
               whatsapp_message_id: textResult?.key?.id,
               content: textBefore,
               message_type: 'text',
@@ -2157,6 +2159,7 @@ async function sendAIResponseToWhatsApp(
         .from('messages')
         .insert({
           conversation_id: context.conversationId,
+          law_firm_id: context.lawFirmId,
           whatsapp_message_id: whatsappMessageId,
           content: caption || `[${mediaTypeRaw}]`,
           message_type: dbMessageType,
@@ -2198,6 +2201,7 @@ async function sendAIResponseToWhatsApp(
             .from('messages')
             .insert({
               conversation_id: context.conversationId,
+              law_firm_id: context.lawFirmId,
               whatsapp_message_id: textResult?.key?.id,
               content: remainingTextAfterCaption,
               message_type: 'text',
@@ -2397,6 +2401,7 @@ async function sendAIResponseToWhatsApp(
           .from('messages')
           .insert({
             conversation_id: context.conversationId,
+            law_firm_id: context.lawFirmId,
             whatsapp_message_id: audioResult.messageId,
             content: chunkText,
             message_type: 'audio',
@@ -2509,6 +2514,7 @@ async function sendAIResponseToWhatsApp(
         .from('messages')
         .insert({
           conversation_id: context.conversationId,
+          law_firm_id: context.lawFirmId,
           whatsapp_message_id: lastWhatsappMessageId,
           content: part,
           message_type: 'text',
@@ -4242,6 +4248,7 @@ serve(async (req) => {
             .from('messages')
             .insert({
               conversation_id: conversation.id,
+              law_firm_id: conversation.law_firm_id,
               whatsapp_message_id: data.key.id,
               content: messageContent,
               message_type: messageType,

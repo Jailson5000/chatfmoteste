@@ -1995,6 +1995,7 @@ async function executeTemplateTool(
     const messageType = finalMediaUrl ? 'media' : 'text';
     const { data: savedMsg, error: saveError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
+      law_firm_id: lawFirmId,
       whatsapp_message_id: whatsappMessageId,
       content: finalContent || '',
       sender_type: "ai",
@@ -3278,6 +3279,7 @@ serve(async (req) => {
           const part = messageParts[i];
           const { data: savedMessage } = await supabase.from("messages").insert({
             conversation_id: conversationId,
+            law_firm_id: agentLawFirmId,
             content: part,
             sender_type: "ai",
             is_from_me: true,
