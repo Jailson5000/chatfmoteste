@@ -1,4 +1,4 @@
-import { Link2, PenTool, ShoppingCart, Calendar } from "lucide-react";
+import { Link2, PenTool, ShoppingCart } from "lucide-react";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { AgendaProIntegration } from "./integrations/AgendaProIntegration";
 import { IntegrationCard } from "./IntegrationCard";
@@ -64,14 +64,6 @@ export function IntegrationsSettings() {
         {/* Active Integrations - Available first */}
         <AgendaProIntegration />
         <TrayChatIntegration />
-        
-        {/* Google Calendar - Coming Soon */}
-        <IntegrationCard
-          icon={<Calendar className="h-5 w-5" />}
-          title="Google Calendar"
-          description="Sincronize agendamentos com o Google Calendar. Permite que a IA visualize e crie eventos automaticamente."
-          isComingSoon
-        />
         
         {/* Coming Soon Integrations */}
         <IntegrationCard
