@@ -740,7 +740,7 @@ Você é uma atendente da empresa @Nome da empresa, especializada em atender e d
                 <span className="text-sm text-muted-foreground">segundos</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Tempo adicional antes de responder (+ 7-15s de jitter humano)
+                Tempo adicional após debounce de 10s (+ 1-3s de jitter humano)
               </p>
             </div>
 
