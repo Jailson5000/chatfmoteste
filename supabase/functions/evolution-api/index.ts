@@ -2136,11 +2136,19 @@ serve(async (req) => {
         const mediaData = await mediaResponse.json();
         console.log(`[Evolution API] Media retrieved, base64 length: ${mediaData.base64?.length || 0}`);
 
+        // Normalize common provider quirk: audio messages sometimes come as video/webm
+        // This breaks HTMLAudio duration/playback (shows 0:00).
+        const normalizedMimetype = (() => {
+          const mt = (mediaData.mimetype || "").toLowerCase();
+          if (mt === "video/webm") return "audio/webm";
+          return mediaData.mimetype;
+        })();
+
         return new Response(
           JSON.stringify({
             success: true,
             base64: mediaData.base64,
-            mimetype: mediaData.mimetype,
+            mimetype: normalizedMimetype,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
@@ -2370,7 +2378,7 @@ serve(async (req) => {
         const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
 
         // Prefer mimetype returned by provider; fallback to requested.
-        const extractedMimeType =
+        let extractedMimeType =
           sendData.message?.imageMessage?.mimetype ||
           sendData.message?.audioMessage?.mimetype ||
           sendData.message?.videoMessage?.mimetype ||
@@ -2378,6 +2386,12 @@ serve(async (req) => {
           sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
           body.mimeType ||
           null;
+
+        // Normalize provider quirk for audio: audioMessage mimetype may come as video/webm
+        if (body.mediaType === "audio" && typeof extractedMimeType === "string") {
+          const mt = extractedMimeType.toLowerCase();
+          if (mt === "video/webm") extractedMimeType = "audio/webm";
+        }
 
         // Extract media URL from Evolution API response
         // The API returns the uploaded media URL in message.[mediaType]Message.url
