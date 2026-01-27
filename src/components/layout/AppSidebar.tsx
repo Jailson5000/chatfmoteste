@@ -21,6 +21,7 @@ import {
   PlayCircle,
   CalendarDays,
   HelpCircle,
+  CheckSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -69,6 +70,7 @@ const settingsItem = { icon: Settings, label: "Configurações", path: "/setting
 const profileItem = { icon: User, label: "Meu Perfil", path: "/profile" };
 const agendaItem = { icon: CalendarDays, label: "Agenda", path: "/agenda" };
 const agendaProItem = { icon: CalendarDays, label: "Agenda Pro", path: "/agenda-pro" };
+const tasksItem = { icon: CheckSquare, label: "Tarefas", path: "/tarefas" };
 const supportItem = { icon: HelpCircle, label: "Suporte", path: "/suporte" };
 const tutorialsItem = { icon: PlayCircle, label: "Tutoriais", path: "/tutoriais" };
 
@@ -89,14 +91,14 @@ export function AppSidebar() {
   const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
 
   // Build bottom menu items based on user role (profileItem is in Footer already)
-  // Order: Agenda Pro, Agenda, Conexões, Configurações, Suporte, Tutoriais
+  // Order: Agenda Pro, Agenda, Tarefas, Conexões, Configurações, Suporte, Tutoriais
   const bottomMenuItems = isAttendant
     ? showAgenda
-      ? [agendaProItem, agendaItem, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, settingsItem, supportItem, tutorialsItem]
+      ? [agendaProItem, agendaItem, tasksItem, settingsItem, supportItem, tutorialsItem]
+      : [agendaProItem, tasksItem, settingsItem, supportItem, tutorialsItem]
     : showAgenda
-      ? [agendaProItem, agendaItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem]
-      : [agendaProItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
+      ? [agendaProItem, agendaItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem]
+      : [agendaProItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
 
   // Open sections if on one of their pages
   useEffect(() => {
