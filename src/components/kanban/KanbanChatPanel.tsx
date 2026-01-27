@@ -1031,10 +1031,20 @@ export function KanbanChatPanel({
   automations,
   onClose,
 }: KanbanChatPanelProps) {
-  // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
-  const conversationOrigin = origin?.toUpperCase();
+  // Determine if this is a WhatsApp conversation (robust detection)
+  // Criteria: origin='whatsapp' OR remote_jid ends with @s.whatsapp.net
+  // Inverse: NOT widget/tray/site/web origins
+  const conversationOrigin = (origin || '').toUpperCase();
   const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
   const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+  
+  // isWhatsAppConversation: used to show/hide audio recorder
+  const isWhatsAppConversation = !isNonWhatsAppConversation && (
+    conversationOrigin === 'WHATSAPP' ||
+    (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
+    conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
+  );
+  
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -3072,8 +3082,8 @@ export function KanbanChatPanel({
           onCancelReply={() => setReplyToMessage(null)}
         />
 
-        {/* Audio Recorder */}
-        {isRecordingAudio ? (
+        {/* Audio Recorder - only for WhatsApp conversations */}
+        {isRecordingAudio && isWhatsAppConversation ? (
           <AudioRecorder
             onSend={handleSendAudio}
             onCancel={() => setIsRecordingAudio(false)}
@@ -3141,16 +3151,18 @@ export function KanbanChatPanel({
                   </PopoverContent>
                 </Popover>
 
-                {/* Audio button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setIsRecordingAudio(true)}
-                  disabled={isInternalMode}
-                >
-                  <Mic className="h-4 w-4" />
-                </Button>
+                {/* Audio button - only show for WhatsApp conversations */}
+                {isWhatsAppConversation && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setIsRecordingAudio(true)}
+                    disabled={isInternalMode}
+                  >
+                    <Mic className="h-4 w-4" />
+                  </Button>
+                )}
 
                 {/* Internal message button */}
                 <Button
