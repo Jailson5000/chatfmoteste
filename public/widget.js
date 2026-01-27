@@ -242,7 +242,10 @@
       let hasUpdatedMessages = false;
       
       serverMessages.forEach((msg) => {
-        if (!msg?.id || !msg?.content) return;
+        // Allow messages with either content or media (audio/image/video)
+        const hasContent = msg?.content && msg.content.trim();
+        const hasMedia = msg?.media_url || msg?.message_type === 'audio' || msg?.message_type === 'image' || msg?.message_type === 'video';
+        if (!msg?.id || (!hasContent && !hasMedia)) return;
         
         // Skip if we already have this message by server ID
         const alreadyByServerId = messages.find((m) => m.serverId === msg.id);
@@ -307,12 +310,29 @@
             return;
           }
           
-          console.log('[MiauChat] New agent message:', msg.content.substring(0, 50));
+          console.log('[MiauChat] New agent message:', (msg.content || '[media]').substring(0, 50));
+          
+          // Build display content - handle media messages
+          let displayContent = msg.content || '';
+          if (msg.message_type === 'audio' && msg.media_url) {
+            displayContent = '🎤 [Áudio]';
+          } else if (msg.message_type === 'image' && msg.media_url) {
+            displayContent = '📷 [Imagem]';
+          } else if (msg.message_type === 'video' && msg.media_url) {
+            displayContent = '🎬 [Vídeo]';
+          } else if (msg.message_type === 'document' && msg.media_url) {
+            displayContent = '📄 [Documento]';
+          } else if (!displayContent && msg.media_url) {
+            displayContent = '📎 [Mídia]';
+          }
+          
           newMessages.push({
             role: 'assistant',
-            content: msg.content,
+            content: displayContent,
             serverId: msg.id,
-            timestamp: msg.created_at
+            timestamp: msg.created_at,
+            mediaUrl: msg.media_url || null,
+            mediaType: msg.message_type || null,
           });
           hasNewFromAgent = true;
           return;
