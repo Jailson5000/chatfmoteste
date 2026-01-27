@@ -1842,39 +1842,109 @@ export default function Conversations() {
         });
       }
 
-      // Convert file to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          // Remove data URL prefix (e.g., "data:image/jpeg;base64,")
-          const base64 = result.split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
-      
-      const mediaBase64 = await base64Promise;
+      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+      const conversationOrigin = selectedConversation.origin?.toUpperCase();
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
 
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId: selectedConversationId,
-          mediaType,
-          mediaBase64,
-          fileName: file.name,
-          caption: "",
-          mimeType: file.type,
-        },
-      });
+      // Generate unique filename to prevent overwrites
+      const ext = file.name.split('.').pop() || 'bin';
+      const uniqueFileName = `${mediaType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-      if (response.error) {
-        throw new Error(response.error.message || "Falha ao enviar mídia");
-      }
+      if (isNonWhatsAppConversation) {
+        // ============ CHAT WEB PATH (Widget/Tray/Site) ============
+        console.log("[Media] Non-WhatsApp conversation, using direct storage path");
+        
+        // Get law_firm_id for storage path RLS compliance
+        const { data: convData } = await supabase
+          .from("conversations")
+          .select("law_firm_id")
+          .eq("id", selectedConversationId)
+          .single();
+        
+        const lawFirmId = convData?.law_firm_id;
+        if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
+        
+        // RLS-compliant path: {law_firm_id}/{conversation_id}/{fileName}
+        const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
+        
+        // Upload to storage
+        const { error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(storagePath, file, {
+            contentType: file.type,
+            upsert: false,
+          });
+        
+        if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+        
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(storagePath);
+        
+        const mediaUrl = urlData?.publicUrl;
+        
+        // Insert message record directly
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: selectedConversationId,
+            law_firm_id: lawFirmId,
+            content: mediaType === "audio" ? "[Áudio]" : `[${file.name}]`,
+            message_type: mediaType,
+            media_url: mediaUrl,
+            media_mime_type: file.type,
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+          });
+        
+        if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", selectedConversationId);
+          
+      } else {
+        // ============ WHATSAPP PATH ============
+        console.log("[Media] WhatsApp conversation, using Evolution API");
+        
+        // Convert file to base64
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(file);
+        
+        const mediaBase64 = await base64Promise;
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || "Falha ao enviar mídia");
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId: selectedConversationId,
+            mediaType,
+            mediaBase64,
+            fileName: uniqueFileName,
+            caption: "",
+            mimeType: file.type,
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar mídia");
+        }
+
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar mídia");
+        }
       }
 
       // Do NOT add optimistic message here - backend already inserted via send_media
@@ -2014,7 +2084,7 @@ export default function Conversations() {
   };
 
   const handleSendAudioRecording = async (audioBlob: Blob) => {
-    if (!selectedConversationId || isSending) return;
+    if (!selectedConversationId || !selectedConversation || isSending) return;
     
     setIsSending(true);
     
@@ -2037,6 +2107,14 @@ export default function Conversations() {
         });
       }
       
+      // CRITICAL: Generate unique filename to prevent overwrites
+      const uniqueFileName = `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.webm`;
+      
+      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+      const conversationOrigin = selectedConversation.origin?.toUpperCase();
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+      
       // Convert blob to base64
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
@@ -2051,23 +2129,87 @@ export default function Conversations() {
       
       const mediaBase64 = await base64Promise;
 
-      const response = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_media",
-          conversationId: selectedConversationId,
-          mediaType: "audio",
-          mediaBase64,
-          fileName: "audio.webm",
-          mimeType: audioBlob.type || "audio/webm",
-        },
-      });
+      if (isNonWhatsAppConversation) {
+        // ============ CHAT WEB PATH (Widget/Tray/Site) ============
+        // Upload to Supabase Storage directly, then insert message record
+        console.log("[Audio] Non-WhatsApp conversation detected, using direct storage path");
+        
+        // Get law_firm_id for storage path RLS compliance
+        const { data: convData } = await supabase
+          .from("conversations")
+          .select("law_firm_id")
+          .eq("id", selectedConversationId)
+          .single();
+        
+        const lawFirmId = convData?.law_firm_id;
+        if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
+        
+        // RLS-compliant path: {law_firm_id}/{conversation_id}/{fileName}
+        const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
+        
+        // Upload to storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("chat-media")
+          .upload(storagePath, audioBlob, {
+            contentType: audioBlob.type || "audio/webm",
+            upsert: false,
+          });
+        
+        if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+        
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from("chat-media")
+          .getPublicUrl(storagePath);
+        
+        const mediaUrl = urlData?.publicUrl;
+        
+        // Insert message record directly
+        const { error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: selectedConversationId,
+            law_firm_id: lawFirmId,
+            content: "[Áudio]",
+            message_type: "audio",
+            media_url: mediaUrl,
+            media_mime_type: audioBlob.type || "audio/webm",
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+          });
+        
+        if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
+        
+        // Update conversation timestamp
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString() })
+          .eq("id", selectedConversationId);
+          
+      } else {
+        // ============ WHATSAPP PATH ============
+        // Use Evolution API for WhatsApp delivery
+        console.log("[Audio] WhatsApp conversation, using Evolution API");
+        
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "send_media",
+            conversationId: selectedConversationId,
+            mediaType: "audio",
+            mediaBase64,
+            fileName: uniqueFileName,
+            mimeType: audioBlob.type || "audio/webm",
+          },
+        });
 
-      if (response.error) {
-        throw new Error(response.error.message || "Falha ao enviar áudio");
-      }
+        if (response.error) {
+          throw new Error(response.error.message || "Falha ao enviar áudio");
+        }
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || "Falha ao enviar áudio");
+        if (!response.data?.success) {
+          throw new Error(response.data?.error || "Falha ao enviar áudio");
+        }
       }
 
       // Do NOT add optimistic message here - let realtime handle it
