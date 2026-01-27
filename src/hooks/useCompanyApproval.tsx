@@ -7,6 +7,11 @@ interface CompanyApprovalStatus {
   rejection_reason: string | null;
   company_name: string | null;
   company_subdomain: string | null;
+  // Trial fields
+  trial_type: 'none' | 'auto_plan' | 'manual' | null;
+  trial_ends_at: string | null;
+  trial_expired: boolean;
+  plan_name: string | null;
   loading: boolean;
 }
 
@@ -17,6 +22,7 @@ interface CompanyApprovalStatus {
  * Used to:
  * - Block access for pending_approval or rejected companies
  * - Validate that user is accessing via their correct subdomain
+ * - Block access when trial has expired
  */
 export function useCompanyApproval(): CompanyApprovalStatus {
   const { user } = useAuth();
@@ -25,6 +31,10 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     rejection_reason: null,
     company_name: null,
     company_subdomain: null,
+    trial_type: null,
+    trial_ends_at: null,
+    trial_expired: false,
+    plan_name: null,
     loading: true,
   });
 
@@ -35,6 +45,10 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         rejection_reason: null,
         company_name: null,
         company_subdomain: null,
+        trial_type: null,
+        trial_ends_at: null,
+        trial_expired: false,
+        plan_name: null,
         loading: false,
       });
       return;
@@ -58,15 +72,27 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             rejection_reason: 'Usuário não está vinculado a nenhuma empresa válida.',
             company_name: null,
             company_subdomain: null,
+            trial_type: null,
+            trial_ends_at: null,
+            trial_expired: false,
+            plan_name: null,
             loading: false,
           });
           return;
         }
 
-        // Get company status and law_firm subdomain
+        // Get company status, trial info, and law_firm subdomain
         const { data: company, error: companyError } = await supabase
           .from('companies')
-          .select('approval_status, rejection_reason, name, law_firm:law_firms(subdomain)')
+          .select(`
+            approval_status, 
+            rejection_reason, 
+            name, 
+            trial_type,
+            trial_ends_at,
+            law_firm:law_firms(subdomain),
+            plan:plans!companies_plan_id_fkey(name)
+          `)
           .eq('law_firm_id', profile.law_firm_id)
           .maybeSingle();
 
@@ -79,6 +105,10 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             rejection_reason: 'Sua empresa não está cadastrada no sistema. Entre em contato com o suporte.',
             company_name: null,
             company_subdomain: null,
+            trial_type: null,
+            trial_ends_at: null,
+            trial_expired: false,
+            plan_name: null,
             loading: false,
           });
           return;
@@ -86,14 +116,28 @@ export function useCompanyApproval(): CompanyApprovalStatus {
 
         // Extract subdomain from law_firm relation
         const subdomain = (company.law_firm as any)?.subdomain || null;
+        const planName = (company.plan as any)?.name || null;
+        
+        // Check if trial has expired
+        const trialType = company.trial_type as 'none' | 'auto_plan' | 'manual' | null;
+        const trialEndsAt = company.trial_ends_at;
+        let trialExpired = false;
+        
+        if (trialType && trialType !== 'none' && trialEndsAt) {
+          trialExpired = new Date() > new Date(trialEndsAt);
+        }
 
-        console.log('[useCompanyApproval] Company status:', company.approval_status, 'Subdomain:', subdomain);
+        console.log('[useCompanyApproval] Company status:', company.approval_status, 'Subdomain:', subdomain, 'Trial:', trialType, 'Expired:', trialExpired);
         
         setStatus({
           approval_status: company.approval_status as 'pending_approval' | 'approved' | 'rejected',
           rejection_reason: company.rejection_reason,
           company_name: company.name,
           company_subdomain: subdomain,
+          trial_type: trialType,
+          trial_ends_at: trialEndsAt,
+          trial_expired: trialExpired,
+          plan_name: planName,
           loading: false,
         });
       } catch (err) {
@@ -104,6 +148,10 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           rejection_reason: 'Erro ao verificar acesso. Tente novamente ou contate o suporte.',
           company_name: null,
           company_subdomain: null,
+          trial_type: null,
+          trial_ends_at: null,
+          trial_expired: false,
+          plan_name: null,
           loading: false,
         });
       }

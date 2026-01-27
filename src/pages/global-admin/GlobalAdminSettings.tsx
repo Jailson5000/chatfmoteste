@@ -147,6 +147,43 @@ export default function GlobalAdminSettings() {
 
           <Separator />
 
+          {/* Auto Trial + Plan Mode */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-green-500/30 bg-green-500/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-green-500" />
+                <Label className="font-medium">Trial Automático + Plano</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Cliente escolhe plano → 7 dias grátis → cobrança automática no 8º dia
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("auto_trial_with_plan_enabled") === "true" || getSetting("auto_trial_with_plan_enabled") === true}
+                onCheckedChange={(checked) => handleChange("auto_trial_with_plan_enabled", checked.toString())}
+              />
+              {localSettings["auto_trial_with_plan_enabled"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("auto_trial_with_plan_enabled")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("auto_trial_with_plan_enabled") === "true" || getSetting("auto_trial_with_plan_enabled") === true) && (
+            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-start gap-2">
+              <Zap className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Trial automático <strong>ativo</strong>. 
+                Clientes que escolherem um plano terão 7 dias grátis antes da cobrança.
+                No 8º dia, o acesso será bloqueado até o pagamento.
+              </span>
+            </div>
+          )}
+
+          <Separator />
+
           <div className="space-y-4">
             <RadioGroup
               value={currentPaymentProvider}

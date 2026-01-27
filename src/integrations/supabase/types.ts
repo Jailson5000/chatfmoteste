@@ -2223,6 +2223,9 @@ export type Database = {
           template_cloned_at: string | null
           template_version: number | null
           trial_ends_at: string | null
+          trial_plan_id: string | null
+          trial_started_at: string | null
+          trial_type: string | null
           updated_at: string
           use_custom_limits: boolean
         }
@@ -2269,6 +2272,9 @@ export type Database = {
           template_cloned_at?: string | null
           template_version?: number | null
           trial_ends_at?: string | null
+          trial_plan_id?: string | null
+          trial_started_at?: string | null
+          trial_type?: string | null
           updated_at?: string
           use_custom_limits?: boolean
         }
@@ -2315,6 +2321,9 @@ export type Database = {
           template_cloned_at?: string | null
           template_version?: number | null
           trial_ends_at?: string | null
+          trial_plan_id?: string | null
+          trial_started_at?: string | null
+          trial_type?: string | null
           updated_at?: string
           use_custom_limits?: boolean
         }
@@ -2329,6 +2338,13 @@ export type Database = {
           {
             foreignKeyName: "companies_plan_id_fkey"
             columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "companies_trial_plan_id_fkey"
+            columns: ["trial_plan_id"]
             isOneToOne: false
             referencedRelation: "plans"
             referencedColumns: ["id"]

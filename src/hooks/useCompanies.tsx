@@ -116,7 +116,7 @@ export function useCompanies() {
         .from("companies")
         .select(`
           *,
-          plan:plans(id, name, price, max_users, max_instances, max_agents, max_workspaces, max_ai_conversations, max_tts_minutes),
+          plan:plans!companies_plan_id_fkey(id, name, price, max_users, max_instances, max_agents, max_workspaces, max_ai_conversations, max_tts_minutes),
           law_firm:law_firms(id, subdomain)
         `)
         .order("created_at", { ascending: false });
@@ -326,12 +326,14 @@ export function useCompanies() {
       companyId, 
       planId, 
       maxUsers = 5, 
-      maxInstances = 2 
+      maxInstances = 2,
+      enableTrial = false,
     }: { 
       companyId: string; 
       planId?: string; 
       maxUsers?: number; 
       maxInstances?: number; 
+      enableTrial?: boolean;
     }) => {
       const { data, error } = await supabase.functions.invoke('approve-company', {
         body: {
@@ -341,6 +343,7 @@ export function useCompanies() {
           max_users: maxUsers,
           max_instances: maxInstances,
           auto_activate_workflow: true,
+          enable_trial: enableTrial,
         },
       });
 
