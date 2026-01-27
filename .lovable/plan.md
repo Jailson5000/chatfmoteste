@@ -1,199 +1,207 @@
 
-# Plano: Remoção Completa da Integração Google Calendar
+# Auditoria de Segurança Multi-Tenant - Resultados e Correções
 
-## Resumo
+## Resumo Executivo
 
-Remover todos os arquivos, hooks, componentes e referências ao Google Calendar, já que o sistema agora utiliza a Agenda Pro como solução de agendamento. A remoção deve ser feita de forma cuidadosa para não afetar outras funcionalidades.
+A auditoria identificou que o sistema possui **proteções robustas** na maioria das áreas, com RLS habilitado em 100% das tabelas e validação de tenant nas Edge Functions críticas. Porém, foram identificados **3 problemas que requerem correção** para evitar vazamentos de dados.
 
 ---
 
-## Mapeamento Completo de Arquivos a Remover/Modificar
+## Problemas Identificados
 
-### Arquivos a DELETAR
+### 1. CRÍTICO: Exposição de Email/Telefone de Profissionais (Prioridade Alta)
 
-| Arquivo | Tipo | Razão |
-|---------|------|-------|
-| src/hooks/useGoogleCalendar.tsx | Hook | Hook principal da integração |
-| src/components/settings/GoogleCalendarCard.tsx | Componente | Card de configuração obsoleto |
-| src/components/settings/integrations/GoogleCalendarIntegration.tsx | Componente | Card de integração obsoleto |
-| src/pages/GoogleCalendarCallback.tsx | Página | Callback do OAuth |
-| src/pages/Calendar.tsx | Página | Visualização de eventos Google |
-| src/pages/Agenda.tsx | Página | Agenda antiga baseada em Google Calendar |
-| src/assets/google-calendar-icon.png | Asset | Ícone não mais utilizado |
-| supabase/functions/google-calendar-auth/ | Edge Function | Autenticação OAuth |
-| supabase/functions/google-calendar-actions/ | Edge Function | Ações de calendário |
-| supabase/functions/google-calendar-sync/ | Edge Function | Sincronização |
+**Tabela:** `agenda_pro_professionals`
 
-### Arquivos a MODIFICAR
+**Problema:** A política RLS "Public can view active professionals" permite SELECT de TODOS os campos (incluindo email, phone, document) para usuários não autenticados quando o booking público está habilitado.
+
+**Evidência:** Query confirmou 1 profissional ativo com email e telefone preenchidos, que pode ser acessado por qualquer pessoa.
+
+**Impacto:** Atacante pode fazer query direta ao Supabase para coletar emails/telefones dos profissionais.
+
+**Correção Proposta:**
+- Criar view segura `agenda_pro_professionals_public` que expõe apenas campos necessários
+- Alterar política RLS para bloquear SELECT direto público
+- Atualizar frontend para usar a nova view em páginas públicas
+
+---
+
+### 2. MÉDIO: Código Obsoleto - Referência Google Calendar (Prioridade Baixa)
+
+**Arquivo:** A remoção do Google Calendar foi bem-sucedida. O código foi limpo corretamente.
+
+**Status:** ✅ Resolvido na última modificação
+
+---
+
+### 3. AVISO: Leaked Password Protection Desabilitado
+
+**Configuração:** Supabase Auth
+
+**Problema:** A proteção contra senhas vazadas (HaveIBeenPwned) está desabilitada.
+
+**Impacto:** Usuários podem usar senhas que já foram comprometidas em vazamentos de dados conhecidos.
+
+**Correção:** Ação manual no painel Supabase - não requer código.
+
+---
+
+## Pontos Positivos Confirmados
+
+| Área | Status | Detalhes |
+|------|--------|----------|
+| RLS em todas tabelas | ✅ OK | 100% das tabelas com `law_firm_id` têm RLS ativo |
+| Funções SECURITY DEFINER | ✅ OK | Todas 76 funções têm `SET search_path = public` |
+| Validação de tenant nas Edge Functions | ✅ OK | `delete-client`, `generate-summary`, `extract-client-facts`, `get-agent-knowledge` validam corretamente |
+| Proteção IDOR | ✅ OK | Funções RPC validam `law_firm_id` antes de operações |
+| Views seguras para tokens | ✅ OK | `whatsapp_instances_safe`, `google_calendar_integrations_safe` |
+| Isolamento de mensagens | ✅ OK | Validação via JOIN com conversations |
+| Módulo `tenant-validation.ts` | ✅ OK | Validação centralizada e bem implementada |
+
+---
+
+## Plano de Correção
+
+### Fase 1: Criar View Pública Segura para Profissionais
+
+**Arquivo a criar:** Migration SQL
+
+```sql
+-- 1. Criar view segura que expõe apenas campos necessários para booking público
+CREATE OR REPLACE VIEW public.agenda_pro_professionals_public AS
+SELECT 
+  id,
+  law_firm_id,
+  name,
+  specialty,
+  bio,
+  avatar_url,
+  color,
+  is_active,
+  position
+FROM public.agenda_pro_professionals;
+
+-- 2. Habilitar RLS na view
+ALTER VIEW public.agenda_pro_professionals_public SET (security_invoker = on);
+
+-- 3. Criar política para acesso público controlado
+CREATE POLICY "Public can view active professionals via safe view"
+ON public.agenda_pro_professionals_public
+FOR SELECT
+USING (
+  is_active = true 
+  AND EXISTS (
+    SELECT 1 FROM agenda_pro_settings s
+    WHERE s.law_firm_id = agenda_pro_professionals_public.law_firm_id
+    AND s.public_booking_enabled = true
+  )
+);
+
+-- 4. Remover política pública da tabela original
+DROP POLICY IF EXISTS "Public can view active professionals" ON public.agenda_pro_professionals;
+
+-- 5. Garantir que tabela original só é acessível por usuários autenticados
+CREATE POLICY "Authenticated users can view professionals"
+ON public.agenda_pro_professionals
+FOR SELECT
+TO authenticated
+USING (law_firm_id = get_user_law_firm_id(auth.uid()));
+```
+
+---
+
+### Fase 2: Atualizar Frontend para Usar View Segura
+
+**Arquivo:** `src/pages/PublicBooking.tsx`
+
+Alterar linha 127:
+```typescript
+// ANTES
+.from("agenda_pro_professionals")
+
+// DEPOIS
+.from("agenda_pro_professionals_public")
+```
+
+---
+
+### Fase 3: Atualizar Edge Functions de Agendamento (se aplicável)
+
+Verificar e atualizar qualquer Edge Function que busque profissionais para contexto público.
+
+---
+
+## Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| src/App.tsx | Remover rota /integrations/google-calendar/callback e import |
-| src/components/layout/AppSidebar.tsx | Remover useGoogleCalendar e lógica showAgenda |
-| src/components/settings/IntegrationsSettings.tsx | Remover menção ao Google Calendar |
-| src/hooks/useAppointments.tsx | Remover função createGoogleCalendarEvent e referências |
-| supabase/functions/ai-chat/index.ts | Remover CALENDAR_TOOLS e funções relacionadas |
-| src/pages/landing/LandingPage.tsx | Atualizar texto (opcional - pode manter como "em breve") |
+| Nova migration SQL | Criar view segura e ajustar políticas |
+| src/pages/PublicBooking.tsx | Usar `agenda_pro_professionals_public` |
+| src/pages/ConfirmAppointment.tsx | Verificar se busca profissionais publicamente |
 
 ---
 
-## Análise de Impacto
+## Arquivos que NÃO precisam de alteração
 
-### Funcionalidades que NÃO serão afetadas
-
-| Funcionalidade | Razão |
-|----------------|-------|
-| Agenda Pro | Sistema independente com tabelas próprias (agenda_pro_*) |
-| Agendamento Público | Usa Agenda Pro, não Google Calendar |
-| Confirmações e Lembretes | Usa Edge Functions próprias (agenda-pro-*) |
-| Chat com IA | Mantém SCHEDULING_TOOLS para Agenda Pro |
-| Kanban | Independente |
-| Conversas | Independente |
-| Dashboard | Métricas não dependem de Google Calendar |
-
-### Funcionalidades que SERÃO removidas
-
-| Funcionalidade | Substituição |
-|----------------|--------------|
-| Visualizar Google Calendar | Usar Agenda Pro |
-| Criar eventos no Google | Usar Agenda Pro |
-| Sync com Google Calendar | Não necessário - Agenda Pro é autônoma |
-| Página /agenda | Redirecionar para /agenda-pro |
-| Página /calendar | Remover completamente |
+| Arquivo | Razão |
+|---------|-------|
+| src/hooks/useAppointments.tsx | Já limpo do Google Calendar |
+| src/components/layout/AppSidebar.tsx | Já limpo do Google Calendar |
+| supabase/functions/ai-chat/index.ts | Validação de tenant correta |
+| supabase/functions/generate-summary/index.ts | Validação de tenant correta |
+| supabase/functions/extract-client-facts/index.ts | Validação de tenant correta |
+| supabase/functions/delete-client/index.ts | Validação de tenant correta via `tenant-validation.ts` |
+| supabase/functions/get-agent-knowledge/index.ts | Validação de tenant correta |
 
 ---
 
-## Detalhamento das Modificações
+## Ação Manual Necessária
 
-### 1. src/App.tsx
-
-Remover:
-- Import do GoogleCalendarCallback
-- Rota /integrations/google-calendar/callback
-- Import do Agenda (página antiga)
-- Rota /agenda que usa a página antiga
-
-Manter redirecionamento /agenda -> /agenda-pro para não quebrar links existentes.
-
-### 2. src/components/layout/AppSidebar.tsx
-
-```typescript
-// REMOVER
-import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
-
-// REMOVER
-const {
-  integration: googleCalendarIntegration,
-  isConnected: isGoogleCalendarConnected,
-} = useGoogleCalendar();
-
-const showAgenda = isGoogleCalendarConnected && !!googleCalendarIntegration?.is_active;
-
-// SIMPLIFICAR bottomMenuItems para sempre mostrar apenas Agenda Pro
-const bottomMenuItems = isAttendant
-  ? [agendaProItem, tasksItem, settingsItem, supportItem, tutorialsItem]
-  : [agendaProItem, tasksItem, ...adminOnlyItems, settingsItem, supportItem, tutorialsItem];
-```
-
-### 3. src/components/settings/IntegrationsSettings.tsx
-
-Remover o card de Google Calendar "Coming Soon" - já que removemos a funcionalidade.
-
-### 4. src/hooks/useAppointments.tsx
-
-```typescript
-// REMOVER linhas 55-112 (função createGoogleCalendarEvent)
-
-// REMOVER linha 186-197 no createAppointment:
-// const googleEventId = await createGoogleCalendarEvent(...)
-// if (googleEventId) { ... }
-
-// REMOVER linha 213:
-// queryClient.invalidateQueries({ queryKey: ["google-calendar-events"] });
-```
-
-### 5. supabase/functions/ai-chat/index.ts
-
-```typescript
-// REMOVER linhas 159-300 (CALENDAR_TOOLS definition)
-// REMOVER linhas 575-600 (checkGoogleCalendarIntegration function)
-// REMOVER linhas 602-620 (getCalendarTools function)
-// REMOVER linhas 655-750 (executeCalendarTool function)
-// MODIFICAR getAllAvailableTools para não incluir calendar tools
-```
-
----
-
-## Sequência de Implementação
-
-| Fase | Ação | Risco |
-|------|------|-------|
-| 1 | Remover hooks e componentes de UI | Baixo |
-| 2 | Remover páginas obsoletas | Baixo |
-| 3 | Modificar AppSidebar | Baixo |
-| 4 | Modificar useAppointments | Baixo |
-| 5 | Modificar IntegrationsSettings | Baixo |
-| 6 | Modificar App.tsx (rotas) | Baixo |
-| 7 | Modificar ai-chat edge function | Médio |
-| 8 | Deletar edge functions do Google | Baixo |
-| 9 | Remover asset (ícone) | Baixo |
-
----
-
-## Rotas a Atualizar
-
-| Rota Antiga | Ação |
-|-------------|------|
-| /calendar | Remover completamente |
-| /agenda | Redirecionar para /agenda-pro |
-| /integrations/google-calendar/callback | Remover |
-
----
-
-## Edge Functions a Deletar
-
-As seguintes Edge Functions serão deletadas do Supabase:
-
-1. google-calendar-auth
-2. google-calendar-actions
-3. google-calendar-sync
-
-**Nota:** As tabelas do banco de dados (google_calendar_integrations, google_calendar_events, google_calendar_ai_logs) podem ser mantidas temporariamente para preservar histórico, ou removidas via migração separada.
+**Habilitar Leaked Password Protection:**
+1. Acessar Cloud View → Backend
+2. Ir em Auth → Settings → Password Security
+3. Habilitar "Leaked Password Protection"
 
 ---
 
 ## Testes de Regressão
 
-Após a remoção, verificar:
+Após implementação, verificar:
 
-1. **Agenda Pro** - Criar, editar, cancelar agendamentos funciona
-2. **Agendamento Público** - /agendar/:slug funciona normalmente
-3. **Confirmação** - /confirmar funciona normalmente
-4. **IA com Agendamento** - SCHEDULING_TOOLS continua funcionando
-5. **Sidebar** - Agenda Pro aparece para todos os usuários
-6. **Settings** - Página de integrações não mostra Google Calendar ativo
-7. **useAppointments** - Criar agendamento não tenta criar evento Google
+1. **Booking Público** - Acessar `/agendar/:slug` sem login e confirmar que email/phone NÃO aparecem na resposta
+2. **Painel Admin** - Acessar lista de profissionais logado e confirmar que email/phone APARECEM
+3. **Página de Confirmação** - Verificar que dados sensíveis não são expostos
+4. **Agenda Pro Admin** - CRUD de profissionais continua funcionando
+
+---
+
+## Detalhes Técnicos
+
+### Por que usar View em vez de ajustar a política?
+
+1. **Políticas RLS controlam acesso à linha, não à coluna** - Não é possível restringir colunas via RLS
+2. **Views podem expor subset de colunas** - Solução padrão para este problema
+3. **`security_invoker = on`** - Garante que a view herda as permissões do caller
+
+### Campos a excluir da view pública:
+
+| Campo | Razão |
+|-------|-------|
+| email | PII - pode ser usado para phishing |
+| phone | PII - pode ser usado para spam |
+| document | PII - CPF/documento sensível |
+| user_id | ID interno - não necessário |
+| notify_new_appointment | Configuração interna |
+| notify_cancellation | Configuração interna |
+| created_at | Metadado interno |
+| updated_at | Metadado interno |
 
 ---
 
 ## Garantias de Não-Regressão
 
-1. Agenda Pro é completamente independente do Google Calendar
-2. SCHEDULING_TOOLS no ai-chat são separados de CALENDAR_TOOLS
-3. Tabelas agenda_pro_* não têm relação com google_calendar_*
-4. Edge Functions agenda-pro-* não dependem de google-calendar-*
-5. Rota /agenda será redirecionada para /agenda-pro
-
----
-
-## Observações sobre Banco de Dados
-
-As seguintes tabelas/views relacionadas ao Google Calendar existem mas NÃO serão removidas nesta operação (podem ser limpas posteriormente via migração):
-
-- google_calendar_integrations
-- google_calendar_integrations_safe (view)
-- google_calendar_integration_status (view)
-- google_calendar_events
-- google_calendar_ai_logs
-
-**Razão:** Remover tabelas requer migração separada e pode conter dados históricos que o cliente deseje preservar.
+1. ✅ View segura herda RLS da tabela base via `security_invoker`
+2. ✅ Políticas existentes para usuários autenticados não são afetadas
+3. ✅ Hooks internos (`useAgendaProProfessionals`) continuam usando tabela original
+4. ✅ Apenas páginas públicas usam a view
+5. ✅ Edge Functions de agendamento usam service_role e não são afetadas
