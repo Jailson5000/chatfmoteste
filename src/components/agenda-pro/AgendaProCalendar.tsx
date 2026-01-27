@@ -7,7 +7,7 @@ const parseAppointmentDate = (dateString: string): Date => {
   // parseISO properly handles ISO 8601 strings with timezone
   return parseISO(dateString);
 };
-import { ChevronLeft, ChevronRight, Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, CalendarDays, List, LayoutGrid, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -215,9 +215,12 @@ export function AgendaProCalendar() {
                       )}
                       style={{ backgroundColor: isCancelled ? undefined : (apt.professional?.color || undefined) }}
                     >
-                      <div className="font-medium truncate">
-                        {apt.client?.name || apt.client_name || "Cliente"}
-                        {isCancelled && <span className="ml-1 no-underline">(Cancelado)</span>}
+                      <div className="font-medium truncate flex items-center gap-1">
+                        {apt.is_recurring && <Repeat className="h-3 w-3 flex-shrink-0" />}
+                        <span className="truncate">
+                          {apt.client?.name || apt.client_name || "Cliente"}
+                          {isCancelled && <span className="ml-1 no-underline">(Cancelado)</span>}
+                        </span>
                       </div>
                       <div className="opacity-90 truncate">
                         {apt.service?.name} • {format(parseAppointmentDate(apt.start_time), "HH:mm")}
@@ -283,7 +286,8 @@ export function AgendaProCalendar() {
                     )}
                     style={{ backgroundColor: isCancelled ? '#ef4444' : (apt.professional?.color || apt.service?.color || "#6366f1") }}
                   >
-                    <div className="font-medium truncate">
+                    <div className="font-medium truncate flex items-center gap-0.5">
+                      {apt.is_recurring && <Repeat className="h-2.5 w-2.5 flex-shrink-0" />}
                       {format(parseAppointmentDate(apt.start_time), "HH:mm")} {apt.client?.name || apt.client_name}
                     </div>
                   </button>

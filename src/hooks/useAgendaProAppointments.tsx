@@ -625,6 +625,68 @@ export function useAgendaProAppointments(options?: {
     },
   });
 
+  // Cancel entire series
+  const cancelSeries = useMutation({
+    mutationFn: async ({ parentId, reason }: { parentId: string; reason?: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+      const { data: user } = await supabase.auth.getUser();
+
+      // Cancel parent appointment
+      const { error: parentError } = await supabase
+        .from("agenda_pro_appointments")
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user.user?.email || 'system',
+          cancellation_reason: reason,
+        })
+        .eq("id", parentId)
+        .eq("law_firm_id", lawFirm.id);
+
+      if (parentError) throw parentError;
+
+      // Cancel all child appointments
+      const { error: childError } = await supabase
+        .from("agenda_pro_appointments")
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user.user?.email || 'system',
+          cancellation_reason: `Série cancelada: ${reason || ''}`.trim(),
+        })
+        .eq("parent_appointment_id", parentId)
+        .eq("law_firm_id", lawFirm.id)
+        .in("status", ["scheduled", "confirmed"]);
+
+      if (childError) throw childError;
+
+      // Cancel all scheduled messages for the series
+      await supabase
+        .from("agenda_pro_scheduled_messages")
+        .update({ 
+          status: "cancelled", 
+          cancelled_at: new Date().toISOString() 
+        })
+        .or(`appointment_id.eq.${parentId},appointment_id.in.(select id from agenda_pro_appointments where parent_appointment_id='${parentId}')`)
+        .eq("status", "pending")
+        .eq("law_firm_id", lawFirm.id);
+
+      // Log activity
+      await logActivity(parentId, "series_cancelled", { reason, source: "manual" });
+
+      return { success: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-scheduled-messages"] });
+      toast({ title: "Série de agendamentos cancelada" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erro ao cancelar série", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     appointments,
     isLoading,
@@ -636,5 +698,6 @@ export function useAgendaProAppointments(options?: {
     completeAppointment,
     markNoShow,
     rescheduleAppointment,
+    cancelSeries,
   };
 }
