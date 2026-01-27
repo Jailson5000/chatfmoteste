@@ -589,11 +589,14 @@ export function useMessagesWithPagination({
                 // or DB id (already checked at start) - don't dedupe by content
                 // This allows multiple audio messages to appear correctly
               } else {
-                // For text messages, check content-based deduplication
+                // For text messages AND internal notes, check content-based deduplication
+                // CRITICAL: Include is_internal check to prevent duplicate internal notes
                 const isDuplicate = prev.some(m =>
                   m.content === rawMsg.content &&
                   m.is_from_me === true &&
                   m.message_type === rawMsg.message_type &&
+                  // CRITICAL: For internal notes, also match is_internal flag to avoid false negatives
+                  (rawMsg.is_internal === true ? m.is_internal === true : true) &&
                   Math.abs(new Date(m.created_at).getTime() - new Date(rawMsg.created_at).getTime()) < 60000
                 );
                 if (isDuplicate) return prev;

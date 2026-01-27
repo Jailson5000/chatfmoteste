@@ -1234,8 +1234,9 @@ export default function Conversations() {
     const replyMessage = replyToMessage;
     setReplyToMessage(null);
     
-    // Optimistically add message to local state with "sending" status
-    // Use a temp whatsapp_message_id prefix to help with reconciliation
+    // For external messages: use optimistic updates with reconciliation
+    // For internal notes: skip optimistic update - let Realtime be the single source of truth
+    // This prevents duplicate notes from appearing in the UI
     const tempId = crypto.randomUUID();
     const tempWhatsAppId = `temp_${tempId}`;
     const messageTimestamp = new Date().toISOString();
@@ -1243,27 +1244,29 @@ export default function Conversations() {
     // Increment client order for stable sorting (prevents visual shuffle)
     const clientOrder = clientOrderRef.current++;
     
-    const newMessage: Message = {
-      id: tempId,
-      content: messageToSend,
-      created_at: messageTimestamp,
-      is_from_me: true,
-      sender_type: "human",
-      ai_generated: false,
-      status: wasInternalMode ? "sent" as MessageStatus : "sending" as MessageStatus,
-      is_internal: wasInternalMode,
-      is_pontual: wasPontualMode,
-      whatsapp_message_id: wasInternalMode ? undefined : tempWhatsAppId,
-      // Client-side ordering fields for stable visual order during reconciliation
-      _clientOrder: clientOrder,
-      _clientTempId: tempId,
-    };
-    
-    // Add message - no sorting needed, _clientOrder ensures stable order
-    // Messages with _clientOrder will always appear after messages without (older backend msgs)
-    setMessages(prev => [...prev, newMessage]);
-
+    // CRITICAL: Only add optimistic message for EXTERNAL messages, NOT internal notes
+    // Internal notes will appear via Realtime subscription after DB insert
     if (!wasInternalMode) {
+      const newMessage: Message = {
+        id: tempId,
+        content: messageToSend,
+        created_at: messageTimestamp,
+        is_from_me: true,
+        sender_type: "human",
+        ai_generated: false,
+        status: "sending" as MessageStatus,
+        is_internal: false,
+        is_pontual: wasPontualMode,
+        whatsapp_message_id: tempWhatsAppId,
+        // Client-side ordering fields for stable visual order during reconciliation
+        _clientOrder: clientOrder,
+        _clientTempId: tempId,
+      };
+      
+      // Add message - no sorting needed, _clientOrder ensures stable order
+      // Messages with _clientOrder will always appear after messages without (older backend msgs)
+      setMessages(prev => [...prev, newMessage]);
+      
       pendingOutgoingRef.current.push({ tempId, content: messageToSend, sentAt: Date.now() });
       if (pendingOutgoingRef.current.length > 50) pendingOutgoingRef.current.shift();
     }
@@ -1274,6 +1277,7 @@ export default function Conversations() {
     enqueueMessage(conversationId, async () => {
       if (wasInternalMode) {
         // Internal message - save directly to database, don't send to WhatsApp
+        // NO optimistic update - Realtime subscription handles display
         const { error } = await supabase
           .from("messages")
           .insert({
@@ -1288,10 +1292,8 @@ export default function Conversations() {
         
         if (error) throw error;
         
-        // Update temp message to saved
-        setMessages(prev => prev.map(m => 
-          m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
-        ));
+        // Note: Don't manually add to state - Realtime subscription will handle it
+        // This prevents duplicate internal notes from appearing in the UI
       } else {
         // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
         const conversationOrigin = conversation.origin?.toUpperCase();
