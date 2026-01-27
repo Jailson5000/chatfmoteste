@@ -2251,15 +2251,24 @@ serve(async (req) => {
             endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
             // WhatsApp is most compatible with Opus in OGG for voice notes.
             // When the browser records as webm (common), request OGG so the provider can convert.
-            // (We keep original for non-webm uploads like mp3/m4a.)
-            const normalizedAudioMimeType =
-              (body.mimeType?.toLowerCase().includes("webm") || body.fileName?.toLowerCase().endsWith(".webm"))
-                ? "audio/ogg;codecs=opus"
-                : (body.mimeType || "audio/ogg;codecs=opus");
+            // Keep original for non-webm uploads like mp3/m4a.
+            const isWebmAudio =
+              body.mimeType?.toLowerCase().includes("webm") ||
+              body.fileName?.toLowerCase().endsWith(".webm");
+            const normalizedAudioMimeType = isWebmAudio
+              ? "audio/ogg;codecs=opus"
+              : (body.mimeType || "audio/ogg;codecs=opus");
+            const safeAudioFileName = (() => {
+              const raw = body.fileName || "audio.ogg";
+              if (isWebmAudio) return raw.replace(/\.webm$/i, ".ogg");
+              return raw;
+            })();
             payload = {
               ...payload,
               mediatype: "audio",
               mimetype: normalizedAudioMimeType,
+              // Some providers require an explicit filename even for audio.
+              fileName: safeAudioFileName,
               media: body.mediaBase64 || body.mediaUrl,
             };
             break;
