@@ -633,23 +633,9 @@ export function LandingPage() {
           {/* Banner Trial + Plano Anual */}
           <div className="mb-10 space-y-4">
             {/* Trial Info */}
-            <div className="p-4 md:p-5 rounded-xl border border-white/10 bg-white/[0.02] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                  <Clock className="h-5 w-5 text-white/60" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-white/80">
-                    Período de avaliação disponível
-                  </p>
-                  <p className="text-xs text-white/50">
-                    Experimente por 7 dias antes de efetuar o pagamento
-                  </p>
-                </div>
-              </div>
-              <Badge variant="outline" className="border-white/20 text-white/60 text-xs shrink-0 w-fit">
-                7 dias para testar
-              </Badge>
+            <div className="py-3 px-4 rounded-lg border border-white/[0.06] bg-white/[0.01] flex items-center justify-center gap-2 text-white/50 text-xs">
+              <Clock className="h-3.5 w-3.5" />
+              <span>Experimente por 7 dias. Pagamento apenas após o período de avaliação.</span>
             </div>
 
             {/* Banner Plano Anual */}
