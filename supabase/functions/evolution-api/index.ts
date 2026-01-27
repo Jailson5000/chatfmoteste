@@ -2326,20 +2326,22 @@ serve(async (req) => {
               : rawMime.includes("mpeg") || rawMime.includes("mp3") ? "audio/mpeg"
               : "audio/ogg"; // default to ogg for best PTT compatibility
             
-            const audioDataUri = `data:${audioPureMime};base64,${audioBase64}`;
+            // Clean base64: remove whitespace and newlines that may corrupt the payload
+            // CRITICAL: Evolution API sendWhatsAppAudio expects RAW base64, NOT Data URI
+            const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
 
             // Use dedicated audio endpoint with PTT (voice note) support
             const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
             const audioPayload = {
               number: targetNumber,
-              audio: audioDataUri,
-              // delay for natural feel (optional)
+              audio: cleanedAudioBase64,  // RAW base64, NOT Data URI (data:audio/...;base64,XXX)
               delay: 500,
             };
 
             console.log(`[Evolution API] Sending audio via sendWhatsAppAudio to ${targetNumber}`, {
               endpoint: audioEndpoint,
-              audioDataUriLength: audioDataUri.length,
+              audioBase64Length: cleanedAudioBase64.length,
+              estimatedKB: Math.round((cleanedAudioBase64.length * 3) / 4 / 1024),
               pureMime: audioPureMime,
             });
 
