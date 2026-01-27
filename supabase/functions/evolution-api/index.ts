@@ -2297,6 +2297,20 @@ serve(async (req) => {
 
         const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
 
+        // Extract media URL from Evolution API response
+        // The API returns the uploaded media URL in message.[mediaType]Message.url
+        const extractedMediaUrl = 
+          sendData.message?.imageMessage?.url ||
+          sendData.message?.audioMessage?.url ||
+          sendData.message?.videoMessage?.url ||
+          sendData.message?.documentMessage?.url ||
+          sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.url ||
+          sendData.message?.stickerMessage?.url ||
+          body.mediaUrl || 
+          null;
+
+        console.log(`[Evolution API] Extracted media URL: ${extractedMediaUrl ? 'present' : 'null'}`);
+
         // Save message to database
         if (conversationId) {
           const { data: savedMessage, error: msgError } = await supabaseClient
@@ -2306,7 +2320,7 @@ serve(async (req) => {
               whatsapp_message_id: whatsappMessageId,
               content: body.caption || body.fileName || `[${body.mediaType}]`,
               message_type: body.mediaType,
-              media_url: body.mediaUrl || null,
+              media_url: extractedMediaUrl,
               media_mime_type: body.mimeType || null,
               is_from_me: true,
               sender_type: "human",
