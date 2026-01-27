@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useClients } from "@/hooks/useClients";
 import { useMessageQueue } from "@/hooks/useMessageQueue";
+import { useLawFirm } from "@/hooks/useLawFirm";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
 import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
@@ -1039,6 +1040,26 @@ export function KanbanChatPanel({
   const queryClient = useQueryClient();
   const { transferHandler, updateConversation, updateConversationDepartment } = useConversations();
   const { updateClientStatus, updateClient } = useClients();
+  const { lawFirm } = useLawFirm();
+  const lawFirmId = lawFirm?.id;
+
+  const blobToBase64 = useCallback((blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1]);
+      };
+      reader.onerror = () => reject(new Error("Falha ao converter arquivo para Base64"));
+      reader.readAsDataURL(blob);
+    });
+  }, []);
+
+  const getChatMediaPath = useCallback((fileName: string) => {
+    // Storage RLS expects the first folder to be the tenant id (lawFirmId)
+    if (!lawFirmId) throw new Error("Empresa não encontrada (lawFirmId ausente)");
+    return `${lawFirmId}/${conversationId}/${fileName}`;
+  }, [conversationId, lawFirmId]);
   
   // Hook for creating client actions (activity log) - same as ContactDetailsPanel
   const { createAction } = useClientActions(clientId || undefined);
@@ -1799,15 +1820,17 @@ export function KanbanChatPanel({
     setIsSending(true);
     try {
       const fileName = `audio_${Date.now()}.webm`;
+      const mediaBase64 = await blobToBase64(audioBlob);
+
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from("chat-media")
-        .upload(`${conversationId}/${fileName}`, audioBlob);
+        .upload(getChatMediaPath(fileName), audioBlob);
       
       if (uploadError) throw uploadError;
       
       const { data: urlData } = supabase.storage
         .from("chat-media")
-        .getPublicUrl(`${conversationId}/${fileName}`);
+        .getPublicUrl(getChatMediaPath(fileName));
       
       // Auto-assign to current user if:
       // 1. Handler is AI, or
@@ -1865,8 +1888,10 @@ export function KanbanChatPanel({
             action: "send_media",
             conversationId,
             mediaUrl: urlData.publicUrl,
+            mediaBase64,
             mediaType: "audio",
             mimeType: audioBlob.type || "audio/webm",
+            fileName,
           },
         });
         
@@ -1895,16 +1920,17 @@ export function KanbanChatPanel({
 
     setIsSending(true);
     try {
+      const mediaBase64 = await blobToBase64(file);
       const fileName = `${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("chat-media")
-        .upload(`${conversationId}/${fileName}`, file);
+        .upload(getChatMediaPath(fileName), file);
       
       if (uploadError) throw uploadError;
       
       const { data: urlData } = supabase.storage
         .from("chat-media")
-        .getPublicUrl(`${conversationId}/${fileName}`);
+        .getPublicUrl(getChatMediaPath(fileName));
       
       // Auto-assign to current user if:
       // 1. Handler is AI, or
@@ -1962,6 +1988,7 @@ export function KanbanChatPanel({
             action: "send_media",
             conversationId,
             mediaUrl: urlData.publicUrl,
+            mediaBase64,
             mediaType: mediaType === "image" ? "image" : "document",
             mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
             fileName: file.name,
@@ -2002,17 +2029,18 @@ export function KanbanChatPanel({
     handleMediaPreviewClose();
 
     try {
+      const mediaBase64 = await blobToBase64(mediaPreview.file);
       // Upload file to storage
       const fileName = `${Date.now()}_${mediaPreview.file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("chat-media")
-        .upload(`${conversationId}/${fileName}`, mediaPreview.file);
+        .upload(getChatMediaPath(fileName), mediaPreview.file);
 
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage
         .from("chat-media")
-        .getPublicUrl(`${conversationId}/${fileName}`);
+        .getPublicUrl(getChatMediaPath(fileName));
 
       // Auto-assign to current user if:
       // 1. Handler is AI, or
@@ -2070,6 +2098,7 @@ export function KanbanChatPanel({
             action: "send_media",
             conversationId,
             mediaUrl: urlData.publicUrl,
+            mediaBase64,
             mediaType: mediaPreview.mediaType,
             mimeType: mediaPreview.file.type || "application/octet-stream",
             fileName: mediaPreview.file.name,
@@ -2098,16 +2127,17 @@ export function KanbanChatPanel({
   const handleSendMedia = async (file: File, type: "audio" | "document") => {
     setIsSending(true);
     try {
+      const mediaBase64 = await blobToBase64(file);
       const fileName = `${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("chat-media")
-        .upload(`${conversationId}/${fileName}`, file);
+        .upload(getChatMediaPath(fileName), file);
 
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage
         .from("chat-media")
-        .getPublicUrl(`${conversationId}/${fileName}`);
+        .getPublicUrl(getChatMediaPath(fileName));
 
       // Auto-assign to current user if:
       // 1. Handler is AI, or
@@ -2165,6 +2195,7 @@ export function KanbanChatPanel({
             action: "send_media",
             conversationId,
             mediaUrl: urlData.publicUrl,
+            mediaBase64,
             mediaType: type,
             mimeType: file.type || "application/octet-stream",
             fileName: file.name,
