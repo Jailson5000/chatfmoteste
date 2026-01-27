@@ -1140,6 +1140,7 @@ export function KanbanChatPanel({
   const lastSeenMessageIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   // Monotonic counter for stable message ordering (prevents visual shuffle during reconciliation)
   const clientOrderRef = useRef(Date.now());
@@ -1818,8 +1819,24 @@ export function KanbanChatPanel({
 
   const handleSendAudio = async (audioBlob: Blob) => {
     setIsSending(true);
+    
+    // Determine best file extension based on actual mime type
+    const blobMimeType = audioBlob.type || "audio/webm";
+    const extension = blobMimeType.includes("ogg") ? "ogg" 
+      : blobMimeType.includes("mp4") ? "m4a" 
+      : blobMimeType.includes("mpeg") ? "mp3" 
+      : "webm";
+    const fileName = `audio_${Date.now()}.${extension}`;
+    
+    // Normalize mimeType for WhatsApp compatibility
+    // Evolution API/WhatsApp prefers audio/ogg for voice messages
+    const normalizedMimeType = blobMimeType.includes("ogg") ? "audio/ogg" 
+      : blobMimeType.includes("webm") ? "audio/webm"
+      : blobMimeType.includes("mp4") ? "audio/mp4"
+      : blobMimeType.includes("mpeg") ? "audio/mpeg"
+      : "audio/ogg"; // Default to ogg for best compatibility
+
     try {
-      const fileName = `audio_${Date.now()}.webm`;
       const mediaBase64 = await blobToBase64(audioBlob);
 
       // Auto-assign to current user
@@ -1880,14 +1897,18 @@ export function KanbanChatPanel({
           .eq("id", conversationId);
       } else {
         // WhatsApp: send directly via Evolution API (no storage upload needed)
-        console.log('[Kanban] WhatsApp channel - sending audio via Evolution API');
+        console.log('[Kanban] WhatsApp channel - sending audio via Evolution API', { 
+          mimeType: normalizedMimeType, 
+          originalType: blobMimeType,
+          fileName 
+        });
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
             action: "send_media",
             conversationId,
             mediaBase64,
             mediaType: "audio",
-            mimeType: audioBlob.type || "audio/webm",
+            mimeType: normalizedMimeType,
             fileName,
           },
         });
@@ -1904,7 +1925,6 @@ export function KanbanChatPanel({
       }
       
       toast({ title: "Áudio enviado" });
-      setIsRecordingAudio(false);
     } catch (error) {
       console.error("Erro ao enviar áudio:", error);
       toast({
@@ -1913,7 +1933,14 @@ export function KanbanChatPanel({
         variant: "destructive",
       });
     } finally {
+      // CRITICAL: Always reset states in finally block to prevent UI freeze
       setIsSending(false);
+      setIsRecordingAudio(false);
+      
+      // Restore focus to input after audio send completes
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
     }
   };
 
@@ -3185,6 +3212,7 @@ export function KanbanChatPanel({
             {/* Message input */}
             <div className="flex gap-2">
               <AutoResizeTextarea
+                ref={textareaRef}
                 placeholder={isInternalMode ? "Mensagem interna..." : "Digite sua mensagem..."}
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
