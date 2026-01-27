@@ -2244,10 +2244,17 @@ serve(async (req) => {
             // Use sendMedia with mediatype audio instead of sendWhatsAppAudio
             // This allows the Evolution API to handle webm format conversion
             endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+            // WhatsApp is most compatible with Opus in OGG for voice notes.
+            // When the browser records as webm (common), request OGG so the provider can convert.
+            // (We keep original for non-webm uploads like mp3/m4a.)
+            const normalizedAudioMimeType =
+              (body.mimeType?.toLowerCase().includes("webm") || body.fileName?.toLowerCase().endsWith(".webm"))
+                ? "audio/ogg;codecs=opus"
+                : (body.mimeType || "audio/ogg;codecs=opus");
             payload = {
               ...payload,
               mediatype: "audio",
-              mimetype: body.mimeType || "audio/ogg",
+              mimetype: normalizedAudioMimeType,
               media: body.mediaBase64 || body.mediaUrl,
             };
             break;
@@ -2297,6 +2304,16 @@ serve(async (req) => {
 
         const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
 
+        // Prefer mimetype returned by provider; fallback to requested.
+        const extractedMimeType =
+          sendData.message?.imageMessage?.mimetype ||
+          sendData.message?.audioMessage?.mimetype ||
+          sendData.message?.videoMessage?.mimetype ||
+          sendData.message?.documentMessage?.mimetype ||
+          sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
+          body.mimeType ||
+          null;
+
         // Extract media URL from Evolution API response
         // The API returns the uploaded media URL in message.[mediaType]Message.url
         const extractedMediaUrl = 
@@ -2321,7 +2338,7 @@ serve(async (req) => {
               content: body.caption || body.fileName || `[${body.mediaType}]`,
               message_type: body.mediaType,
               media_url: extractedMediaUrl,
-              media_mime_type: body.mimeType || null,
+              media_mime_type: extractedMimeType,
               is_from_me: true,
               sender_type: "human",
               ai_generated: false,
