@@ -1,246 +1,168 @@
 
-# Plano: Melhorias na Página de Suporte
+# Plano: Remoção Completa da Integração Tray Commerce
 
-## Resumo das Melhorias
+## Resumo
 
-| Prioridade | Melhoria | Impacto |
-|------------|----------|---------|
-| Alta | Busca por título + Filtro por status | Navegação eficiente |
-| Alta | Diferenciação visual cliente/suporte | Clareza na comunicação |
-| Média | Indicador de novas respostas (unread) | Engajamento do usuário |
+Remover toda a infraestrutura do Tray Commerce do sistema, incluindo frontend, backend (edge functions), banco de dados e tipos. O **Chat Web (Tray Chat)** permanece **intacto**.
 
 ---
 
-## 1. Busca e Filtros
+## Arquivos a DELETAR
 
-### Estado Atual
-- Sem busca
-- Sem filtro por status
-- Lista mostra todos os tickets
+### Frontend (5 arquivos)
 
-### Implementação
+| Arquivo | Descrição |
+|---------|-----------|
+| `src/hooks/useTrayCommerceIntegration.tsx` | Hook completo (~457 linhas) |
+| `src/components/settings/integrations/TrayCommerceIntegration.tsx` | Componente de UI (~626 linhas) |
 
-Adicionar no header abaixo do título:
+### Edge Functions (2 pastas)
 
-```text
-┌────────────────────────────────────────────────────────────┐
-│  Suporte                                 [+ Novo Ticket]   │
-│  Abra tickets para reportar problemas                      │
-├────────────────────────────────────────────────────────────┤
-│  [🔍 Buscar por título...        ]  [Status: Todos     ▼]  │
-└────────────────────────────────────────────────────────────┘
-```
-
-**Código a adicionar em `Support.tsx`:**
-
-```tsx
-// Novos estados (após linha 44)
-const [searchTerm, setSearchTerm] = useState("");
-const [statusFilter, setStatusFilter] = useState<string>("all");
-
-// Filtro (antes do return, após selectedTicket)
-const filteredTickets = tickets.filter(ticket => {
-  const matchesSearch = ticket.title?.toLowerCase().includes(searchTerm.toLowerCase());
-  const matchesStatus = statusFilter === "all" || ticket.status === statusFilter;
-  return matchesSearch && matchesStatus;
-});
-```
-
-**UI do filtro (após linha 114, antes dos Cards de métricas):**
-```tsx
-<div className="flex flex-col sm:flex-row gap-3">
-  <div className="relative flex-1">
-    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-    <Input 
-      placeholder="Buscar por título..." 
-      value={searchTerm} 
-      onChange={e => setSearchTerm(e.target.value)}
-      className="pl-10"
-    />
-  </div>
-  <Select value={statusFilter} onValueChange={setStatusFilter}>
-    <SelectTrigger className="w-full sm:w-48">
-      <SelectValue placeholder="Status" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="all">Todos</SelectItem>
-      <SelectItem value="aberto">Aberto</SelectItem>
-      <SelectItem value="em_andamento">Em Andamento</SelectItem>
-      <SelectItem value="aguardando_cliente">Aguardando</SelectItem>
-      <SelectItem value="resolvido">Resolvido</SelectItem>
-      <SelectItem value="fechado">Fechado</SelectItem>
-    </SelectContent>
-  </Select>
-</div>
-```
+| Pasta | Descrição |
+|-------|-----------|
+| `supabase/functions/tray-commerce-api/` | API de conexão, sync, CRUD |
+| `supabase/functions/tray-commerce-webhook/` | Recepção de webhooks da Tray |
 
 ---
 
-## 2. Diferenciação Visual de Mensagens
+## Arquivos a MODIFICAR
 
-### Estado Atual
-Todas as mensagens têm o mesmo visual (linha 146):
-```tsx
-<div className="p-3 rounded-lg bg-background mb-2">
-  <p className="text-sm">{m.content}</p>
-  <span className="text-xs text-muted-foreground">{format(...)}</span>
-</div>
-```
+### 1. `src/components/settings/IntegrationsSettings.tsx`
 
-### Proposta Visual
+**Remover:**
+- Linhas 40-46: Função `TrayCommerceIcon()`
+- Linhas 97-102: O card do Tray Commerce no grid
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│ Mensagens                                               │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ┌─────────────────────────────────┐                    │
-│  │ Você                           │  ← Cliente (direita)│
-│  │ Mensagem do cliente...         │     bg-primary/10   │
-│  │                    12/01 14:30 │                      │
-│  └─────────────────────────────────┘                    │
-│                                                         │
-│  ┌─────────────────────────────────┐                    │
-│  │ Suporte                        │  ← Admin (esquerda) │
-│  │ Resposta do suporte...         │     bg-emerald/10   │
-│  │ 12/01 15:45                    │                      │
-│  └─────────────────────────────────┘                    │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Código da mensagem diferenciada:**
-```tsx
-{messages.map(m => {
-  const isClient = m.sender_type === "client";
-  return (
-    <div 
-      key={m.id} 
-      className={cn(
-        "p-3 rounded-lg mb-2 max-w-[85%]",
-        isClient 
-          ? "bg-primary/10 ml-auto" 
-          : "bg-emerald-500/10 mr-auto"
-      )}
-    >
-      <div className="flex items-center gap-2 mb-1">
-        <span className={cn(
-          "text-xs font-medium",
-          isClient ? "text-primary" : "text-emerald-600"
-        )}>
-          {isClient ? "Você" : "Suporte"}
-        </span>
-      </div>
-      <p className="text-sm">{m.content}</p>
-      <span className={cn(
-        "text-xs text-muted-foreground block",
-        isClient ? "text-right" : "text-left"
-      )}>
-        {format(new Date(m.created_at), "dd/MM HH:mm")}
-      </span>
-    </div>
-  );
-})}
-```
+**Resultado:** O grid de integrações mostrará apenas AgendaPro, Chat Web e os "Coming Soon" (ADV BOX, Custom Tool, PDF, Assinatura Digital)
 
 ---
 
-## 3. Indicador de Novas Respostas
+## Migração de Banco de Dados
 
-### Análise do Banco de Dados
-A tabela `ticket_messages` já possui:
-- `sender_type`: "client" ou "admin"
-- `is_internal`: boolean (mensagens internas não são visíveis ao cliente)
-- `created_at`: timestamp
-
-**Estratégia:** Comparar timestamp da última mensagem do admin com a última visualização do cliente.
-
-### Opção A: Campo `last_read_at` no ticket (recomendada)
-Adicionar coluna `client_last_read_at` na tabela `support_tickets`:
+**Tabelas a DROPAR (com CASCADE para dependências):**
 
 ```sql
-ALTER TABLE support_tickets 
-ADD COLUMN client_last_read_at timestamptz DEFAULT now();
+-- Ordem de remoção (respeitando FK constraints)
+DROP TABLE IF EXISTS public.tray_commerce_webhook_logs CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_audit_logs CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_sync_state CASCADE;
+DROP TABLE IF EXISTS public.tray_coupon_map CASCADE;
+DROP TABLE IF EXISTS public.tray_order_map CASCADE;
+DROP TABLE IF EXISTS public.tray_product_map CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_connections CASCADE;
+
+-- Remover funções/triggers relacionados
+DROP FUNCTION IF EXISTS public.create_tray_sync_state() CASCADE;
+DROP FUNCTION IF EXISTS public.ensure_single_default_tray_connection() CASCADE;
 ```
 
-**Lógica:**
-1. Quando cliente abre o Sheet do ticket → atualizar `client_last_read_at`
-2. Badge aparece se existir mensagem do admin com `created_at > client_last_read_at`
+**Tabelas afetadas (total: 7):**
+1. `tray_commerce_connections` - Conexões OAuth
+2. `tray_commerce_sync_state` - Estado de sincronização
+3. `tray_commerce_audit_logs` - Logs de auditoria
+4. `tray_commerce_webhook_logs` - Logs de webhooks
+5. `tray_product_map` - Produtos sincronizados
+6. `tray_order_map` - Pedidos sincronizados
+7. `tray_coupon_map` - Cupons sincronizados
 
-### Opção B: Query calculada (sem migração)
-Calcular "tem resposta nova" na query:
+---
 
-```tsx
-// Na query de tickets
-const { data } = await supabase
-  .from("support_tickets")
-  .select(`
-    *,
-    ticket_messages!inner(created_at, sender_type, is_internal)
-  `)
-  .eq("law_firm_id", lawFirmId)
-  .order("created_at", { ascending: false });
+## Verificação de Dados
 
-// Processar para identificar unread
-const ticketsWithUnread = data?.map(t => ({
-  ...t,
-  hasUnreadReply: t.ticket_messages?.some(m => 
-    m.sender_type === "admin" && 
-    !m.is_internal && 
-    new Date(m.created_at) > new Date(t.updated_at)
-  )
-}));
+**Antes de executar**, verificar se há dados em produção:
+
+```sql
+SELECT 
+  (SELECT COUNT(*) FROM tray_commerce_connections) AS connections,
+  (SELECT COUNT(*) FROM tray_product_map) AS products,
+  (SELECT COUNT(*) FROM tray_order_map) AS orders,
+  (SELECT COUNT(*) FROM tray_coupon_map) AS coupons;
 ```
 
-### UI do Badge (no card do ticket)
-```tsx
-<Card className="cursor-pointer hover:bg-muted/50">
-  <CardContent className="flex items-center justify-between py-4">
-    {/* ... conteúdo existente ... */}
-    <div className="flex items-center gap-2">
-      {ticket.hasUnreadReply && (
-        <Badge variant="destructive" className="animate-pulse">
-          Nova resposta
-        </Badge>
-      )}
-      <Badge variant={...}>{statusLabels[...]}</Badge>
-    </div>
-  </CardContent>
-</Card>
-```
+Se houver dados, será necessário backup antes da remoção.
+
+---
+
+## Resumo de Mudanças
+
+| Categoria | Ação | Itens |
+|-----------|------|-------|
+| **Frontend** | Deletar | 2 arquivos |
+| **Edge Functions** | Deletar | 2 pastas |
+| **UI Component** | Modificar | 1 arquivo (IntegrationsSettings) |
+| **Database** | Dropar | 7 tabelas + 2 funções |
+| **Types** | Auto-regenerado | `types.ts` será atualizado automaticamente |
+
+---
+
+## NÃO AFETADOS (Chat Web / Tray Chat)
+
+Estes arquivos permanecem **intactos**:
+- `src/components/settings/integrations/TrayChatIntegration.tsx` ✅
+- `src/hooks/useTrayIntegration.tsx` ✅
+- `supabase/functions/widget-messages/` ✅
+- Tabelas `tray_chat_*` ✅
+
+---
+
+## Ordem de Execução
+
+1. **Migração SQL** - Dropar tabelas e funções
+2. **Deletar Edge Functions** - `tray-commerce-api/` e `tray-commerce-webhook/`
+3. **Deletar arquivos frontend** - Hook e componente
+4. **Modificar IntegrationsSettings.tsx** - Remover card e ícone
+5. **Types.ts** - Será regenerado automaticamente
 
 ---
 
 ## Detalhes Técnicos
 
-### Arquivos Modificados
+### Modificação em `IntegrationsSettings.tsx`
 
-| Arquivo | Mudanças |
-|---------|----------|
-| `src/pages/Support.tsx` | Adicionar busca, filtro, diferenciação de mensagens, badge unread |
-
-### Imports Adicionais
 ```tsx
-import { Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+// REMOVER: linhas 40-46
+function TrayCommerceIcon() {
+  return (
+    <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+      <ShoppingCart className="h-5 w-5 text-white" />
+    </div>
+  );
+}
+
+// REMOVER: linhas 97-102
+<IntegrationCard
+  icon={<TrayCommerceIcon />}
+  title="Tray Commerce"
+  description="Integre pedidos, produtos, cupons e frete do seu e-commerce Tray."
+  isComingSoon
+/>
+
+// REMOVER import não utilizado: ShoppingCart
 ```
 
-### Garantias de Não-Regressão
+### SQL Migration Completa
 
-1. **Funcionalidade preservada**: Criação de ticket, envio de mensagens, visualização de resolução
-2. **Performance**: Filtro aplicado client-side nos tickets já carregados
-3. **Mobile**: Layout responsivo com `flex-col sm:flex-row`
-4. **Acessibilidade**: Labels e placeholders mantidos
+```sql
+-- =============================================
+-- REMOÇÃO COMPLETA DO TRAY COMMERCE
+-- =============================================
 
----
+-- 1. Dropar políticas RLS primeiro
+DROP POLICY IF EXISTS "Admins can view tray connections" ON public.tray_commerce_connections;
+DROP POLICY IF EXISTS "Admins can manage tray connections" ON public.tray_commerce_connections;
+DROP POLICY IF EXISTS "Only service role can insert tray_commerce_audit_logs" ON public.tray_commerce_audit_logs;
+DROP POLICY IF EXISTS "Only service role can insert tray_commerce_webhook_logs" ON public.tray_commerce_webhook_logs;
 
-## Decisão Necessária
+-- 2. Dropar tabelas em ordem (respeitando FKs)
+DROP TABLE IF EXISTS public.tray_commerce_webhook_logs CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_audit_logs CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_sync_state CASCADE;
+DROP TABLE IF EXISTS public.tray_coupon_map CASCADE;
+DROP TABLE IF EXISTS public.tray_order_map CASCADE;
+DROP TABLE IF EXISTS public.tray_product_map CASCADE;
+DROP TABLE IF EXISTS public.tray_commerce_connections CASCADE;
 
-Para o indicador de "novas respostas", qual abordagem preferir?
-
-| Opção | Prós | Contras |
-|-------|------|---------|
-| **A: Migração** | Preciso, performático | Requer ALTER TABLE |
-| **B: Query** | Sem migração | Mais complexo, menos preciso |
-
-**Recomendação**: Opção A (migração) para melhor UX a longo prazo.
+-- 3. Dropar funções/triggers
+DROP FUNCTION IF EXISTS public.create_tray_sync_state() CASCADE;
+DROP FUNCTION IF EXISTS public.ensure_single_default_tray_connection() CASCADE;
+```
