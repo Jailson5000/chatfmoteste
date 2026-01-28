@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard } from "lucide-react";
+import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard, Globe, Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,16 @@ import miauchatLogo from "@/assets/miauchat-logo.png";
 import { publicRegistrationSchema, companyFieldConfig } from "@/lib/schemas/companySchema";
 import { usePlans } from "@/hooks/usePlans";
 import { formatPhone, formatDocument } from "@/lib/inputMasks";
+
+// Generate subdomain suggestion from company name (no hyphens)
+function generateSubdomainSuggestion(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/[^a-z0-9]/g, '')       // remove everything except letters and numbers
+    .substring(0, 30);
+}
 
 export default function Register() {
   const navigate = useNavigate();
@@ -30,7 +40,86 @@ export default function Register() {
     phone: "",
     document: "",
     planId: "",
+    subdomain: "",
   });
+  
+  const [subdomainStatus, setSubdomainStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [subdomainManuallyEdited, setSubdomainManuallyEdited] = useState(false);
+  const checkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Debounced subdomain availability check
+  const checkSubdomainAvailability = useCallback(async (subdomain: string) => {
+    if (subdomain.length < 3) {
+      setSubdomainStatus('idle');
+      return;
+    }
+    
+    setSubdomainStatus('checking');
+    
+    try {
+      const { data } = await supabase
+        .from('law_firms')
+        .select('id')
+        .eq('subdomain', subdomain)
+        .maybeSingle();
+      
+      setSubdomainStatus(data ? 'taken' : 'available');
+    } catch (error) {
+      console.error('[Register] Error checking subdomain:', error);
+      setSubdomainStatus('idle');
+    }
+  }, []);
+  
+  // Handle subdomain input change with debounce
+  const handleSubdomainChange = useCallback((value: string) => {
+    const sanitized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    setFormData(prev => ({ ...prev, subdomain: sanitized }));
+    setSubdomainManuallyEdited(true);
+    
+    // Clear previous timeout
+    if (checkTimeoutRef.current) {
+      clearTimeout(checkTimeoutRef.current);
+    }
+    
+    // Set new debounced check
+    checkTimeoutRef.current = setTimeout(() => {
+      checkSubdomainAvailability(sanitized);
+    }, 500);
+  }, [checkSubdomainAvailability]);
+  
+  // Handle company name change - auto-suggest subdomain if not manually edited
+  const handleCompanyNameChange = useCallback((value: string) => {
+    setFormData(prev => {
+      const newSubdomain = !subdomainManuallyEdited 
+        ? generateSubdomainSuggestion(value)
+        : prev.subdomain;
+      
+      // Trigger availability check for auto-generated subdomain
+      if (!subdomainManuallyEdited && newSubdomain.length >= 3) {
+        if (checkTimeoutRef.current) {
+          clearTimeout(checkTimeoutRef.current);
+        }
+        checkTimeoutRef.current = setTimeout(() => {
+          checkSubdomainAvailability(newSubdomain);
+        }, 500);
+      }
+      
+      return {
+        ...prev,
+        companyName: value,
+        subdomain: newSubdomain,
+      };
+    });
+  }, [subdomainManuallyEdited, checkSubdomainAvailability]);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (checkTimeoutRef.current) {
+        clearTimeout(checkTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +145,7 @@ export default function Register() {
           phone: formData.phone || undefined,
           document: formData.document || undefined,
           plan_id: formData.planId,
+          subdomain: formData.subdomain || undefined,
         },
       });
 
@@ -226,9 +316,52 @@ export default function Register() {
                     maxLength={companyFieldConfig.companyName.maxLength}
                     className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                     value={formData.companyName}
-                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                    onChange={(e) => handleCompanyNameChange(e.target.value)}
                     required
                   />
+                </div>
+              </div>
+              
+              {/* Subdomain Field */}
+              <div className="space-y-2">
+                <Label htmlFor="subdomain" className="text-zinc-300">
+                  Seu Subdomínio
+                </Label>
+                <div className="relative">
+                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                  <Input
+                    id="subdomain"
+                    type="text"
+                    placeholder="suaempresa"
+                    maxLength={30}
+                    className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
+                    value={formData.subdomain}
+                    onChange={(e) => handleSubdomainChange(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-zinc-500">→</span>
+                  <span className="text-zinc-400 font-mono">
+                    {formData.subdomain || 'suaempresa'}.miauchat.com.br
+                  </span>
+                  {subdomainStatus === 'checking' && (
+                    <span className="flex items-center gap-1 text-zinc-500">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Verificando...
+                    </span>
+                  )}
+                  {subdomainStatus === 'available' && formData.subdomain.length >= 3 && (
+                    <span className="flex items-center gap-1 text-green-500">
+                      <Check className="h-3 w-3" />
+                      Disponível
+                    </span>
+                  )}
+                  {subdomainStatus === 'taken' && (
+                    <span className="flex items-center gap-1 text-red-400">
+                      <X className="h-3 w-3" />
+                      Já em uso
+                    </span>
+                  )}
                 </div>
               </div>
               
