@@ -188,20 +188,49 @@ export function useAgendaProServices() {
     mutationFn: async (id: string) => {
       if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
+      // Check for future non-cancelled/completed appointments
+      const { data: futureAppointments, error: checkError } = await supabase
+        .from("agenda_pro_appointments")
+        .select("id")
+        .eq("service_id", id)
+        .eq("law_firm_id", lawFirm.id)
+        .gte("start_time", new Date().toISOString())
+        .not("status", "in", '("cancelled","no_show","completed")')
+        .limit(1);
+
+      if (checkError) throw checkError;
+
+      if (futureAppointments && futureAppointments.length > 0) {
+        throw new Error(
+          "Este serviço possui agendamentos futuros. " +
+          "Cancele ou reagende os atendimentos antes de remover, " +
+          "ou desative o serviço."
+        );
+      }
+
       const { error } = await supabase
         .from("agenda_pro_services")
         .delete()
         .eq("id", id)
-        .eq("law_firm_id", lawFirm.id); // Tenant validation
+        .eq("law_firm_id", lawFirm.id);
       
-      if (error) throw error;
+      if (error) {
+        // Translate FK error to friendly message
+        if (error.message.includes('violates foreign key constraint')) {
+          throw new Error(
+            "Este serviço possui agendamentos no histórico. " +
+            "Desative-o para preservar os registros."
+          );
+        }
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-services"] });
       toast({ title: "Serviço removido" });
     },
     onError: (error: Error) => {
-      toast({ title: "Erro ao remover", description: error.message, variant: "destructive" });
+      toast({ title: "Não foi possível remover", description: error.message, variant: "destructive" });
     },
   });
 
