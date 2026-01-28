@@ -38,13 +38,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useClients } from "@/hooks/useClients";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useDepartments } from "@/hooks/useDepartments";
@@ -56,7 +49,7 @@ import { ptBR } from "date-fns/locale";
 import { exportToExcel, getFormattedDate } from "@/lib/exportUtils";
 
 export default function Contacts() {
-  const { clients, isLoading, createClient, deleteClient, unifyDuplicates, updateClientStatus } = useClients();
+  const { clients, isLoading, createClient, deleteClient, unifyDuplicates } = useClients();
   const { statuses } = useCustomStatuses();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
@@ -215,44 +208,6 @@ export default function Contacts() {
   const toggleSelectContact = (id: string) => {
     setSelectedContacts((prev) =>
       prev.includes(id) ? prev.filter((cid) => cid !== id) : [...prev, id]
-    );
-  };
-
-  const handleStatusChange = (clientId: string, statusId: string) => {
-    const normalizedStatusId = statusId === "none" ? null : statusId;
-
-    updateClientStatus.mutate(
-      { clientId, statusId: normalizedStatusId },
-      {
-        onSuccess: (data: any) => {
-          const created = typeof data?.follow_ups_created === "number" ? data.follow_ups_created : null;
-
-          if (created === 0) {
-            toast({
-              title: "Status atualizado",
-              description: "Nenhum follow-up configurado para este status.",
-            });
-            return;
-          }
-
-          if (typeof created === "number" && created > 0) {
-            toast({
-              title: "Status atualizado",
-              description: `${created} follow-up(s) agendado(s).`,
-            });
-            return;
-          }
-
-          toast({ title: "Status atualizado" });
-        },
-        onError: (error) => {
-          toast({
-            title: "Erro ao atualizar status",
-            description: error.message,
-            variant: "destructive",
-          });
-        },
-      }
     );
   };
 
@@ -480,47 +435,22 @@ export default function Contacts() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Select
-                        value={client.custom_status_id || "none"}
-                        onValueChange={(val) => handleStatusChange(client.id, val)}
-                      >
-                        <SelectTrigger className="h-7 w-auto min-w-[100px] border-0 bg-transparent hover:bg-muted/50">
-                          <SelectValue placeholder="Status" />
-                          <span className="sr-only">Status</span>
-                          {status ? (
-                            <Badge 
-                              variant="outline"
-                              style={{ 
-                                backgroundColor: `${status.color}20`,
-                                borderColor: status.color,
-                                color: status.color
-                              }}
-                            >
-                              {status.name}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="border-emerald-500 text-emerald-500 bg-emerald-500/10">
-                              Aberto
-                            </Badge>
-                          )}
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">
-                            <span className="text-emerald-600">Aberto</span>
-                          </SelectItem>
-                          {statuses.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              <div className="flex items-center gap-2">
-                                <div 
-                                  className="w-2 h-2 rounded-full" 
-                                  style={{ backgroundColor: s.color }} 
-                                />
-                                {s.name}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {status ? (
+                        <Badge 
+                          variant="outline"
+                          style={{ 
+                            backgroundColor: `${status.color}20`,
+                            borderColor: status.color,
+                            color: status.color
+                          }}
+                        >
+                          {status.name}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-emerald-500 text-emerald-500 bg-emerald-500/10">
+                          Aberto
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       {department ? (
