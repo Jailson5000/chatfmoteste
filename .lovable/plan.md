@@ -1,112 +1,165 @@
 
+# Correção: Templates da IA com Mídia não Aparecem no Chat + Duplicação
 
-# Adicionar Seção de Vídeo Tutorial na Landing Page
+## Problemas Identificados
 
-## Objetivo
+Analisando as screenshots e o código, identifiquei dois problemas distintos mas relacionados:
 
-Adicionar uma seção na landing page com um vídeo do YouTube que mostra como criar uma conta, fazer o cadastro e acessar a plataforma MiauChat.
+### Problema 1: Templates com Mídia não Exibem Imagens no Chat MiauChat
 
-**ID do Vídeo:** `q9VESHWqHBQ`
-
-## Localização
-
-A seção será adicionada **após a seção Hero** (logo após os CTAs principais) e **antes da seção "Agentes IA ON"**. Este é o posicionamento ideal porque:
-
-1. Visitantes veem o vídeo logo no início
-2. Ajuda a converter interessados mostrando simplicidade do cadastro
-3. Reduz dúvidas sobre o processo de onboarding
-
-## Design da Seção
-
-Seguindo o padrão visual da landing page:
-- Fundo escuro com borda sutil
-- Título chamativo com destaque em vermelho
-- Player de vídeo responsivo (16:9)
-- Ícone de contexto (Play/Video)
-
-## Estrutura Visual
+**Causa raiz:** A função `executeTemplateTool` envia texto e mídia SEPARADAMENTE para o WhatsApp, mas salva apenas UMA mensagem no banco de dados.
 
 ```text
-+--------------------------------------------------+
-|                                                  |
-|  ▶️  VEJA COMO É SIMPLES                        |
-|                                                  |
-|     Como criar sua conta e                      |
-|     começar a usar o MiauChat                    |
-|                                                  |
-|  +--------------------------------------------+  |
-|  |                                            |  |
-|  |       [  Vídeo YouTube Embed  ]            |  |
-|  |           (16:9 ratio)                     |  |
-|  |                                            |  |
-|  +--------------------------------------------+  |
-|                                                  |
-|     Assista e veja como é fácil começar         |
-|                                                  |
-+--------------------------------------------------+
+Fluxo atual:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. IA chama send_template("Baixar extratos")                │
+│ 2. executeTemplateTool extrai [IMAGE]url do conteúdo        │
+│ 3. Envia TEXTO via Evolution API → recebe whatsapp_id_texto │
+│ 4. Envia MÍDIA via Evolution API → recebe whatsapp_id_mídia │
+│ 5. Salva UMA mensagem com whatsapp_id_texto e media_url     │
+│ 6. Problema: mídia não tem whatsapp_message_id vinculado    │
+│    então não consegue descriptografar via get_media         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Mudanças no Código
+**Por que a imagem não aparece no chat:**
+- A mensagem salva no banco tem `message_type: 'media'` e `media_url` com a URL pública do template
+- Mas quando o `MessageBubble` tenta renderizar, ele usa o `whatsappMessageId` para descriptografar
+- O `whatsappMessageId` salvo é do TEXTO, não da MÍDIA
+- Resultado: a função `get_media` falha porque o ID não corresponde a uma mídia
 
-### Arquivo: `src/pages/landing/LandingPage.tsx`
+### Problema 2: Mensagens Duplicadas no WhatsApp
 
-**1. Adicionar import do ícone PlayCircle:**
-```tsx
-import {
-  // ... imports existentes
-  PlayCircle,
-} from "lucide-react";
+**Causa raiz:** O fluxo `send.message` do Evolution API não está sendo ignorado adequadamente.
+
+```text
+Cenário de duplicação:
+┌─────────────────────────────────────────────────────────────┐
+│ 1. executeTemplateTool envia mídia para WhatsApp            │
+│ 2. Evolution API dispara webhook 'send.message' com mídia   │
+│ 3. evolution-webhook recebe evento                          │
+│ 4. Tenta salvar nova mensagem (não encontra duplicata)      │
+│ 5. Resultado: DUAS mensagens com mesma imagem no WhatsApp   │
+│    (uma do ai-chat + uma do webhook)                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**2. Adicionar nova seção após o Hero (linha ~327):**
-```tsx
-{/* Seção - Vídeo Tutorial */}
-<section className="relative z-10 py-16 md:py-20 border-t border-white/[0.06]">
-  <div className="max-w-4xl mx-auto px-6">
-    <div className="text-center mb-8">
-      <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
-        <PlayCircle className="h-7 w-7 text-red-500" strokeWidth={1.5} />
-      </div>
-      <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
-        Veja como é simples
-      </p>
-      <h2 className="text-2xl md:text-3xl font-bold leading-tight">
-        Como criar sua conta e
-        <br />
-        <span className="text-red-500">começar a usar o MiauChat</span>
-      </h2>
-      <p className="mt-4 text-base text-white/50">
-        Assista ao vídeo e veja como é fácil começar
-      </p>
-    </div>
-    
-    {/* Video Container */}
-    <div className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-black/50">
-      <div className="aspect-video">
-        <iframe
-          src="https://www.youtube.com/embed/q9VESHWqHBQ"
-          title="Como criar conta no MiauChat"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-          className="w-full h-full border-0"
-        />
-      </div>
-    </div>
-  </div>
-</section>
+---
+
+## Solução Proposta
+
+### Correção 1: Salvar Mensagens de Mídia Separadamente
+
+Modificar `executeTemplateTool` em `supabase/functions/ai-chat/index.ts`:
+
+**Antes:**
+```typescript
+// Salva UMA mensagem com ambos texto e mídia
+const { data: savedMsg } = await supabase.from("messages").insert({
+  whatsapp_message_id: whatsappMessageId, // ID do texto apenas
+  content: finalContent,
+  message_type: finalMediaUrl ? 'media' : 'text',
+  media_url: finalMediaUrl,
+  ...
+});
 ```
 
-## Características Técnicas
+**Depois:**
+```typescript
+// 1. Se tem TEXTO, salvar mensagem de texto
+if (finalContent) {
+  await supabase.from("messages").insert({
+    whatsapp_message_id: whatsappMessageId, // ID do texto
+    content: finalContent,
+    message_type: 'text',
+    // SEM media_url no texto
+    ...
+  });
+}
 
-1. **Responsivo**: Usa `aspect-video` (16:9) do Tailwind para manter proporção
-2. **Consistente**: Segue o mesmo padrão visual das outras seções
-3. **Performante**: Embed nativo do YouTube (lazy loading automático)
-4. **Acessível**: Título descritivo no iframe para leitores de tela
+// 2. Se tem MÍDIA, salvar mensagem de mídia SEPARADA
+if (finalMediaUrl) {
+  await supabase.from("messages").insert({
+    whatsapp_message_id: mediaMessageId, // ID da mídia (do sendMedia)
+    content: null, // Mídia não precisa de content
+    message_type: 'image' | 'video' | 'document',
+    media_url: finalMediaUrl,
+    ...
+  });
+}
+```
 
-## Resultado Esperado
+### Correção 2: Evitar Duplicação no Webhook
 
-- Nova seção aparece logo após o Hero
-- Vídeo carrega diretamente no player embed
-- Layout responsivo funciona em mobile e desktop
-- Visual integrado com o restante da landing page
+O `evolution-webhook` já tem verificação de duplicatas por `whatsapp_message_id`, mas precisamos garantir que:
 
+1. O `mediaMessageId` seja capturado corretamente do envio de mídia
+2. Esse ID seja salvo na mensagem de mídia para que o webhook reconheça como duplicata
+
+Atualmente a verificação existe em linha 4154-4163:
+```typescript
+const { data: existingMsg } = await supabaseClient
+  .from('messages')
+  .select('id')
+  .eq('conversation_id', conversation.id)
+  .eq('whatsapp_message_id', data.key.id)
+  .maybeSingle();
+
+if (existingMsg?.id) {
+  logDebug('MESSAGE', `Duplicate message ignored...`);
+  break;
+}
+```
+
+Com a correção 1, quando salvamos o `mediaMessageId` correto, o webhook vai encontrar a duplicata e ignorar.
+
+### Correção 3: Usar URL Pública para Mídia de Templates
+
+Para templates que usam URLs públicas do Supabase Storage (como `https://...supabase.co/storage/v1/object/public/...`), NÃO precisamos de descriptografia. O `MessageBubble` deve detectar isso:
+
+**Em `src/components/conversations/MessageBubble.tsx`:**
+
+```typescript
+// No ImageViewer/VideoPlayer/DocumentViewer
+// Não precisa de descriptografia se:
+// 1. URL é pública (não é WhatsApp encrypted)
+// 2. Ou mensagem é ai_generated com URL de storage
+const isPublicUrl = src.includes('supabase.co/storage/') || 
+                    (!src.includes('.enc') && !src.includes('mmg.whatsapp.net'));
+const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
+```
+
+---
+
+## Arquivos a Modificar
+
+### 1. `supabase/functions/ai-chat/index.ts`
+
+**Função `executeTemplateTool` (linhas ~1764-2050):**
+- Separar salvamento de texto e mídia
+- Capturar e usar o `mediaMessageId` corretamente
+- Melhorar logging para debug
+
+### 2. `src/components/conversations/MessageBubble.tsx`
+
+**Componentes `ImageViewer`, `VideoPlayer`, `DocumentViewer`:**
+- Detectar URLs públicas que não precisam de descriptografia
+- Exibir mídia diretamente quando URL é acessível
+
+---
+
+## Testes a Realizar
+
+1. **Enviar template com imagem via IA**
+   - [ ] Verificar que imagem aparece no chat MiauChat
+   - [ ] Verificar que imagem aparece no WhatsApp do cliente
+   - [ ] Verificar que NÃO há duplicação
+
+2. **Verificar banco de dados**
+   - [ ] Template com texto+imagem cria 2 mensagens (texto e imagem separadas)
+   - [ ] Cada mensagem tem seu próprio `whatsapp_message_id`
+
+3. **Testar diferentes tipos de mídia**
+   - [ ] Template com imagem
+   - [ ] Template com vídeo
+   - [ ] Template com documento PDF
