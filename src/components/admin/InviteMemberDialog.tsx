@@ -228,10 +228,10 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                           onPointerDown={(e) => e.stopPropagation()}
                         />
                         <div
-                          className="w-3 h-3 rounded-full pointer-events-none"
+                          className="w-3 h-3 rounded-full"
                           style={{ backgroundColor: dept.color }}
                         />
-                        <span className="text-sm pointer-events-none">{dept.name}</span>
+                        <span className="text-sm">{dept.name}</span>
                       </div>
                     ))}
                   </div>
