@@ -1,84 +1,61 @@
 
-## Melhorias Visuais no Player de Áudio
 
-### Resumo das Alterações
+## Remoção do Label "[Áudio]" da Visualização do Cliente
 
-**Duas modificações simples no componente `MessageBubble.tsx`:**
+### Problema Identificado
 
-1. **Remover o placeholder "[ÁUDIO]"** que aparece para áudios sem URL/whatsappMessageId
-2. **Alterar o texto de loading** baseado na direção da mensagem:
-   - Enviados (`isFromMe: true`): "Enviando áudio..."
-   - Recebidos (`isFromMe: false`): "Baixando áudio..."
+Na screenshot, o cliente vê **"[Áudio]"** abaixo do player de áudio nas mensagens enviadas. Isso acontece porque:
 
----
+1. **Quando áudio é enviado**, o sistema salva `content: "[Áudio]"` no banco de dados
+2. **O MessageBubble** já tem filtros para remover alguns padrões de placeholder, mas o padrão exato `[Áudio]` não está sendo filtrado
 
-### Detalhes Técnicos
+### Origem do Texto "[Áudio]"
 
-#### Arquivo: `src/components/conversations/MessageBubble.tsx`
+| Arquivo | Linha | Código |
+|---------|-------|--------|
+| `Conversations.tsx` | 1907 | `content: mediaType === "audio" ? "[Áudio]" : ...` |
+| `evolution-api/index.ts` | 2427 | `content: "[Áudio]"` |
 
-**Alteração 1 - Linha 335: Mudar texto de descriptografia**
+### Solução
+
+**Arquivo:** `src/components/conversations/MessageBubble.tsx`
+
+Adicionar um regex no `displayContent` para filtrar `[Áudio]` (e variações):
+
+**Linha ~1560-1562 (no processamento de `displayContent`):**
 
 De:
-```tsx
-<span className="text-xs text-primary/70 font-medium">Descriptografando áudio...</span>
+```typescript
+let processed = content
+  .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
+  .replace(/\r\n/g, "\n");
 ```
 
 Para:
-```tsx
-<span className="text-xs text-primary/70 font-medium">
-  {isFromMe ? "Enviando áudio..." : "Baixando áudio..."}
-</span>
+```typescript
+let processed = content
+  .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
+  .replace(/\[\s*[áaÁA]udio\s*\]/gi, "")  // Remove [Áudio], [Audio], [áudio], etc.
+  .replace(/\r\n/g, "\n");
 ```
 
-**Alteração 2 - Linhas 1786-1796: Simplificar placeholder de áudio**
-
-De:
-```tsx
-{!hasMedia && messageType === "audio" && !whatsappMessageId && (
-  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
-    <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
-      <Mic className="h-5 w-5 text-primary" />
-    </div>
-    <div className="flex-1">
-      <p className="text-sm font-medium">Mensagem de áudio</p>
-      <p className="text-xs text-muted-foreground">Áudio enviado via WhatsApp</p>
-    </div>
-  </div>
-)}
-```
-
-Para:
-```tsx
-{!hasMedia && messageType === "audio" && !whatsappMessageId && (
-  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
-    <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
-      <Mic className="h-5 w-5 text-primary" />
-    </div>
-    <div className="flex-1">
-      <div className="flex items-center gap-2">
-        <Loader2 className="h-3 w-3 animate-spin text-primary" />
-        <span className="text-xs text-muted-foreground">
-          {isFromMe ? "Enviando..." : "Baixando..."}
-        </span>
-      </div>
-    </div>
-  </div>
-)}
-```
-
----
+O novo regex `/\[\s*[áaÁA]udio\s*\]/gi` captura:
+- `[Áudio]` ✅
+- `[Audio]` ✅
+- `[áudio]` ✅
+- `[audio]` ✅
+- `[ Áudio ]` ✅ (com espaços)
 
 ### Resultado Visual
 
-| Situação | Antes | Depois |
-|----------|-------|--------|
-| Áudio enviado carregando | "Descriptografando áudio..." | "Enviando áudio..." |
-| Áudio recebido carregando | "Descriptografando áudio..." | "Baixando áudio..." |
-| Placeholder sem URL (enviado) | "[ÁUDIO] Mensagem de áudio - Áudio enviado via WhatsApp" | Spinner + "Enviando..." |
-| Placeholder sem URL (recebido) | "[ÁUDIO] Mensagem de áudio - Áudio enviado via WhatsApp" | Spinner + "Baixando..." |
+| Antes | Depois |
+|-------|--------|
+| Player de áudio + "[Áudio]" abaixo | Apenas o player de áudio (igual ao WhatsApp) |
 
 ### Risco
 
-- **Zero risco de regressão**: Alterações são apenas de texto/UI
-- Não afeta lógica de envio, recebimento ou descriptografia de áudio
-- Mantém todos os estilos e comportamentos existentes
+- **Zero**: Alteração é apenas visual/cosmética
+- Não afeta o armazenamento no banco
+- Não afeta a reprodução do áudio
+- Mantém a lógica de envio/recebimento intacta
+
