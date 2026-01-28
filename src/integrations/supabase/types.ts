@@ -194,7 +194,7 @@ export type Database = {
           payment_method: string | null
           pre_message_sent_at: string | null
           price: number | null
-          professional_id: string
+          professional_id: string | null
           recurrence_rule: string | null
           reminder_sent_at: string | null
           resource_id: string | null
@@ -234,7 +234,7 @@ export type Database = {
           payment_method?: string | null
           pre_message_sent_at?: string | null
           price?: number | null
-          professional_id: string
+          professional_id?: string | null
           recurrence_rule?: string | null
           reminder_sent_at?: string | null
           resource_id?: string | null
@@ -274,7 +274,7 @@ export type Database = {
           payment_method?: string | null
           pre_message_sent_at?: string | null
           price?: number | null
-          professional_id?: string
+          professional_id?: string | null
           recurrence_rule?: string | null
           reminder_sent_at?: string | null
           resource_id?: string | null

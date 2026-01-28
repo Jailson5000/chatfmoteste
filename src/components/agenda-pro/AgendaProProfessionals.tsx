@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, Pencil, Trash2, Loader2, User, Phone, Mail, Clock } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, Pencil, Trash2, Loader2, User, Phone, Mail, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { useAgendaProProfessionals, AgendaProProfessional } from "@/hooks/useAgendaProProfessionals";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAgendaProProfessionals, AgendaProProfessional, DeleteAction } from "@/hooks/useAgendaProProfessionals";
 import { useAgendaProServices } from "@/hooks/useAgendaProServices";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -35,13 +37,52 @@ const defaultFormData: ProfessionalFormData = {
 };
 
 export function AgendaProProfessionals() {
-  const { professionals, isLoading, createProfessional, updateProfessional, deleteProfessional } = useAgendaProProfessionals();
+  const { 
+    professionals, 
+    isLoading, 
+    createProfessional, 
+    updateProfessional, 
+    deleteProfessionalWithOptions,
+    getAppointmentCount 
+  } = useAgendaProProfessionals();
   const { activeServices } = useAgendaProServices();
+  
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingProfessional, setEditingProfessional] = useState<AgendaProProfessional | null>(null);
   const [deletingProfessional, setDeletingProfessional] = useState<AgendaProProfessional | null>(null);
   const [formData, setFormData] = useState<ProfessionalFormData>(defaultFormData);
+  
+  // Delete options state
+  const [deleteOption, setDeleteOption] = useState<DeleteAction>('transfer');
+  const [transferToId, setTransferToId] = useState<string>('');
+  const [appointmentCount, setAppointmentCount] = useState(0);
+  const [loadingCount, setLoadingCount] = useState(false);
+
+  // Get other professionals for transfer option
+  const otherProfessionals = professionals.filter(
+    p => p.id !== deletingProfessional?.id && p.is_active
+  );
+
+  // Load appointment count when delete dialog opens
+  useEffect(() => {
+    if (deleteDialogOpen && deletingProfessional) {
+      setLoadingCount(true);
+      getAppointmentCount(deletingProfessional.id)
+        .then(count => {
+          setAppointmentCount(count);
+          // Default to delete_all if no other professionals available
+          if (otherProfessionals.length === 0 && count > 0) {
+            setDeleteOption('delete_all');
+          }
+        })
+        .finally(() => setLoadingCount(false));
+    } else {
+      setAppointmentCount(0);
+      setDeleteOption('transfer');
+      setTransferToId('');
+    }
+  }, [deleteDialogOpen, deletingProfessional]);
 
   const handleOpenNew = () => {
     setEditingProfessional(null);
@@ -82,12 +123,17 @@ export function AgendaProProfessionals() {
     setDialogOpen(false);
   };
 
-  const handleDelete = () => {
-    if (deletingProfessional) {
-      deleteProfessional.mutate(deletingProfessional.id);
-      setDeleteDialogOpen(false);
-      setDeletingProfessional(null);
-    }
+  const handleDeleteWithOptions = async () => {
+    if (!deletingProfessional) return;
+    
+    await deleteProfessionalWithOptions.mutateAsync({
+      id: deletingProfessional.id,
+      action: deleteOption,
+      transferToId: deleteOption === 'transfer' ? transferToId : undefined,
+    });
+    
+    setDeleteDialogOpen(false);
+    setDeletingProfessional(null);
   };
 
   const toggleService = (serviceId: string) => {
@@ -107,6 +153,10 @@ export function AgendaProProfessionals() {
       .toUpperCase()
       .slice(0, 2);
   };
+
+  const canDelete = appointmentCount === 0 || 
+    (deleteOption === 'transfer' && transferToId) || 
+    deleteOption === 'delete_all';
 
   if (isLoading) {
     return (
@@ -326,19 +376,104 @@ export function AgendaProProfessionals() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Dialog */}
+      {/* Delete Dialog with Options */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover Profissional</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem certeza que deseja remover "{deletingProfessional?.name}"? Esta ação não pode ser desfeita.
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Excluir Profissional
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-4">
+                <p>
+                  Tem certeza que deseja excluir <strong>"{deletingProfessional?.name}"</strong>?
+                </p>
+                
+                {loadingCount ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : appointmentCount > 0 ? (
+                  <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 space-y-3">
+                    <p className="font-medium text-yellow-600 dark:text-yellow-400 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      {appointmentCount} agendamento(s) vinculado(s)
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      O que deseja fazer com estes agendamentos?
+                    </p>
+                    
+                    <RadioGroup 
+                      value={deleteOption} 
+                      onValueChange={(v) => setDeleteOption(v as DeleteAction)}
+                      className="space-y-3"
+                    >
+                      {otherProfessionals.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="transfer" id="transfer" />
+                            <Label htmlFor="transfer" className="cursor-pointer">
+                              Transferir para outro profissional
+                            </Label>
+                          </div>
+                          
+                          {deleteOption === 'transfer' && (
+                            <Select value={transferToId} onValueChange={setTransferToId}>
+                              <SelectTrigger className="ml-6">
+                                <SelectValue placeholder="Selecionar profissional..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {otherProfessionals.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>
+                                    <div className="flex items-center gap-2">
+                                      <div 
+                                        className="w-3 h-3 rounded-full" 
+                                        style={{ backgroundColor: p.color }}
+                                      />
+                                      {p.name}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="delete_all" id="delete_all" />
+                        <Label htmlFor="delete_all" className="text-destructive cursor-pointer">
+                          Excluir todos os agendamentos junto
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                    
+                    {deleteOption === 'delete_all' && (
+                      <p className="text-xs text-destructive font-medium bg-destructive/10 p-2 rounded">
+                        ⚠️ Esta ação é irreversível! Todos os {appointmentCount} agendamentos serão excluídos permanentemente.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Este profissional não possui agendamentos vinculados.
+                  </p>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
-              Remover
+            <AlertDialogAction 
+              onClick={handleDeleteWithOptions} 
+              disabled={!canDelete || deleteProfessionalWithOptions.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteProfessionalWithOptions.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              Confirmar Exclusão
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
