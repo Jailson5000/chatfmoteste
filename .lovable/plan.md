@@ -1,122 +1,96 @@
 
-# Correção Final: Clique em Departamentos Causa Tela Preta
+# Correção: Remover pointer-events-none que Causa Tela Preta
 
 ## Problema Identificado
 
-O usuário reporta que:
-- ✅ Clicar no **checkbox** (quadrado vermelho) funciona
-- ❌ Clicar no **texto** ou **bolinha colorida** (área amarela) causa tela preta
+O `pointer-events-none` aplicado ao texto e bolinha colorida está fazendo com que os cliques "vazem" para a camada de dismiss do Dialog, que interpreta como "clique fora" e fecha o modal abruptamente (tela preta).
 
-### Causa Raiz
-
-O `ScrollArea` do Radix UI pode estar interferindo com o sistema de detecção de "outside click" do `Dialog`. O Radix Dialog usa `onPointerDownOutside` para detectar cliques fora do conteúdo, e o ScrollArea cria um viewport interno que pode não ser reconhecido corretamente como "dentro" do DialogContent.
+**Por que funciona em Settings.tsx (edição de membros)?**
+O código de edição **não usa** `pointer-events-none` nos elementos de texto e bolinha - os cliques são naturalmente capturados pelo div pai.
 
 ## Solução
 
-Substituir o `ScrollArea` por um **div nativo** com `overflow-y: auto`, eliminando qualquer interferência do componente Radix ScrollArea com o Dialog.
-
-Esta é a mesma solução já documentada na memória do projeto (`style/sidebar-scrolling-optimization`):
-> "Uses native 'div' containers with 'max-h-[60vh]', 'overflow-y-auto', and 'overscroll-contain' for lists. This layout replaces Radix 'ScrollArea' components to prevent scrolling conflicts in nested containers."
+Remover `pointer-events-none` do texto e da bolinha colorida no InviteMemberDialog, alinhando com o código que funciona em Settings.tsx.
 
 ## Arquivo Afetado
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/admin/InviteMemberDialog.tsx` | Substituir ScrollArea por div nativo |
+| `src/components/admin/InviteMemberDialog.tsx` | Remover `pointer-events-none` das linhas 231 e 234 |
 
 ## Mudanças Específicas
 
-### InviteMemberDialog.tsx
+### InviteMemberDialog.tsx (linhas 230-234)
 
 **ANTES:**
 ```tsx
-<ScrollArea className="h-[150px] border rounded-md p-3">
-  {departments.length === 0 ? (
-    ...
-  ) : (
-    <div className="space-y-2">
-      {departments.filter(d => d.is_active).map((dept) => (
-        ...
-      ))}
-    </div>
-  )}
-</ScrollArea>
+<div
+  className="w-3 h-3 rounded-full pointer-events-none"
+  style={{ backgroundColor: dept.color }}
+/>
+<span className="text-sm pointer-events-none">{dept.name}</span>
 ```
 
 **DEPOIS:**
 ```tsx
-<div 
-  className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
-  onPointerDown={(e) => e.stopPropagation()}
->
-  {departments.length === 0 ? (
-    ...
-  ) : (
-    <div className="space-y-2">
-      {departments.filter(d => d.is_active).map((dept) => (
-        ...
-      ))}
-    </div>
-  )}
-</div>
-```
-
-### Ajustes adicionais no item de departamento:
-
-Garantir que todos os elementos filhos tenham proteção contra propagação:
-
-```tsx
 <div
-  key={dept.id}
-  className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer select-none"
-  onClick={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    handleDepartmentToggle(dept.id);
-  }}
-  onPointerDown={(e) => e.stopPropagation()}
-  onMouseDown={(e) => e.stopPropagation()}
->
-  <Checkbox ... />
-  <div 
-    className="w-3 h-3 rounded-full pointer-events-none"
-    style={{ backgroundColor: dept.color }}
-  />
-  <span className="text-sm pointer-events-none">{dept.name}</span>
-</div>
+  className="w-3 h-3 rounded-full"
+  style={{ backgroundColor: dept.color }}
+/>
+<span className="text-sm">{dept.name}</span>
 ```
-
-Adicionamos:
-1. `pointer-events-none` na bolinha colorida e no texto para que o clique seja sempre capturado pelo container div
-2. `select-none` no container para evitar seleção de texto acidental
-3. `onMouseDown` com stopPropagation como fallback adicional
 
 ## Por que isso resolve
 
-1. **Div nativo** não cria estruturas internas complexas que podem interferir com o Dialog
-2. **pointer-events-none** nos elementos visuais (texto/bolinha) força o clique a ser tratado pelo div pai
-3. **stopPropagation em múltiplos eventos** (click, pointerdown, mousedown) garante que nenhum evento "vaze" para o Dialog
+1. **Sem `pointer-events-none`**, os cliques no texto e na bolinha são capturados normalmente pelo DOM
+2. O evento "borbulha" (bubble) para o div pai que tem o `onClick` com `handleDepartmentToggle`
+3. O `stopPropagation()` no div pai impede que o clique chegue ao Dialog
+4. O Dialog não interpreta como "clique fora"
+5. A tela não fica preta
 
-## Resultado Esperado
+## Comparação Visual
 
-- Clicar no checkbox: ✅ funciona (como antes)
-- Clicar no texto do departamento: ✅ funciona
-- Clicar na bolinha colorida: ✅ funciona
-- Clicar no espaço vazio da linha: ✅ funciona
-- Dialog não fecha inesperadamente
+```text
+ANTES (com pointer-events-none):
+┌─────────────────────────────────────┐
+│ [checkbox] [●] Atendimento          │
+│                 ↓                   │
+│         Clique no texto             │
+│                 ↓                   │
+│   pointer-events-none (ignora)      │
+│                 ↓                   │
+│   Clique "vaza" para Dialog Layer   │
+│                 ↓                   │
+│   Dialog fecha = TELA PRETA         │
+└─────────────────────────────────────┘
+
+DEPOIS (sem pointer-events-none):
+┌─────────────────────────────────────┐
+│ [checkbox] [●] Atendimento          │
+│                 ↓                   │
+│         Clique no texto             │
+│                 ↓                   │
+│   Evento sobe para div pai          │
+│                 ↓                   │
+│   onClick + stopPropagation         │
+│                 ↓                   │
+│   handleDepartmentToggle() ✅       │
+└─────────────────────────────────────┘
+```
 
 ## Checklist de Testes
 
-1. Abrir **Convidar Membro**
-2. Selecionar **Atendente**
-3. Testar cliques em diferentes áreas:
-   - [ ] Checkbox diretamente
-   - [ ] Texto do departamento
-   - [ ] Bolinha colorida
-   - [ ] Espaço vazio na linha
-4. Verificar que a contagem "X selecionados" atualiza
-5. Enviar convite e confirmar funcionamento
+1. Ir em **Configurações → Membros**
+2. Clicar **Convidar membro**
+3. Selecionar **Atendente**
+4. Testar cliques em:
+   - [ ] Checkbox (quadrado vermelho) → deve funcionar
+   - [ ] Bolinha colorida → deve funcionar
+   - [ ] Nome do departamento (texto) → deve funcionar
+   - [ ] Espaço vazio na linha → deve funcionar
+5. Verificar que a contagem "X selecionados" atualiza corretamente
+6. Verificar que a tela **NÃO** fica preta
 
 ## Risco
 
-**Muito baixo** - Apenas substituímos um componente de scroll por equivalente nativo, mantendo toda a lógica de negócio intacta.
+**Mínimo** - Apenas removemos uma propriedade CSS que estava causando o problema. Alinhamos com o código que já funciona em Settings.tsx.
