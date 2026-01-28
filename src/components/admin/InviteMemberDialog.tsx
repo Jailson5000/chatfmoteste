@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,9 +58,6 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
   const [role, setRole] = useState<AppRole>("atendente");
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [error, setError] = useState("");
-  
-  // Ref para a lista de departamentos - usado para bloquear dismiss incorreto
-  const deptListRef = useRef<HTMLDivElement>(null);
 
   const selectedRole = roles.find(r => r.value === role);
   const requiresDepartments = selectedRole?.requiresDepartments ?? false;
@@ -202,11 +199,7 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                   {selectedDepartments.length} selecionado{selectedDepartments.length !== 1 ? "s" : ""}
                 </Badge>
               </Label>
-              <div 
-                ref={deptListRef}
-                className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
-                onPointerDownCapture={(e) => e.stopPropagation()}
-              >
+              <div className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain">
                 {departments.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     Nenhum departamento cadastrado
@@ -214,21 +207,16 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                 ) : (
                   <div className="space-y-2">
                     {departments.filter((d) => d.is_active).map((dept) => (
-                      <div
-                        key={dept.id}
-                        role="button"
-                        tabIndex={0}
-                        className="flex w-full select-none items-center space-x-3 rounded-md p-2 text-left cursor-pointer hover:bg-muted/50"
-                        onClick={() => handleDepartmentToggle(dept.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            handleDepartmentToggle(dept.id);
-                          }
+                      <div 
+                        key={dept.id} 
+                        className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDepartmentToggle(dept.id);
                         }}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
-                        <Checkbox
-                          type="button"
+                        <Checkbox 
                           checked={selectedDepartments.includes(dept.id)}
                           onCheckedChange={() => handleDepartmentToggle(dept.id)}
                           onClick={(e) => e.stopPropagation()}
