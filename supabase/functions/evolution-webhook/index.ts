@@ -4284,10 +4284,44 @@ serve(async (req) => {
         // This protects manual name edits made by users
         const shouldUpdateContactName = !isFromMe && !conversation.client_id && data.pushName;
         
+        // ========================================================================
+        // HANDOFF AUTOMÁTICO: Mensagem externa do atendente desativa a IA
+        // ========================================================================
+        // Quando um atendente envia mensagem DIRETAMENTE pelo WhatsApp (fora do sistema),
+        // isso indica que ele quer assumir o atendimento manualmente.
+        // Se a conversa estava com a IA, devemos:
+        // 1. Desativar a IA (current_automation_id = null)
+        // 2. Remover responsável (assigned_to = null) → vai para a fila
+        // 3. Definir handler como humano
+        // ========================================================================
+        let externalHandoffApplied = false;
+        if (isFromMe && conversation.current_handler === 'ai') {
+          externalHandoffApplied = true;
+          logDebug('HANDOFF', `External WhatsApp message from attendant detected - disabling AI and moving to queue`, {
+            requestId,
+            conversationId: conversation.id,
+            previousHandler: conversation.current_handler,
+            previousAutomationId: conversation.current_automation_id,
+            previousAssignedTo: conversation.assigned_to,
+          });
+        }
+        
         const updatePayload: Record<string, unknown> = {
           last_message_at: new Date().toISOString(),
           contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
         };
+        
+        // Apply handoff if external message detected from attendant while AI was active
+        if (externalHandoffApplied) {
+          updatePayload.current_handler = 'human';
+          updatePayload.current_automation_id = null;
+          updatePayload.assigned_to = null;
+          
+          logDebug('HANDOFF', `Handoff applied - conversation moved to queue`, {
+            requestId,
+            conversationId: conversation.id,
+          });
+        }
 
         // If archived, unarchive and restore to appropriate handler
         if (isArchived) {
