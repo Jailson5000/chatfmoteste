@@ -656,123 +656,139 @@ export default function Settings() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Dialog 
-                            open={editingMember === member.id} 
-                            onOpenChange={(open) => {
-                              if (open) {
-                                setEditingMember(member.id);
-                                setEditMemberRole(member.role);
-                                setEditMemberDepts(member.department_ids);
-                              } else {
-                                setEditingMember(null);
-                              }
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              setEditingMember(member.id);
+                              setEditMemberRole(member.role);
+                              setEditMemberDepts(member.department_ids || []);
                             }}
                           >
-                            <DialogTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <Pencil className="h-3 w-3 mr-1" />
-                                Editar
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>Editar Permissões - {member.full_name}</DialogTitle>
-                              </DialogHeader>
-                              <div className="space-y-4 mt-4">
-                                <div className="space-y-2">
-                                  <Label>Função</Label>
-                                  <Select 
-                                    value={editMemberRole} 
-                                    onValueChange={(v) => setEditMemberRole(v as AppRole)}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="admin">Administrador - Acesso total ao sistema</SelectItem>
-                                      <SelectItem value="gerente">Gerente - Acesso completo à operação</SelectItem>
-                                      <SelectItem value="atendente">Atendente - Apenas departamentos selecionados</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                {editMemberRole === "atendente" && (
-                                  <div className="space-y-2">
-                                    <Label>Departamentos com acesso</Label>
-                                    <p className="text-xs text-muted-foreground mb-2">
-                                      Atendente não pode: modificar configurações, conexões ou automações.
-                                    </p>
-                                    <div className="space-y-2 border rounded-lg p-3">
-                                      {departments.map(dept => (
-                                        <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
-                                          <Checkbox 
-                                            checked={editMemberDepts.includes(dept.id)}
-                                            onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                setEditMemberDepts(prev => [...prev, dept.id]);
-                                              } else {
-                                                setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
-                                              }
-                                            }}
-                                          />
-                                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
-                                          <span className="text-sm">{dept.name}</span>
-                                        </label>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                <DialogFooter className="pt-4">
-                                  <Button variant="outline" onClick={() => setEditingMember(null)}>
-                                    Cancelar
-                                  </Button>
-                                  <Button 
-                                    onClick={async () => {
-                                      setSavingMember(true);
-                                      try {
-                                        // Update role if changed
-                                        if (editMemberRole !== member.role) {
-                                          await updateMemberRole.mutateAsync({ 
-                                            memberId: member.id, 
-                                            role: editMemberRole 
-                                          });
-                                        }
-                                        // Update departments if atendente
-                                        if (editMemberRole === "atendente") {
-                                          await updateMemberDepartments.mutateAsync({
-                                            memberId: member.id,
-                                            departmentIds: editMemberDepts,
-                                          });
-                                        }
-                                        setEditingMember(null);
-                                        toast({
-                                          title: "Permissões atualizadas",
-                                          description: "As permissões do membro foram salvas.",
-                                        });
-                                      } catch (error: any) {
-                                        toast({
-                                          title: "Erro ao salvar",
-                                          description: error.message,
-                                          variant: "destructive",
-                                        });
-                                      } finally {
-                                        setSavingMember(false);
-                                      }
-                                    }}
-                                    disabled={savingMember}
-                                  >
-                                    {savingMember && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                    Salvar
-                                  </Button>
-                                </DialogFooter>
-                              </div>
-                            </DialogContent>
-                          </Dialog>
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Editar
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
+
+              {/* Dialog de edição de membro - FORA do loop para evitar múltiplos overlays */}
+              {(() => {
+                const memberBeingEdited = teamMembers.find(m => m.id === editingMember);
+                const activeDepartments = departments?.filter(d => d.is_active) || [];
+                
+                return (
+                  <Dialog 
+                    open={editingMember !== null} 
+                    onOpenChange={(open) => {
+                      if (!open) setEditingMember(null);
+                    }}
+                  >
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Editar Permissões - {memberBeingEdited?.full_name}</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 mt-4">
+                        <div className="space-y-2">
+                          <Label>Função</Label>
+                          <Select 
+                            value={editMemberRole} 
+                            onValueChange={(v) => setEditMemberRole(v as AppRole)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="admin">Administrador - Acesso total ao sistema</SelectItem>
+                              <SelectItem value="gerente">Gerente - Acesso completo à operação</SelectItem>
+                              <SelectItem value="atendente">Atendente - Apenas departamentos selecionados</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {editMemberRole === "atendente" && (
+                          <div className="space-y-2">
+                            <Label>Departamentos com acesso</Label>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Atendente não pode: modificar configurações, conexões ou automações.
+                            </p>
+                            <div className="space-y-2 border rounded-lg p-3 max-h-[200px] overflow-y-auto">
+                              {activeDepartments.length > 0 ? (
+                                activeDepartments.map(dept => (
+                                  <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
+                                    <Checkbox 
+                                      checked={editMemberDepts.includes(dept.id)}
+                                      onCheckedChange={(checked) => {
+                                        if (checked) {
+                                          setEditMemberDepts(prev => [...prev, dept.id]);
+                                        } else {
+                                          setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
+                                        }
+                                      }}
+                                    />
+                                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
+                                    <span className="text-sm">{dept.name}</span>
+                                  </label>
+                                ))
+                              ) : (
+                                <p className="text-sm text-muted-foreground text-center py-2">
+                                  Nenhum departamento cadastrado
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        <DialogFooter className="pt-4">
+                          <Button variant="outline" onClick={() => setEditingMember(null)}>
+                            Cancelar
+                          </Button>
+                          <Button 
+                            onClick={async () => {
+                              if (!memberBeingEdited) return;
+                              setSavingMember(true);
+                              try {
+                                // Update role if changed
+                                if (editMemberRole !== memberBeingEdited.role) {
+                                  await updateMemberRole.mutateAsync({ 
+                                    memberId: memberBeingEdited.id, 
+                                    role: editMemberRole 
+                                  });
+                                }
+                                // Update departments if atendente
+                                if (editMemberRole === "atendente") {
+                                  await updateMemberDepartments.mutateAsync({
+                                    memberId: memberBeingEdited.id,
+                                    departmentIds: editMemberDepts,
+                                  });
+                                }
+                                setEditingMember(null);
+                                toast({
+                                  title: "Permissões atualizadas",
+                                  description: "As permissões do membro foram salvas.",
+                                });
+                              } catch (error: any) {
+                                toast({
+                                  title: "Erro ao salvar",
+                                  description: error.message,
+                                  variant: "destructive",
+                                });
+                              } finally {
+                                setSavingMember(false);
+                              }
+                            }}
+                            disabled={savingMember}
+                          >
+                            {savingMember && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                            Salvar
+                          </Button>
+                        </DialogFooter>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                );
+              })()}
             </CardContent>
           </Card>
           
