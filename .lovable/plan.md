@@ -1,174 +1,124 @@
 
-# Correção da Tela Preta em Configurações > Membros
+## Objetivo
+Eliminar definitivamente a “tela preta” ao selecionar departamentos em **Configurações → Membros**, tanto no fluxo de **Convidar membro** quanto no de **Editar permissões**, sem causar regressões.
 
-## Problema Identificado
+---
 
-A funcionalidade de edição de permissões de membros apresenta uma **tela preta** ao interagir com a seleção de departamentos. Isso ocorre devido a:
+## O que sabemos até agora (e por que o problema ainda pode acontecer)
+- A “tela preta” visualmente se parece com um **overlay modal** (camada preta) ficando ativo/“travado” enquanto o conteúdo some.
+- O problema ocorre **no momento do clique/seleção do departamento**, o que indica que algo relacionado a evento de clique/foco dentro de um Dialog/Modal está acionando um comportamento inesperado (fechamento/estado inconsistente) ou gerando erro que desmonta a UI sob o overlay.
+- Existem **dois fluxos** com seleção de departamentos:
+  1) **InviteMemberDialog** (Convidar Membro) — lista dentro de `ScrollArea` e item com **onClick no container + onCheckedChange no Checkbox** (pode disparar duas vezes a mudança, ou causar interações indesejadas com “outside click”/foco).
+  2) **Edição de membro em Settings.tsx** — lista com `<label>` envolvendo `Checkbox` (pode gerar comportamentos de clique/foco inesperados em Radix quando combinado com Dialog).
 
-1. **Múltiplos Dialogs dentro do loop de tabela**: Cada linha de membro renderiza seu próprio `Dialog` com overlay escuro (`bg-black/80`), o que pode causar sobreposição de backdrops
-2. **Departamentos não filtrados**: O código não filtra departamentos inativos (`is_active`), diferente do `InviteMemberDialog` que faz isso corretamente
-3. **Possível problema de estado**: Quando o Dialog é aberto com estado inicial incorreto
+Mesmo após mover o Dialog para fora do loop, ainda há pontos que podem manter o overlay “preso”: principalmente **event bubbling + handlers duplicados + onOpenChange mal interpretado**.
 
-## Solução Proposta
+---
 
-### 1. Extrair o Dialog de Edição para Fora do Loop
+## Hipóteses mais prováveis (prioridade)
+### H1) “Clique duplo lógico” no convite (container onClick + Checkbox onCheckedChange)
+No `InviteMemberDialog`, clicar no checkbox dispara:
+- `Checkbox.onCheckedChange(...)`
+- e também o `div.onClick(...)` (bubbling)
+Isso pode:
+- alternar o estado duas vezes (marca e desmarca instantaneamente),
+- causar rerenders e interações estranhas com o Dialog (dependendo de foco/outside-click),
+- e em alguns cenários deixar o overlay ativo sem conteúdo “visível”.
 
-Mover o Dialog de edição de membros para **fora do loop** `teamMembers.map()`, usando estado para controlar qual membro está sendo editado.
+### H2) Eventos de pointer/click sendo interpretados como “outside click” do Dialog
+Em Radix Dialog, dependendo do elemento e do evento (pointerdown/click), pode ocorrer fechamento/estado inconsistente se o evento “vaza” e o Dialog entende que foi interação externa.
 
-```text
-ANTES:
-┌──────────────────────────────────────────────┐
-│ teamMembers.map((member) => (                │
-│   <TableRow>                                 │
-│     ...                                      │
-│     <Dialog> ← Dialog DENTRO do loop         │
-│       <DialogContent>...</DialogContent>     │
-│     </Dialog>                                │
-│   </TableRow>                                │
-│ ))                                           │
-└──────────────────────────────────────────────┘
+### H3) Erro runtime disparado no clique (UI desmonta e fica só o fundo)
+Sem logs do momento exato do clique, precisamos adicionar instrumentação pontual (sem impacto) para capturar exceções e confirmar a causa.
 
-DEPOIS:
-┌──────────────────────────────────────────────┐
-│ teamMembers.map((member) => (                │
-│   <TableRow>                                 │
-│     ...                                      │
-│     <Button onClick={() => openEdit(member)} │
-│   </TableRow>                                │
-│ ))                                           │
-│                                              │
-│ {/* Dialog FORA do loop */}                  │
-│ <Dialog open={editingMember !== null}>       │
-│   <DialogContent>...</DialogContent>         │
-│ </Dialog>                                    │
-└──────────────────────────────────────────────┘
-```
+---
 
-### 2. Filtrar Departamentos Inativos
+## Estratégia de correção (mínima, segura e sem quebrar nada)
+Vamos atacar de forma **cirúrgica**, com mudanças pequenas e isoladas:
 
-```typescript
-// ANTES (linha 705):
-{departments.map(dept => (
+### 1) Corrigir o fluxo “Convidar Membro” (InviteMemberDialog) — remover duplicidade e travar bubbling
+**Mudanças:**
+- Remover o `onClick` do container da linha do departamento **OU** garantir que o clique no checkbox não dispare o onClick do container.
+- Implementar handler de toggle apenas em um lugar (preferência: no checkbox + label clicável).
+- Garantir que `onCheckedChange` trate explicitamente o tipo `boolean | "indeterminate"`:
+  - `const isChecked = checked === true;`
+- Adicionar `stopPropagation()` no `Checkbox` (e/ou no item), usando `onClick` e `onPointerDown` para evitar “outside click”.
 
-// DEPOIS:
-{departments.filter(d => d.is_active).map(dept => (
-```
+**Resultado esperado:**
+- Selecionar departamento não dispara eventos duplicados
+- Não há fechamento inesperado nem overlay preso
 
-### 3. Adicionar Validação de Segurança
+### 2) Corrigir o fluxo “Editar permissões” (Settings.tsx) — tornar a interação do checkbox “à prova de modal”
+**Mudanças:**
+- Trocar a estrutura `label` envolvendo `Checkbox` por uma estrutura consistente e controlada:
+  - Ex.: `div` clicável + checkbox com `stopPropagation`
+- Garantir o mesmo tratamento de `checked === true`
+- (Opcional e bem seguro) Adicionar `onPointerDown={(e)=>e.stopPropagation()}` no container do item + no checkbox para evitar interpretação como clique fora do modal.
 
-```typescript
-// Adicionar fallback para array de departamentos
-const activeDepartments = departments?.filter(d => d.is_active) || [];
+### 3) Instrumentação leve para “prova” (sem afetar produção)
+- Adicionar logs condicionais (apenas em dev) ou logs minimalistas e temporários para capturar:
+  - quando ocorre seleção
+  - estado do Dialog (open/close)
+  - se algum erro é lançado no clique
+- Alternativa mais elegante e segura: um pequeno Error Boundary apenas ao redor da área do dialog de membros (fallback simples em vez de tela vazia), evitando que o usuário fique “travado” caso exista algum erro escondido.
 
-// Validar antes de renderizar checkboxes
-{activeDepartments.length > 0 ? (
-  activeDepartments.map(dept => ...)
-) : (
-  <p className="text-sm text-muted-foreground">Nenhum departamento cadastrado</p>
-)}
-```
+Obs: Se preferir zero logs, podemos pular essa etapa, mas ela ajuda muito a garantir que não exista um erro oculto além dos eventos.
 
-## Arquivos Afetados
+---
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Settings.tsx` | Refatorar estrutura do Dialog e filtrar departamentos |
+## Arquivos que serão modificados
+1) `src/components/admin/InviteMemberDialog.tsx`
+2) `src/pages/Settings.tsx`
+(opcional, só se necessário para diagnóstico) 3) um ErrorBoundary simples em `src/components/...` ou no próprio `Settings.tsx` (local, sem mexer na app toda)
 
-## Mudanças Detalhadas
+---
 
-### Settings.tsx - Estrutura do Dialog de Edição
+## Passo a passo de implementação (sequência)
+1. Ajustar `InviteMemberDialog`:
+   - Refatorar item de departamento para ter **apenas uma fonte de verdade** do toggle
+   - Bloquear bubbling do checkbox (click/pointerdown)
+   - Garantir o tratamento de `indeterminate`
+2. Ajustar lista de departamentos do Dialog de edição em `Settings.tsx` com a mesma abordagem:
+   - item clicável controlado
+   - checkbox “isolado” com stopPropagation
+3. (Se ainda ocorrer) Adicionar instrumentação mínima ou ErrorBoundary local
+4. Revisar visual/UX: manter o layout idêntico, sem mudanças de estilo inesperadas
 
-1. **Remover o Dialog de dentro do `map()`** (linhas 659-769)
-2. **Criar um Dialog único controlado fora da tabela**
-3. **Adicionar estado para armazenar o membro selecionado para edição**
+---
 
-```typescript
-// Estado para membro em edição (já existe, mas será usado diferente)
-const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+## Checklist de testes (anti-regressão)
+### Fluxo A — Convidar membro
+1. Ir em **Configurações → Membros**
+2. Clicar **Convidar membro**
+3. Selecionar **Atendente**
+4. Marcar/desmarcar departamentos (vários cliques, rápido e lento)
+5. Verificar que:
+   - a tela não fica preta
+   - o diálogo não fecha sozinho
+   - a contagem “X selecionados” atualiza corretamente
+6. Enviar convite e confirmar que continua funcionando
 
-// Na tabela, apenas o botão de abrir
-<Button 
-  variant="ghost" 
-  size="sm"
-  onClick={() => {
-    setEditingMember(member);
-    setEditMemberRole(member.role);
-    setEditMemberDepts(member.department_ids || []);
-  }}
->
-  <Pencil className="h-3 w-3 mr-1" />
-  Editar
-</Button>
+### Fluxo B — Editar permissões
+1. Em **Membros**, clicar **Editar**
+2. Alterar para **Atendente**
+3. Marcar/desmarcar departamentos
+4. Salvar e validar que:
+   - não ocorre tela preta
+   - permissões persistem
+   - badges na tabela refletem os departamentos
 
-// Dialog fora do loop
-<Dialog 
-  open={editingMember !== null} 
-  onOpenChange={(open) => !open && setEditingMember(null)}
->
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Editar Permissões - {editingMember?.full_name}</DialogTitle>
-    </DialogHeader>
-    {/* Conteúdo do form */}
-  </DialogContent>
-</Dialog>
-```
+### Smoke test geral
+- Navegar entre abas: **Templates**, **Integrações**, **Plano**, **Segurança**
+- Verificar que nenhum modal ficou com overlay “preso”
 
-### Filtragem de Departamentos
+---
 
-```typescript
-// Garantir que apenas departamentos ativos sejam exibidos
-const activeDepartments = departments?.filter(d => d.is_active) || [];
+## Risco e por que não deve quebrar nada
+- Mudanças são **somente de UI/eventos** (stopPropagation + remover duplicidade), sem alterar regras de permissão nem chamadas ao backend.
+- Mantém o mesmo estado e as mesmas mutações, apenas evita eventos inesperados que podem travar o modal.
+- Plano é incremental: primeiro corrigimos o convite (mais suspeito), depois alinhamos a edição.
 
-{editMemberRole === "atendente" && (
-  <div className="space-y-2">
-    <Label>Departamentos com acesso</Label>
-    <p className="text-xs text-muted-foreground mb-2">
-      Atendente não pode: modificar configurações, conexões ou automações.
-    </p>
-    <div className="space-y-2 border rounded-lg p-3 max-h-[200px] overflow-y-auto">
-      {activeDepartments.length > 0 ? (
-        activeDepartments.map(dept => (
-          <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
-            <Checkbox 
-              checked={editMemberDepts.includes(dept.id)}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setEditMemberDepts(prev => [...prev, dept.id]);
-                } else {
-                  setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
-                }
-              }}
-            />
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
-            <span className="text-sm">{dept.name}</span>
-          </label>
-        ))
-      ) : (
-        <p className="text-sm text-muted-foreground text-center py-2">
-          Nenhum departamento cadastrado
-        </p>
-      )}
-    </div>
-  </div>
-)}
-```
+---
 
-## Resultado Esperado
-
-1. **Tela preta eliminada**: Apenas um Dialog com um único overlay será renderizado
-2. **Departamentos corretos**: Apenas departamentos ativos serão exibidos
-3. **Comportamento estável**: Estado controlado corretamente sem conflitos
-
-## Testes de Validação
-
-1. Abrir a aba "Membros" em Configurações
-2. Clicar em "Editar" em qualquer membro
-3. Alterar a função para "Atendente"
-4. Verificar que os checkboxes de departamentos funcionam sem tela preta
-5. Selecionar/desselecionar departamentos
-6. Salvar e confirmar que as alterações foram aplicadas
-
-## Risco
-
-**Baixo** - A alteração melhora a estrutura do código sem modificar a lógica de negócio. Mantém compatibilidade total com o fluxo existente.
+## Entrega
+Após você aprovar este plano, eu implemento as alterações e valido os fluxos A/B no preview, com foco em não gerar regressões.
