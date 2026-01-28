@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,9 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
   const [role, setRole] = useState<AppRole>("atendente");
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [error, setError] = useState("");
+  
+  // Ref para a lista de departamentos - usado para bloquear dismiss incorreto
+  const deptListRef = useRef<HTMLDivElement>(null);
 
   const selectedRole = roles.find(r => r.value === role);
   const requiresDepartments = selectedRole?.requiresDepartments ?? false;
@@ -66,6 +69,23 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
         ? prev.filter(id => id !== deptId)
         : [...prev, deptId]
     );
+  };
+
+  // Função separada para resetar o formulário
+  const resetForm = () => {
+    setEmail("");
+    setFullName("");
+    setRole("atendente");
+    setSelectedDepartments([]);
+    setError("");
+  };
+
+  // Handler que respeita o boolean do Radix (alinhado com Settings.tsx)
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      resetForm();
+    }
+    onOpenChange(nextOpen);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,29 +110,38 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
         departmentIds: requiresDepartments ? selectedDepartments : [],
       });
       
-      // Reset form
-      setEmail("");
-      setFullName("");
-      setRole("atendente");
-      setSelectedDepartments([]);
+      // Reset form and close
+      resetForm();
       onOpenChange(false);
     } catch (err: any) {
       setError(err.message || "Erro ao convidar membro");
     }
   };
 
-  const handleClose = () => {
-    setEmail("");
-    setFullName("");
-    setRole("atendente");
-    setSelectedDepartments([]);
-    setError("");
-    onOpenChange(false);
+  // Handler para bloquear dismiss quando clique é dentro da lista de departamentos
+  const handleInteractOutside = (event: Event) => {
+    // Verifica se o clique foi dentro da lista de departamentos
+    const target = event.target as Node | null;
+    if (target && deptListRef.current?.contains(target)) {
+      event.preventDefault();
+    }
+  };
+
+  // Handler redundante para pointer down (reforço de segurança)
+  const handlePointerDownOutside = (event: { preventDefault: () => void; target?: EventTarget | null }) => {
+    const target = event.target as Node | null;
+    if (target && deptListRef.current?.contains(target)) {
+      event.preventDefault();
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px]">
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+      <DialogContent 
+        className="sm:max-w-[500px]"
+        onInteractOutside={handleInteractOutside}
+        onPointerDownOutside={handlePointerDownOutside}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5 text-primary" />
@@ -191,9 +220,8 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                 </Badge>
               </Label>
               <div 
+                ref={deptListRef}
                 className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
-                onPointerDown={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
               >
                 {departments.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
@@ -202,37 +230,23 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                 ) : (
                   <div className="space-y-2">
                     {departments.filter(d => d.is_active).map((dept) => (
-                      <div
+                      <button
                         key={dept.id}
-                        className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer select-none"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleDepartmentToggle(dept.id);
-                        }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
+                        type="button"
+                        className="flex items-center w-full space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer select-none text-left"
+                        onClick={() => handleDepartmentToggle(dept.id)}
                       >
                         <Checkbox
                           checked={selectedDepartments.includes(dept.id)}
-                          onCheckedChange={(checked) => {
-                            const isChecked = checked === true;
-                            const currentlySelected = selectedDepartments.includes(dept.id);
-                            if (isChecked && !currentlySelected) {
-                              handleDepartmentToggle(dept.id);
-                            } else if (!isChecked && currentlySelected) {
-                              handleDepartmentToggle(dept.id);
-                            }
-                          }}
+                          onCheckedChange={() => handleDepartmentToggle(dept.id)}
                           onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
                         />
                         <div
-                          className="w-3 h-3 rounded-full"
+                          className="w-3 h-3 rounded-full flex-shrink-0"
                           style={{ backgroundColor: dept.color }}
                         />
                         <span className="text-sm">{dept.name}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -251,7 +265,7 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={handleClose}>
+            <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
               Cancelar
             </Button>
             <Button type="submit" disabled={isLoading}>
