@@ -201,11 +201,27 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                       <div
                         key={dept.id}
                         className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer"
-                        onClick={() => handleDepartmentToggle(dept.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDepartmentToggle(dept.id);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
                         <Checkbox
                           checked={selectedDepartments.includes(dept.id)}
-                          onCheckedChange={() => handleDepartmentToggle(dept.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked === true) {
+                              if (!selectedDepartments.includes(dept.id)) {
+                                handleDepartmentToggle(dept.id);
+                              }
+                            } else {
+                              if (selectedDepartments.includes(dept.id)) {
+                                handleDepartmentToggle(dept.id);
+                              }
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                         />
                         <div
                           className="w-3 h-3 rounded-full"
