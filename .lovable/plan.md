@@ -1,65 +1,229 @@
 
-Objetivo
-- No painel lateral de Conversas (ContactDetailsPanel), permitir selecionar qualquer status/etiqueta/departamento mesmo quando a lista for grande, adicionando rolagem clara e confiável, sem afetar Kanban nem outras áreas.
+# Campo de Subdomínio Personalizável no Cadastro
 
-Diagnóstico (por que acontece)
-- O painel lateral já tem rolagem principal (ScrollArea “grande”) e, dentro de “Propriedades”, cada seção (Status/Etiquetas/Departamento) também tem uma área de rolagem própria.
-- Hoje, Status e Etiquetas usam `ScrollArea` com `max-h-48` (e Departamento `max-h-[60vh]`). Na prática, isso deixa visível só uma “fatia” (ex.: ~5 itens) e depende de uma rolagem interna que está pouco evidente/instável (principalmente por ser um ScrollArea Radix aninhado dentro de outro ScrollArea).
+## Objetivo
 
-Solução (mínima e segura)
-- Tornar a rolagem dessas listas mais óbvia e garantida, evitando ScrollArea aninhado onde possível.
-- Implementar rolagem “nativa” (overflow-y) apenas dentro das listas de Status/Etiquetas/Departamento, mantendo o resto do painel como está. Isso reduz risco de conflitos de scroll entre ScrollAreas.
+Permitir que o usuário escolha seu próprio subdomínio durante o cadastro, com validação em tempo real de disponibilidade.
 
-Mudanças planejadas (código)
-1) Ajustar ContactDetailsPanel (arquivo: `src/components/conversations/ContactDetailsPanel.tsx`)
-   - Na seção “Status”:
-     - Substituir o bloco:
-       - `<ScrollArea className="max-h-48"> ... </ScrollArea>`
-     - Por um container nativo com altura máxima e rolagem:
-       - `div` com `max-h-[60vh] overflow-y-auto pr-2 overscroll-contain` (altura pode ser 60vh para “caber mais” e ainda rolar quando necessário).
-     - Manter o conteúdo interno igual (map de `statuses` e botões).
-   - Na seção “Etiquetas”:
-     - Mesmo ajuste: trocar `ScrollArea` por `div` com `max-h-[60vh] overflow-y-auto pr-2 overscroll-contain`.
-   - Na seção “Departamento”:
-     - Também trocar o `ScrollArea` por `div` nativo equivalente (ou manter se estiver ok, mas para consistência e evitar o mesmo problema, vamos padronizar as 3).
-   - Observação: manteremos toda a lógica (handlers, seleção, logs de atividade, invalidações) intacta — só altera a “caixa” que contém a lista.
+## Solução Proposta
 
-2) Garantir que nada “vaze” visualmente
-   - Verificar se as listas não ficam “transparentes” e não ficam atrás de outros elementos (aqui não é dropdown/popover, então tende a ser tranquilo).
-   - Confirmar que o painel lateral continua com `overflow-x-hidden` e que o `pr-2` evita o scroll sobrepor texto.
+Adicionar um campo de "Subdomínio" no formulário de registro com:
+1. **Preview em tempo real**: `[campo].miauchat.com.br`
+2. **Validação de caracteres**: apenas letras minúsculas, números (sem hífens obrigatórios)
+3. **Verificação de disponibilidade**: consulta ao banco antes de enviar
+4. **Sugestão automática**: baseada no nome da empresa (o usuário pode editar)
 
-3) Ajuste fino de UX (opcional, só se necessário e sem quebrar nada)
-   - Se ainda ficar “apertado”, aumentar um pouco a altura máxima:
-     - ex.: `max-h-[70vh]` em Status/Etiquetas (mantendo Departamento em 60vh) ou padronizar tudo em 70vh.
-   - Se você quiser que “Status” mostre mais itens visíveis sem rolar, podemos aumentar o padding/altura do item ou reduzir espaçamentos — mas isso é opcional.
+## Fluxo de UX
 
-Arquivos afetados
-- `src/components/conversations/ContactDetailsPanel.tsx` (somente ajustes de layout/rolagem nas três listas)
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│  Nome da Empresa: [Liz Importados]                               │
+│                                                                  │
+│  Seu Subdomínio:                                                 │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │ lizimportados                                            │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│  → lizimportados.miauchat.com.br   ✅ Disponível                 │
+│                                                                  │
+│  (O usuário pode mudar para "liz", "lizimport", etc.)            │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-Critérios de aceite (o que vai ficar funcionando)
-- No painel lateral:
-  - Ao abrir “Propriedades” → “Status”, dá para rolar a lista e selecionar um status que hoje não aparece (ex.: o 10º/11º).
-  - Em “Etiquetas”, dá para rolar e selecionar qualquer etiqueta (respeitando o limite de 4).
-  - Em “Departamento”, dá para rolar e escolher qualquer departamento.
-- Nada muda no Kanban (já está correto) e o cabeçalho de Conversas continua exibindo e atualizando corretamente.
+## Arquivos Afetados
 
-Testes (anti-regressão — obrigatório)
-1) Conversas (desktop)
-   - Abrir uma conversa com painel lateral.
-   - Expandir Status → rolar até o fim → selecionar um status “lá de baixo”.
-   - Confirmar que:
-     - o badge do status no painel atualiza,
-     - o header (Status no topo da conversa) reflete a mudança,
-     - ao trocar de conversa e voltar, permanece correto.
-2) Etiquetas
-   - Expandir Etiquetas → rolar → selecionar 4 etiquetas → confirmar bloqueio da 5ª.
-3) Departamento
-   - Expandir Departamento → rolar → selecionar um departamento no fim da lista.
-4) Teste de rolagem
-   - Garantir que a rolagem ocorre dentro da lista (e não “trava” o painel).
-5) Teste cross-feature rápido
-   - Ir no Kanban e confirmar que nada mudou no comportamento de status/departamentos/etiquetas.
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/Register.tsx` | Adicionar campo de subdomínio + validação + preview |
+| `src/lib/schemas/companySchema.ts` | Adicionar campo `subdomain` ao schema |
+| `supabase/functions/register-company/index.ts` | Aceitar `subdomain` customizado e validar disponibilidade |
 
-Risco e mitigação
-- Risco baixo: alteração apenas de layout/overflow dentro do ContactDetailsPanel.
-- Mitigação: manter handlers e dados intactos; somente trocar o container de scroll (evitar mudanças em hooks, queries, realtime ou mutations).
+## Implementação Técnica
+
+### 1. Schema (`src/lib/schemas/companySchema.ts`)
+
+```typescript
+// Adicionar ao publicRegistrationSchema
+subdomain: z
+  .string()
+  .min(3, "Subdomínio deve ter no mínimo 3 caracteres")
+  .max(30, "Subdomínio deve ter no máximo 30 caracteres")
+  .regex(/^[a-z0-9]+$/, "Apenas letras minúsculas e números (sem hífens ou espaços)")
+  .optional()
+  .transform((val) => val?.toLowerCase() || undefined),
+```
+
+### 2. Formulário (`src/pages/Register.tsx`)
+
+**Estado adicional:**
+```typescript
+const [formData, setFormData] = useState({
+  companyName: "",
+  adminName: "",
+  email: "",
+  phone: "",
+  document: "",
+  planId: "",
+  subdomain: "", // NOVO
+});
+
+const [subdomainStatus, setSubdomainStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+```
+
+**Função para gerar sugestão (sem hífens):**
+```typescript
+function generateSubdomainSuggestion(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-z0-9]/g, '')       // remove tudo exceto letras e números
+    .substring(0, 30);
+}
+```
+
+**Auto-preenchimento ao digitar nome da empresa:**
+```typescript
+onChange={(e) => {
+  const newName = e.target.value;
+  setFormData(prev => ({
+    ...prev,
+    companyName: newName,
+    // Auto-sugerir subdomínio se o usuário não editou manualmente
+    subdomain: prev.subdomain === generateSubdomainSuggestion(prev.companyName) 
+      ? generateSubdomainSuggestion(newName)
+      : prev.subdomain
+  }));
+}}
+```
+
+**Novo campo de subdomínio:**
+```tsx
+<div className="space-y-2">
+  <Label htmlFor="subdomain" className="text-zinc-300">
+    Seu Subdomínio
+  </Label>
+  <div className="relative">
+    <Input
+      id="subdomain"
+      type="text"
+      placeholder="suaempresa"
+      maxLength={30}
+      className="bg-zinc-800/50 border-zinc-700 text-white"
+      value={formData.subdomain}
+      onChange={(e) => {
+        const value = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        setFormData({ ...formData, subdomain: value });
+        checkSubdomainAvailability(value);
+      }}
+    />
+  </div>
+  <div className="flex items-center gap-2 text-sm">
+    <span className="text-zinc-500">→</span>
+    <span className="text-zinc-400">
+      {formData.subdomain || 'suaempresa'}.miauchat.com.br
+    </span>
+    {subdomainStatus === 'checking' && (
+      <span className="text-zinc-500">Verificando...</span>
+    )}
+    {subdomainStatus === 'available' && (
+      <span className="text-green-500">✅ Disponível</span>
+    )}
+    {subdomainStatus === 'taken' && (
+      <span className="text-red-500">❌ Já em uso</span>
+    )}
+  </div>
+</div>
+```
+
+**Verificação de disponibilidade (debounced):**
+```typescript
+const checkSubdomainAvailability = useMemo(() => 
+  debounce(async (subdomain: string) => {
+    if (subdomain.length < 3) {
+      setSubdomainStatus('idle');
+      return;
+    }
+    setSubdomainStatus('checking');
+    
+    const { data } = await supabase
+      .from('law_firms')
+      .select('id')
+      .eq('subdomain', subdomain)
+      .maybeSingle();
+    
+    setSubdomainStatus(data ? 'taken' : 'available');
+  }, 500),
+[]);
+```
+
+### 3. Edge Function (`register-company/index.ts`)
+
+**Aceitar subdomain customizado:**
+```typescript
+interface RegisterRequest {
+  company_name: string;
+  admin_name: string;
+  admin_email: string;
+  phone?: string;
+  document?: string;
+  plan_id?: string;
+  subdomain?: string; // NOVO - customizado pelo usuário
+  website?: string;
+}
+```
+
+**Validar e usar o subdomain informado:**
+```typescript
+// Se o usuário informou um subdomain customizado, usar ele
+// Senão, gerar automaticamente a partir do nome
+let subdomain = body.subdomain || generateSubdomain(company_name);
+
+// Validar formato (apenas letras minúsculas e números)
+if (!/^[a-z0-9]{3,30}$/.test(subdomain)) {
+  return new Response(
+    JSON.stringify({ error: 'Subdomínio inválido. Use apenas letras minúsculas e números (3-30 caracteres)' }),
+    { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+// Verificar disponibilidade
+const { data: existingSubdomain } = await supabase
+  .from('law_firms')
+  .select('id')
+  .eq('subdomain', subdomain)
+  .single();
+
+if (existingSubdomain) {
+  return new Response(
+    JSON.stringify({ error: 'Este subdomínio já está em uso. Por favor, escolha outro.' }),
+    { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+```
+
+## Exemplos de Resultado
+
+| Nome da Empresa | Sugestão Automática | Usuário pode mudar para |
+|-----------------|---------------------|-------------------------|
+| Liz Importados | `lizimportados` | `liz`, `lizimport` |
+| Café & Companhia | `cafecompanhia` | `cafe`, `cafecia` |
+| Dr. João Silva | `drjoaosilva` | `joaosilva`, `drjoao` |
+
+## Validações
+
+1. **Mínimo 3 caracteres** - evita conflitos e subdomínios muito curtos
+2. **Máximo 30 caracteres** - limite de DNS
+3. **Apenas `a-z` e `0-9`** - sem hífens, acentos ou espaços (mais limpo)
+4. **Verificação em tempo real** - feedback imediato de disponibilidade
+5. **Verificação server-side** - proteção contra race conditions
+
+## Testes de Não-Regressão
+
+1. **Cadastro com subdomínio padrão**: não informar nada → usa sugestão automática
+2. **Cadastro com subdomínio customizado**: informar `liz` → usa `liz`
+3. **Subdomínio já em uso**: informar um existente → erro claro
+4. **Caracteres inválidos**: não permitir hífens, espaços, acentos
+
+## Risco
+
+**Baixo** - A alteração adiciona funcionalidade sem modificar fluxos existentes. O comportamento padrão (auto-geração) continua funcionando se o campo não for preenchido.
