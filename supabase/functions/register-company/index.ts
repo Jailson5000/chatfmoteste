@@ -55,17 +55,17 @@ interface RegisterRequest {
   phone?: string;
   document?: string;
   plan_id?: string;
+  subdomain?: string; // Custom subdomain chosen by user
   website?: string; // Honeypot field - should be empty
 }
 
+// Generate subdomain from company name (no hyphens, only letters and numbers)
 function generateSubdomain(companyName: string): string {
   return companyName
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
+    .replace(/[^a-z0-9]/g, '')
     .substring(0, 30);
 }
 
@@ -109,7 +109,7 @@ serve(async (req) => {
   try {
     // Parse request body
     const body: RegisterRequest = await req.json();
-    const { company_name, admin_name, admin_email, phone, document, plan_id, website } = body;
+    const { company_name, admin_name, admin_email, phone, document, plan_id, subdomain: customSubdomain, website } = body;
 
     // Honeypot check - if website field is filled, it's a bot
     if (website) {
@@ -153,18 +153,51 @@ serve(async (req) => {
 
     console.log(`[register-company] New registration request: ${company_name} - ${admin_email} (IP: ${clientIP}, remaining: ${rateLimit.remaining})`);
 
-    // Generate subdomain
-    let subdomain = generateSubdomain(company_name);
+    // Use custom subdomain if provided, otherwise generate from company name
+    let subdomain = customSubdomain || generateSubdomain(company_name);
+    
+    // Validate subdomain format (only lowercase letters and numbers, 3-30 chars)
+    if (!/^[a-z0-9]{3,30}$/.test(subdomain)) {
+      return new Response(
+        JSON.stringify({ error: 'Subdomínio inválido. Use apenas letras minúsculas e números (3-30 caracteres)' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
     // Check if subdomain is available
     const { data: existingSubdomain } = await supabase
       .from('law_firms')
       .select('id')
       .eq('subdomain', subdomain)
-      .single();
+      .maybeSingle();
 
     if (existingSubdomain) {
-      subdomain = `${subdomain}-${Math.random().toString(36).substring(2, 6)}`;
+      // If user provided a custom subdomain that's taken, return error
+      if (customSubdomain) {
+        return new Response(
+          JSON.stringify({ error: 'Este subdomínio já está em uso. Por favor, escolha outro.' }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      // For auto-generated subdomains, use sequential numbering
+      const { data: similarSubdomains } = await supabase
+        .from('law_firms')
+        .select('subdomain')
+        .or(`subdomain.eq.${subdomain},subdomain.like.${subdomain}%`);
+      
+      if (similarSubdomains && similarSubdomains.length > 0) {
+        // Find the highest number suffix
+        const numbers: number[] = [1];
+        for (const row of similarSubdomains) {
+          if (row.subdomain === subdomain) continue;
+          const match = row.subdomain.match(new RegExp(`^${subdomain}(\\d+)$`));
+          if (match) {
+            numbers.push(parseInt(match[1], 10));
+          }
+        }
+        const nextNumber = Math.max(...numbers) + 1;
+        subdomain = `${subdomain}${nextNumber}`;
+      }
     }
 
     // Check if email is already registered

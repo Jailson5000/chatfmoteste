@@ -153,6 +153,15 @@ export const publicRegistrationSchema = z.object({
     .string()
     .uuid("Selecione um plano válido")
     .min(1, "Selecione um plano"),
+
+  // Subdomain - Optional, user can customize
+  subdomain: z
+    .string()
+    .min(3, "Subdomínio deve ter no mínimo 3 caracteres")
+    .max(30, "Subdomínio deve ter no máximo 30 caracteres")
+    .regex(/^[a-z0-9]+$/, "Apenas letras minúsculas e números (sem hífens ou espaços)")
+    .optional()
+    .transform((val) => val?.toLowerCase() || undefined),
 });
 
 /**
