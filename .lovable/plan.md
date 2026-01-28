@@ -1,158 +1,264 @@
 
-# Correção: Templates da IA não Aparecem no Chat
+# Correção: Exclusão de Profissionais e Serviços na Agenda Pro
 
 ## Problema Identificado
 
-### Causa Raiz Confirmada nos Logs
+### Erro de Foreign Key ao Excluir Profissional
 ```text
-ERROR [AI Chat] Failed to save template media message: {
-  code: "PGRST204",
-  message: "Could not find the 'metadata' column of 'messages' in the schema cache"
-}
+update or delete on table "agenda_pro_professionals" violates foreign key constraint 
+"agenda_pro_appointments_professional_id_fkey" on table "agenda_pro_appointments"
 ```
 
-O código atual tenta inserir dados na coluna `metadata` da tabela `messages`, mas **essa coluna não existe**.
-
-### Fluxo Atual (Quebrado)
+### Causa Raiz
+A tabela `agenda_pro_appointments` possui uma foreign key para `agenda_pro_professionals` com **`ON DELETE RESTRICT`**, o que impede a exclusão de profissionais que possuem agendamentos vinculados.
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ 1. IA chama send_template("Baixar extratos")                        │
-│ 2. executeTemplateTool:                                              │
-│    → Envia TEXTO via WhatsApp (OK) ✓                                 │
-│    → Envia MÍDIA via WhatsApp (OK) ✓                                 │
-│    → Tenta salvar TEXTO no banco com "metadata" → ERRO ✗            │
-│    → Tenta salvar MÍDIA no banco com "metadata" → ERRO ✗            │
-│ 3. Resultado:                                                        │
-│    • Mensagens chegam no WhatsApp do cliente ✓                       │
-│    • Mensagens NÃO são salvas no banco de dados ✗                   │
-│    • Mensagens NÃO aparecem no chat do MiauChat ✗                   │
-└─────────────────────────────────────────────────────────────────────┘
+Tabelas relacionadas a agenda_pro_professionals:
+┌──────────────────────────────────────────────────────────────────────┐
+│ Tabela                         │ Constraint          │ On Delete    │
+├──────────────────────────────────────────────────────────────────────┤
+│ agenda_pro_appointments        │ professional_id     │ RESTRICT ✗   │
+│ agenda_pro_breaks              │ professional_id     │ CASCADE  ✓   │
+│ agenda_pro_clients             │ preferred_prof_id   │ SET NULL ✓   │
+│ agenda_pro_service_professionals│ professional_id    │ CASCADE  ✓   │
+│ agenda_pro_time_off            │ professional_id     │ CASCADE  ✓   │
+│ agenda_pro_working_hours       │ professional_id     │ CASCADE  ✓   │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### Por que algumas mensagens antigas funcionam?
-As mensagens antigas com imagem (de 16-17/01) foram criadas antes da modificação que adicionou o campo `metadata` no insert. O webhook do Evolution API (`evolution-webhook`) também cria mensagens, mas sem esse campo problemático.
+O mesmo problema afeta serviços (`agenda_pro_services`), também com `ON DELETE RESTRICT`.
 
-## Solução
+---
 
-### Correção 1: Remover campo `metadata` dos inserts
+## Solução Proposta
 
-O campo `metadata` não existe na tabela `messages`. Precisamos removê-lo de AMBOS os inserts (texto e mídia) na função `executeTemplateTool`.
+### Opção A: Soft Delete (Desativar em vez de Excluir) ← Recomendada
+Ao invés de excluir fisicamente, desativar o registro mantendo histórico.
 
-**Arquivo:** `supabase/functions/ai-chat/index.ts`
+**Vantagens:**
+- Preserva histórico de agendamentos
+- Não perde dados de relatórios
+- Comportamento esperado em sistemas de agenda
 
-**Linhas 2005-2023 (insert de texto):**
+**Desvantagens:**
+- Registros "inativos" ficam na base
+
+### Opção B: Verificar Agendamentos Antes de Excluir
+Checar se há agendamentos pendentes/ativos antes de permitir exclusão.
+
+**Vantagens:**
+- Permite exclusão quando não há dependências ativas
+
+**Desvantagens:**
+- Não permite excluir se houver histórico
+
+### Opção C: Alterar Constraint para SET NULL
+Alterar a foreign key para `ON DELETE SET NULL`.
+
+**Vantagens:**
+- Permite exclusão mantendo agendamentos órfãos
+
+**Desvantagens:**
+- Perde referência do profissional nos relatórios
+
+---
+
+## Implementação Escolhida: Opção Híbrida (A + B)
+
+### 1. Verificar se há agendamentos FUTUROS antes de excluir
+Se houver agendamentos com `status` diferente de `cancelled`/`no_show`/`completed` E `start_time >= now()`:
+- Impedir exclusão com mensagem clara
+- Sugerir desativar ou reagendar
+
+### 2. Se não houver agendamentos futuros ativos
+- Permitir exclusão (já que só há histórico passado ou cancelados)
+- Alterar constraint para `ON DELETE SET NULL` para preservar agendamentos históricos
+
+### 3. Melhorar mensagem de erro
+- Traduzir erro técnico para mensagem amigável
+- Informar quantos agendamentos estão bloqueando
+
+---
+
+## Mudanças no Código
+
+### Arquivo 1: `src/hooks/useAgendaProProfessionals.tsx`
+
+**Modificar `deleteProfessional` para verificar agendamentos antes:**
 ```typescript
-// ANTES (quebrado)
-const { data: savedTextMsg, error: textSaveError } = await supabase.from("messages").insert({
-  // ... campos válidos ...
-  metadata: {  // ← ERRO: coluna não existe!
-    template_id: matchedTemplate.id,
-    template_name: matchedTemplate.name,
-    sent_via_whatsapp: whatsappSendSuccess,
-    has_companion_media: !!finalMediaUrl
-  }
-}).select("id").single();
+const deleteProfessional = useMutation({
+  mutationFn: async (id: string) => {
+    if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
-// DEPOIS (corrigido)
-const { data: savedTextMsg, error: textSaveError } = await supabase.from("messages").insert({
-  conversation_id: conversationId,
-  law_firm_id: lawFirmId,
-  whatsapp_message_id: whatsappTextMessageId,
-  content: finalContent,
-  sender_type: "ai",
-  is_from_me: true,
-  message_type: 'text',
-  media_url: null,
-  media_mime_type: null,
-  status: whatsappSendSuccess ? "sent" : "delivered",
-  ai_generated: true,
-  // REMOVIDO: metadata (coluna não existe)
-}).select("id").single();
+    // Verificar se há agendamentos futuros NÃO cancelados
+    const { data: futureAppointments, error: checkError } = await supabase
+      .from("agenda_pro_appointments")
+      .select("id, start_time, status")
+      .eq("professional_id", id)
+      .eq("law_firm_id", lawFirm.id)
+      .gte("start_time", new Date().toISOString())
+      .not("status", "in", '("cancelled","no_show","completed")')
+      .limit(1);
+
+    if (checkError) throw checkError;
+
+    if (futureAppointments && futureAppointments.length > 0) {
+      throw new Error(
+        "Este profissional possui agendamentos futuros. " +
+        "Cancele ou reagende os atendimentos antes de remover, " +
+        "ou desative o profissional nas configurações."
+      );
+    }
+
+    // Se não há agendamentos futuros, pode excluir
+    const { error } = await supabase
+      .from("agenda_pro_professionals")
+      .delete()
+      .eq("id", id)
+      .eq("law_firm_id", lawFirm.id);
+    
+    if (error) {
+      // Traduzir erro de FK para mensagem amigável
+      if (error.message.includes('violates foreign key constraint')) {
+        throw new Error(
+          "Este profissional possui agendamentos no histórico. " +
+          "Desative-o ao invés de excluir para preservar os registros."
+        );
+      }
+      throw error;
+    }
+  },
+  onError: (error: Error) => {
+    toast({ 
+      title: "Não foi possível remover", 
+      description: error.message, 
+      variant: "destructive" 
+    });
+  },
+});
 ```
 
-**Linhas 2040-2058 (insert de mídia):**
+### Arquivo 2: `src/hooks/useAgendaProServices.tsx`
+
+**Aplicar mesma lógica de verificação:**
 ```typescript
-// ANTES (quebrado)
-const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
-  // ... campos válidos ...
-  metadata: {  // ← ERRO: coluna não existe!
-    template_id: matchedTemplate.id,
-    template_name: matchedTemplate.name,
-    sent_via_whatsapp: whatsappSendSuccess,
-    is_public_url: ...
-  }
-}).select("id").single();
+const deleteService = useMutation({
+  mutationFn: async (id: string) => {
+    if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
-// DEPOIS (corrigido)
-const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
-  conversation_id: conversationId,
-  law_firm_id: lawFirmId,
-  whatsapp_message_id: whatsappMediaMessageId,
-  content: null,
-  sender_type: "ai",
-  is_from_me: true,
-  message_type: mediaMessageType,
-  media_url: finalMediaUrl,
-  media_mime_type: mediaMimeType,
-  status: whatsappSendSuccess ? "sent" : "delivered",
-  ai_generated: true,
-  // REMOVIDO: metadata (coluna não existe)
-}).select("id").single();
+    // Verificar se há agendamentos futuros NÃO cancelados
+    const { data: futureAppointments } = await supabase
+      .from("agenda_pro_appointments")
+      .select("id")
+      .eq("service_id", id)
+      .eq("law_firm_id", lawFirm.id)
+      .gte("start_time", new Date().toISOString())
+      .not("status", "in", '("cancelled","no_show","completed")')
+      .limit(1);
+
+    if (futureAppointments && futureAppointments.length > 0) {
+      throw new Error(
+        "Este serviço possui agendamentos futuros. " +
+        "Cancele ou reagende os atendimentos antes de remover, " +
+        "ou desative o serviço."
+      );
+    }
+
+    const { error } = await supabase
+      .from("agenda_pro_services")
+      .delete()
+      .eq("id", id)
+      .eq("law_firm_id", lawFirm.id);
+    
+    if (error) {
+      if (error.message.includes('violates foreign key constraint')) {
+        throw new Error(
+          "Este serviço possui agendamentos no histórico. " +
+          "Desative-o para preservar os registros."
+        );
+      }
+      throw error;
+    }
+  },
+});
 ```
 
-### Correção 2: Melhorar renderização de mídia pública
+### Arquivo 3: Migração SQL (Opcional mas Recomendada)
 
-O componente `MessageBubble` já possui a lógica `isPublicStorageUrl()` para detectar URLs públicas, mas vou garantir que está funcionando corretamente para templates.
+**Alterar constraint para `SET NULL` em agendamentos históricos:**
+```sql
+-- Alterar constraint de RESTRICT para SET NULL
+ALTER TABLE public.agenda_pro_appointments 
+DROP CONSTRAINT agenda_pro_appointments_professional_id_fkey;
 
-**Arquivo:** `src/components/conversations/MessageBubble.tsx`
+ALTER TABLE public.agenda_pro_appointments
+ADD CONSTRAINT agenda_pro_appointments_professional_id_fkey 
+FOREIGN KEY (professional_id) 
+REFERENCES public.agenda_pro_professionals(id) 
+ON DELETE SET NULL;
 
-A função `isPublicStorageUrl` já existe (linha 794-796) e deve funcionar. A verificação é:
-```typescript
-function isPublicStorageUrl(url: string): boolean {
-  return url.includes('supabase.co/storage/v1/object/public/') || 
-         url.includes('.supabase.co/storage/v1/object/public/');
-}
+-- Mesma lógica para service_id
+ALTER TABLE public.agenda_pro_appointments 
+DROP CONSTRAINT agenda_pro_appointments_service_id_fkey;
+
+ALTER TABLE public.agenda_pro_appointments
+ADD CONSTRAINT agenda_pro_appointments_service_id_fkey 
+FOREIGN KEY (service_id) 
+REFERENCES public.agenda_pro_services(id) 
+ON DELETE SET NULL;
 ```
 
-Isso já cobre as URLs do bucket `template-media` usado pelos templates.
+---
 
-## Arquivos a Modificar
-
-1. **`supabase/functions/ai-chat/index.ts`**
-   - Remover campo `metadata` do insert de texto (linhas 2017-2022)
-   - Remover campo `metadata` do insert de mídia (linhas 2052-2057)
-   - Manter logs de debug para rastrear template_id
-
-## Resultado Esperado
-
-Após a correção:
+## Fluxo Após Correção
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ 1. IA chama send_template("Baixar extratos")                        │
-│ 2. executeTemplateTool:                                              │
-│    → Envia TEXTO via WhatsApp (OK) ✓                                 │
-│    → Envia MÍDIA via WhatsApp (OK) ✓                                 │
-│    → Salva TEXTO no banco (OK) ✓                                    │
-│    → Salva MÍDIA no banco (OK) ✓                                    │
-│ 3. Resultado:                                                        │
-│    • Mensagens chegam no WhatsApp do cliente ✓                       │
-│    • Mensagens são salvas no banco de dados ✓                       │
-│    • Mensagens aparecem no chat do MiauChat ✓                       │
-│    • Imagens/vídeos renderizam diretamente (URL pública) ✓          │
-└─────────────────────────────────────────────────────────────────────┘
+Usuário clica em "Remover Profissional"
+                │
+                ▼
+   ┌─────────────────────────────┐
+   │ Verificar agendamentos      │
+   │ futuros NÃO cancelados      │
+   └─────────────────────────────┘
+                │
+        ┌───────┴───────┐
+        │               │
+   Existem         Não existem
+        │               │
+        ▼               ▼
+  ┌────────────┐   ┌────────────────┐
+  │ Bloquear   │   │ Tentar DELETE  │
+  │ com aviso  │   │ no banco       │
+  │ explicativo│   └────────────────┘
+  └────────────┘            │
+                     ┌──────┴──────┐
+                     │             │
+                  Sucesso     FK Error
+                     │             │
+                     ▼             ▼
+              ┌──────────┐  ┌──────────────┐
+              │ Removido │  │ Sugerir      │
+              │ com      │  │ desativar    │
+              │ sucesso  │  │ ao invés de  │
+              └──────────┘  │ excluir      │
+                            └──────────────┘
 ```
 
-## Considerações de Segurança
+---
 
-- Não haverá regressões - apenas removemos um campo que causava erro
-- O fluxo de envio de mídia pelo atendente (`handleSendMedia`) já funciona corretamente, pois não usa o campo `metadata`
-- O webhook (`evolution-webhook`) também não usa esse campo
+## Resumo das Mudanças
+
+| Arquivo | Mudança |
+|---------|---------|
+| `src/hooks/useAgendaProProfessionals.tsx` | Verificar agendamentos antes de excluir + mensagem amigável |
+| `src/hooks/useAgendaProServices.tsx` | Mesma lógica de verificação para serviços |
+| Migração SQL (opcional) | Alterar FK para `SET NULL` permitindo exclusão de histórico |
+
+---
 
 ## Testes Recomendados
 
-1. Enviar template com imagem via IA → verificar se aparece no chat e WhatsApp
-2. Enviar template com vídeo via IA → verificar se aparece no chat e WhatsApp
-3. Enviar template só texto via IA → verificar se aparece normalmente
-4. Verificar que mensagens antigas continuam funcionando
+1. **Tentar excluir profissional COM agendamento futuro** → Deve bloquear com mensagem clara
+2. **Tentar excluir profissional só com histórico** → Deve funcionar (após migração) ou sugerir desativar
+3. **Desativar profissional** → Deve funcionar sem problemas
+4. **Verificar relatórios** → Agendamentos antigos devem manter informação do profissional (mesmo se null)
