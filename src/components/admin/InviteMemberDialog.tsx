@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Shield, Users, Headphones, AlertCircle, Mail, CheckCircle2 } from "lucide-react";
 import { useDepartments } from "@/hooks/useDepartments";
 import type { AppRole } from "@/hooks/useUserRole";
@@ -190,7 +190,11 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                   {selectedDepartments.length} selecionado{selectedDepartments.length !== 1 ? "s" : ""}
                 </Badge>
               </Label>
-              <ScrollArea className="h-[150px] border rounded-md p-3">
+              <div 
+                className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 {departments.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     Nenhum departamento cadastrado
@@ -200,39 +204,39 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                     {departments.filter(d => d.is_active).map((dept) => (
                       <div
                         key={dept.id}
-                        className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer"
+                        className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer select-none"
                         onClick={(e) => {
+                          e.preventDefault();
                           e.stopPropagation();
                           handleDepartmentToggle(dept.id);
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
                       >
                         <Checkbox
                           checked={selectedDepartments.includes(dept.id)}
                           onCheckedChange={(checked) => {
-                            if (checked === true) {
-                              if (!selectedDepartments.includes(dept.id)) {
-                                handleDepartmentToggle(dept.id);
-                              }
-                            } else {
-                              if (selectedDepartments.includes(dept.id)) {
-                                handleDepartmentToggle(dept.id);
-                              }
+                            const isChecked = checked === true;
+                            const currentlySelected = selectedDepartments.includes(dept.id);
+                            if (isChecked && !currentlySelected) {
+                              handleDepartmentToggle(dept.id);
+                            } else if (!isChecked && currentlySelected) {
+                              handleDepartmentToggle(dept.id);
                             }
                           }}
                           onClick={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
                         />
                         <div
-                          className="w-3 h-3 rounded-full"
+                          className="w-3 h-3 rounded-full pointer-events-none"
                           style={{ backgroundColor: dept.color }}
                         />
-                        <span className="text-sm">{dept.name}</span>
+                        <span className="text-sm pointer-events-none">{dept.name}</span>
                       </div>
                     ))}
                   </div>
                 )}
-              </ScrollArea>
+              </div>
               <p className="text-xs text-muted-foreground">
                 O Atendente só terá acesso às conversas dos departamentos selecionados
               </p>
