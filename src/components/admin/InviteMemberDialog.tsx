@@ -4,13 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-
-import { InviteMemberDialogErrorBoundary } from "@/components/admin/InviteMemberDialogErrorBoundary";
-
 import { Shield, Users, Headphones, AlertCircle, Mail, CheckCircle2 } from "lucide-react";
-import { useDepartments } from "@/hooks/useDepartments";
 import type { AppRole } from "@/hooks/useUserRole";
 
 interface InviteMemberDialogProps {
@@ -20,66 +14,48 @@ interface InviteMemberDialogProps {
   isLoading?: boolean;
 }
 
-const roles: { value: AppRole; label: string; description: string; icon: React.ReactNode; requiresDepartments: boolean }[] = [
+const roles: { value: AppRole; label: string; description: string; icon: React.ReactNode }[] = [
   {
     value: "admin",
     label: "Administrador",
     description: "Acesso total ao sistema e a todos os módulos",
     icon: <Shield className="h-4 w-4" />,
-    requiresDepartments: false,
   },
   {
     value: "gerente",
     label: "Gerente",
     description: "Acesso completo à operação, todos os departamentos",
     icon: <Users className="h-4 w-4" />,
-    requiresDepartments: false,
   },
   {
     value: "advogado",
     label: "Supervisor",
     description: "Supervisão de equipe e acompanhamento de conversas",
     icon: <Users className="h-4 w-4" />,
-    requiresDepartments: false,
   },
   {
     value: "atendente",
     label: "Atendente",
-    description: "Acesso apenas aos departamentos selecionados",
+    description: "Acesso restrito - configure departamentos após criação",
     icon: <Headphones className="h-4 w-4" />,
-    requiresDepartments: true,
   },
 ];
 
 export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: InviteMemberDialogProps) {
-  const { departments } = useDepartments();
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<AppRole>("atendente");
-  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   const selectedRole = roles.find(r => r.value === role);
-  const requiresDepartments = selectedRole?.requiresDepartments ?? false;
 
-  const handleDepartmentToggle = (deptId: string) => {
-    setSelectedDepartments(prev =>
-      prev.includes(deptId)
-        ? prev.filter(id => id !== deptId)
-        : [...prev, deptId]
-    );
-  };
-
-  // Função separada para resetar o formulário
   const resetForm = () => {
     setEmail("");
     setFullName("");
     setRole("atendente");
-    setSelectedDepartments([]);
     setError("");
   };
 
-  // Handler que respeita o boolean do Radix (alinhado com Settings.tsx)
   const handleDialogOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       resetForm();
@@ -96,20 +72,14 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
       return;
     }
 
-    if (requiresDepartments && selectedDepartments.length === 0) {
-      setError("Selecione pelo menos um departamento para o Atendente");
-      return;
-    }
-
     try {
       await onInvite({
         email,
         fullName,
         role,
-        departmentIds: requiresDepartments ? selectedDepartments : [],
+        departmentIds: [], // Departamentos são configurados após criação
       });
       
-      // Reset form and close
       resetForm();
       onOpenChange(false);
     } catch (err: any) {
@@ -117,33 +87,31 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
     }
   };
 
-
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
-        <InviteMemberDialogErrorBoundary>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5 text-primary" />
-              Convidar Membro
-            </DialogTitle>
-            <DialogDescription>
-              Adicione um novo membro à sua equipe. Um email será enviado automaticamente com as credenciais de acesso.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5 text-primary" />
+            Convidar Membro
+          </DialogTitle>
+          <DialogDescription>
+            Adicione um novo membro à sua equipe. Um email será enviado automaticamente com as credenciais de acesso.
+          </DialogDescription>
+        </DialogHeader>
 
-          {/* Email notice */}
-          <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-            <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-primary mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-foreground">Envio automático de credenciais</p>
-              <p className="mt-0.5 text-muted-foreground">
-                O novo membro receberá um email com login e senha temporária para acessar o sistema.
-              </p>
-            </div>
+        {/* Email notice */}
+        <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+          <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-primary mt-0.5" />
+          <div className="text-sm">
+            <p className="font-medium text-foreground">Envio automático de credenciais</p>
+            <p className="mt-0.5 text-muted-foreground">
+              O novo membro receberá um email com login e senha temporária para acessar o sistema.
+            </p>
           </div>
+        </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="fullName">Nome Completo *</Label>
             <Input
@@ -191,47 +159,10 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
             )}
           </div>
 
-          {requiresDepartments && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                Departamentos *
-                <Badge variant="secondary" className="text-xs">
-                  {selectedDepartments.length} selecionado{selectedDepartments.length !== 1 ? "s" : ""}
-                </Badge>
-              </Label>
-              <div className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain">
-                {departments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Nenhum departamento cadastrado
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {departments.filter((d) => d.is_active).map((dept) => (
-                      <div 
-                        key={dept.id} 
-                        className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDepartmentToggle(dept.id);
-                        }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                      >
-                        <Checkbox 
-                          checked={selectedDepartments.includes(dept.id)}
-                          onCheckedChange={() => handleDepartmentToggle(dept.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        />
-                        <div className="w-3 h-3 flex-shrink-0 rounded-full" style={{ backgroundColor: dept.color }} />
-                        <span className="text-sm">{dept.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                O Atendente só terá acesso às conversas dos departamentos selecionados
-              </p>
+          {role === "atendente" && (
+            <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <span>Após criar o membro, edite-o para configurar os departamentos que ele poderá acessar.</span>
             </div>
           )}
 
@@ -242,16 +173,15 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
             </div>
           )}
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? "Enviando..." : "Enviar Convite"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </InviteMemberDialogErrorBoundary>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? "Enviando..." : "Enviar Convite"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
