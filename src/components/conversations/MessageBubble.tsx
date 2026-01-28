@@ -332,7 +332,9 @@ function AudioPlayer({
           </div>
           <div className="flex items-center gap-2">
             <Loader2 className="h-3 w-3 animate-spin text-primary/70" />
-            <span className="text-xs text-primary/70 font-medium">Descriptografando áudio...</span>
+            <span className="text-xs text-primary/70 font-medium">
+              {isFromMe ? "Enviando áudio..." : "Baixando áudio..."}
+            </span>
           </div>
         </div>
       </div>
@@ -1789,8 +1791,12 @@ export function MessageBubble({
               <Mic className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1">
-              <p className="text-sm font-medium">Mensagem de áudio</p>
-              <p className="text-xs text-muted-foreground">Áudio enviado via WhatsApp</p>
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                <span className="text-xs text-muted-foreground">
+                  {isFromMe ? "Enviando..." : "Baixando..."}
+                </span>
+              </div>
             </div>
           </div>
         )}
