@@ -1,93 +1,95 @@
 
 
-# Plano: Corrigir Atualização de Status, Etiquetas e Departamentos
+# Correção: Status, Etiquetas e Departamentos não aparecem todos em Conversas
 
 ## Problema Identificado
 
-Ao criar um status, etiqueta ou departamento, eles não aparecem imediatamente para seleção no cliente. A causa principal é:
+Na página **Conversas**, o painel lateral (`ContactDetailsPanel`) mostra apenas **5 status**, enquanto no **Kanban** (`KanbanChatPanel`) todos os **10 status** aparecem corretamente.
 
-**As tabelas `custom_statuses`, `tags`, `departments`, `whatsapp_instances` e `scheduled_follow_ups` NÃO estão habilitadas para Supabase Realtime.**
+### Causa Raiz
 
-O código do `RealtimeSyncContext` está corretamente configurado para escutar mudanças nessas tabelas, mas como elas não estão publicadas no `supabase_realtime`, nenhum evento é disparado.
+O `ContactDetailsPanel` **não está filtrando** os status e departamentos pelo campo `is_active`, mas o `KanbanChatPanel` está. Isso causa uma inconsistência visual:
 
-## Evidência
+| Componente | Código atual | Status exibidos |
+|------------|--------------|-----------------|
+| `KanbanChatPanel.tsx` (linha 2693) | `customStatuses.filter(s => s.is_active).map(...)` | ✅ Todos ativos |
+| `KanbanChatPanel.tsx` (linha 2800) | `departments.filter(d => d.is_active).map(...)` | ✅ Todos ativos |
+| `ContactDetailsPanel.tsx` (linha 881) | `statuses.map(...)` | ❌ Sem filtro |
+| `ContactDetailsPanel.tsx` (linha 1037) | `departments.map(...)` | ❌ Sem filtro |
 
-Tabelas atualmente no Realtime:
-- `agenda_pro_appointments`, `agenda_pro_clients`, `agenda_pro_professionals`, `agenda_pro_services`
-- `ai_transfer_logs`, `appointments`, `client_actions`, `clients`
-- `conversations`, `instance_status_history`, `messages`, `tray_chat_integrations`
-
-Tabelas **ausentes** (necessárias pelo `RealtimeSyncContext`):
-- `custom_statuses` ❌
-- `tags` ❌
-- `departments` ❌
-- `whatsapp_instances` ❌
-- `scheduled_follow_ups` ❌
+**Observação:** A tabela `tags` não possui campo `is_active`, portanto não precisa de filtro.
 
 ## Solução
 
-### Parte 1: Migração de Banco de Dados
+Adicionar filtro `is_active` no `ContactDetailsPanel.tsx` para manter consistência com o Kanban.
 
-Adicionar as tabelas faltantes à publicação `supabase_realtime`:
+### Alterações
 
-```sql
--- Habilitar Realtime para tabelas de configuração
-ALTER PUBLICATION supabase_realtime ADD TABLE custom_statuses;
-ALTER PUBLICATION supabase_realtime ADD TABLE tags;
-ALTER PUBLICATION supabase_realtime ADD TABLE departments;
-ALTER PUBLICATION supabase_realtime ADD TABLE whatsapp_instances;
-ALTER PUBLICATION supabase_realtime ADD TABLE scheduled_follow_ups;
+**Arquivo:** `src/components/conversations/ContactDetailsPanel.tsx`
+
+**1. Status (linha 881)**
+```
+De:
+{statuses.map(status => {
+
+Para:
+{statuses.filter(s => s.is_active !== false).map(status => {
 ```
 
-### Parte 2: Garantir Invalidação Correta nas Mutações
+**2. Departamentos (linha 1037)**
+```
+De:
+{departments.map(dept => {
 
-Verificar e ajustar os hooks para invalidar com o prefixo correto. A invalidação atual está correta (`queryClient.invalidateQueries({ queryKey: ["custom_statuses"] })`) e faz match por prefixo com `["custom_statuses", lawFirm.id]`.
+Para:
+{departments.filter(d => d.is_active !== false).map(dept => {
+```
 
-**Nenhuma alteração necessária nos hooks** - a lógica de invalidação está funcionando.
+### Por que `!== false` em vez de `=== true`?
 
-## Arquivos Afetados
+O `ContactDetailsPanel` recebe os props como `Array<{ id: string; name: string; color: string }>` sem o campo `is_active`. Para garantir compatibilidade:
+- Se `is_active` existir e for `false` → oculta
+- Se `is_active` não existir ou for `true` → exibe
 
-| Arquivo | Alteração |
-|---------|-----------|
-| Nova migração SQL | Adicionar 5 tabelas ao Realtime |
+Alternativamente, podemos atualizar a interface do componente para incluir `is_active` nas props ou ajustar a passagem de dados na página Conversations.tsx.
 
 ## Fluxo Após a Correção
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│           Usuário cria Status em Settings                       │
+│           Usuário abre painel de detalhes em Conversas          │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│     1. createStatus.mutateAsync() executa                       │
-│     2. INSERT no banco de dados                                 │
-│     3. onSuccess: invalidateQueries(["custom_statuses"])        │
+│  1. Hook useCustomStatuses() retorna todos os 10 status         │
+│  2. Conversations.tsx passa para ContactDetailsPanel            │
+│  3. ContactDetailsPanel filtra por is_active !== false          │
+│  4. Apenas status ativos são renderizados                       │
 └─────────────────────────────────────────────────────────────────┘
-                               │
-          ┌────────────────────┴────────────────────┐
-          ▼                                         ▼
-┌───────────────────────────┐         ┌───────────────────────────┐
-│  Invalidação imediata     │         │  Evento Realtime          │
-│  na mesma aba             │         │  para outras abas/users   │
-│  (já funciona)            │         │  (AGORA FUNCIONARÁ)       │
-└───────────────────────────┘         └───────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│        Lista de status atualizada em todas as telas             │
-│        (Settings, Conversations, Kanban)                        │
+│        TODOS os status ativos aparecem (igual ao Kanban)        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Arquivos Afetados
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/components/conversations/ContactDetailsPanel.tsx` | Adicionar filtro `is_active` em status e departments |
+| `src/pages/Conversations.tsx` | Passar campo `is_active` nas props de statuses e departments |
+
+## Verificação de Não-Regressão
+
+A alteração é conservadora:
+- Só filtra itens explicitamente marcados como inativos (`is_active === false`)
+- Mantém comportamento existente para itens sem o campo
+- Não afeta lógica de seleção, salvamento ou outras funcionalidades
+- Alinha o comportamento com o Kanban já em produção
+
 ## Risco
 
-**Baixo** - Apenas adiciona tabelas à publicação Realtime existente. Não altera schema, RLS ou dados. A alteração permite que eventos de mudança sejam propagados corretamente.
-
-## Testes Recomendados
-
-1. Criar um novo status em Settings
-2. Verificar se aparece imediatamente na lista de status em Settings
-3. Ir para Conversations e verificar se o novo status aparece no painel de detalhes do contato
-4. Abrir duas abas - criar status em uma e verificar se aparece na outra
+**Baixo** - Apenas adiciona filtro para ocultar itens inativos, seguindo o mesmo padrão já utilizado no Kanban.
 
