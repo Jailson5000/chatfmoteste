@@ -1,157 +1,336 @@
 
 
-# Melhorias no Dashboard de Empresas - Global Admin
+# Correção: Exclusão de Profissionais na Agenda Pro
 
-## Problemas Identificados
+## Problema Identificado
 
-### 1. Visualização Bloqueada quando Empresa Expandida
-Quando uma empresa está expandida, o painel de detalhes ocupa espaço dentro da tabela, dificultando a visualização das outras empresas.
+### Erro Exibido (da imagem)
+```text
+Não foi possível remover
+null value in column "professional_id" of relation "agenda_pro_appointments" violates not-null constraint
+```
 
-### 2. Parte Inferior Cortada
-O ScrollArea tem `max-h-[calc(100vh-300px)]` que pode cortar conteúdo dependendo da altura da tela.
+### Causa Raiz
+A migração anterior configurou a FK como `ON DELETE SET NULL`, porém a coluna `professional_id` é `NOT NULL` no schema:
 
-### 3. Falta Filtro de Empresas em Trial
-Não há opção para filtrar empresas em período de teste (trial). Dados do banco mostram que existe "Miau test" em trial manual (expira 04/02/2026).
+```text
+┌────────────────────────────────────────────────────────────┐
+│ Coluna: professional_id                                    │
+│ - is_nullable: NO (NOT NULL)                               │
+│ - ON DELETE: SET NULL (da FK)                              │
+│                                                            │
+│ Conflito! SET NULL não funciona com NOT NULL.             │
+└────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Solução Proposta
 
-### Mudança 1: Painel de Detalhes Deslizante (Sheet)
-Substituir a linha expandida por um **Sheet lateral** que abre sobre o conteúdo, sem ocupar espaço na tabela.
+### Fluxo de Exclusão com 3 Opções
 
 ```text
-Antes:                              Depois:
-┌───────────────────────┐           ┌──────────────────┬────────────┐
-│ Empresa A             │           │ Empresa A        │            │
-├───────────────────────┤           │ Empresa B ←      │  PAINEL    │
-│ [Detalhes expandidos] │           │ Empresa C        │  LATERAL   │
-│ ...muito espaço...    │           │ Empresa D        │  (Sheet)   │
-├───────────────────────┤           │ ...              │            │
-│ Empresa B             │           │                  │            │
-│ Empresa C             │           └──────────────────┴────────────┘
-└───────────────────────┘           Todas empresas sempre visíveis!
+Usuário clica em "Excluir Profissional"
+           │
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│ Modal: "Excluir Profissional: {nome}"                    │
+│                                                          │
+│ ⚠️ Este profissional possui X agendamentos vinculados.   │
+│                                                          │
+│ O que deseja fazer com os agendamentos?                  │
+│                                                          │
+│ ○ Transferir para outro profissional                     │
+│   [Dropdown: Selecionar profissional ▼]                  │
+│                                                          │
+│ ○ Excluir todos os agendamentos junto                    │
+│   ⚠️ Esta ação não pode ser desfeita!                    │
+│                                                          │
+│ [Cancelar]  [Confirmar Exclusão]                         │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Mudança 2: Altura Dinâmica do ScrollArea
-Alterar o cálculo de altura para usar mais espaço disponível:
-- De: `max-h-[calc(100vh-300px)]`
-- Para: `max-h-[calc(100vh-200px)]` ou usar `flex-1` com container flex
+### Mudanças Necessárias
 
-### Mudança 3: Adicionar Filtro "Em Trial"
-Novo filtro no Select de status para mostrar empresas em período de trial:
-- Adicionar opção "Em Trial" no dropdown
-- Mostrar badge especial "Trial" com dias restantes
-- Adicionar contador de empresas em trial nas estatísticas rápidas
+#### 1. Migração SQL: Permitir NULL em `professional_id`
 
-### Mudança 4: Badge de Trial na Tabela
-Adicionar indicador visual quando empresa está em trial:
-- Badge azul "Trial 5d" indicando dias restantes
-- Badge laranja "Trial 2d" quando <= 2 dias
-- Badge vermelho "Expirado" quando trial acabou
+```sql
+-- Permitir NULL em professional_id para suportar exclusão com histórico
+ALTER TABLE public.agenda_pro_appointments 
+ALTER COLUMN professional_id DROP NOT NULL;
+```
+
+Com isso, agendamentos históricos ficam com `professional_id = NULL` após excluir o profissional, mas mantêm os dados do agendamento.
+
+#### 2. Hook `useAgendaProProfessionals.tsx`
+
+**Nova função `deleteProfessionalWithOptions`:**
+
+```typescript
+const deleteProfessionalWithOptions = useMutation({
+  mutationFn: async ({ 
+    id, 
+    action, 
+    transferToId 
+  }: { 
+    id: string; 
+    action: 'transfer' | 'delete_all' | 'set_null';
+    transferToId?: string;
+  }) => {
+    if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
+    if (action === 'transfer' && transferToId) {
+      // Transferir agendamentos para outro profissional
+      const { error: transferError } = await supabase
+        .from("agenda_pro_appointments")
+        .update({ professional_id: transferToId })
+        .eq("professional_id", id)
+        .eq("law_firm_id", lawFirm.id);
+      
+      if (transferError) throw transferError;
+    } else if (action === 'delete_all') {
+      // Excluir todos os agendamentos vinculados
+      const { error: deleteApptError } = await supabase
+        .from("agenda_pro_appointments")
+        .delete()
+        .eq("professional_id", id)
+        .eq("law_firm_id", lawFirm.id);
+      
+      if (deleteApptError) throw deleteApptError;
+    }
+    // action === 'set_null' → deixa ON DELETE SET NULL fazer o trabalho
+
+    // Agora exclui o profissional
+    const { error } = await supabase
+      .from("agenda_pro_professionals")
+      .delete()
+      .eq("id", id)
+      .eq("law_firm_id", lawFirm.id);
+    
+    if (error) throw error;
+  },
+});
+```
+
+**Função auxiliar para contar agendamentos:**
+
+```typescript
+const getAppointmentCount = async (professionalId: string): Promise<number> => {
+  if (!lawFirm?.id) return 0;
+  
+  const { count, error } = await supabase
+    .from("agenda_pro_appointments")
+    .select("id", { count: 'exact', head: true })
+    .eq("professional_id", professionalId)
+    .eq("law_firm_id", lawFirm.id);
+  
+  return error ? 0 : (count || 0);
+};
+```
+
+#### 3. Componente `AgendaProProfessionals.tsx`
+
+**Novo estado e modal:**
+
+```typescript
+const [deleteOption, setDeleteOption] = useState<'transfer' | 'delete_all'>('transfer');
+const [transferToId, setTransferToId] = useState<string>('');
+const [appointmentCount, setAppointmentCount] = useState(0);
+const [loadingCount, setLoadingCount] = useState(false);
+```
+
+**Modal de exclusão aprimorado:**
+
+```tsx
+<AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+  <AlertDialogContent className="max-w-md">
+    <AlertDialogHeader>
+      <AlertDialogTitle className="text-destructive flex items-center gap-2">
+        <AlertTriangle className="h-5 w-5" />
+        Excluir Profissional
+      </AlertDialogTitle>
+      <AlertDialogDescription className="space-y-3">
+        <p>
+          Tem certeza que deseja excluir <strong>"{deletingProfessional?.name}"</strong>?
+        </p>
+        
+        {appointmentCount > 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-sm">
+            <p className="font-medium text-yellow-600">
+              ⚠️ {appointmentCount} agendamento(s) vinculado(s)
+            </p>
+            <p className="text-muted-foreground mt-1">
+              O que deseja fazer com estes agendamentos?
+            </p>
+            
+            <RadioGroup value={deleteOption} onValueChange={(v) => setDeleteOption(v as 'transfer' | 'delete_all')}>
+              <div className="flex items-center space-x-2 mt-3">
+                <RadioGroupItem value="transfer" id="transfer" />
+                <Label htmlFor="transfer">Transferir para outro profissional</Label>
+              </div>
+              
+              {deleteOption === 'transfer' && (
+                <Select value={transferToId} onValueChange={setTransferToId}>
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Selecionar profissional..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {otherProfessionals.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              
+              <div className="flex items-center space-x-2 mt-2">
+                <RadioGroupItem value="delete_all" id="delete_all" />
+                <Label htmlFor="delete_all" className="text-destructive">
+                  Excluir todos os agendamentos
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+        )}
+      </AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+      <AlertDialogAction 
+        onClick={handleDeleteWithOptions}
+        disabled={deleteOption === 'transfer' && !transferToId}
+        className="bg-destructive"
+      >
+        Confirmar Exclusão
+      </AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
+```
+
+#### 4. Trocar Profissional em Agendamentos Existentes
+
+**Adicionar seletor de profissional no `AgendaProAppointmentSheet.tsx`:**
+
+```tsx
+// Novo estado
+const [changeProfessionalOpen, setChangeProfessionalOpen] = useState(false);
+const [newProfessionalId, setNewProfessionalId] = useState<string>('');
+
+// Botão na interface
+<Button 
+  variant="outline" 
+  size="sm" 
+  className="gap-2"
+  onClick={() => setChangeProfessionalOpen(true)}
+>
+  <UserCog className="h-4 w-4" />
+  Trocar Profissional
+</Button>
+
+// Dialog para trocar
+<Dialog open={changeProfessionalOpen} onOpenChange={setChangeProfessionalOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>Trocar Profissional</DialogTitle>
+    </DialogHeader>
+    
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Profissional atual: <strong>{appointment.professional?.name}</strong>
+      </p>
+      
+      <div>
+        <Label>Novo profissional</Label>
+        <Select value={newProfessionalId} onValueChange={setNewProfessionalId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Selecionar..." />
+          </SelectTrigger>
+          <SelectContent>
+            {activeProfessionals
+              .filter(p => p.id !== appointment.professional_id)
+              .map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+    
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setChangeProfessionalOpen(false)}>
+        Cancelar
+      </Button>
+      <Button 
+        onClick={handleChangeProfessional}
+        disabled={!newProfessionalId || isUpdating}
+      >
+        Confirmar Troca
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+```
 
 ---
 
 ## Arquivos a Modificar
 
-### `src/components/global-admin/CompanyUsageTable.tsx`
-
-1. **Importar Sheet** do shadcn para painel lateral
-2. **Substituir linha expandida** por Sheet deslizante
-3. **Adicionar filtro "trial"** no StatusFilter type e SelectContent
-4. **Criar componente TrialBadge** para exibir status do trial
-5. **Adicionar contador de trials** nas estatísticas rápidas
-6. **Ajustar altura** do ScrollArea
-
-### Mudanças Específicas:
-
-**1. Tipo de filtro (linha 109):**
-```typescript
-type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled" | "critical" | "warning" | "trial";
-```
-
-**2. Interface CompanyWithStatus (linha 100-107):**
-```typescript
-interface CompanyWithStatus extends CompanyUsage {
-  // ... campos existentes ...
-  trial_type?: string | null;
-  trial_ends_at?: string | null;
-  trial_started_at?: string | null;
-}
-```
-
-**3. Query para incluir dados de trial (linha 240-248):**
-```typescript
-const { data: companyData } = await supabase
-  .from("companies")
-  .select("id, status, created_at, law_firm_id, trial_type, trial_ends_at, trial_started_at");
-```
-
-**4. Filtro de trial (linha 341-367):**
-```typescript
-if (statusFilter === "trial") {
-  return company.trial_type && company.trial_type !== 'none' && company.trial_ends_at;
-}
-```
-
-**5. Estatísticas de trial (linha 371-379):**
-```typescript
-const stats = useMemo(() => {
-  // ... existente ...
-  return {
-    total: companies.length,
-    active: ...,
-    pending: ...,
-    suspended: ...,
-    trial: companies.filter((c) => c.trial_type && c.trial_type !== 'none').length,
-  };
-}, [companies]);
-```
-
-**6. Sheet lateral para detalhes (substituindo linha expandida 664-817):**
-```typescript
-<Sheet open={!!expandedRow} onOpenChange={(open) => !open && setExpandedRow(null)}>
-  <SheetContent side="right" className="w-[400px] sm:w-[540px] bg-[#1a1a1a] border-white/10">
-    <SheetHeader>
-      <SheetTitle className="text-white">Detalhes da Empresa</SheetTitle>
-    </SheetHeader>
-    {/* Conteúdo do painel de detalhes aqui */}
-  </SheetContent>
-</Sheet>
-```
-
-**7. Componente TrialBadge:**
-```typescript
-function TrialBadge({ company }: { company: CompanyWithStatus }) {
-  if (!company.trial_type || company.trial_type === 'none' || !company.trial_ends_at) return null;
-  
-  const daysLeft = differenceInDays(new Date(company.trial_ends_at), new Date());
-  
-  if (daysLeft < 0) {
-    return <Badge className="bg-red-500/20 text-red-400">Expirado</Badge>;
-  }
-  if (daysLeft <= 2) {
-    return <Badge className="bg-orange-500/20 text-orange-400">Trial {daysLeft}d</Badge>;
-  }
-  return <Badge className="bg-blue-500/20 text-blue-400">Trial {daysLeft}d</Badge>;
-}
-```
+| Arquivo | Mudança |
+|---------|---------|
+| **Migração SQL** | Permitir NULL em `professional_id` |
+| `src/hooks/useAgendaProProfessionals.tsx` | Nova função `deleteProfessionalWithOptions` + `getAppointmentCount` |
+| `src/components/agenda-pro/AgendaProProfessionals.tsx` | Modal de exclusão com opções de transferir/excluir |
+| `src/components/agenda-pro/AgendaProAppointmentSheet.tsx` | Botão "Trocar Profissional" em cada agendamento |
+| `src/hooks/useAgendaProAppointments.tsx` | Função `changeProfessional` |
 
 ---
 
-## Benefícios
+## Fluxo Completo Após Correção
 
-1. **Todas empresas sempre visíveis** - Sheet lateral não bloqueia a tabela
-2. **Mais espaço para conteúdo** - altura otimizada do ScrollArea
-3. **Monitoramento de trials** - filtro e badge para acompanhar empresas em teste
-4. **UX melhorada** - navegação mais fluída entre empresas
+```text
+Excluir Profissional "Gabii"
+           │
+           ▼
+┌─────────────────────────────────────┐
+│ Verificar: quantos agendamentos?    │
+└─────────────────────────────────────┘
+           │
+     ┌─────┴─────┐
+     │           │
+   0 agend.    N > 0
+     │           │
+     ▼           ▼
+ Excluir      Mostrar modal
+ direto       com opções
+                 │
+        ┌────────┴────────┐
+        │                 │
+   Transferir        Excluir Tudo
+        │                 │
+        ▼                 ▼
+  UPDATE apts       DELETE apts
+  SET prof = X      WHERE prof = Y
+        │                 │
+        └────────┬────────┘
+                 │
+                 ▼
+          DELETE professional
+                 │
+                 ▼
+           ✓ Sucesso!
+```
 
 ---
 
 ## Testes Recomendados
 
-1. Expandir empresa e verificar que outras continuam visíveis
-2. Verificar scroll até o final da lista
-3. Filtrar por "Em Trial" e verificar que mostra apenas empresas em período de teste
-4. Verificar badge de trial com dias restantes corretos
+1. **Excluir profissional SEM agendamentos** → Deve funcionar diretamente
+2. **Excluir profissional COM agendamentos + transferir** → Verificar se agendamentos foram movidos
+3. **Excluir profissional COM agendamentos + excluir tudo** → Verificar se agendamentos foram removidos
+4. **Trocar profissional em agendamento individual** → Verificar se funciona na tela de detalhes
+5. **Verificar mensagens de erro** → Devem ser amigáveis, não técnicas
 
