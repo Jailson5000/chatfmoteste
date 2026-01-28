@@ -47,7 +47,7 @@ export default function Register() {
   const [subdomainManuallyEdited, setSubdomainManuallyEdited] = useState(false);
   const checkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Debounced subdomain availability check
+  // Debounced subdomain availability check using secure RPC function
   const checkSubdomainAvailability = useCallback(async (subdomain: string) => {
     if (subdomain.length < 3) {
       setSubdomainStatus('idle');
@@ -57,13 +57,17 @@ export default function Register() {
     setSubdomainStatus('checking');
     
     try {
-      const { data } = await supabase
-        .from('law_firms')
-        .select('id')
-        .eq('subdomain', subdomain)
-        .maybeSingle();
+      // Use RPC function that bypasses RLS to check availability
+      const { data, error } = await supabase
+        .rpc('is_subdomain_available', { _subdomain: subdomain });
       
-      setSubdomainStatus(data ? 'taken' : 'available');
+      if (error) {
+        console.error('[Register] Error checking subdomain:', error);
+        setSubdomainStatus('idle');
+        return;
+      }
+      
+      setSubdomainStatus(data ? 'available' : 'taken');
     } catch (error) {
       console.error('[Register] Error checking subdomain:', error);
       setSubdomainStatus('idle');

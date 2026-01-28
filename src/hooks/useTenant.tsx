@@ -245,7 +245,8 @@ export function useTenant() {
 // ============================================================================
 
 /**
- * Verifica se um subdomínio está disponível
+ * Verifica se um subdomínio está disponível usando RPC function
+ * que bypassa RLS para verificação segura
  */
 export async function checkSubdomainAvailability(subdomain: string): Promise<boolean> {
   if (!isValidSubdomain(subdomain)) {
@@ -256,14 +257,16 @@ export async function checkSubdomainAvailability(subdomain: string): Promise<boo
     return false;
   }
   
+  // Use RPC function that bypasses RLS
   const { data, error } = await supabase
-    .from('law_firms')
-    .select('id')
-    .eq('subdomain', subdomain.toLowerCase())
-    .single();
+    .rpc('is_subdomain_available', { _subdomain: subdomain.toLowerCase() });
   
-  // Se não encontrou, está disponível
-  return error?.code === 'PGRST116';
+  if (error) {
+    console.error('Error checking subdomain availability:', error);
+    return false;
+  }
+  
+  return data === true;
 }
 
 /**
