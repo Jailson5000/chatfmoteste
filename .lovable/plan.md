@@ -1,165 +1,93 @@
 
-# Handoff Automático: Mensagem Externa do WhatsApp Desativa a IA
+
+# Plano: Corrigir Atualização de Status, Etiquetas e Departamentos
 
 ## Problema Identificado
 
-Quando um **atendente envia uma mensagem diretamente pelo WhatsApp** (pelo celular físico, fora do sistema MiauChat), essa mensagem chega via webhook com `fromMe = true`. Atualmente, o sistema salva a mensagem mas **não faz nenhuma alteração no handler da conversa** - a IA continua ativa e pode responder logo em seguida, causando confusão.
+Ao criar um status, etiqueta ou departamento, eles não aparecem imediatamente para seleção no cliente. A causa principal é:
 
-## Comportamento Desejado
+**As tabelas `custom_statuses`, `tags`, `departments`, `whatsapp_instances` e `scheduled_follow_ups` NÃO estão habilitadas para Supabase Realtime.**
 
-Quando uma mensagem `fromMe = true` (externa) chega via webhook:
+O código do `RealtimeSyncContext` está corretamente configurado para escutar mudanças nessas tabelas, mas como elas não estão publicadas no `supabase_realtime`, nenhum evento é disparado.
 
-1. **Verificar** se a conversa está sendo atendida pela IA (`current_handler = 'ai'`)
-2. **Se sim:**
-   - Definir `current_handler = 'human'`
-   - Definir `assigned_to = null` (sem responsável → vai para a fila)
-   - Definir `current_automation_id = null` (desativar IA)
-3. **Resultado:** Conversa aparece na aba "Fila" sem responsável atribuído
+## Evidência
 
-## Solução Técnica
+Tabelas atualmente no Realtime:
+- `agenda_pro_appointments`, `agenda_pro_clients`, `agenda_pro_professionals`, `agenda_pro_services`
+- `ai_transfer_logs`, `appointments`, `client_actions`, `clients`
+- `conversations`, `instance_status_history`, `messages`, `tray_chat_integrations`
 
-### Arquivo: `supabase/functions/evolution-webhook/index.ts`
+Tabelas **ausentes** (necessárias pelo `RealtimeSyncContext`):
+- `custom_statuses` ❌
+- `tags` ❌
+- `departments` ❌
+- `whatsapp_instances` ❌
+- `scheduled_follow_ups` ❌
 
-**Localização:** Após salvar a mensagem (linha ~4273) e antes de construir `updatePayload` (linha ~4287)
+## Solução
 
-**Lógica a adicionar:**
+### Parte 1: Migração de Banco de Dados
 
-```text
-// ========================================================================
-// HANDOFF AUTOMÁTICO: Mensagem externa do atendente desativa a IA
-// ========================================================================
-// Quando um atendente envia mensagem DIRETAMENTE pelo WhatsApp (fora do sistema),
-// isso é interpretado como uma interferência manual na conversa.
-// Se a conversa estava com a IA, devemos:
-// 1. Desativar a IA (current_automation_id = null)
-// 2. Remover responsável (assigned_to = null) → vai para a fila
-// 3. Definir handler como humano
-// ========================================================================
-if (isFromMe && conversation.current_handler === 'ai') {
-  logDebug('HANDOFF', `External message from attendant detected - disabling AI and moving to queue`, {
-    requestId,
-    conversationId: conversation.id,
-    previousAutomation: conversation.current_automation_id,
-  });
-  
-  // Override the handler to human and remove both AI and human assignment
-  updatePayload.current_handler = 'human';
-  updatePayload.current_automation_id = null;
-  updatePayload.assigned_to = null;
-}
+Adicionar as tabelas faltantes à publicação `supabase_realtime`:
+
+```sql
+-- Habilitar Realtime para tabelas de configuração
+ALTER PUBLICATION supabase_realtime ADD TABLE custom_statuses;
+ALTER PUBLICATION supabase_realtime ADD TABLE tags;
+ALTER PUBLICATION supabase_realtime ADD TABLE departments;
+ALTER PUBLICATION supabase_realtime ADD TABLE whatsapp_instances;
+ALTER PUBLICATION supabase_realtime ADD TABLE scheduled_follow_ups;
 ```
 
-**Fluxo detalhado:**
+### Parte 2: Garantir Invalidação Correta nas Mutações
+
+Verificar e ajustar os hooks para invalidar com o prefixo correto. A invalidação atual está correta (`queryClient.invalidateQueries({ queryKey: ["custom_statuses"] })`) e faz match por prefixo com `["custom_statuses", lawFirm.id]`.
+
+**Nenhuma alteração necessária nos hooks** - a lógica de invalidação está funcionando.
+
+## Arquivos Afetados
+
+| Arquivo | Alteração |
+|---------|-----------|
+| Nova migração SQL | Adicionar 5 tabelas ao Realtime |
+
+## Fluxo Após a Correção
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│                    WEBHOOK: messages.upsert                     │
-│                        (fromMe = true)                          │
+│           Usuário cria Status em Settings                       │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Mensagem é salva no banco                      │
-│               (is_from_me = true, sender_type = 'system')       │
+│     1. createStatus.mutateAsync() executa                       │
+│     2. INSERT no banco de dados                                 │
+│     3. onSuccess: invalidateQueries(["custom_statuses"])        │
 └─────────────────────────────────────────────────────────────────┘
+                               │
+          ┌────────────────────┴────────────────────┐
+          ▼                                         ▼
+┌───────────────────────────┐         ┌───────────────────────────┐
+│  Invalidação imediata     │         │  Evento Realtime          │
+│  na mesma aba             │         │  para outras abas/users   │
+│  (já funciona)            │         │  (AGORA FUNCIONARÁ)       │
+└───────────────────────────┘         └───────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│          A conversa está com IA? (current_handler = 'ai')       │
+│        Lista de status atualizada em todas as telas             │
+│        (Settings, Conversations, Kanban)                        │
 └─────────────────────────────────────────────────────────────────┘
-                          │           │
-                   SIM    │           │   NÃO
-                          ▼           ▼
-     ┌────────────────────────────┐   ┌─────────────────────────────┐
-     │ HANDOFF AUTOMÁTICO:        │   │ Nenhuma alteração no handler│
-     │ • current_handler = human  │   │ (já está com humano ou na   │
-     │ • assigned_to = null       │   │  fila)                      │
-     │ • current_automation_id =  │   └─────────────────────────────┘
-     │   null                     │
-     │ • Conversa → FILA          │
-     └────────────────────────────┘
 ```
-
-### Detalhes da Implementação
-
-**Arquivo:** `supabase/functions/evolution-webhook/index.ts`
-
-**Linha aproximada:** ~4285 (antes de construir o `updatePayload`)
-
-**Alteração:** Inserir a lógica de handoff automático
-
-```typescript
-// Existing code around line 4275-4290:
-if (msgError) {
-  logDebug('ERROR', `Failed to save message`, { requestId, error: msgError, code: msgError.code });
-} else {
-  logDebug('MESSAGE', `Message saved successfully`, { requestId, dbMessageId: savedMessage?.id, whatsappId: data.key.id });
-}
-
-// ========================================================================
-// NEW: HANDOFF AUTOMÁTICO - Mensagem externa do atendente desativa a IA
-// ========================================================================
-// Quando um atendente envia mensagem DIRETAMENTE pelo WhatsApp (fora do sistema),
-// isso indica que ele quer assumir o atendimento manualmente.
-// Se a conversa estava com a IA, devemos:
-// 1. Desativar a IA
-// 2. Mover para a fila (sem responsável atribuído)
-// ========================================================================
-let externalHandoffApplied = false;
-if (isFromMe && conversation.current_handler === 'ai') {
-  externalHandoffApplied = true;
-  logDebug('HANDOFF', `External WhatsApp message from attendant detected - disabling AI and moving to queue`, {
-    requestId,
-    conversationId: conversation.id,
-    previousHandler: conversation.current_handler,
-    previousAutomationId: conversation.current_automation_id,
-    previousAssignedTo: conversation.assigned_to,
-  });
-}
-
-// Update conversation last_message_at
-// ... existing code ...
-
-const updatePayload: Record<string, unknown> = {
-  last_message_at: new Date().toISOString(),
-  contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
-};
-
-// Apply handoff if external message detected
-if (externalHandoffApplied) {
-  updatePayload.current_handler = 'human';
-  updatePayload.current_automation_id = null;
-  updatePayload.assigned_to = null;
-  
-  logDebug('HANDOFF', `Handoff applied - conversation moved to queue`, {
-    requestId,
-    conversationId: conversation.id,
-  });
-}
-```
-
-## Resultado Esperado
-
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Atendente envia msg pelo WhatsApp enquanto IA está ativa | IA continua respondendo | Conversa vai para Fila, IA desativada |
-| Atendente envia msg pelo sistema (Painel) | Handler já é 'human' | Sem mudança (já estava correto) |
-| Cliente envia msg para IA | IA processa normalmente | Sem mudança (funciona como antes) |
-
-## Verificação de Não-Regressão
-
-A alteração só afeta o cenário específico:
-- `isFromMe = true` (mensagem enviada, não recebida)
-- `conversation.current_handler = 'ai'` (conversa estava com IA)
-
-Não afeta:
-- Mensagens recebidas do cliente (`isFromMe = false`)
-- Conversas já com humano (`current_handler = 'human'`)
-- Envio de mensagens pelo painel (que já marca como `human` antes de enviar)
-- Arquivamento/desarquivamento
-- Transcrição de áudio
-- Processamento de IA
 
 ## Risco
 
-**Baixo** - A alteração é cirúrgica e só modifica o `updatePayload` quando as duas condições são verdadeiras.
+**Baixo** - Apenas adiciona tabelas à publicação Realtime existente. Não altera schema, RLS ou dados. A alteração permite que eventos de mudança sejam propagados corretamente.
+
+## Testes Recomendados
+
+1. Criar um novo status em Settings
+2. Verificar se aparece imediatamente na lista de status em Settings
+3. Ir para Conversations e verificar se o novo status aparece no painel de detalhes do contato
+4. Abrir duas abas - criar status em uma e verificar se aparece na outra
+
