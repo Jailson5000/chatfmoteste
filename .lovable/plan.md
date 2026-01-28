@@ -1,113 +1,99 @@
 
 
-# Correção: Navegação Inteligente por Status de Aprovação
+# Correção: Ver Usuários de Empresas no Admin Global
 
-## Problema Identificado
+## Problemas Identificados
 
-Quando você clica em "Ajustar Limites" ou "Alterar Plano" no painel lateral do Dashboard (Empresas Ativas), o sistema redireciona para `/global-admin/companies?edit=XXX`.
+### 1. Contagem do Dashboard
+Analisei os dados:
+- Total no banco: 12 perfis distribuídos em 7 empresas
+- `company_usage_summary` mostra corretamente: FMO=2, Jr=2, Liz=1, Miau=1, Miau test=1, Suporte=1, Formulário=0
+- Dashboard soma `current_users` de cada empresa = totais corretos
 
-**Comportamento atual:**
-- Sempre abre na aba "Pendentes" (porque `activeTab` começa como `"pending"`)
-- Não lê o parâmetro `?edit=...` da URL
-- Não determina qual aba corresponde à empresa
+**Resultado: As contagens estão CORRETAS.**
 
-**Comportamento esperado:**
-- Se a empresa está aprovada → abrir na aba "Aprovadas"
-- Se a empresa está pendente → abrir na aba "Pendentes"
-- Se a empresa está rejeitada → abrir na aba "Rejeitadas"
+### 2. Ver Usuários - NÃO FUNCIONA
+
+**Causa Raiz**: As políticas RLS na tabela `profiles` e `user_roles` restringem visualização apenas ao mesmo `law_firm_id`:
+
+```sql
+-- Política atual em profiles:
+SELECT: (law_firm_id = get_user_law_firm_id(auth.uid()))
+
+-- Política atual em user_roles:
+SELECT: EXISTS (... AND p.law_firm_id = get_user_law_firm_id(auth.uid()))
+```
+
+Isso significa que mesmo Admin Global não consegue ver perfis de outras empresas, pois não há exceção para `is_admin(auth.uid())`.
 
 ---
 
-## Solução
+## Solução: Atualizar RLS para Permitir Admin Global
 
-### Arquivo: `src/pages/global-admin/GlobalAdminCompanies.tsx`
+### Migração SQL
 
-**1. Adicionar import do `useSearchParams`:**
-```typescript
-import { useSearchParams } from "react-router-dom";
+```sql
+-- 1. Adicionar política para Admin Global ver TODOS os profiles
+DROP POLICY IF EXISTS "Global admins can view all profiles" ON public.profiles;
+CREATE POLICY "Global admins can view all profiles"
+  ON public.profiles
+  FOR SELECT
+  TO authenticated
+  USING (is_admin(auth.uid()));
+
+-- 2. Adicionar política para Admin Global ver TODOS os user_roles
+DROP POLICY IF EXISTS "Global admins can view all user roles" ON public.user_roles;
+CREATE POLICY "Global admins can view all user roles"
+  ON public.user_roles
+  FOR SELECT
+  TO authenticated
+  USING (is_admin(auth.uid()));
 ```
 
-**2. Ler parâmetro da URL e determinar tab correta:**
-```typescript
-const [searchParams] = useSearchParams();
-const editCompanyId = searchParams.get("edit");
-
-// Effect para detectar empresa do edit param e abrir na aba correta
-useEffect(() => {
-  if (editCompanyId && companies.length > 0) {
-    // Encontrar a empresa pelo ID
-    const company = companies.find(c => c.id === editCompanyId);
-    
-    if (company) {
-      // Determinar qual aba abrir baseado no approval_status
-      const targetTab = 
-        company.approval_status === 'pending_approval' ? 'pending' :
-        company.approval_status === 'rejected' ? 'rejected' : 
-        'approved';
-      
-      setActiveTab(targetTab);
-      
-      // Também abrir o dialog de edição
-      openEditDialog(company);
-    }
-  }
-}, [editCompanyId, companies]);
-```
-
-**3. Mudar valor inicial de `activeTab`:**
-```typescript
-// Antes:
-const [activeTab, setActiveTab] = useState("pending");
-
-// Depois:
-const [activeTab, setActiveTab] = useState<string>("approved");
-// Ou usar lógica para default baseado no edit param
-```
-
----
-
-## Fluxo Corrigido
+### Fluxo Corrigido
 
 ```text
-Dashboard → Clique "Ajustar Limites" (Liz importados - Aprovada)
+Admin Global clica "Ver Usuários" da empresa "Jr"
      │
      ▼
-Navega para: /global-admin/companies?edit=xxx
+CompanyUsersDialog abre com law_firm_id = "7cd827bc-..."
      │
      ▼
-GlobalAdminCompanies carrega
+Query: SELECT * FROM profiles WHERE law_firm_id = "..."
+     │
+     ├── Política antiga: BLOCKED (usuário não pertence a Jr)
+     │
+     └── Com nova política: is_admin(auth.uid()) = true → ALLOWED
      │
      ▼
-Lê searchParams.get("edit") → "xxx"
-     │
-     ▼
-Busca empresa em companies pelo ID
-     │
-     ▼
-Verifica approval_status da empresa
-     │
-     ├── "pending_approval" → setActiveTab("pending")
-     ├── "rejected" → setActiveTab("rejected")
-     └── "approved" ou null → setActiveTab("approved")
-     │
-     ▼
-Abre Dialog de edição automaticamente
+Mostra 2 usuários da empresa Jr
 ```
 
 ---
 
-## Mudanças Resumidas
+## Segurança
 
-| Arquivo | Mudança |
-|---------|---------|
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar `useSearchParams`, useEffect para detectar edit param e abrir tab + dialog corretos |
+A função `is_admin()` é `SECURITY DEFINER` e verifica a tabela `admin_user_roles`:
+
+```sql
+-- Função existente (segura)
+CREATE FUNCTION is_admin(_user_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admin_user_roles WHERE user_id = _user_id
+  )
+$$;
+```
+
+Isso garante que apenas usuários na tabela `admin_user_roles` (Admin Global) podem acessar todos os profiles.
 
 ---
 
 ## Testes Recomendados
 
-1. No Dashboard, clicar em "Ajustar Limites" de empresa **aprovada** → Deve abrir aba "Aprovadas"
-2. Se houver empresa pendente, clicar → Deve abrir aba "Pendentes"
-3. Acessar `/global-admin/companies` diretamente (sem param) → Comportamento normal
-4. Verificar se dialog de edição abre automaticamente
+1. Logar como Admin Global
+2. Ir em Empresas → Ações → "Ver Usuários"
+3. Verificar se lista mostra usuários da empresa selecionada
+4. Verificar que atendente comum NÃO consegue ver usuários de outras empresas
 
