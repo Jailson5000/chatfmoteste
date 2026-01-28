@@ -1559,6 +1559,7 @@ export function MessageBubble({
     // appended to a normal text message (common on mobile due to line wrapping).
     let processed = content
       .replace(/\[\s*mensagem de [áa]udio\s*\]/gi, "")
+      .replace(/\[\s*[áaÁA]udio\s*\]/gi, "") // Remove [Áudio], [Audio], [áudio], etc.
       .replace(/\r\n/g, "\n");
 
     // Remove media patterns [IMAGE]url, [VIDEO]url, [AUDIO]url, [DOCUMENT]url
