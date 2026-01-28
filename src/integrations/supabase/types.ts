@@ -5550,6 +5550,7 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_subdomain_available: { Args: { _subdomain: string }; Returns: boolean }
       mark_messages_as_read: {
         Args: { _conversation_id: string; _user_id: string }
         Returns: number
