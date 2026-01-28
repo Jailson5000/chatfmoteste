@@ -26,6 +26,14 @@ export interface AgendaProProfessional {
   working_hours?: AgendaProWorkingHour[];
 }
 
+export type DeleteAction = 'transfer' | 'delete_all';
+
+export interface DeleteProfessionalOptions {
+  id: string;
+  action: DeleteAction;
+  transferToId?: string;
+}
+
 export interface AgendaProWorkingHour {
   id: string;
   professional_id: string;
@@ -192,31 +200,64 @@ export function useAgendaProProfessionals() {
     },
   });
 
-  // Delete professional
-  const deleteProfessional = useMutation({
-    mutationFn: async (id: string) => {
+  // Get appointment count for a professional
+  const getAppointmentCount = async (professionalId: string): Promise<number> => {
+    if (!lawFirm?.id) return 0;
+    
+    const { count, error } = await supabase
+      .from("agenda_pro_appointments")
+      .select("id", { count: 'exact', head: true })
+      .eq("professional_id", professionalId)
+      .eq("law_firm_id", lawFirm.id);
+    
+    return error ? 0 : (count || 0);
+  };
+
+  // Delete professional with options for handling appointments
+  const deleteProfessionalWithOptions = useMutation({
+    mutationFn: async ({ id, action, transferToId }: DeleteProfessionalOptions) => {
       if (!lawFirm?.id) throw new Error("Empresa não encontrada");
 
-      // Check for future non-cancelled/completed appointments
-      const { data: futureAppointments, error: checkError } = await supabase
-        .from("agenda_pro_appointments")
-        .select("id")
-        .eq("professional_id", id)
-        .eq("law_firm_id", lawFirm.id)
-        .gte("start_time", new Date().toISOString())
-        .not("status", "in", '("cancelled","no_show","completed")')
-        .limit(1);
+      if (action === 'transfer') {
+        if (!transferToId) {
+          throw new Error("Selecione um profissional para transferir os agendamentos");
+        }
+        // Transfer appointments to another professional
+        const { error: transferError } = await supabase
+          .from("agenda_pro_appointments")
+          .update({ professional_id: transferToId })
+          .eq("professional_id", id)
+          .eq("law_firm_id", lawFirm.id);
+        
+        if (transferError) throw transferError;
+      } else if (action === 'delete_all') {
+        // Get appointment IDs first
+        const { data: appointmentIds } = await supabase
+          .from("agenda_pro_appointments")
+          .select("id")
+          .eq("professional_id", id)
+          .eq("law_firm_id", lawFirm.id);
 
-      if (checkError) throw checkError;
+        if (appointmentIds && appointmentIds.length > 0) {
+          const ids = appointmentIds.map(a => a.id);
+          
+          // Delete related scheduled messages first
+          await supabase
+            .from("agenda_pro_scheduled_messages")
+            .delete()
+            .in("appointment_id", ids);
 
-      if (futureAppointments && futureAppointments.length > 0) {
-        throw new Error(
-          "Este profissional possui agendamentos futuros. " +
-          "Cancele ou reagende os atendimentos antes de remover, " +
-          "ou desative o profissional nas configurações."
-        );
+          // Delete all appointments
+          const { error: deleteApptError } = await supabase
+            .from("agenda_pro_appointments")
+            .delete()
+            .in("id", ids);
+          
+          if (deleteApptError) throw deleteApptError;
+        }
       }
 
+      // Now delete the professional
       const { error } = await supabase
         .from("agenda_pro_professionals")
         .delete()
@@ -224,11 +265,10 @@ export function useAgendaProProfessionals() {
         .eq("law_firm_id", lawFirm.id);
       
       if (error) {
-        // Translate FK error to friendly message
         if (error.message.includes('violates foreign key constraint')) {
           throw new Error(
-            "Este profissional possui agendamentos no histórico. " +
-            "Desative-o ao invés de excluir para preservar os registros."
+            "Não foi possível excluir o profissional. " +
+            "Verifique se há dados vinculados que impedem a exclusão."
           );
         }
         throw error;
@@ -236,10 +276,15 @@ export function useAgendaProProfessionals() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agenda-pro-professionals"] });
-      toast({ title: "Profissional removido" });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      toast({ title: "Profissional removido com sucesso" });
     },
     onError: (error: Error) => {
-      toast({ title: "Não foi possível remover", description: error.message, variant: "destructive" });
+      toast({ 
+        title: "Erro ao remover profissional", 
+        description: error.message, 
+        variant: "destructive" 
+      });
     },
   });
 
@@ -278,7 +323,8 @@ export function useAgendaProProfessionals() {
     isLoading,
     createProfessional,
     updateProfessional,
-    deleteProfessional,
+    deleteProfessionalWithOptions,
+    getAppointmentCount,
     updateWorkingHours,
   };
 }

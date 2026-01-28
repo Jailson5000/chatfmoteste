@@ -687,6 +687,39 @@ export function useAgendaProAppointments(options?: {
     },
   });
 
+  // Change professional for an appointment
+  const changeProfessional = useMutation({
+    mutationFn: async ({ id, newProfessionalId }: { id: string; newProfessionalId: string }) => {
+      if (!lawFirm?.id) throw new Error("Empresa não encontrada");
+
+      const { data, error } = await supabase
+        .from("agenda_pro_appointments")
+        .update({ professional_id: newProfessionalId })
+        .eq("id", id)
+        .eq("law_firm_id", lawFirm.id)
+        .select(`
+          *,
+          professional:agenda_pro_professionals(id, name, color)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      // Log activity
+      await logActivity(id, "professional_changed", { new_professional_id: newProfessionalId });
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda-pro-activity-log"] });
+      toast({ title: "Profissional alterado com sucesso" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Erro ao alterar profissional", description: error.message, variant: "destructive" });
+    },
+  });
+
   return {
     appointments,
     isLoading,
@@ -699,5 +732,6 @@ export function useAgendaProAppointments(options?: {
     markNoShow,
     rescheduleAppointment,
     cancelSeries,
+    changeProfessional,
   };
 }

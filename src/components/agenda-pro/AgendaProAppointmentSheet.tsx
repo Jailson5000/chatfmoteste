@@ -13,14 +13,18 @@ import {
   Loader2,
   History,
   CalendarClock,
-  Repeat
+  Repeat,
+  UserCog
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AgendaProAppointment, useAgendaProAppointments } from "@/hooks/useAgendaProAppointments";
+import { useAgendaProProfessionals } from "@/hooks/useAgendaProProfessionals";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -67,8 +71,10 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
   const [cancelSeriesDialogOpen, setCancelSeriesDialogOpen] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
+  const [changeProfessionalOpen, setChangeProfessionalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [newProfessionalId, setNewProfessionalId] = useState<string>('');
   
   // Reschedule state
   const [rescheduleDate, setRescheduleDate] = useState<Date | undefined>(addDays(new Date(), 1));
@@ -78,7 +84,8 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
 
   const { lawFirm } = useLawFirm();
   const { settings } = useAgendaPro();
-  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow, rescheduleAppointment, cancelSeries } = useAgendaProAppointments();
+  const { activeProfessionals } = useAgendaProProfessionals();
+  const { confirmAppointment, completeAppointment, cancelAppointment, markNoShow, rescheduleAppointment, cancelSeries, changeProfessional } = useAgendaProAppointments();
 
   const status = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
   const StatusIcon = status.icon;
@@ -242,9 +249,31 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
       setCancelSeriesDialogOpen(false);
       onClose();
     } finally {
+    setIsUpdating(false);
+    }
+  };
+
+  const handleChangeProfessional = async () => {
+    if (!newProfessionalId) return;
+    
+    setIsUpdating(true);
+    try {
+      await changeProfessional.mutateAsync({
+        id: appointment.id,
+        newProfessionalId,
+      });
+      setChangeProfessionalOpen(false);
+      setNewProfessionalId('');
+      onClose();
+    } finally {
       setIsUpdating(false);
     }
   };
+
+  // Filter out current professional from selection
+  const availableProfessionals = activeProfessionals.filter(
+    p => p.id !== appointment.professional_id
+  );
 
   return (
     <>
@@ -297,7 +326,23 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
             {/* Professional */}
             {appointment.professional && (
               <div className="space-y-2">
-                <h4 className="text-sm font-medium text-muted-foreground">Profissional</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-muted-foreground">Profissional</h4>
+                  {appointment.status !== "cancelled" && 
+                   appointment.status !== "completed" && 
+                   appointment.status !== "no_show" && 
+                   availableProfessionals.length > 0 && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="gap-1 h-7 text-xs"
+                      onClick={() => setChangeProfessionalOpen(true)}
+                    >
+                      <UserCog className="h-3.5 w-3.5" />
+                      Trocar
+                    </Button>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   <div 
                     className="w-10 h-10 rounded-full flex items-center justify-center text-white font-medium"
@@ -615,6 +660,56 @@ export function AgendaProAppointmentSheet({ appointment, onClose }: AgendaProApp
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Change Professional Dialog */}
+      <Dialog open={changeProfessionalOpen} onOpenChange={setChangeProfessionalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Trocar Profissional</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Profissional atual: <strong>{appointment.professional?.name}</strong>
+            </p>
+            
+            <div className="space-y-2">
+              <Label>Novo profissional</Label>
+              <Select value={newProfessionalId} onValueChange={setNewProfessionalId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecionar profissional..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableProfessionals.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-3 h-3 rounded-full" 
+                          style={{ backgroundColor: p.color }}
+                        />
+                        {p.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangeProfessionalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleChangeProfessional}
+              disabled={!newProfessionalId || isUpdating}
+            >
+              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserCog className="h-4 w-4 mr-2" />}
+              Confirmar Troca
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
