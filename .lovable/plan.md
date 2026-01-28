@@ -1,95 +1,110 @@
 
 
-# Correção: Status, Etiquetas e Departamentos não aparecem todos em Conversas
+# Correção: Status não aparecem todos no Painel Lateral de Conversas
 
 ## Problema Identificado
 
-Na página **Conversas**, o painel lateral (`ContactDetailsPanel`) mostra apenas **5 status**, enquanto no **Kanban** (`KanbanChatPanel`) todos os **10 status** aparecem corretamente.
+O **dropdown de Status no cabeçalho** (componente `ContactStatusTags`) mostra **todos os 10+ status**, enquanto o **painel lateral direito** (componente `ContactDetailsPanel`) mostra apenas **5 status**.
 
-### Causa Raiz
+## Causa Raiz
 
-O `ContactDetailsPanel` **não está filtrando** os status e departamentos pelo campo `is_active`, mas o `KanbanChatPanel` está. Isso causa uma inconsistência visual:
+A diferença está na forma como cada componente obtém os dados:
 
-| Componente | Código atual | Status exibidos |
-|------------|--------------|-----------------|
-| `KanbanChatPanel.tsx` (linha 2693) | `customStatuses.filter(s => s.is_active).map(...)` | ✅ Todos ativos |
-| `KanbanChatPanel.tsx` (linha 2800) | `departments.filter(d => d.is_active).map(...)` | ✅ Todos ativos |
-| `ContactDetailsPanel.tsx` (linha 881) | `statuses.map(...)` | ❌ Sem filtro |
-| `ContactDetailsPanel.tsx` (linha 1037) | `departments.map(...)` | ❌ Sem filtro |
+| Componente | Como obtém Status | Resultado |
+|------------|-------------------|-----------|
+| `ContactStatusTags` (cabeçalho) | `useCustomStatuses()` direto + `.filter(s => s.is_active)` | ✅ Todos os status ativos |
+| `ContactDetailsPanel` (painel lateral) | Recebe via **props** de `Conversations.tsx` | ❌ Apenas 5 status |
 
-**Observação:** A tabela `tags` não possui campo `is_active`, portanto não precisa de filtro.
+O `ContactDetailsPanel` depende de dados passados pela página `Conversations.tsx`, que pode estar com o cache do TanStack Query desatualizado ou com algum problema de timing.
 
-## Solução
+## Solução Proposta
 
-Adicionar filtro `is_active` no `ContactDetailsPanel.tsx` para manter consistência com o Kanban.
+**Modificar o `ContactDetailsPanel` para usar diretamente os hooks**, eliminando a dependência de props para status, departamentos e tags. Isso garante que ele sempre tenha os dados mais recentes, igual ao `ContactStatusTags`.
 
 ### Alterações
 
 **Arquivo:** `src/components/conversations/ContactDetailsPanel.tsx`
 
-**1. Status (linha 881)**
-```
-De:
-{statuses.map(status => {
-
-Para:
-{statuses.filter(s => s.is_active !== false).map(status => {
+1. **Importar hooks diretamente:**
+```typescript
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useDepartments } from "@/hooks/useDepartments";
+import { useTags } from "@/hooks/useTags";
 ```
 
-**2. Departamentos (linha 1037)**
+2. **Usar hooks dentro do componente:**
+```typescript
+export function ContactDetailsPanel({
+  conversation,
+  // Remover: departments, tags, statuses das props
+  members,
+  automations,
+  // ...
+}: ContactDetailsPanelProps) {
+  const queryClient = useQueryClient();
+  
+  // Usar hooks diretos - mesmo padrão do ContactStatusTags
+  const { statuses: allStatuses } = useCustomStatuses();
+  const { departments: allDepartments } = useDepartments();
+  const { tags: allTags } = useTags();
+  
+  // Filtrar ativos
+  const statuses = allStatuses.filter(s => s.is_active);
+  const departments = allDepartments.filter(d => d.is_active);
+  const tags = allTags; // Tags não tem is_active
+  
+  // ... resto do componente
+}
 ```
-De:
-{departments.map(dept => {
 
-Para:
-{departments.filter(d => d.is_active !== false).map(dept => {
-```
+3. **Atualizar a interface `ContactDetailsPanelProps`:**
+   - Remover `departments`, `tags`, `statuses` da interface
 
-### Por que `!== false` em vez de `=== true`?
-
-O `ContactDetailsPanel` recebe os props como `Array<{ id: string; name: string; color: string }>` sem o campo `is_active`. Para garantir compatibilidade:
-- Se `is_active` existir e for `false` → oculta
-- Se `is_active` não existir ou for `true` → exibe
-
-Alternativamente, podemos atualizar a interface do componente para incluir `is_active` nas props ou ajustar a passagem de dados na página Conversations.tsx.
+4. **Atualizar `Conversations.tsx`:**
+   - Remover a passagem dessas props para `ContactDetailsPanel`
 
 ## Fluxo Após a Correção
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│           Usuário abre painel de detalhes em Conversas          │
+│           ContactDetailsPanel é renderizado                     │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  1. Hook useCustomStatuses() retorna todos os 10 status         │
-│  2. Conversations.tsx passa para ContactDetailsPanel            │
-│  3. ContactDetailsPanel filtra por is_active !== false          │
-│  4. Apenas status ativos são renderizados                       │
+│  useCustomStatuses() → Query com cache do TanStack Query        │
+│  useDepartments() → Mesmo cache que ContactStatusTags           │
+│  useTags() → Dados sempre sincronizados                         │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│        TODOS os status ativos aparecem (igual ao Kanban)        │
+│        TODOS os status/departments/tags aparecem                │
+│        (idêntico ao comportamento do cabeçalho)                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Vantagens da Solução
+
+1. **Consistência**: Ambos os componentes usam a mesma fonte de dados
+2. **Atualização automática**: Mudanças via Realtime são refletidas imediatamente
+3. **Menos props**: Simplifica a interface do componente
+4. **Cache compartilhado**: TanStack Query gerencia um único cache para todos
 
 ## Arquivos Afetados
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/conversations/ContactDetailsPanel.tsx` | Adicionar filtro `is_active` em status e departments |
-| `src/pages/Conversations.tsx` | Passar campo `is_active` nas props de statuses e departments |
+| `src/components/conversations/ContactDetailsPanel.tsx` | Usar hooks diretamente em vez de props |
+| `src/pages/Conversations.tsx` | Remover props desnecessárias |
 
 ## Verificação de Não-Regressão
 
-A alteração é conservadora:
-- Só filtra itens explicitamente marcados como inativos (`is_active === false`)
-- Mantém comportamento existente para itens sem o campo
-- Não afeta lógica de seleção, salvamento ou outras funcionalidades
-- Alinha o comportamento com o Kanban já em produção
+- As funções `onChangeStatus`, `onChangeTags`, `onChangeDepartment` continuam funcionando (já existem)
+- O filtro `is_active` é aplicado dentro do componente (igual ao cabeçalho)
+- Não afeta a lógica de seleção ou salvamento
 
 ## Risco
 
-**Baixo** - Apenas adiciona filtro para ocultar itens inativos, seguindo o mesmo padrão já utilizado no Kanban.
+**Baixo** - A mudança alinha o comportamento com um padrão já em uso (`ContactStatusTags`) e simplifica a passagem de dados.
 
