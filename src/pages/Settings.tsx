@@ -167,11 +167,21 @@ export default function Settings() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validar que lawFirm existe para conformidade com RLS
+    if (!lawFirm?.id) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível identificar a empresa. Recarregue a página.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setUploadingMedia(true);
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `${fileName}`;
+      const filePath = `${lawFirm.id}/${fileName}`;
 
       const { data, error } = await supabase.storage
         .from('template-media')
