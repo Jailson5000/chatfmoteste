@@ -1,169 +1,84 @@
 
-# Correção do Bloqueio de Áudio para Chat Web
+## Melhorias Visuais no Player de Áudio
 
-## Problema Identificado
+### Resumo das Alterações
 
-A partir da análise do código e das screenshots, identifiquei dois problemas distintos:
+**Duas modificações simples no componente `MessageBubble.tsx`:**
 
-### 1. Kanban: Áudio sendo enviado para conversa de Site
-- O botão de microfone aparece em conversa de **origem "Site"** (destacado em verde na imagem)
-- A mensagem aparece como "Mensagem de áudio - Áudio enviado via WhatsApp" 
-- **Causa**: A lógica `isWhatsAppConversation` tem um fallback que assume WhatsApp quando `origin` está vazio:
-  ```typescript
-  conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
-  ```
-- Além disso, pode haver inconsistência no valor de `origin` recebido pelo componente
+1. **Remover o placeholder "[ÁUDIO]"** que aparece para áudios sem URL/whatsappMessageId
+2. **Alterar o texto de loading** baseado na direção da mensagem:
+   - Enviados (`isFromMe: true`): "Enviando áudio..."
+   - Recebidos (`isFromMe: false`): "Baixando áudio..."
 
-### 2. Conversas: Mensagem de erro técnica
-- O `AudioRecorder` é renderizado **sempre** (linha 4299), sem verificar o canal
-- Quando o usuário tenta enviar áudio para Chat Web, aparece o erro técnico: "Evolution API retornou erro 400..."
-- O erro vem da API porque não existe instância WhatsApp para conversa de Site
+---
 
-## Correções Propostas
+### Detalhes Técnicos
 
-### Arquivo 1: `src/components/kanban/KanbanChatPanel.tsx`
+#### Arquivo: `src/components/conversations/MessageBubble.tsx`
 
-**Alteração 1**: Remover o fallback que assume WhatsApp quando origin vazio (linhas 1042-1046)
+**Alteração 1 - Linha 335: Mudar texto de descriptografia**
 
 De:
-```typescript
-const isWhatsAppConversation = !isNonWhatsAppConversation && (
-  conversationOrigin === 'WHATSAPP' ||
-  (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
-  conversationOrigin === '' // Legacy: assume WhatsApp if origin is empty
-);
+```tsx
+<span className="text-xs text-primary/70 font-medium">Descriptografando áudio...</span>
 ```
 
 Para:
-```typescript
-// IMPORTANTE: Não assumir WhatsApp se origin vazio - requer confirmação explícita
-const isWhatsAppConversation = !isNonWhatsAppConversation && (
-  conversationOrigin === 'WHATSAPP' ||
-  (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) ||
-  !!whatsappInstanceId // Usar whatsappInstanceId como critério mais seguro
-);
+```tsx
+<span className="text-xs text-primary/70 font-medium">
+  {isFromMe ? "Enviando áudio..." : "Baixando áudio..."}
+</span>
 ```
 
-**Alteração 2**: Melhorar mensagem de erro no `handleSendAudio` (linha 1890)
+**Alteração 2 - Linhas 1786-1796: Simplificar placeholder de áudio**
 
 De:
-```typescript
-throw new Error("Chat Web aceita apenas mensagens de texto e imagens (sem áudio).");
+```tsx
+{!hasMedia && messageType === "audio" && !whatsappMessageId && (
+  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
+    <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
+      <Mic className="h-5 w-5 text-primary" />
+    </div>
+    <div className="flex-1">
+      <p className="text-sm font-medium">Mensagem de áudio</p>
+      <p className="text-xs text-muted-foreground">Áudio enviado via WhatsApp</p>
+    </div>
+  </div>
+)}
 ```
 
 Para:
-```typescript
-throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
+```tsx
+{!hasMedia && messageType === "audio" && !whatsappMessageId && (
+  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary-foreground/10">
+    <div className="h-10 w-10 rounded-full flex items-center justify-center bg-primary/20">
+      <Mic className="h-5 w-5 text-primary" />
+    </div>
+    <div className="flex-1">
+      <div className="flex items-center gap-2">
+        <Loader2 className="h-3 w-3 animate-spin text-primary" />
+        <span className="text-xs text-muted-foreground">
+          {isFromMe ? "Enviando..." : "Baixando..."}
+        </span>
+      </div>
+    </div>
+  </div>
+)}
 ```
 
 ---
 
-### Arquivo 2: `src/pages/Conversations.tsx`
+### Resultado Visual
 
-**Alteração 1**: Adicionar variável `isWhatsAppConversation` usando `useMemo` 
+| Situação | Antes | Depois |
+|----------|-------|--------|
+| Áudio enviado carregando | "Descriptografando áudio..." | "Enviando áudio..." |
+| Áudio recebido carregando | "Descriptografando áudio..." | "Baixando áudio..." |
+| Placeholder sem URL (enviado) | "[ÁUDIO] Mensagem de áudio - Áudio enviado via WhatsApp" | Spinner + "Enviando..." |
+| Placeholder sem URL (recebido) | "[ÁUDIO] Mensagem de áudio - Áudio enviado via WhatsApp" | Spinner + "Baixando..." |
 
-Adicionar logo após a declaração de `selectedConversation` (aproximadamente linha 437):
-```typescript
-// Robust WhatsApp detection for audio button visibility
-const isWhatsAppConversation = useMemo(() => {
-  if (!selectedConversation) return false;
-  const origin = (selectedConversation.origin || '').toUpperCase();
-  const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-  if (nonWhatsAppOrigins.includes(origin)) return false;
-  
-  // Positive check: must be explicitly WhatsApp
-  return origin === 'WHATSAPP' || 
-    (selectedConversation.remote_jid?.endsWith('@s.whatsapp.net')) ||
-    !!selectedConversation.whatsapp_instance_id;
-}, [selectedConversation]);
-```
+### Risco
 
-**Alteração 2**: Esconder `AudioRecorder` para conversas não-WhatsApp (linhas 4050-4057 e 4298-4303)
-
-De:
-```tsx
-{showAudioRecorder ? (
-  <div className="w-full px-3 lg:px-4">
-    <AudioRecorder
-      onSend={handleSendAudioRecording}
-      onCancel={() => setShowAudioRecorder(false)}
-      disabled={isSending}
-    />
-  </div>
-) : (
-```
-
-Para:
-```tsx
-{showAudioRecorder && isWhatsAppConversation ? (
-  <div className="w-full px-3 lg:px-4">
-    <AudioRecorder
-      onSend={handleSendAudioRecording}
-      onCancel={() => setShowAudioRecorder(false)}
-      disabled={isSending}
-    />
-  </div>
-) : (
-```
-
-E na seção mobile (linha 4298-4303):
-
-De:
-```tsx
-<div className="flex gap-1">
-  <AudioRecorder
-    onSend={handleSendAudioRecording}
-    onCancel={() => {}}
-    disabled={isSending}
-  />
-```
-
-Para:
-```tsx
-<div className="flex gap-1">
-  {isWhatsAppConversation && (
-    <AudioRecorder
-      onSend={handleSendAudioRecording}
-      onCancel={() => {}}
-      disabled={isSending}
-    />
-  )}
-```
-
-**Alteração 3**: Melhorar mensagem de erro no `handleSendAudioRecording` (linha 2225)
-
-De:
-```typescript
-throw new Error("Chat Web aceita apenas mensagens de texto (sem áudio). Use texto ou imagens.");
-```
-
-Para:
-```typescript
-throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
-```
-
----
-
-## Resumo das Alterações
-
-| Arquivo | Linha(s) | Alteração |
-|---------|----------|-----------|
-| `KanbanChatPanel.tsx` | 1042-1046 | Remover fallback que assume WhatsApp quando origin vazio |
-| `KanbanChatPanel.tsx` | 1890 | Mensagem amigável de bloqueio |
-| `Conversations.tsx` | ~437 | Adicionar `isWhatsAppConversation` com useMemo |
-| `Conversations.tsx` | 4050 | Condicionar `showAudioRecorder` ao canal WhatsApp |
-| `Conversations.tsx` | 4298-4303 | Esconder `AudioRecorder` mobile para não-WhatsApp |
-| `Conversations.tsx` | 2225 | Mensagem amigável de bloqueio |
-
-## Critério de Sucesso
-
-1. Botão de microfone **não aparece** para conversas de Site/Widget/Tray
-2. Se por algum motivo o áudio for enviado para Chat Web, mensagem amigável: "Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens."
-3. Envio de áudio para WhatsApp continua funcionando normalmente
-4. Zero regressões em texto, imagens e documentos
-
-## Risco
-
-- **Baixo**: Alterações focadas apenas na visibilidade do `AudioRecorder` e mensagens de erro
-- Não afeta o fluxo de envio de áudio para WhatsApp (que já foi corrigido)
-- Não afeta envio de texto/imagens para nenhum canal
+- **Zero risco de regressão**: Alterações são apenas de texto/UI
+- Não afeta lógica de envio, recebimento ou descriptografia de áudio
+- Mantém todos os estilos e comportamentos existentes
