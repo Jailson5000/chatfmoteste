@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ import { formatPhone, formatDocument } from "@/lib/inputMasks";
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
   const { plans } = usePlans();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<string | null>(null);
@@ -66,7 +68,34 @@ export default function GlobalAdminCompanies() {
   const [resettingPassword, setResettingPassword] = useState<string | null>(null);
   const [rejectingCompany, setRejectingCompany] = useState<typeof companies[0] | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
-  const [activeTab, setActiveTab] = useState("pending");
+  const [activeTab, setActiveTab] = useState("approved");
+  const [editParamProcessed, setEditParamProcessed] = useState(false);
+
+  // Effect to detect edit param from URL and open correct tab + dialog
+  const editCompanyId = searchParams.get("edit");
+  
+  useEffect(() => {
+    if (editCompanyId && companies.length > 0 && !editParamProcessed) {
+      const company = companies.find(c => c.id === editCompanyId);
+      
+      if (company) {
+        // Determine which tab to open based on approval_status
+        const targetTab = 
+          company.approval_status === 'pending_approval' ? 'pending' :
+          company.approval_status === 'rejected' ? 'rejected' : 
+          'approved';
+        
+        setActiveTab(targetTab);
+        
+        // Open edit dialog for this company
+        openEditDialog(company);
+        
+        // Mark as processed and clear URL param
+        setEditParamProcessed(true);
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [editCompanyId, companies, editParamProcessed]);
   // State to track plan changes for pending companies
   const [pendingPlanChanges, setPendingPlanChanges] = useState<Record<string, string>>({});
   // State to track trial checkbox for pending companies
