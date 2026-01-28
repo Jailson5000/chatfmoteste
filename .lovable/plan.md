@@ -1,110 +1,65 @@
 
+Objetivo
+- No painel lateral de Conversas (ContactDetailsPanel), permitir selecionar qualquer status/etiqueta/departamento mesmo quando a lista for grande, adicionando rolagem clara e confiável, sem afetar Kanban nem outras áreas.
 
-# Correção: Status não aparecem todos no Painel Lateral de Conversas
+Diagnóstico (por que acontece)
+- O painel lateral já tem rolagem principal (ScrollArea “grande”) e, dentro de “Propriedades”, cada seção (Status/Etiquetas/Departamento) também tem uma área de rolagem própria.
+- Hoje, Status e Etiquetas usam `ScrollArea` com `max-h-48` (e Departamento `max-h-[60vh]`). Na prática, isso deixa visível só uma “fatia” (ex.: ~5 itens) e depende de uma rolagem interna que está pouco evidente/instável (principalmente por ser um ScrollArea Radix aninhado dentro de outro ScrollArea).
 
-## Problema Identificado
+Solução (mínima e segura)
+- Tornar a rolagem dessas listas mais óbvia e garantida, evitando ScrollArea aninhado onde possível.
+- Implementar rolagem “nativa” (overflow-y) apenas dentro das listas de Status/Etiquetas/Departamento, mantendo o resto do painel como está. Isso reduz risco de conflitos de scroll entre ScrollAreas.
 
-O **dropdown de Status no cabeçalho** (componente `ContactStatusTags`) mostra **todos os 10+ status**, enquanto o **painel lateral direito** (componente `ContactDetailsPanel`) mostra apenas **5 status**.
+Mudanças planejadas (código)
+1) Ajustar ContactDetailsPanel (arquivo: `src/components/conversations/ContactDetailsPanel.tsx`)
+   - Na seção “Status”:
+     - Substituir o bloco:
+       - `<ScrollArea className="max-h-48"> ... </ScrollArea>`
+     - Por um container nativo com altura máxima e rolagem:
+       - `div` com `max-h-[60vh] overflow-y-auto pr-2 overscroll-contain` (altura pode ser 60vh para “caber mais” e ainda rolar quando necessário).
+     - Manter o conteúdo interno igual (map de `statuses` e botões).
+   - Na seção “Etiquetas”:
+     - Mesmo ajuste: trocar `ScrollArea` por `div` com `max-h-[60vh] overflow-y-auto pr-2 overscroll-contain`.
+   - Na seção “Departamento”:
+     - Também trocar o `ScrollArea` por `div` nativo equivalente (ou manter se estiver ok, mas para consistência e evitar o mesmo problema, vamos padronizar as 3).
+   - Observação: manteremos toda a lógica (handlers, seleção, logs de atividade, invalidações) intacta — só altera a “caixa” que contém a lista.
 
-## Causa Raiz
+2) Garantir que nada “vaze” visualmente
+   - Verificar se as listas não ficam “transparentes” e não ficam atrás de outros elementos (aqui não é dropdown/popover, então tende a ser tranquilo).
+   - Confirmar que o painel lateral continua com `overflow-x-hidden` e que o `pr-2` evita o scroll sobrepor texto.
 
-A diferença está na forma como cada componente obtém os dados:
+3) Ajuste fino de UX (opcional, só se necessário e sem quebrar nada)
+   - Se ainda ficar “apertado”, aumentar um pouco a altura máxima:
+     - ex.: `max-h-[70vh]` em Status/Etiquetas (mantendo Departamento em 60vh) ou padronizar tudo em 70vh.
+   - Se você quiser que “Status” mostre mais itens visíveis sem rolar, podemos aumentar o padding/altura do item ou reduzir espaçamentos — mas isso é opcional.
 
-| Componente | Como obtém Status | Resultado |
-|------------|-------------------|-----------|
-| `ContactStatusTags` (cabeçalho) | `useCustomStatuses()` direto + `.filter(s => s.is_active)` | ✅ Todos os status ativos |
-| `ContactDetailsPanel` (painel lateral) | Recebe via **props** de `Conversations.tsx` | ❌ Apenas 5 status |
+Arquivos afetados
+- `src/components/conversations/ContactDetailsPanel.tsx` (somente ajustes de layout/rolagem nas três listas)
 
-O `ContactDetailsPanel` depende de dados passados pela página `Conversations.tsx`, que pode estar com o cache do TanStack Query desatualizado ou com algum problema de timing.
+Critérios de aceite (o que vai ficar funcionando)
+- No painel lateral:
+  - Ao abrir “Propriedades” → “Status”, dá para rolar a lista e selecionar um status que hoje não aparece (ex.: o 10º/11º).
+  - Em “Etiquetas”, dá para rolar e selecionar qualquer etiqueta (respeitando o limite de 4).
+  - Em “Departamento”, dá para rolar e escolher qualquer departamento.
+- Nada muda no Kanban (já está correto) e o cabeçalho de Conversas continua exibindo e atualizando corretamente.
 
-## Solução Proposta
+Testes (anti-regressão — obrigatório)
+1) Conversas (desktop)
+   - Abrir uma conversa com painel lateral.
+   - Expandir Status → rolar até o fim → selecionar um status “lá de baixo”.
+   - Confirmar que:
+     - o badge do status no painel atualiza,
+     - o header (Status no topo da conversa) reflete a mudança,
+     - ao trocar de conversa e voltar, permanece correto.
+2) Etiquetas
+   - Expandir Etiquetas → rolar → selecionar 4 etiquetas → confirmar bloqueio da 5ª.
+3) Departamento
+   - Expandir Departamento → rolar → selecionar um departamento no fim da lista.
+4) Teste de rolagem
+   - Garantir que a rolagem ocorre dentro da lista (e não “trava” o painel).
+5) Teste cross-feature rápido
+   - Ir no Kanban e confirmar que nada mudou no comportamento de status/departamentos/etiquetas.
 
-**Modificar o `ContactDetailsPanel` para usar diretamente os hooks**, eliminando a dependência de props para status, departamentos e tags. Isso garante que ele sempre tenha os dados mais recentes, igual ao `ContactStatusTags`.
-
-### Alterações
-
-**Arquivo:** `src/components/conversations/ContactDetailsPanel.tsx`
-
-1. **Importar hooks diretamente:**
-```typescript
-import { useCustomStatuses } from "@/hooks/useCustomStatuses";
-import { useDepartments } from "@/hooks/useDepartments";
-import { useTags } from "@/hooks/useTags";
-```
-
-2. **Usar hooks dentro do componente:**
-```typescript
-export function ContactDetailsPanel({
-  conversation,
-  // Remover: departments, tags, statuses das props
-  members,
-  automations,
-  // ...
-}: ContactDetailsPanelProps) {
-  const queryClient = useQueryClient();
-  
-  // Usar hooks diretos - mesmo padrão do ContactStatusTags
-  const { statuses: allStatuses } = useCustomStatuses();
-  const { departments: allDepartments } = useDepartments();
-  const { tags: allTags } = useTags();
-  
-  // Filtrar ativos
-  const statuses = allStatuses.filter(s => s.is_active);
-  const departments = allDepartments.filter(d => d.is_active);
-  const tags = allTags; // Tags não tem is_active
-  
-  // ... resto do componente
-}
-```
-
-3. **Atualizar a interface `ContactDetailsPanelProps`:**
-   - Remover `departments`, `tags`, `statuses` da interface
-
-4. **Atualizar `Conversations.tsx`:**
-   - Remover a passagem dessas props para `ContactDetailsPanel`
-
-## Fluxo Após a Correção
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│           ContactDetailsPanel é renderizado                     │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  useCustomStatuses() → Query com cache do TanStack Query        │
-│  useDepartments() → Mesmo cache que ContactStatusTags           │
-│  useTags() → Dados sempre sincronizados                         │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│        TODOS os status/departments/tags aparecem                │
-│        (idêntico ao comportamento do cabeçalho)                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Vantagens da Solução
-
-1. **Consistência**: Ambos os componentes usam a mesma fonte de dados
-2. **Atualização automática**: Mudanças via Realtime são refletidas imediatamente
-3. **Menos props**: Simplifica a interface do componente
-4. **Cache compartilhado**: TanStack Query gerencia um único cache para todos
-
-## Arquivos Afetados
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/components/conversations/ContactDetailsPanel.tsx` | Usar hooks diretamente em vez de props |
-| `src/pages/Conversations.tsx` | Remover props desnecessárias |
-
-## Verificação de Não-Regressão
-
-- As funções `onChangeStatus`, `onChangeTags`, `onChangeDepartment` continuam funcionando (já existem)
-- O filtro `is_active` é aplicado dentro do componente (igual ao cabeçalho)
-- Não afeta a lógica de seleção ou salvamento
-
-## Risco
-
-**Baixo** - A mudança alinha o comportamento com um padrão já em uso (`ContactStatusTags`) e simplifica a passagem de dados.
-
+Risco e mitigação
+- Risco baixo: alteração apenas de layout/overflow dentro do ContactDetailsPanel.
+- Mitigação: manter handlers e dados intactos; somente trocar o container de scroll (evitar mudanças em hooks, queries, realtime ou mutations).
