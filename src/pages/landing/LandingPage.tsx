@@ -30,6 +30,7 @@ import {
   CalendarClock,
   Link2,
   Palette,
+  PlayCircle,
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { CheckoutModal } from "@/components/landing/CheckoutModal";
@@ -322,6 +323,41 @@ export function LandingPage() {
                 Falar com especialista
               </a>
             </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Seção - Vídeo Tutorial */}
+      <section className="relative z-10 py-16 md:py-20 border-t border-white/[0.06]">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
+              <PlayCircle className="h-7 w-7 text-red-500" strokeWidth={1.5} />
+            </div>
+            <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
+              Veja como é simples
+            </p>
+            <h2 className="text-2xl md:text-3xl font-bold leading-tight">
+              Como criar sua conta e
+              <br />
+              <span className="text-red-500">começar a usar o MiauChat</span>
+            </h2>
+            <p className="mt-4 text-base text-white/50">
+              Assista ao vídeo e veja como é fácil começar
+            </p>
+          </div>
+          
+          {/* Video Container */}
+          <div className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-black/50">
+            <div className="aspect-video">
+              <iframe
+                src="https://www.youtube.com/embed/q9VESHWqHBQ"
+                title="Como criar conta no MiauChat"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full border-0"
+              />
+            </div>
           </div>
         </div>
       </section>
