@@ -2010,16 +2010,11 @@ async function executeTemplateTool(
         sender_type: "ai",
         is_from_me: true,
         message_type: 'text',
-        media_url: null, // Text message has no media
+        media_url: null,
         media_mime_type: null,
         status: whatsappSendSuccess ? "sent" : "delivered",
-        ai_generated: true,
-        metadata: { 
-          template_id: matchedTemplate.id, 
-          template_name: matchedTemplate.name,
-          sent_via_whatsapp: whatsappSendSuccess,
-          has_companion_media: !!finalMediaUrl
-        }
+        ai_generated: true
+        // Note: template_id tracking via logs, not metadata column
       }).select("id").single();
       
       if (textSaveError) {
@@ -2040,21 +2035,16 @@ async function executeTemplateTool(
       const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
         conversation_id: conversationId,
         law_firm_id: lawFirmId,
-        whatsapp_message_id: whatsappMediaMessageId, // Use the MEDIA message ID, not text
-        content: null, // Media message typically has no text content
+        whatsapp_message_id: whatsappMediaMessageId,
+        content: null,
         sender_type: "ai",
         is_from_me: true,
         message_type: mediaMessageType,
         media_url: finalMediaUrl,
         media_mime_type: mediaMimeType,
         status: whatsappSendSuccess ? "sent" : "delivered",
-        ai_generated: true,
-        metadata: { 
-          template_id: matchedTemplate.id, 
-          template_name: matchedTemplate.name,
-          sent_via_whatsapp: whatsappSendSuccess,
-          is_public_url: finalMediaUrl.includes('supabase.co/storage/v1/object/public/')
-        }
+        ai_generated: true
+        // Note: template tracking via logs, public URL renders directly
       }).select("id").single();
       
       if (mediaSaveError) {
