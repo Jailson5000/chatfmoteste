@@ -1,128 +1,112 @@
 
 
-# Remover Seleção de Departamentos da Criação de Membros
+# Adicionar Seção de Vídeo Tutorial na Landing Page
 
 ## Objetivo
 
-Separar a funcionalidade conforme solicitado:
-- **Criação**: Apenas nome, email e perfil (sem departamentos)
-- **Edição**: Configurar departamentos (já funciona em Settings.tsx)
+Adicionar uma seção na landing page com um vídeo do YouTube que mostra como criar uma conta, fazer o cadastro e acessar a plataforma MiauChat.
 
-## Benefícios
+**ID do Vídeo:** `q9VESHWqHBQ`
 
-1. **Resolve o bug de crash** - Remove completamente o código problemático da lista de checkboxes
-2. **Fluxo mais limpo** - Criar primeiro, configurar depois
-3. **Consistência** - Todos os membros são criados da mesma forma
+## Localização
 
-## Mudanças em `src/components/admin/InviteMemberDialog.tsx`
+A seção será adicionada **após a seção Hero** (logo após os CTAs principais) e **antes da seção "Agentes IA ON"**. Este é o posicionamento ideal porque:
 
-### 1. Remover imports não utilizados
+1. Visitantes veem o vídeo logo no início
+2. Ajuda a converter interessados mostrando simplicidade do cadastro
+3. Reduz dúvidas sobre o processo de onboarding
 
-```tsx
-// REMOVER
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-import { useDepartments } from "@/hooks/useDepartments";
+## Design da Seção
+
+Seguindo o padrão visual da landing page:
+- Fundo escuro com borda sutil
+- Título chamativo com destaque em vermelho
+- Player de vídeo responsivo (16:9)
+- Ícone de contexto (Play/Video)
+
+## Estrutura Visual
+
+```text
++--------------------------------------------------+
+|                                                  |
+|  ▶️  VEJA COMO É SIMPLES                        |
+|                                                  |
+|     Como criar sua conta e                      |
+|     começar a usar o MiauChat                    |
+|                                                  |
+|  +--------------------------------------------+  |
+|  |                                            |  |
+|  |       [  Vídeo YouTube Embed  ]            |  |
+|  |           (16:9 ratio)                     |  |
+|  |                                            |  |
+|  +--------------------------------------------+  |
+|                                                  |
+|     Assista e veja como é fácil começar         |
+|                                                  |
++--------------------------------------------------+
 ```
 
-### 2. Remover a flag `requiresDepartments` dos roles
+## Mudanças no Código
 
+### Arquivo: `src/pages/landing/LandingPage.tsx`
+
+**1. Adicionar import do ícone PlayCircle:**
 ```tsx
-// ANTES
-const roles = [
-  { value: "atendente", ..., requiresDepartments: true },
-];
-
-// DEPOIS
-const roles = [
-  { value: "atendente", ..., requiresDepartments: false }, // ou remover a propriedade
-];
+import {
+  // ... imports existentes
+  PlayCircle,
+} from "lucide-react";
 ```
 
-### 3. Remover estado e lógica de departamentos
-
+**2. Adicionar nova seção após o Hero (linha ~327):**
 ```tsx
-// REMOVER
-const { departments } = useDepartments();
-const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
-const selectedRole = roles.find(r => r.value === role);
-const requiresDepartments = selectedRole?.requiresDepartments ?? false;
-const handleDepartmentToggle = ...
-```
-
-### 4. Remover validação de departamentos no submit
-
-```tsx
-// REMOVER
-if (requiresDepartments && selectedDepartments.length === 0) {
-  setError("Selecione pelo menos um departamento para o Atendente");
-  return;
-}
-```
-
-### 5. Simplificar envio
-
-```tsx
-// ANTES
-departmentIds: requiresDepartments ? selectedDepartments : [],
-
-// DEPOIS
-departmentIds: [], // Sempre vazio na criação
-```
-
-### 6. Remover toda a seção de UI de departamentos (linhas 194-236)
-
-Remover o bloco:
-```tsx
-{requiresDepartments && (
-  <div className="space-y-2">
-    <Label>Departamentos *</Label>
-    ...
+{/* Seção - Vídeo Tutorial */}
+<section className="relative z-10 py-16 md:py-20 border-t border-white/[0.06]">
+  <div className="max-w-4xl mx-auto px-6">
+    <div className="text-center mb-8">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-red-500/10 border border-red-500/20 mb-6">
+        <PlayCircle className="h-7 w-7 text-red-500" strokeWidth={1.5} />
+      </div>
+      <p className="text-red-500 text-xs font-medium tracking-widest uppercase mb-3">
+        Veja como é simples
+      </p>
+      <h2 className="text-2xl md:text-3xl font-bold leading-tight">
+        Como criar sua conta e
+        <br />
+        <span className="text-red-500">começar a usar o MiauChat</span>
+      </h2>
+      <p className="mt-4 text-base text-white/50">
+        Assista ao vídeo e veja como é fácil começar
+      </p>
+    </div>
+    
+    {/* Video Container */}
+    <div className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-black/50">
+      <div className="aspect-video">
+        <iframe
+          src="https://www.youtube.com/embed/q9VESHWqHBQ"
+          title="Como criar conta no MiauChat"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          className="w-full h-full border-0"
+        />
+      </div>
+    </div>
   </div>
-)}
+</section>
 ```
 
-### 7. Atualizar descrição do perfil Atendente
+## Características Técnicas
 
-```tsx
-// ANTES
-description: "Acesso apenas aos departamentos selecionados",
+1. **Responsivo**: Usa `aspect-video` (16:9) do Tailwind para manter proporção
+2. **Consistente**: Segue o mesmo padrão visual das outras seções
+3. **Performante**: Embed nativo do YouTube (lazy loading automático)
+4. **Acessível**: Título descritivo no iframe para leitores de tela
 
-// DEPOIS  
-description: "Acesso restrito - configure departamentos após criação",
-```
+## Resultado Esperado
 
-## Resultado Final
-
-O modal de convite terá apenas:
-- Nome Completo
-- Email
-- Perfil de Acesso (Admin, Gerente, Supervisor, Atendente)
-- Mensagem de credenciais automáticas
-
-## Fluxo do Usuário
-
-1. Clica "Convidar Membro"
-2. Preenche nome, email, seleciona "Atendente"
-3. Clica "Enviar Convite"
-4. Membro é criado
-5. Na lista de membros, clica "Editar"
-6. Seleciona os departamentos no dialog de edição (já funciona)
-
-## Checklist de Testes
-
-1. **Criar atendente**
-   - [ ] Modal abre sem crash
-   - [ ] NÃO aparece seleção de departamentos
-   - [ ] Consegue criar atendente normalmente
-
-2. **Editar atendente** (já funciona)
-   - [ ] Clica em Editar
-   - [ ] Aparece seleção de departamentos
-   - [ ] Consegue marcar/desmarcar sem crash
-   - [ ] Salva corretamente
-
-## Risco
-
-**Mínimo** - Estamos apenas removendo código, não adicionando complexidade.
+- Nova seção aparece logo após o Hero
+- Vídeo carrega diretamente no player embed
+- Layout responsivo funciona em mobile e desktop
+- Visual integrado com o restante da landing page
 
