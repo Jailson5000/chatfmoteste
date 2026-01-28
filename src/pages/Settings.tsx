@@ -717,20 +717,38 @@ export default function Settings() {
                             <div className="space-y-2 border rounded-lg p-3 max-h-[200px] overflow-y-auto">
                               {activeDepartments.length > 0 ? (
                                 activeDepartments.map(dept => (
-                                  <label key={dept.id} className="flex items-center gap-2 cursor-pointer">
+                                  <div 
+                                    key={dept.id} 
+                                    className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditMemberDepts(prev => 
+                                        prev.includes(dept.id) 
+                                          ? prev.filter(id => id !== dept.id)
+                                          : [...prev, dept.id]
+                                      );
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                  >
                                     <Checkbox 
                                       checked={editMemberDepts.includes(dept.id)}
                                       onCheckedChange={(checked) => {
-                                        if (checked) {
-                                          setEditMemberDepts(prev => [...prev, dept.id]);
+                                        if (checked === true) {
+                                          if (!editMemberDepts.includes(dept.id)) {
+                                            setEditMemberDepts(prev => [...prev, dept.id]);
+                                          }
                                         } else {
-                                          setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
+                                          if (editMemberDepts.includes(dept.id)) {
+                                            setEditMemberDepts(prev => prev.filter(id => id !== dept.id));
+                                          }
                                         }
                                       }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onPointerDown={(e) => e.stopPropagation()}
                                     />
                                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dept.color }} />
                                     <span className="text-sm">{dept.name}</span>
-                                  </label>
+                                  </div>
                                 ))
                               ) : (
                                 <p className="text-sm text-muted-foreground text-center py-2">
