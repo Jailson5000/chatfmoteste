@@ -120,36 +120,10 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
     }
   };
 
-  // Handler para bloquear dismiss quando clique é dentro da lista de departamentos
-  const getRadixOriginalTarget = (event: any): Node | null => {
-    const fromDetail = event?.detail?.originalEvent?.target as Node | undefined;
-    const direct = event?.target as Node | undefined;
-    return (fromDetail ?? direct) ?? null;
-  };
-
-  // Handler para bloquear dismiss quando o clique é dentro da lista de departamentos
-  const handleInteractOutside = (event: any) => {
-    const target = getRadixOriginalTarget(event);
-    if (target && deptListRef.current?.contains(target)) {
-      event.preventDefault?.();
-    }
-  };
-
-  // Handler redundante para pointer down (reforço de segurança)
-  const handlePointerDownOutside = (event: any) => {
-    const target = getRadixOriginalTarget(event);
-    if (target && deptListRef.current?.contains(target)) {
-      event.preventDefault?.();
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent
-        className="sm:max-w-[500px]"
-        onInteractOutside={handleInteractOutside}
-        onPointerDownOutside={handlePointerDownOutside}
-      >
+      <DialogContent className="sm:max-w-[500px]">
         <InviteMemberDialogErrorBoundary>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -231,6 +205,7 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
               <div 
                 ref={deptListRef}
                 className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
+                onPointerDownCapture={(e) => e.stopPropagation()}
               >
                 {departments.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
