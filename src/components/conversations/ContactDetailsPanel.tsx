@@ -884,7 +884,7 @@ export function ContactDetailsPanel({
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-1">
-                  <ScrollArea className="max-h-48">
+                  <div className="max-h-[60vh] overflow-y-auto pr-2 overscroll-contain">
                     <div className="space-y-0.5 pl-2">
                       {statuses.map(status => {
                         const isSelected = currentStatus?.id === status.id;
@@ -921,7 +921,7 @@ export function ContactDetailsPanel({
                         <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum status cadastrado</span>
                       )}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </CollapsibleContent>
               </Collapsible>
 
@@ -963,7 +963,7 @@ export function ContactDetailsPanel({
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-1">
-                  <ScrollArea className="max-h-48">
+                  <div className="max-h-[60vh] overflow-y-auto pr-2 overscroll-contain">
                     <div className="space-y-0.5 pl-2">
                       {tags.map(tag => {
                         const isSelected = conversationTags.some(t => t.id === tag.id);
@@ -1003,7 +1003,7 @@ export function ContactDetailsPanel({
                         <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhuma etiqueta cadastrada</span>
                       )}
                     </div>
-                  </ScrollArea>
+                  </div>
                   {conversationTags.length >= 4 && (
                     <p className="text-[10px] text-muted-foreground mt-1 px-3">Máximo de 4 etiquetas</p>
                   )}
@@ -1040,7 +1040,7 @@ export function ContactDetailsPanel({
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-1">
-                  <ScrollArea className="max-h-[60vh]">
+                  <div className="max-h-[60vh] overflow-y-auto pr-2 overscroll-contain">
                     <div className="space-y-0.5 pl-2">
                       {departments.map(dept => {
                         const isSelected = currentDepartment?.id === dept.id;
@@ -1077,7 +1077,7 @@ export function ContactDetailsPanel({
                         <span className="text-xs text-muted-foreground px-3 py-2 block">Nenhum departamento cadastrado</span>
                       )}
                     </div>
-                  </ScrollArea>
+                  </div>
                 </CollapsibleContent>
               </Collapsible>
             </div>
