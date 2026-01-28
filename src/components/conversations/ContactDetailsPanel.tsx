@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useCustomStatuses } from "@/hooks/useCustomStatuses";
+import { useDepartments } from "@/hooks/useDepartments";
+import { useTags } from "@/hooks/useTags";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -121,9 +124,7 @@ interface ContactDetailsPanelProps {
     assigned_profile?: { full_name: string } | null;
     whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
   } | null;
-  departments: Array<{ id: string; name: string; color: string }>;
-  tags: Array<{ id: string; name: string; color: string }>;
-  statuses: Array<{ id: string; name: string; color: string }>;
+  // Removed: departments, tags, statuses - now using hooks directly
   members: Array<{ id: string; full_name: string }>;
   automations: Automation[];
   onClose: () => void;
@@ -144,9 +145,6 @@ function getInitials(name: string | null): string {
 
 export function ContactDetailsPanel({
   conversation,
-  departments,
-  tags,
-  statuses,
   members,
   automations,
   onClose,
@@ -158,6 +156,16 @@ export function ContactDetailsPanel({
   onChangeTags,
 }: ContactDetailsPanelProps) {
   const queryClient = useQueryClient();
+  
+  // Use hooks directly to ensure consistent data (same as ContactStatusTags)
+  const { statuses: allStatuses } = useCustomStatuses();
+  const { departments: allDepartments } = useDepartments();
+  const { tags: allTags } = useTags();
+  
+  // Filter active items only
+  const statuses = useMemo(() => allStatuses.filter(s => s.is_active), [allStatuses]);
+  const departments = useMemo(() => allDepartments.filter(d => d.is_active), [allDepartments]);
+  const tags = useMemo(() => allTags, [allTags]); // Tags don't have is_active
   
   // Client ID for actions
   const clientId = conversation?.client?.id;
