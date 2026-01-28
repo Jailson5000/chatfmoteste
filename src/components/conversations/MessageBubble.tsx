@@ -790,6 +790,12 @@ function AIAudioPlayer({
   );
 }
 
+// Helper to check if URL is a public Supabase Storage URL (no decryption needed)
+function isPublicStorageUrl(url: string): boolean {
+  return url.includes('supabase.co/storage/v1/object/public/') || 
+         url.includes('.supabase.co/storage/v1/object/public/');
+}
+
 // Custom image component with decryption support
 function ImageViewer({ 
   src, 
@@ -807,9 +813,12 @@ function ImageViewer({
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
 
-  // Para imagens do WhatsApp sempre forçar descriptografia via backend
-  // para evitar URLs expiradas e garantir exibição consistente.
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  // CRITICAL FIX: Don't decrypt public URLs (e.g., template media from Supabase Storage)
+  // Public URLs can be accessed directly without WhatsApp decryption
+  const isPublicUrl = isPublicStorageUrl(src);
+  
+  // Only need decryption for WhatsApp encrypted media (not public URLs)
+  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
 
   // Decrypt/fetch image on mount if needed
   useEffect(() => {
@@ -950,8 +959,11 @@ function VideoPlayer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
 
-  // Para vídeos do WhatsApp sempre forçar descriptografia via backend
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  // CRITICAL FIX: Don't decrypt public URLs (e.g., template media from Supabase Storage)
+  const isPublicUrl = isPublicStorageUrl(src);
+  
+  // Only need decryption for WhatsApp encrypted media (not public URLs)
+  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
 
   // Decrypt video on mount if needed
   useEffect(() => {
@@ -1080,9 +1092,11 @@ function DocumentViewer({
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [error, setError] = useState(false);
 
-  // Para documentos do WhatsApp sempre forçar descriptografia via backend
-  // para garantir download correto com extensão (sem .enc) e evitar URLs expiradas.
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  // CRITICAL FIX: Don't decrypt public URLs (e.g., template media from Supabase Storage)
+  const isPublicUrl = isPublicStorageUrl(src);
+  
+  // Only need decryption for WhatsApp encrypted media (not public URLs)
+  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
   
   // Check if this is an internal chat file (private bucket)
   // Support both new format (internal-chat-files://) and old format (supabase URL with internal-chat-files)

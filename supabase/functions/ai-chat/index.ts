@@ -1869,7 +1869,8 @@ async function executeTemplateTool(
     console.log(`[AI Chat] Template send context: origin=${origin}, isWidget=${isWidgetConversation}, instanceId=${instanceId}`);
     
     // For WhatsApp conversations, send directly via Evolution API
-    let whatsappMessageId: string | null = null;
+    let whatsappTextMessageId: string | null = null;
+    let whatsappMediaMessageId: string | null = null;
     let whatsappSendSuccess = false;
     
     if (!isWidgetConversation && instanceId && remoteJid) {
@@ -1900,9 +1901,9 @@ async function executeTemplateTool(
               
               if (textResponse.ok) {
                 const textResult = await textResponse.json();
-                whatsappMessageId = textResult?.key?.id;
+                whatsappTextMessageId = textResult?.key?.id;
                 whatsappSendSuccess = true;
-                console.log(`[AI Chat] Template text sent to WhatsApp: ${whatsappMessageId}`);
+                console.log(`[AI Chat] Template text sent to WhatsApp: ${whatsappTextMessageId}`);
               } else {
                 const errorText = await textResponse.text();
                 console.error(`[AI Chat] Failed to send template text to WhatsApp:`, errorText);
@@ -1974,9 +1975,9 @@ async function executeTemplateTool(
               
               if (mediaResponse.ok) {
                 const mediaResult = await mediaResponse.json();
-                const mediaMessageId = mediaResult?.key?.id;
+                whatsappMediaMessageId = mediaResult?.key?.id;
                 whatsappSendSuccess = true;
-                console.log(`[AI Chat] Template media sent to WhatsApp: ${mediaMessageId}`);
+                console.log(`[AI Chat] Template media sent to WhatsApp: ${whatsappMediaMessageId}`);
               } else {
                 const errorText = await mediaResponse.text();
                 console.error(`[AI Chat] Failed to send template media to WhatsApp:`, errorText);
@@ -1991,33 +1992,81 @@ async function executeTemplateTool(
       }
     }
     
-    // Save template message to database
-    const messageType = finalMediaUrl ? 'media' : 'text';
-    const { data: savedMsg, error: saveError } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      law_firm_id: lawFirmId,
-      whatsapp_message_id: whatsappMessageId,
-      content: finalContent || '',
-      sender_type: "ai",
-      is_from_me: true,
-      message_type: messageType,
-      media_url: finalMediaUrl,
-      media_mime_type: mediaMimeType,
-      status: whatsappSendSuccess ? "sent" : "delivered",
-      ai_generated: true,
-      metadata: { 
-        template_id: matchedTemplate.id, 
-        template_name: matchedTemplate.name,
-        sent_via_whatsapp: whatsappSendSuccess
-      }
-    }).select("id").single();
+    // CRITICAL FIX: Save TEXT and MEDIA as SEPARATE messages
+    // This ensures each message has its own whatsapp_message_id for:
+    // 1. Proper duplicate detection in webhook
+    // 2. Correct media decryption (media needs its own message ID)
     
-    if (saveError) {
-      console.error(`[AI Chat] Failed to save template message:`, saveError);
-      return JSON.stringify({ error: "Erro ao salvar mensagem do template" });
-    } else {
-      console.log(`[AI Chat] Template message saved: ${savedMsg?.id}, hasMedia: ${!!finalMediaUrl}, whatsappSent: ${whatsappSendSuccess}`);
+    let savedTextMsgId: string | null = null;
+    let savedMediaMsgId: string | null = null;
+    
+    // Save TEXT message if there's content
+    if (finalContent) {
+      const { data: savedTextMsg, error: textSaveError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        law_firm_id: lawFirmId,
+        whatsapp_message_id: whatsappTextMessageId,
+        content: finalContent,
+        sender_type: "ai",
+        is_from_me: true,
+        message_type: 'text',
+        media_url: null, // Text message has no media
+        media_mime_type: null,
+        status: whatsappSendSuccess ? "sent" : "delivered",
+        ai_generated: true,
+        metadata: { 
+          template_id: matchedTemplate.id, 
+          template_name: matchedTemplate.name,
+          sent_via_whatsapp: whatsappSendSuccess,
+          has_companion_media: !!finalMediaUrl
+        }
+      }).select("id").single();
+      
+      if (textSaveError) {
+        console.error(`[AI Chat] Failed to save template text message:`, textSaveError);
+      } else {
+        savedTextMsgId = savedTextMsg?.id;
+        console.log(`[AI Chat] Template text message saved: ${savedTextMsgId}, whatsappId: ${whatsappTextMessageId}`);
+      }
     }
+    
+    // Save MEDIA message SEPARATELY if there's media
+    if (finalMediaUrl) {
+      // Determine the correct message_type based on media type
+      let mediaMessageType = 'image';
+      if (finalMediaType === 'video') mediaMessageType = 'video';
+      else if (finalMediaType === 'document') mediaMessageType = 'document';
+      
+      const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        law_firm_id: lawFirmId,
+        whatsapp_message_id: whatsappMediaMessageId, // Use the MEDIA message ID, not text
+        content: null, // Media message typically has no text content
+        sender_type: "ai",
+        is_from_me: true,
+        message_type: mediaMessageType,
+        media_url: finalMediaUrl,
+        media_mime_type: mediaMimeType,
+        status: whatsappSendSuccess ? "sent" : "delivered",
+        ai_generated: true,
+        metadata: { 
+          template_id: matchedTemplate.id, 
+          template_name: matchedTemplate.name,
+          sent_via_whatsapp: whatsappSendSuccess,
+          is_public_url: finalMediaUrl.includes('supabase.co/storage/v1/object/public/')
+        }
+      }).select("id").single();
+      
+      if (mediaSaveError) {
+        console.error(`[AI Chat] Failed to save template media message:`, mediaSaveError);
+      } else {
+        savedMediaMsgId = savedMediaMsg?.id;
+        console.log(`[AI Chat] Template media message saved: ${savedMediaMsgId}, whatsappId: ${whatsappMediaMessageId}, type: ${mediaMessageType}`);
+      }
+    }
+    
+    // Log overall status
+    console.log(`[AI Chat] Template save complete: textMsg=${savedTextMsgId}, mediaMsg=${savedMediaMsgId}, whatsappSent=${whatsappSendSuccess}`);
     
     // Update conversation last_message_at
     await supabase
