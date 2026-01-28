@@ -1034,9 +1034,54 @@ export default function GlobalAdminCompanies() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={statusColors[company.status] || "outline"}>
-                              {statusLabels[company.status] || company.status}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant={statusColors[company.status] || "outline"}>
+                                {statusLabels[company.status] || company.status}
+                              </Badge>
+                              {/* Trial indicator with remaining days */}
+                              {company.trial_type && company.trial_type !== 'none' && company.trial_ends_at && (
+                                (() => {
+                                  const now = new Date();
+                                  const trialEnd = new Date(company.trial_ends_at);
+                                  const diffTime = trialEnd.getTime() - now.getTime();
+                                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                  const isExpired = diffDays <= 0;
+                                  
+                                  return (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Badge 
+                                            variant="outline" 
+                                            className={`text-xs ${
+                                              isExpired 
+                                                ? 'bg-red-50 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400' 
+                                                : diffDays <= 2 
+                                                  ? 'bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-900/20 dark:text-orange-400'
+                                                  : 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400'
+                                            }`}
+                                          >
+                                            <Clock className="h-3 w-3 mr-1" />
+                                            {isExpired 
+                                              ? 'Trial expirado' 
+                                              : `${diffDays} dia${diffDays !== 1 ? 's' : ''} restante${diffDays !== 1 ? 's' : ''}`
+                                            }
+                                          </Badge>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <div className="text-sm">
+                                            <p><strong>Trial {company.trial_type === 'manual' ? 'Manual' : 'Automático'}</strong></p>
+                                            <p>Início: {company.trial_started_at ? new Date(company.trial_started_at).toLocaleDateString('pt-BR') : '-'}</p>
+                                            <p>Término: {new Date(company.trial_ends_at).toLocaleDateString('pt-BR')}</p>
+                                            {isExpired && <p className="text-red-500 font-medium mt-1">Acesso bloqueado</p>}
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                })()
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <TooltipProvider>

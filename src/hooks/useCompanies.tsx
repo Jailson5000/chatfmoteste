@@ -14,6 +14,8 @@ interface Company {
   max_users: number;
   max_instances: number;
   trial_ends_at: string | null;
+  trial_type: 'none' | 'auto_plan' | 'manual' | null;
+  trial_started_at: string | null;
   created_at: string;
   updated_at: string;
   subdomain?: string;
