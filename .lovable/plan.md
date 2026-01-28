@@ -1,165 +1,158 @@
 
-# Correção: Templates da IA com Mídia não Aparecem no Chat + Duplicação
+# Correção: Templates da IA não Aparecem no Chat
 
-## Problemas Identificados
+## Problema Identificado
 
-Analisando as screenshots e o código, identifiquei dois problemas distintos mas relacionados:
-
-### Problema 1: Templates com Mídia não Exibem Imagens no Chat MiauChat
-
-**Causa raiz:** A função `executeTemplateTool` envia texto e mídia SEPARADAMENTE para o WhatsApp, mas salva apenas UMA mensagem no banco de dados.
-
+### Causa Raiz Confirmada nos Logs
 ```text
-Fluxo atual:
-┌─────────────────────────────────────────────────────────────┐
-│ 1. IA chama send_template("Baixar extratos")                │
-│ 2. executeTemplateTool extrai [IMAGE]url do conteúdo        │
-│ 3. Envia TEXTO via Evolution API → recebe whatsapp_id_texto │
-│ 4. Envia MÍDIA via Evolution API → recebe whatsapp_id_mídia │
-│ 5. Salva UMA mensagem com whatsapp_id_texto e media_url     │
-│ 6. Problema: mídia não tem whatsapp_message_id vinculado    │
-│    então não consegue descriptografar via get_media         │
-└─────────────────────────────────────────────────────────────┘
+ERROR [AI Chat] Failed to save template media message: {
+  code: "PGRST204",
+  message: "Could not find the 'metadata' column of 'messages' in the schema cache"
+}
 ```
 
-**Por que a imagem não aparece no chat:**
-- A mensagem salva no banco tem `message_type: 'media'` e `media_url` com a URL pública do template
-- Mas quando o `MessageBubble` tenta renderizar, ele usa o `whatsappMessageId` para descriptografar
-- O `whatsappMessageId` salvo é do TEXTO, não da MÍDIA
-- Resultado: a função `get_media` falha porque o ID não corresponde a uma mídia
+O código atual tenta inserir dados na coluna `metadata` da tabela `messages`, mas **essa coluna não existe**.
 
-### Problema 2: Mensagens Duplicadas no WhatsApp
-
-**Causa raiz:** O fluxo `send.message` do Evolution API não está sendo ignorado adequadamente.
+### Fluxo Atual (Quebrado)
 
 ```text
-Cenário de duplicação:
-┌─────────────────────────────────────────────────────────────┐
-│ 1. executeTemplateTool envia mídia para WhatsApp            │
-│ 2. Evolution API dispara webhook 'send.message' com mídia   │
-│ 3. evolution-webhook recebe evento                          │
-│ 4. Tenta salvar nova mensagem (não encontra duplicata)      │
-│ 5. Resultado: DUAS mensagens com mesma imagem no WhatsApp   │
-│    (uma do ai-chat + uma do webhook)                        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. IA chama send_template("Baixar extratos")                        │
+│ 2. executeTemplateTool:                                              │
+│    → Envia TEXTO via WhatsApp (OK) ✓                                 │
+│    → Envia MÍDIA via WhatsApp (OK) ✓                                 │
+│    → Tenta salvar TEXTO no banco com "metadata" → ERRO ✗            │
+│    → Tenta salvar MÍDIA no banco com "metadata" → ERRO ✗            │
+│ 3. Resultado:                                                        │
+│    • Mensagens chegam no WhatsApp do cliente ✓                       │
+│    • Mensagens NÃO são salvas no banco de dados ✗                   │
+│    • Mensagens NÃO aparecem no chat do MiauChat ✗                   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
----
+### Por que algumas mensagens antigas funcionam?
+As mensagens antigas com imagem (de 16-17/01) foram criadas antes da modificação que adicionou o campo `metadata` no insert. O webhook do Evolution API (`evolution-webhook`) também cria mensagens, mas sem esse campo problemático.
 
-## Solução Proposta
+## Solução
 
-### Correção 1: Salvar Mensagens de Mídia Separadamente
+### Correção 1: Remover campo `metadata` dos inserts
 
-Modificar `executeTemplateTool` em `supabase/functions/ai-chat/index.ts`:
+O campo `metadata` não existe na tabela `messages`. Precisamos removê-lo de AMBOS os inserts (texto e mídia) na função `executeTemplateTool`.
 
-**Antes:**
+**Arquivo:** `supabase/functions/ai-chat/index.ts`
+
+**Linhas 2005-2023 (insert de texto):**
 ```typescript
-// Salva UMA mensagem com ambos texto e mídia
-const { data: savedMsg } = await supabase.from("messages").insert({
-  whatsapp_message_id: whatsappMessageId, // ID do texto apenas
+// ANTES (quebrado)
+const { data: savedTextMsg, error: textSaveError } = await supabase.from("messages").insert({
+  // ... campos válidos ...
+  metadata: {  // ← ERRO: coluna não existe!
+    template_id: matchedTemplate.id,
+    template_name: matchedTemplate.name,
+    sent_via_whatsapp: whatsappSendSuccess,
+    has_companion_media: !!finalMediaUrl
+  }
+}).select("id").single();
+
+// DEPOIS (corrigido)
+const { data: savedTextMsg, error: textSaveError } = await supabase.from("messages").insert({
+  conversation_id: conversationId,
+  law_firm_id: lawFirmId,
+  whatsapp_message_id: whatsappTextMessageId,
   content: finalContent,
-  message_type: finalMediaUrl ? 'media' : 'text',
+  sender_type: "ai",
+  is_from_me: true,
+  message_type: 'text',
+  media_url: null,
+  media_mime_type: null,
+  status: whatsappSendSuccess ? "sent" : "delivered",
+  ai_generated: true,
+  // REMOVIDO: metadata (coluna não existe)
+}).select("id").single();
+```
+
+**Linhas 2040-2058 (insert de mídia):**
+```typescript
+// ANTES (quebrado)
+const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
+  // ... campos válidos ...
+  metadata: {  // ← ERRO: coluna não existe!
+    template_id: matchedTemplate.id,
+    template_name: matchedTemplate.name,
+    sent_via_whatsapp: whatsappSendSuccess,
+    is_public_url: ...
+  }
+}).select("id").single();
+
+// DEPOIS (corrigido)
+const { data: savedMediaMsg, error: mediaSaveError } = await supabase.from("messages").insert({
+  conversation_id: conversationId,
+  law_firm_id: lawFirmId,
+  whatsapp_message_id: whatsappMediaMessageId,
+  content: null,
+  sender_type: "ai",
+  is_from_me: true,
+  message_type: mediaMessageType,
   media_url: finalMediaUrl,
-  ...
-});
+  media_mime_type: mediaMimeType,
+  status: whatsappSendSuccess ? "sent" : "delivered",
+  ai_generated: true,
+  // REMOVIDO: metadata (coluna não existe)
+}).select("id").single();
 ```
 
-**Depois:**
-```typescript
-// 1. Se tem TEXTO, salvar mensagem de texto
-if (finalContent) {
-  await supabase.from("messages").insert({
-    whatsapp_message_id: whatsappMessageId, // ID do texto
-    content: finalContent,
-    message_type: 'text',
-    // SEM media_url no texto
-    ...
-  });
-}
+### Correção 2: Melhorar renderização de mídia pública
 
-// 2. Se tem MÍDIA, salvar mensagem de mídia SEPARADA
-if (finalMediaUrl) {
-  await supabase.from("messages").insert({
-    whatsapp_message_id: mediaMessageId, // ID da mídia (do sendMedia)
-    content: null, // Mídia não precisa de content
-    message_type: 'image' | 'video' | 'document',
-    media_url: finalMediaUrl,
-    ...
-  });
+O componente `MessageBubble` já possui a lógica `isPublicStorageUrl()` para detectar URLs públicas, mas vou garantir que está funcionando corretamente para templates.
+
+**Arquivo:** `src/components/conversations/MessageBubble.tsx`
+
+A função `isPublicStorageUrl` já existe (linha 794-796) e deve funcionar. A verificação é:
+```typescript
+function isPublicStorageUrl(url: string): boolean {
+  return url.includes('supabase.co/storage/v1/object/public/') || 
+         url.includes('.supabase.co/storage/v1/object/public/');
 }
 ```
 
-### Correção 2: Evitar Duplicação no Webhook
-
-O `evolution-webhook` já tem verificação de duplicatas por `whatsapp_message_id`, mas precisamos garantir que:
-
-1. O `mediaMessageId` seja capturado corretamente do envio de mídia
-2. Esse ID seja salvo na mensagem de mídia para que o webhook reconheça como duplicata
-
-Atualmente a verificação existe em linha 4154-4163:
-```typescript
-const { data: existingMsg } = await supabaseClient
-  .from('messages')
-  .select('id')
-  .eq('conversation_id', conversation.id)
-  .eq('whatsapp_message_id', data.key.id)
-  .maybeSingle();
-
-if (existingMsg?.id) {
-  logDebug('MESSAGE', `Duplicate message ignored...`);
-  break;
-}
-```
-
-Com a correção 1, quando salvamos o `mediaMessageId` correto, o webhook vai encontrar a duplicata e ignorar.
-
-### Correção 3: Usar URL Pública para Mídia de Templates
-
-Para templates que usam URLs públicas do Supabase Storage (como `https://...supabase.co/storage/v1/object/public/...`), NÃO precisamos de descriptografia. O `MessageBubble` deve detectar isso:
-
-**Em `src/components/conversations/MessageBubble.tsx`:**
-
-```typescript
-// No ImageViewer/VideoPlayer/DocumentViewer
-// Não precisa de descriptografia se:
-// 1. URL é pública (não é WhatsApp encrypted)
-// 2. Ou mensagem é ai_generated com URL de storage
-const isPublicUrl = src.includes('supabase.co/storage/') || 
-                    (!src.includes('.enc') && !src.includes('mmg.whatsapp.net'));
-const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
-```
-
----
+Isso já cobre as URLs do bucket `template-media` usado pelos templates.
 
 ## Arquivos a Modificar
 
-### 1. `supabase/functions/ai-chat/index.ts`
+1. **`supabase/functions/ai-chat/index.ts`**
+   - Remover campo `metadata` do insert de texto (linhas 2017-2022)
+   - Remover campo `metadata` do insert de mídia (linhas 2052-2057)
+   - Manter logs de debug para rastrear template_id
 
-**Função `executeTemplateTool` (linhas ~1764-2050):**
-- Separar salvamento de texto e mídia
-- Capturar e usar o `mediaMessageId` corretamente
-- Melhorar logging para debug
+## Resultado Esperado
 
-### 2. `src/components/conversations/MessageBubble.tsx`
+Após a correção:
 
-**Componentes `ImageViewer`, `VideoPlayer`, `DocumentViewer`:**
-- Detectar URLs públicas que não precisam de descriptografia
-- Exibir mídia diretamente quando URL é acessível
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. IA chama send_template("Baixar extratos")                        │
+│ 2. executeTemplateTool:                                              │
+│    → Envia TEXTO via WhatsApp (OK) ✓                                 │
+│    → Envia MÍDIA via WhatsApp (OK) ✓                                 │
+│    → Salva TEXTO no banco (OK) ✓                                    │
+│    → Salva MÍDIA no banco (OK) ✓                                    │
+│ 3. Resultado:                                                        │
+│    • Mensagens chegam no WhatsApp do cliente ✓                       │
+│    • Mensagens são salvas no banco de dados ✓                       │
+│    • Mensagens aparecem no chat do MiauChat ✓                       │
+│    • Imagens/vídeos renderizam diretamente (URL pública) ✓          │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
----
+## Considerações de Segurança
 
-## Testes a Realizar
+- Não haverá regressões - apenas removemos um campo que causava erro
+- O fluxo de envio de mídia pelo atendente (`handleSendMedia`) já funciona corretamente, pois não usa o campo `metadata`
+- O webhook (`evolution-webhook`) também não usa esse campo
 
-1. **Enviar template com imagem via IA**
-   - [ ] Verificar que imagem aparece no chat MiauChat
-   - [ ] Verificar que imagem aparece no WhatsApp do cliente
-   - [ ] Verificar que NÃO há duplicação
+## Testes Recomendados
 
-2. **Verificar banco de dados**
-   - [ ] Template com texto+imagem cria 2 mensagens (texto e imagem separadas)
-   - [ ] Cada mensagem tem seu próprio `whatsapp_message_id`
-
-3. **Testar diferentes tipos de mídia**
-   - [ ] Template com imagem
-   - [ ] Template com vídeo
-   - [ ] Template com documento PDF
+1. Enviar template com imagem via IA → verificar se aparece no chat e WhatsApp
+2. Enviar template com vídeo via IA → verificar se aparece no chat e WhatsApp
+3. Enviar template só texto via IA → verificar se aparece normalmente
+4. Verificar que mensagens antigas continuam funcionando
