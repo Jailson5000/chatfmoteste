@@ -28,6 +28,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Building2,
   Search,
   AlertTriangle,
@@ -46,6 +52,8 @@ import {
   ArrowUpRight,
   Trash2,
   DollarSign,
+  Clock,
+  X,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -58,7 +66,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCompanies } from "@/hooks/useCompanies";
-import { format } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { calculateAdditionalCosts, formatCurrency, ADDITIONAL_PRICING } from "@/lib/billing-config";
@@ -104,14 +112,18 @@ interface CompanyWithStatus extends CompanyUsage {
   last_activity?: string;
   agents?: AgentWithConversations[];
   monthly_value?: number;
+  trial_type?: string | null;
+  trial_ends_at?: string | null;
+  trial_started_at?: string | null;
 }
 
-type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled" | "critical" | "warning";
+type StatusFilter = "all" | "active" | "pending" | "suspended" | "blocked" | "cancelled" | "critical" | "warning" | "trial";
 
 interface CompanyUsageTableProps {
   initialFilter?: StatusFilter;
   onFilterChange?: (filter: StatusFilter) => void;
 }
+
 // Helper to calculate percentage
 const getPercentage = (current: number, max: number): number => {
   if (!max || max === 0) return 0;
@@ -124,6 +136,66 @@ const getAlertLevel = (percentage: number): "ok" | "warning" | "critical" => {
   if (percentage >= 80) return "warning";
   return "ok";
 };
+
+// Trial Badge Component
+function TrialBadge({ company }: { company: CompanyWithStatus }) {
+  if (!company.trial_type || company.trial_type === 'none' || !company.trial_ends_at) return null;
+  
+  const daysLeft = differenceInDays(new Date(company.trial_ends_at), new Date());
+  
+  if (daysLeft < 0) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+              <Clock className="h-3 w-3 mr-1" />
+              Expirado
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
+            <p>Trial {company.trial_type === 'manual' ? 'Manual' : 'Automático'}</p>
+            <p className="text-red-400 text-xs">Expirou em {format(new Date(company.trial_ends_at), "dd/MM/yyyy", { locale: ptBR })}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  if (daysLeft <= 2) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">
+              <Clock className="h-3 w-3 mr-1" />
+              Trial {daysLeft}d
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
+            <p>Trial {company.trial_type === 'manual' ? 'Manual' : 'Automático'}</p>
+            <p className="text-orange-400 text-xs">Expira em {format(new Date(company.trial_ends_at), "dd/MM/yyyy", { locale: ptBR })}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+            <Clock className="h-3 w-3 mr-1" />
+            Trial {daysLeft}d
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
+          <p>Trial {company.trial_type === 'manual' ? 'Manual' : 'Automático'}</p>
+          <p className="text-blue-400 text-xs">Expira em {format(new Date(company.trial_ends_at), "dd/MM/yyyy", { locale: ptBR })}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 // Progress bar with alert colors
 function UsageProgress({ current, max, label }: { current: number; max: number; label: string }) {
@@ -208,6 +280,169 @@ function getCurrentBillingPeriod(): { start: Date; end: Date; label: string } {
   return { start, end, label };
 }
 
+// Company Details Panel Component
+function CompanyDetailsPanel({ 
+  company, 
+  billingPeriod, 
+  onClose,
+  onNavigate
+}: { 
+  company: CompanyWithStatus; 
+  billingPeriod: { start: Date; end: Date; label: string };
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-medium text-white">
+          Consumo Detalhado • Ciclo: {billingPeriod.label}
+        </h4>
+        <div className="flex items-center gap-2 text-xs text-white/40">
+          <Calendar className="h-3 w-3" />
+          Criada em {format(new Date(company.created_at), "dd/MM/yyyy", { locale: ptBR })}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Users */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <Users className="h-4 w-4 text-blue-400" />
+            <span className="text-xs text-white/60">Usuários</span>
+          </div>
+          <UsageProgress
+            current={company.current_users}
+            max={company.effective_max_users}
+            label=""
+          />
+          <p className="mt-1 text-lg font-bold text-white">
+            {company.current_users}
+            <span className="text-sm text-white/40 font-normal">/{company.effective_max_users}</span>
+          </p>
+        </div>
+
+        {/* Connections */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <Wifi className="h-4 w-4 text-green-400" />
+            <span className="text-xs text-white/60">WhatsApp</span>
+          </div>
+          <UsageProgress
+            current={company.current_instances}
+            max={company.effective_max_instances}
+            label=""
+          />
+          <p className="mt-1 text-lg font-bold text-white">
+            {company.current_instances}
+            <span className="text-sm text-white/40 font-normal">/{company.effective_max_instances}</span>
+          </p>
+        </div>
+
+        {/* AI Agents */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <Bot className="h-4 w-4 text-purple-400" />
+            <span className="text-xs text-white/60">Agentes IA</span>
+          </div>
+          <UsageProgress
+            current={company.current_agents}
+            max={company.effective_max_agents}
+            label=""
+          />
+          <p className="mt-1 text-lg font-bold text-white">
+            {company.current_agents}
+            <span className="text-sm text-white/40 font-normal">/{company.effective_max_agents}</span>
+          </p>
+        </div>
+
+        {/* AI Conversations */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <MessageSquare className="h-4 w-4 text-orange-400" />
+            <span className="text-xs text-white/60">Conversas IA/mês</span>
+          </div>
+          <UsageProgress
+            current={company.current_ai_conversations}
+            max={company.effective_max_ai_conversations}
+            label=""
+          />
+          <p className="mt-1 text-lg font-bold text-white">
+            {company.current_ai_conversations}
+            <span className="text-sm text-white/40 font-normal">/{company.effective_max_ai_conversations}</span>
+          </p>
+        </div>
+
+        {/* TTS Minutes */}
+        <div className="p-3 rounded-lg bg-white/5 border border-white/10 sm:col-span-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Mic className="h-4 w-4 text-red-400" />
+            <span className="text-xs text-white/60">Áudio/mês (min)</span>
+          </div>
+          <UsageProgress
+            current={company.current_tts_minutes}
+            max={company.effective_max_tts_minutes}
+            label=""
+          />
+          <p className="mt-1 text-lg font-bold text-white">
+            {Math.round(company.current_tts_minutes)}
+            <span className="text-sm text-white/40 font-normal">/{company.effective_max_tts_minutes}</span>
+          </p>
+        </div>
+      </div>
+
+      {/* Agents breakdown */}
+      {company.agents && company.agents.length > 0 && (
+        <div className="mt-4">
+          <h5 className="text-sm font-medium text-white/80 mb-2 flex items-center gap-2">
+            <Bot className="h-4 w-4 text-purple-400" />
+            Agentes de IA ({company.agents.length})
+          </h5>
+          <div className="grid grid-cols-1 gap-2">
+            {company.agents.map((agent) => (
+              <div 
+                key={agent.id}
+                className="p-2 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-gray-500'}`} />
+                  <span className="text-sm text-white truncate">{agent.name}</span>
+                </div>
+                <div className="flex items-center gap-1 text-xs">
+                  <MessageSquare className="h-3 w-3 text-orange-400" />
+                  <span className="text-white/60">{agent.conversations_count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 pt-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 flex-1"
+          onClick={() => onNavigate(`/global-admin/companies?edit=${company.company_id}`)}
+        >
+          <Settings className="h-3 w-3 mr-2" />
+          Ajustar Limites
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 flex-1"
+          onClick={() => onNavigate(`/global-admin/companies?edit=${company.company_id}`)}
+        >
+          <ArrowUpRight className="h-3 w-3 mr-2" />
+          Alterar Plano
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsageTableProps = {}) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -237,10 +472,10 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
         throw usageError;
       }
 
-      // Fetch company details for status, created_at, etc.
+      // Fetch company details for status, created_at, trial data, etc.
       const { data: companyData, error: companyError } = await supabase
         .from("companies")
-        .select("id, status, created_at, law_firm_id");
+        .select("id, status, created_at, law_firm_id, trial_type, trial_ends_at, trial_started_at");
 
       if (companyError) {
         throw companyError;
@@ -307,6 +542,9 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
           subdomain: lawFirm?.subdomain || null,
           agents: companyAgents,
           monthly_value: monthlyValue,
+          trial_type: company?.trial_type,
+          trial_ends_at: company?.trial_ends_at,
+          trial_started_at: company?.trial_started_at,
         };
       });
 
@@ -339,6 +577,11 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
     if (!companies) return [];
 
     return companies.filter((company) => {
+      // Trial filter
+      if (statusFilter === "trial") {
+        return company.trial_type && company.trial_type !== 'none' && company.trial_ends_at;
+      }
+
       // Alert level filter
       if (statusFilter === "critical") {
         return getCompanyAlertLevel(company) === "critical";
@@ -369,12 +612,13 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
 
   // Stats
   const stats = useMemo(() => {
-    if (!companies) return { total: 0, active: 0, pending: 0, suspended: 0 };
+    if (!companies) return { total: 0, active: 0, pending: 0, suspended: 0, trial: 0 };
     return {
       total: companies.length,
       active: companies.filter((c) => c.status === "active").length,
       pending: companies.filter((c) => c.status === "pending").length,
       suspended: companies.filter((c) => c.status === "suspended" || c.status === "blocked").length,
+      trial: companies.filter((c) => c.trial_type && c.trial_type !== 'none' && c.trial_ends_at).length,
     };
   }, [companies]);
 
@@ -411,6 +655,12 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
     setDeleteConfirm(null);
   };
 
+  // Get selected company for Sheet
+  const selectedCompany = useMemo(() => {
+    if (!expandedRow || !companies) return null;
+    return companies.find(c => c.company_id === expandedRow) || null;
+  }, [expandedRow, companies]);
+
   return (
     <div className="space-y-6">
       {/* Header with stats */}
@@ -443,6 +693,12 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
             <span className="text-xs text-red-400">Suspensas</span>
             <p className="text-lg font-bold text-red-400">{stats.suspended}</p>
           </div>
+          {stats.trial > 0 && (
+            <div className="px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <span className="text-xs text-blue-400">Em Trial</span>
+              <p className="text-lg font-bold text-blue-400">{stats.trial}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -468,6 +724,12 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
             <SelectItem value="suspended" className="text-white hover:bg-white/10">Suspensas</SelectItem>
             <SelectItem value="blocked" className="text-white hover:bg-white/10">Bloqueadas</SelectItem>
             <SelectItem value="cancelled" className="text-white hover:bg-white/10">Canceladas</SelectItem>
+            <SelectItem value="trial" className="text-blue-400 hover:bg-white/10">
+              <span className="flex items-center gap-2">
+                <Clock className="h-3 w-3" />
+                Em Trial
+              </span>
+            </SelectItem>
             <SelectItem value="critical" className="text-red-400 hover:bg-white/10">
               <span className="flex items-center gap-2">
                 <AlertCircle className="h-3 w-3" />
@@ -486,7 +748,7 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
 
       {/* Table */}
       <div className="rounded-xl border border-white/10 overflow-hidden">
-        <ScrollArea className="max-h-[calc(100vh-300px)]">
+        <ScrollArea className="max-h-[calc(100vh-200px)]">
           <Table>
             <TableHeader className="bg-white/5 sticky top-0">
               <TableRow className="border-white/10 hover:bg-transparent">
@@ -514,316 +776,190 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
                 </TableRow>
               ) : (
                 filteredCompanies.map((company) => (
-                  <>
-                    <TableRow
-                      key={company.company_id}
-                      className="border-white/10 hover:bg-white/5 cursor-pointer"
-                      onClick={() => setExpandedRow(expandedRow === company.company_id ? null : company.company_id)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-white/5">
-                            <Building2 className="h-4 w-4 text-white/60" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-white">{company.company_name}</p>
-                            {company.subdomain && (
-                              <p className="text-xs text-white/40">{company.subdomain}.miauchat.com.br</p>
-                            )}
-                          </div>
+                  <TableRow
+                    key={company.company_id}
+                    className={`border-white/10 hover:bg-white/5 cursor-pointer ${
+                      expandedRow === company.company_id ? 'bg-white/5' : ''
+                    }`}
+                    onClick={() => setExpandedRow(expandedRow === company.company_id ? null : company.company_id)}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-white/5">
+                          <Building2 className="h-4 w-4 text-white/60" />
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            className={
-                              company.plan_name === "Enterprise"
-                                ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
-                                : company.plan_name === "Professional"
-                                ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                                : "bg-white/10 text-white/60"
-                            }
-                          >
-                            {company.plan_name || "Sem plano"}
-                          </Badge>
-                          {company.use_custom_limits && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger>
-                                  <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 px-1">
-                                    <Settings className="h-3 w-3" />
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="bg-[#1a1a1a] border-white/10">
-                                  Limites personalizados
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                        <div>
+                          <p className="font-medium text-white">{company.company_name}</p>
+                          {company.subdomain && (
+                            <p className="text-xs text-white/40">{company.subdomain}.miauchat.com.br</p>
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(company.status)}</TableCell>
-                      <TableCell>
-                        <CompanyAlertBadge usage={company} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-4">
-                          <UsageProgress
-                            current={company.current_users}
-                            max={company.effective_max_users}
-                            label="Usuários"
-                          />
-                          <UsageProgress
-                            current={company.current_ai_conversations}
-                            max={company.effective_max_ai_conversations}
-                            label="IA/mês"
-                          />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="flex items-center gap-1">
-                                <DollarSign className="h-4 w-4 text-green-400" />
-                                <span className="font-medium text-white">
-                                  {formatCurrency(company.monthly_value || 0)}
-                                </span>
-                                {company.use_custom_limits && (
-                                  <Badge className="ml-1 bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] px-1">
-                                    +add
-                                  </Badge>
-                                )}
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
-                              <p>Plano: {formatCurrency(company.plan_price || 0)}</p>
-                              {company.use_custom_limits && company.monthly_value && company.plan_price && company.monthly_value > company.plan_price && (
-                                <p className="text-orange-400 text-xs">
-                                  + {formatCurrency(company.monthly_value - company.plan_price)} em adicionais
-                                </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          className={
+                            company.plan_name === "Enterprise"
+                              ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
+                              : company.plan_name === "Professional"
+                              ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                              : "bg-white/10 text-white/60"
+                          }
+                        >
+                          {company.plan_name || "Sem plano"}
+                        </Badge>
+                        {company.use_custom_limits && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 px-1">
+                                  <Settings className="h-3 w-3" />
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-[#1a1a1a] border-white/10">
+                                Limites personalizados
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {getStatusBadge(company.status)}
+                        <TrialBadge company={company} />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <CompanyAlertBadge usage={company} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-4">
+                        <UsageProgress
+                          current={company.current_users}
+                          max={company.effective_max_users}
+                          label="Usuários"
+                        />
+                        <UsageProgress
+                          current={company.current_ai_conversations}
+                          max={company.effective_max_ai_conversations}
+                          label="IA/mês"
+                        />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center gap-1">
+                              <DollarSign className="h-4 w-4 text-green-400" />
+                              <span className="font-medium text-white">
+                                {formatCurrency(company.monthly_value || 0)}
+                              </span>
+                              {company.use_custom_limits && (
+                                <Badge className="ml-1 bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] px-1">
+                                  +add
+                                </Badge>
                               )}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          {company.status === "cancelled" && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDeleteConfirm({ id: company.company_id, name: company.company_name });
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent className="bg-[#1a1a1a] border-white/10">
-                                  Excluir empresa cancelada
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/10"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/global-admin/companies?edit=${company.company_id}`);
-                            }}
-                          >
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/10"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedRow(expandedRow === company.company_id ? null : company.company_id);
-                            }}
-                          >
-                            {expandedRow === company.company_id ? (
-                              <ChevronUp className="h-4 w-4" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4" />
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="bg-[#1a1a1a] border-white/10 text-white">
+                            <p>Plano: {formatCurrency(company.plan_price || 0)}</p>
+                            {company.use_custom_limits && company.monthly_value && company.plan_price && company.monthly_value > company.plan_price && (
+                              <p className="text-orange-400 text-xs">
+                                + {formatCurrency(company.monthly_value - company.plan_price)} em adicionais
+                              </p>
                             )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-
-                    {/* Expanded row with detailed usage */}
-                    {expandedRow === company.company_id && (
-                      <TableRow className="border-white/10 bg-white/[0.02]">
-                        <TableCell colSpan={7} className="p-4">
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-sm font-medium text-white">
-                                Consumo Detalhado • Ciclo: {billingPeriod.label}
-                              </h4>
-                              <div className="flex items-center gap-2 text-xs text-white/40">
-                                <Calendar className="h-3 w-3" />
-                                Criada em {format(new Date(company.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                              {/* Users */}
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Users className="h-4 w-4 text-blue-400" />
-                                  <span className="text-xs text-white/60">Usuários</span>
-                                </div>
-                                <UsageProgress
-                                  current={company.current_users}
-                                  max={company.effective_max_users}
-                                  label=""
-                                />
-                                <p className="mt-1 text-lg font-bold text-white">
-                                  {company.current_users}
-                                  <span className="text-sm text-white/40 font-normal">/{company.effective_max_users}</span>
-                                </p>
-                              </div>
-
-                              {/* Connections */}
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Wifi className="h-4 w-4 text-green-400" />
-                                  <span className="text-xs text-white/60">WhatsApp</span>
-                                </div>
-                                <UsageProgress
-                                  current={company.current_instances}
-                                  max={company.effective_max_instances}
-                                  label=""
-                                />
-                                <p className="mt-1 text-lg font-bold text-white">
-                                  {company.current_instances}
-                                  <span className="text-sm text-white/40 font-normal">/{company.effective_max_instances}</span>
-                                </p>
-                              </div>
-
-                              {/* AI Agents */}
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Bot className="h-4 w-4 text-purple-400" />
-                                  <span className="text-xs text-white/60">Agentes IA</span>
-                                </div>
-                                <UsageProgress
-                                  current={company.current_agents}
-                                  max={company.effective_max_agents}
-                                  label=""
-                                />
-                                <p className="mt-1 text-lg font-bold text-white">
-                                  {company.current_agents}
-                                  <span className="text-sm text-white/40 font-normal">/{company.effective_max_agents}</span>
-                                </p>
-                              </div>
-
-                              {/* AI Conversations */}
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <MessageSquare className="h-4 w-4 text-orange-400" />
-                                  <span className="text-xs text-white/60">Conversas IA/mês</span>
-                                </div>
-                                <UsageProgress
-                                  current={company.current_ai_conversations}
-                                  max={company.effective_max_ai_conversations}
-                                  label=""
-                                />
-                                <p className="mt-1 text-lg font-bold text-white">
-                                  {company.current_ai_conversations}
-                                  <span className="text-sm text-white/40 font-normal">/{company.effective_max_ai_conversations}</span>
-                                </p>
-                              </div>
-
-                              {/* TTS Minutes */}
-                              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Mic className="h-4 w-4 text-red-400" />
-                                  <span className="text-xs text-white/60">Áudio/mês (min)</span>
-                                </div>
-                                <UsageProgress
-                                  current={company.current_tts_minutes}
-                                  max={company.effective_max_tts_minutes}
-                                  label=""
-                                />
-                                <p className="mt-1 text-lg font-bold text-white">
-                                  {Math.round(company.current_tts_minutes)}
-                                  <span className="text-sm text-white/40 font-normal">/{company.effective_max_tts_minutes}</span>
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Agents breakdown */}
-                            {company.agents && company.agents.length > 0 && (
-                              <div className="mt-4">
-                                <h5 className="text-sm font-medium text-white/80 mb-2 flex items-center gap-2">
-                                  <Bot className="h-4 w-4 text-purple-400" />
-                                  Agentes de IA ({company.agents.length})
-                                </h5>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                  {company.agents.map((agent) => (
-                                    <div 
-                                      key={agent.id}
-                                      className="p-2 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between"
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <div className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-green-500' : 'bg-gray-500'}`} />
-                                        <span className="text-sm text-white truncate max-w-[150px]">{agent.name}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <MessageSquare className="h-3 w-3 text-orange-400" />
-                                        <span className="text-white/60">{agent.conversations_count}</span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Actions */}
-                            <div className="flex gap-2 pt-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                onClick={() => navigate(`/global-admin/companies?edit=${company.company_id}`)}
-                              >
-                                <Settings className="h-3 w-3 mr-2" />
-                                Ajustar Limites
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="bg-white/5 border-white/10 text-white hover:bg-white/10"
-                                onClick={() => navigate(`/global-admin/companies?edit=${company.company_id}`)}
-                              >
-                                <ArrowUpRight className="h-3 w-3 mr-2" />
-                                Alterar Plano
-                              </Button>
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {company.status === "cancelled" && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirm({ id: company.company_id, name: company.company_name });
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-[#1a1a1a] border-white/10">
+                                Excluir empresa cancelada
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/global-admin/companies?edit=${company.company_id}`);
+                          }}
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-white/60 hover:text-white hover:bg-white/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedRow(expandedRow === company.company_id ? null : company.company_id);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
-          {/* Extra padding for expanded last row */}
-          <div className="h-32" />
         </ScrollArea>
       </div>
+
+      {/* Company Details Sheet (Lateral Panel) */}
+      <Sheet open={!!selectedCompany} onOpenChange={(open) => !open && setExpandedRow(null)}>
+        <SheetContent 
+          side="right" 
+          className="w-[400px] sm:w-[540px] bg-[#1a1a1a] border-white/10 overflow-y-auto"
+        >
+          <SheetHeader className="mb-4">
+            <SheetTitle className="text-white flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-red-500" />
+              {selectedCompany?.company_name}
+            </SheetTitle>
+            {selectedCompany?.subdomain && (
+              <p className="text-sm text-white/40">{selectedCompany.subdomain}.miauchat.com.br</p>
+            )}
+          </SheetHeader>
+          
+          {selectedCompany && (
+            <CompanyDetailsPanel 
+              company={selectedCompany}
+              billingPeriod={billingPeriod}
+              onClose={() => setExpandedRow(null)}
+              onNavigate={(path) => {
+                setExpandedRow(null);
+                navigate(path);
+              }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
