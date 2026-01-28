@@ -1,88 +1,100 @@
 
-# Correção Definitiva: Overlay Órfão no Modal de Convite
 
-## Problema Identificado
+# Correção: Alinhar InviteMemberDialog com o padrão funcional de Settings.tsx
 
-O clique no nome do departamento **fecha o Dialog parcialmente**, deixando só o overlay visível (tela escura). Isso acontece porque:
+## Diagnóstico Final
 
-1. O Radix Dialog detecta o clique como "interação externa" e dispara `onOpenChange(false)`
-2. O conteúdo do modal fecha, mas o overlay permanece na tela
-3. Os handlers `onInteractOutside` e `onPointerDownOutside` não estão impedindo o dismiss corretamente porque:
-   - O Radix usa `CustomEvent` com `detail.originalEvent`
-   - A verificação `.contains(target)` falha porque o target do evento customizado pode não corresponder corretamente ao elemento clicado
+O `div#root` fica **completamente vazio** após o clique - isso indica um crash total do React. A causa é:
+
+1. **`onPointerDownCapture` no container** - Interceptar na fase de captura pode quebrar o gerenciamento interno de estado do Radix Dialog
+2. **Estrutura diferente do modal que funciona** - O modal de edição em `Settings.tsx` (linhas 720-751) funciona sem problemas usando uma abordagem diferente
+
+## Diferenças Identificadas
+
+| Aspecto | Settings.tsx (funciona) | InviteMemberDialog (quebra) |
+|---------|------------------------|----------------------------|
+| Container | Sem handlers especiais | `onPointerDownCapture` no container |
+| Cada linha | `onPointerDown={(e) => e.stopPropagation()}` | `role="button"`, `tabIndex={0}`, `onKeyDown` |
+| Checkbox | `onClick` + `onPointerDown` com stopPropagation | Igual |
 
 ## Solução
 
-Usar **`onPointerDownCapture`** diretamente no container da lista de departamentos para interceptar o evento **na fase de captura** (antes que chegue ao Radix). Isso é mais confiável que tentar bloquear o dismiss depois.
+Copiar exatamente o padrão que funciona em Settings.tsx:
 
-### Arquivos a Modificar
+### Mudanças em `src/components/admin/InviteMemberDialog.tsx`:
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/components/admin/InviteMemberDialog.tsx` | Adicionar `onPointerDownCapture={(e) => e.stopPropagation()}` no container da lista |
+**1. Remover `onPointerDownCapture` do container (linha 208):**
 
-### Mudanças Específicas
-
-**1. Container da lista de departamentos (linha 231-234):**
-
-**ANTES:**
 ```tsx
-<div 
-  ref={deptListRef}
-  className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
->
-```
-
-**DEPOIS:**
-```tsx
+// ANTES
 <div 
   ref={deptListRef}
   className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
   onPointerDownCapture={(e) => e.stopPropagation()}
 >
-```
 
-**2. Simplificar os handlers do DialogContent:**
-
-Remover `onInteractOutside` e `onPointerDownOutside` do DialogContent, já que não estão funcionando corretamente. A proteção via `onPointerDownCapture` na lista é suficiente.
-
-**ANTES:**
-```tsx
-<DialogContent
-  className="sm:max-w-[500px]"
-  onInteractOutside={handleInteractOutside}
-  onPointerDownOutside={handlePointerDownOutside}
+// DEPOIS
+<div 
+  ref={deptListRef}
+  className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
 >
 ```
 
-**DEPOIS:**
+**2. Simplificar cada linha de departamento (linhas 217-239):**
+
 ```tsx
-<DialogContent className="sm:max-w-[500px]">
+// ANTES
+<div
+  key={dept.id}
+  role="button"
+  tabIndex={0}
+  className="flex w-full select-none items-center space-x-3 rounded-md p-2 text-left cursor-pointer hover:bg-muted/50"
+  onClick={() => handleDepartmentToggle(dept.id)}
+  onKeyDown={(e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleDepartmentToggle(dept.id);
+    }
+  }}
+>
+  <Checkbox ... />
+
+// DEPOIS (idêntico ao Settings.tsx)
+<div 
+  key={dept.id} 
+  className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
+  onClick={(e) => {
+    e.stopPropagation();
+    handleDepartmentToggle(dept.id);
+  }}
+  onPointerDown={(e) => e.stopPropagation()}
+>
+  <Checkbox ... />
 ```
 
-**3. Remover código morto:**
+**3. Remover ref não utilizado:**
 
-Remover as funções `getRadixOriginalTarget`, `handleInteractOutside`, e `handlePointerDownOutside` que não estão mais em uso.
+O `deptListRef` não é mais necessário, pode ser removido.
 
-### Por que `onPointerDownCapture` funciona
+## Por que isso funciona
 
 ```text
-Fluxo de eventos DOM:
+Settings.tsx (funciona):
+1. Clique na linha
+2. onPointerDown -> stopPropagation (bloqueia evento antes de bubble)
+3. onClick -> stopPropagation + toggle
+4. Radix NÃO detecta "outside click"
+5. Dialog permanece aberto ✅
 
-1. Usuário clica no nome do departamento
-2. [CAPTURA] onPointerDownCapture no div da lista → stopPropagation() 
-3. O evento PARA aqui - nunca chega ao Radix DismissableLayer
-4. O Dialog NÃO fecha
-5. O onClick normal da linha do departamento executa → toggle funciona ✅
-
-Sem onPointerDownCapture:
-1. Usuário clica no nome do departamento
-2. Evento sobe pelo DOM
-3. Radix DismissableLayer detecta "pointerdown fora do conteúdo primário"
-4. Dialog fecha → overlay órfão ❌
+InviteMemberDialog com onPointerDownCapture (quebra):
+1. Clique na linha
+2. [CAPTURA] Container intercepta TODOS os eventos
+3. stopPropagation na fase de captura pode quebrar listeners internos do Radix
+4. Estado do Radix fica inconsistente
+5. React crash → div#root vazio ❌
 ```
 
-### Código Final (Seção Relevante)
+## Código Final da Lista de Departamentos
 
 ```tsx
 {requiresDepartments && (
@@ -93,13 +105,39 @@ Sem onPointerDownCapture:
         {selectedDepartments.length} selecionado{selectedDepartments.length !== 1 ? "s" : ""}
       </Badge>
     </Label>
-    <div 
-      ref={deptListRef}
-      className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
-      onPointerDownCapture={(e) => e.stopPropagation()}
-    >
-      {/* Lista de departamentos */}
+    <div className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain">
+      {departments.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-4">
+          Nenhum departamento cadastrado
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {departments.filter((d) => d.is_active).map((dept) => (
+            <div 
+              key={dept.id} 
+              className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDepartmentToggle(dept.id);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <Checkbox 
+                checked={selectedDepartments.includes(dept.id)}
+                onCheckedChange={() => handleDepartmentToggle(dept.id)}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              />
+              <div className="w-3 h-3 flex-shrink-0 rounded-full" style={{ backgroundColor: dept.color }} />
+              <span className="text-sm">{dept.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
+    <p className="text-xs text-muted-foreground">
+      O Atendente só terá acesso às conversas dos departamentos selecionados
+    </p>
   </div>
 )}
 ```
@@ -108,18 +146,19 @@ Sem onPointerDownCapture:
 
 1. **Configurações → Membros → Convidar membro**
 2. Selecionar **Atendente**
-3. Testar cliques em:
-   - [ ] Checkbox → deve funcionar
-   - [ ] Bolinha colorida → deve funcionar  
-   - [ ] Nome do departamento (texto) → deve funcionar
-   - [ ] Espaço vazio na linha → deve funcionar
+3. Clicar no:
+   - [ ] Checkbox → funciona
+   - [ ] Nome do departamento → funciona SEM crash
+   - [ ] Bolinha colorida → funciona
 4. Verificar:
-   - [ ] NÃO aparece "overlay órfão" (tela escura travada)
+   - [ ] Página NÃO fica preta
    - [ ] Modal NÃO fecha sozinho
-   - [ ] Contador "X selecionados" atualiza corretamente
-   - [ ] Botão X e Cancelar fecham normalmente
-   - [ ] Scroll na lista funciona
+   - [ ] Contador atualiza
+
+5. **Teste de regressão - Editar membro existente**
+   - [ ] Confirmar que edição ainda funciona
 
 ## Risco
 
-**Mínimo** - A alteração usa API padrão do DOM (`onPointerDownCapture`), não depende de comportamentos específicos do Radix, e é isolada ao container da lista de departamentos.
+**Baixo** - Estamos copiando exatamente o padrão que já funciona em outra parte do sistema.
+
