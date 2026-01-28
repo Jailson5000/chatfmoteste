@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 
+import { InviteMemberDialogErrorBoundary } from "@/components/admin/InviteMemberDialogErrorBoundary";
+
 import { Shield, Users, Headphones, AlertCircle, Mail, CheckCircle2 } from "lucide-react";
 import { useDepartments } from "@/hooks/useDepartments";
 import type { AppRole } from "@/hooks/useUserRole";
@@ -119,51 +121,58 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
   };
 
   // Handler para bloquear dismiss quando clique é dentro da lista de departamentos
-  const handleInteractOutside = (event: Event) => {
-    // Verifica se o clique foi dentro da lista de departamentos
-    const target = event.target as Node | null;
+  const getRadixOriginalTarget = (event: any): Node | null => {
+    const fromDetail = event?.detail?.originalEvent?.target as Node | undefined;
+    const direct = event?.target as Node | undefined;
+    return (fromDetail ?? direct) ?? null;
+  };
+
+  // Handler para bloquear dismiss quando o clique é dentro da lista de departamentos
+  const handleInteractOutside = (event: any) => {
+    const target = getRadixOriginalTarget(event);
     if (target && deptListRef.current?.contains(target)) {
-      event.preventDefault();
+      event.preventDefault?.();
     }
   };
 
   // Handler redundante para pointer down (reforço de segurança)
-  const handlePointerDownOutside = (event: { preventDefault: () => void; target?: EventTarget | null }) => {
-    const target = event.target as Node | null;
+  const handlePointerDownOutside = (event: any) => {
+    const target = getRadixOriginalTarget(event);
     if (target && deptListRef.current?.contains(target)) {
-      event.preventDefault();
+      event.preventDefault?.();
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent 
+      <DialogContent
         className="sm:max-w-[500px]"
         onInteractOutside={handleInteractOutside}
         onPointerDownOutside={handlePointerDownOutside}
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Mail className="h-5 w-5 text-primary" />
-            Convidar Membro
-          </DialogTitle>
-          <DialogDescription>
-            Adicione um novo membro à sua equipe. Um email será enviado automaticamente com as credenciais de acesso.
-          </DialogDescription>
-        </DialogHeader>
+        <InviteMemberDialogErrorBoundary>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" />
+              Convidar Membro
+            </DialogTitle>
+            <DialogDescription>
+              Adicione um novo membro à sua equipe. Um email será enviado automaticamente com as credenciais de acesso.
+            </DialogDescription>
+          </DialogHeader>
 
-        {/* Email notice */}
-        <div className="flex items-start gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
-          <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-          <div className="text-sm">
-            <p className="font-medium text-foreground">Envio automático de credenciais</p>
-            <p className="text-muted-foreground mt-0.5">
-              O novo membro receberá um email com login e senha temporária para acessar o sistema.
-            </p>
+          {/* Email notice */}
+          <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-primary mt-0.5" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">Envio automático de credenciais</p>
+              <p className="mt-0.5 text-muted-foreground">
+                O novo membro receberá um email com login e senha temporária para acessar o sistema.
+              </p>
+            </div>
           </div>
-        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="fullName">Nome Completo *</Label>
             <Input
@@ -229,24 +238,30 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {departments.filter(d => d.is_active).map((dept) => (
-                      <button
+                    {departments.filter((d) => d.is_active).map((dept) => (
+                      <div
                         key={dept.id}
-                        type="button"
-                        className="flex items-center w-full space-x-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer select-none text-left"
+                        role="button"
+                        tabIndex={0}
+                        className="flex w-full select-none items-center space-x-3 rounded-md p-2 text-left cursor-pointer hover:bg-muted/50"
                         onClick={() => handleDepartmentToggle(dept.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleDepartmentToggle(dept.id);
+                          }
+                        }}
                       >
                         <Checkbox
+                          type="button"
                           checked={selectedDepartments.includes(dept.id)}
                           onCheckedChange={() => handleDepartmentToggle(dept.id)}
                           onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                         />
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: dept.color }}
-                        />
+                        <div className="w-3 h-3 flex-shrink-0 rounded-full" style={{ backgroundColor: dept.color }} />
                         <span className="text-sm">{dept.name}</span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -264,15 +279,16 @@ export function InviteMemberDialog({ open, onOpenChange, onInvite, isLoading }: 
             </div>
           )}
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Enviando..." : "Enviar Convite"}
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? "Enviando..." : "Enviar Convite"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </InviteMemberDialogErrorBoundary>
       </DialogContent>
     </Dialog>
   );
