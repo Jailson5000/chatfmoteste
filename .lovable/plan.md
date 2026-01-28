@@ -1,117 +1,125 @@
 
-## Situação atual (reformulando o erro)
-- O erro é crítico e **acontece somente no modal “Convidar membro”**.
-- **Clicar no checkbox (quadradinho vermelho) funciona**.
-- **Clicar no nome do departamento (texto) causa “tela preta” imediatamente**.
-- No modal de **editar membros existentes**, clicar no texto funciona — então o problema está isolado no fluxo de convite.
+# Correção Definitiva: Overlay Órfão no Modal de Convite
 
-## O que eu verifiquei no código (onde o problema pode estar)
-Arquivo atual: `src/components/admin/InviteMemberDialog.tsx`
+## Problema Identificado
 
-1) **O `Dialog` está com `onOpenChange={handleClose}`**
-- Hoje está assim:
-  ```tsx
-  <Dialog open={open} onOpenChange={handleClose}>
-  ```
-- `handleClose()` ignora o booleano do Radix (`true/false`) e sempre reseta tudo + fecha o modal.
-- Isso é diferente do fluxo de edição (em `Settings.tsx`), que usa:
-  ```tsx
-  onOpenChange={(open) => { if (!open) setEditingMember(null); }}
-  ```
-- Esse detalhe pode causar comportamento instável quando o Radix tenta gerenciar “dismiss”/foco.
+O clique no nome do departamento **fecha o Dialog parcialmente**, deixando só o overlay visível (tela escura). Isso acontece porque:
 
-2) **Eventos “outside click” do Radix podem estar disparando ao clicar no texto**
-- O Radix Dialog fecha quando ele acha que houve interação “fora” do conteúdo (pointer/focus outside).
-- `stopPropagation()` em `onClick`/`onPointerDown` nem sempre impede isso, porque o Radix usa handlers próprios e pode detectar “outside” antes do seu handler.
-- Resultado típico: modal tenta fechar e pode sobrar apenas o overlay escuro (percepção de “tela preta”).
+1. O Radix Dialog detecta o clique como "interação externa" e dispara `onOpenChange(false)`
+2. O conteúdo do modal fecha, mas o overlay permanece na tela
+3. Os handlers `onInteractOutside` e `onPointerDownOutside` não estão impedindo o dismiss corretamente porque:
+   - O Radix usa `CustomEvent` com `detail.originalEvent`
+   - A verificação `.contains(target)` falha porque o target do evento customizado pode não corresponder corretamente ao elemento clicado
 
-## Do I know what the issue is?
-Tenho uma hipótese forte e consistente com o sintoma “só texto quebra, checkbox não”: **o clique no texto está sendo interpretado pelo Dialog como interação externa (dismiss)**, e isso combinado com `onOpenChange={handleClose}` (que sempre reseta/fecha) torna o fechamento instável no convite.
+## Solução
 
-## Correção proposta (sem quebrar nada e isolada no modal de convite)
-Vamos fazer uma correção “à prova de Radix” em 3 frentes, todas apenas no `InviteMemberDialog`:
+Usar **`onPointerDownCapture`** diretamente no container da lista de departamentos para interceptar o evento **na fase de captura** (antes que chegue ao Radix). Isso é mais confiável que tentar bloquear o dismiss depois.
 
-### A) Corrigir o `onOpenChange` do Dialog (não ignorar o boolean)
-- Substituir:
-  ```tsx
-  <Dialog open={open} onOpenChange={handleClose}>
-  ```
-- Por um handler que:
-  - **só reseta o formulário quando estiver fechando**
-  - **respeita o boolean** vindo do Radix
-- Exemplo de estrutura:
-  - `resetForm()` (apenas reseta estados locais)
-  - `handleDialogOpenChange(nextOpen: boolean)`:
-    - se `nextOpen === false`: `resetForm(); onOpenChange(false)`
-    - se `nextOpen === true`: `onOpenChange(true)`
+### Arquivos a Modificar
 
-Isso alinha o comportamento com o modal de edição (que funciona).
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/components/admin/InviteMemberDialog.tsx` | Adicionar `onPointerDownCapture={(e) => e.stopPropagation()}` no container da lista |
 
-### B) Bloquear “dismiss” incorreto quando o clique acontece dentro da lista de departamentos
-Adicionar um `ref` no container da lista de departamentos:
-- `const deptListRef = useRef<HTMLDivElement>(null);`
-- `ref={deptListRef}` no `<div className="h-[150px] ...">`
+### Mudanças Específicas
 
-E no `<DialogContent />`, adicionar:
-- `onInteractOutside={(event) => { ... }}`
-- `onPointerDownOutside={(event) => { ... }}` (reforço)
+**1. Container da lista de departamentos (linha 231-234):**
 
-Lógica:
-- Se o `event.target` (ou `event.detail.originalEvent.target`) estiver **dentro** do `deptListRef.current`, então:
-  - `event.preventDefault()` para impedir o Dialog de fechar por engano.
+**ANTES:**
+```tsx
+<div 
+  ref={deptListRef}
+  className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
+>
+```
 
-Isso mantém:
-- clique no texto -> funciona e não fecha o modal
-- clique fora do modal -> continua fechando normalmente (porque não será “dentro” do ref)
+**DEPOIS:**
+```tsx
+<div 
+  ref={deptListRef}
+  className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
+  onPointerDownCapture={(e) => e.stopPropagation()}
+>
+```
 
-### C) Tornar a linha inteira “clicável” de forma segura dentro do `<form>`
-Para não existir nenhum risco de “submit” ou comportamento estranho dentro de form:
-- Trocar a linha do departamento para um elemento semanticamente clicável:
-  - opção 1 (mais simples): manter `<div>` mas remover `e.preventDefault()` do `onClick` (não é necessário aqui)
-  - opção 2 (mais robusta): transformar a linha em `<button type="button">...</button>`
-- Garantir também que o `Checkbox` dentro do form sempre seja `type="button"`:
-  ```tsx
-  <Checkbox type="button" ... />
-  ```
-Isso é totalmente local ao modal de convite, reduz chance de efeitos colaterais.
+**2. Simplificar os handlers do DialogContent:**
 
-## Arquivo a alterar
-- `src/components/admin/InviteMemberDialog.tsx` (somente)
+Remover `onInteractOutside` e `onPointerDownOutside` do DialogContent, já que não estão funcionando corretamente. A proteção via `onPointerDownCapture` na lista é suficiente.
 
-## Sequência de implementação
-1) Refatorar `handleClose` em:
-   - `resetForm()`
-   - `handleDialogOpenChange(nextOpen: boolean)`
-2) Adicionar `deptListRef` e plugar no container da lista.
-3) Adicionar em `DialogContent`:
-   - `onInteractOutside` com `preventDefault` quando `target` estiver dentro do `deptListRef`
-   - `onPointerDownOutside` com a mesma regra (redundância intencional para garantir estabilidade)
-4) Ajustar o item de departamento para aceitar clique no texto/bolinha com segurança:
-   - manter `onClick` no container/linha para toggle
-   - remover `preventDefault()` se não for mais necessário
-   - passar `type="button"` no `Checkbox` do convite
-5) Se ainda houver qualquer “tela preta”:
-   - adicionar um Error Boundary local (somente envolvendo o conteúdo do modal) para capturar erro runtime e logar a stack, sem derrubar a tela.
+**ANTES:**
+```tsx
+<DialogContent
+  className="sm:max-w-[500px]"
+  onInteractOutside={handleInteractOutside}
+  onPointerDownOutside={handlePointerDownOutside}
+>
+```
 
-## Checklist de testes (obrigatório para evitar regressão)
-### Fluxo A (o que está quebrando)
-1) Configurações → Membros → Convidar membro
-2) Selecionar perfil “Atendente”
-3) Testar clique em:
-   - checkbox (quadrado vermelho)
-   - nome do departamento (texto)
-   - bolinha colorida
-   - área vazia da linha
-4) Confirmar:
-   - não aparece “tela preta”
-   - o modal não fecha sozinho
-   - o contador “X selecionados” atualiza
+**DEPOIS:**
+```tsx
+<DialogContent className="sm:max-w-[500px]">
+```
 
-### Fluxo B (não pode regredir)
-1) Editar membro existente → Atendente → clicar no texto e marcar/desmarcar
-2) Salvar e confirmar que persistiu.
+**3. Remover código morto:**
 
-## Por que isso é seguro (sem quebrar nada)
-- Alteração fica restrita ao **InviteMemberDialog**, sem mexer em hooks, backend, nem no fluxo de edição que já está OK.
-- A correção usa a própria API prevista pelo Radix (`onInteractOutside/onPointerDownOutside`) para resolver “dismiss” indevido.
-- Mantém o comportamento esperado: clicar no texto seleciona, clicar fora fecha, e não há múltiplos overlays nem travamentos.
+Remover as funções `getRadixOriginalTarget`, `handleInteractOutside`, e `handlePointerDownOutside` que não estão mais em uso.
+
+### Por que `onPointerDownCapture` funciona
+
+```text
+Fluxo de eventos DOM:
+
+1. Usuário clica no nome do departamento
+2. [CAPTURA] onPointerDownCapture no div da lista → stopPropagation() 
+3. O evento PARA aqui - nunca chega ao Radix DismissableLayer
+4. O Dialog NÃO fecha
+5. O onClick normal da linha do departamento executa → toggle funciona ✅
+
+Sem onPointerDownCapture:
+1. Usuário clica no nome do departamento
+2. Evento sobe pelo DOM
+3. Radix DismissableLayer detecta "pointerdown fora do conteúdo primário"
+4. Dialog fecha → overlay órfão ❌
+```
+
+### Código Final (Seção Relevante)
+
+```tsx
+{requiresDepartments && (
+  <div className="space-y-2">
+    <Label className="flex items-center gap-2">
+      Departamentos *
+      <Badge variant="secondary" className="text-xs">
+        {selectedDepartments.length} selecionado{selectedDepartments.length !== 1 ? "s" : ""}
+      </Badge>
+    </Label>
+    <div 
+      ref={deptListRef}
+      className="h-[150px] border rounded-md p-3 overflow-y-auto overscroll-contain"
+      onPointerDownCapture={(e) => e.stopPropagation()}
+    >
+      {/* Lista de departamentos */}
+    </div>
+  </div>
+)}
+```
+
+## Checklist de Testes
+
+1. **Configurações → Membros → Convidar membro**
+2. Selecionar **Atendente**
+3. Testar cliques em:
+   - [ ] Checkbox → deve funcionar
+   - [ ] Bolinha colorida → deve funcionar  
+   - [ ] Nome do departamento (texto) → deve funcionar
+   - [ ] Espaço vazio na linha → deve funcionar
+4. Verificar:
+   - [ ] NÃO aparece "overlay órfão" (tela escura travada)
+   - [ ] Modal NÃO fecha sozinho
+   - [ ] Contador "X selecionados" atualiza corretamente
+   - [ ] Botão X e Cancelar fecham normalmente
+   - [ ] Scroll na lista funciona
+
+## Risco
+
+**Mínimo** - A alteração usa API padrão do DOM (`onPointerDownCapture`), não depende de comportamentos específicos do Radix, e é isolada ao container da lista de departamentos.
