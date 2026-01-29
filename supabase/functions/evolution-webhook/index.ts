@@ -817,6 +817,18 @@ interface MessageAckData {
   ids?: string[];
 }
 
+// Contact update data for WABA (WhatsApp Business API) contacts.update events
+interface ContactUpdateData {
+  remoteJid: string;
+  pushName?: string;
+  profilePicUrl?: string;
+  // WABA specific fields
+  verifiedName?: string;
+  name?: string;
+  notify?: string;
+  formattedName?: string;
+}
+
 // Helper to normalize event names (Evolution API can send in different formats)
 function normalizeEventName(event: string): string {
   // Convert UPPER_CASE to lowercase.with.dots
@@ -4706,6 +4718,116 @@ serve(async (req) => {
 
       case 'send.message': {
         logDebug('MESSAGE', `Send message event received`, { requestId, data: body.data });
+        break;
+      }
+
+      case 'contacts.update': {
+        // ========================================================================
+        // WABA (WhatsApp Business API) Contact Name Resolution
+        // ========================================================================
+        // The official WhatsApp API sends contact names in 'contacts.update' events
+        // instead of in the message data. This handler captures those updates
+        // and applies them to conversations/clients that are still showing phone numbers.
+        // ========================================================================
+        logDebug('CONTACTS_UPDATE', 'Processing contacts.update event for WABA name resolution', { requestId });
+        
+        try {
+          const contacts = Array.isArray(body.data) 
+            ? body.data as ContactUpdateData[] 
+            : [body.data as ContactUpdateData];
+          
+          for (const contact of contacts) {
+            const remoteJid = contact.remoteJid;
+            if (!remoteJid) {
+              logDebug('CONTACTS_UPDATE', 'Skipping contact without remoteJid', { requestId, contact });
+              continue;
+            }
+            
+            // Extract best available name from WABA contact data
+            const contactName = contact.pushName || 
+                               contact.verifiedName || 
+                               contact.name ||
+                               contact.notify ||
+                               contact.formattedName;
+            
+            if (!contactName) {
+              logDebug('CONTACTS_UPDATE', 'No name found in contact data, skipping', { requestId, remoteJid });
+              continue;
+            }
+            
+            // Extract phone number from JID (handles both @lid and @s.whatsapp.net formats)
+            const phoneNumber = remoteJid.split('@')[0];
+            
+            logDebug('CONTACTS_UPDATE', 'Updating contact name from WABA event', {
+              requestId,
+              remoteJid,
+              contactName,
+              phoneNumber,
+              lawFirmId,
+            });
+            
+            // Update conversations where contact_name is still the phone number or null
+            // This is a conditional update that won't overwrite manually edited names
+            const { data: updatedConversations, error: convError } = await supabaseClient
+              .from('conversations')
+              .update({ contact_name: contactName })
+              .eq('remote_jid', remoteJid)
+              .eq('law_firm_id', lawFirmId)
+              .or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
+              .select('id');
+            
+            if (convError) {
+              logDebug('CONTACTS_UPDATE', 'Error updating conversations', { 
+                requestId, 
+                error: convError.message 
+              });
+            } else if (updatedConversations && updatedConversations.length > 0) {
+              logDebug('CONTACTS_UPDATE', 'Updated conversation contact names', {
+                requestId,
+                count: updatedConversations.length,
+                conversationIds: updatedConversations.map(c => c.id),
+              });
+            }
+            
+            // Also update clients that have matching phone number and name = phone or null
+            // Uses flexible phone matching (last 8 digits) for format variations
+            const phoneLastDigits = phoneNumber.slice(-8);
+            
+            const { data: updatedClients, error: clientError } = await supabaseClient
+              .from('clients')
+              .update({ name: contactName })
+              .eq('law_firm_id', lawFirmId)
+              .ilike('phone', `%${phoneLastDigits}`)
+              .or(`name.eq.${phoneNumber},name.is.null`)
+              .select('id');
+            
+            if (clientError) {
+              logDebug('CONTACTS_UPDATE', 'Error updating clients', { 
+                requestId, 
+                error: clientError.message 
+              });
+            } else if (updatedClients && updatedClients.length > 0) {
+              logDebug('CONTACTS_UPDATE', 'Updated client names', {
+                requestId,
+                count: updatedClients.length,
+                clientIds: updatedClients.map(c => c.id),
+              });
+            }
+            
+            logDebug('CONTACTS_UPDATE', 'Contact name resolution completed', {
+              requestId,
+              remoteJid,
+              contactName,
+              conversationsUpdated: updatedConversations?.length || 0,
+              clientsUpdated: updatedClients?.length || 0,
+            });
+          }
+        } catch (contactUpdateError) {
+          logDebug('CONTACTS_UPDATE', 'Error processing contacts.update', { 
+            requestId, 
+            error: contactUpdateError instanceof Error ? contactUpdateError.message : String(contactUpdateError)
+          });
+        }
         break;
       }
 
