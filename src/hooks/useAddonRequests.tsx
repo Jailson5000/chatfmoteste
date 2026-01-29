@@ -150,6 +150,9 @@ export function useAdminAddonRequests() {
       let asaasUpdated = false;
       let asaasError: string | null = null;
       
+      let asaasSkipped = false;
+      let asaasMessage = "";
+      
       if (newMonthlyValue && companyId) {
         try {
           const { data: asaasResult, error: asaasErr } = await supabase.functions.invoke(
@@ -166,10 +169,15 @@ export function useAdminAddonRequests() {
           if (asaasErr) {
             console.error("ASAAS update error:", asaasErr);
             asaasError = asaasErr.message;
+          } else if (asaasResult?.skipped) {
+            // Company doesn't have active ASAAS subscription yet - this is expected
+            asaasSkipped = true;
+            asaasMessage = asaasResult.message;
+            console.log("ASAAS update skipped:", asaasResult);
           } else if (asaasResult?.error) {
             console.error("ASAAS update failed:", asaasResult);
             asaasError = asaasResult.details || asaasResult.error;
-          } else {
+          } else if (asaasResult?.success) {
             asaasUpdated = true;
             console.log("ASAAS subscription updated:", asaasResult);
           }
@@ -182,6 +190,8 @@ export function useAdminAddonRequests() {
       return { 
         ...result, 
         asaas_updated: asaasUpdated,
+        asaas_skipped: asaasSkipped,
+        asaas_message: asaasMessage,
         asaas_error: asaasError
       };
     },
@@ -191,9 +201,13 @@ export function useAdminAddonRequests() {
       queryClient.invalidateQueries({ queryKey: ["company-usage-dashboard"] });
       
       if (data.asaas_updated) {
-        toast.success(`Aprovado! Limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões. ASAAS atualizado ✓`);
+        toast.success(`Aprovado! Limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões. Cobrança ASAAS atualizada ✓`);
+      } else if (data.asaas_skipped) {
+        toast.success(`Aprovado! Limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões.`, {
+          description: "Empresa ainda sem assinatura ativa - valor será aplicado quando assinar."
+        });
       } else if (data.asaas_error) {
-        toast.warning(`Aprovado! Limites atualizados. Aviso: ${data.asaas_error}`);
+        toast.warning(`Aprovado! Limites atualizados. Aviso ASAAS: ${data.asaas_error}`);
       } else {
         toast.success(`Aprovado! Novos limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões.`);
       }
