@@ -1,69 +1,194 @@
 
-# Plano: Corrigir Inconsistência no Cálculo de Dias de Trial
+# Plano: Correção das Contagens de Consumo (IA, Áudio, Agentes)
 
-## Problema Identificado
+## Resumo da Análise
 
-O badge de "dias de trial restantes" mostra valores diferentes dependendo de onde é exibido:
-- **Dashboard** (CompanyUsageTable.tsx): Mostra "Trial 5d"
-- **Empresas** (GlobalAdminCompanies.tsx): Mostra "6 dias restantes"
+Após análise detalhada do sistema de contagem de consumo, identifiquei **2 problemas principais** e **1 potencial inconsistência**:
 
-### Causa Raiz
+## Problemas Encontrados
 
-Os dois arquivos usam métodos diferentes para calcular os dias restantes:
+### 1. TTS Frontend Não é Contabilizado
 
-| Local | Método | Resultado |
-|-------|--------|-----------|
-| Dashboard | `differenceInDays(trialEnd, now)` | 5 dias (dias **completos**) |
-| Empresas | `Math.ceil((trialEnd - now) / (1000*60*60*24))` | 6 dias (arredonda **para cima**) |
+**Arquivo afetado:** `supabase/functions/elevenlabs-tts/index.ts`
 
-Quando faltam 5 dias e 12 horas para o trial expirar:
-- `differenceInDays` do date-fns retorna `5` (só conta dias completos passados)
-- `Math.ceil` retorna `6` (arredonda 5.5 para cima)
+A função `elevenlabs-tts` (usada pelo frontend para preview de voz) **NÃO registra uso de TTS**. Apenas a função `evolution-webhook` registra via `recordTTSUsage()`.
 
-## Solução
+**Impacto:**
+- Áudio gerado para preview de agente (página de edição)
+- Áudio gerado para teste de voz (configurações)
+- Esses minutos NÃO estão sendo contabilizados na fatura
 
-Padronizar o cálculo usando `Math.ceil` em ambos os lugares. Isso é mais intuitivo para o usuário, pois:
-- Se falta 1 hora, ainda mostra "1 dia restante" (não 0)
-- Reflete melhor a expectativa do cliente sobre quando o trial expira
+**Correção:**
+Adicionar `recordTTSUsage()` na função `elevenlabs-tts` após gerar áudio com sucesso.
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│ FLUXO TTS ATUAL (incompleto)                                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ [evolution-webhook] → recordTTSUsage() ✅ Registra              │
+│                                                                 │
+│ [elevenlabs-tts]    → NÃO registra    ❌ FALTA                  │
+│ [ai-text-to-speech] → NÃO registra    ❌ FALTA                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Metadado 'source' Inconsistente
+
+**Arquivo afetado:** `supabase/functions/evolution-webhook/index.ts`
+
+A função `recordAIConversationUsage` no `evolution-webhook` **NÃO inclui o campo 'source'** nos metadados, enquanto a função `ai-chat` inclui.
+
+**Situação atual na base:**
+| Source     | Registros |
+|------------|-----------|
+| null       | 24        |
+| whatsapp   | 18        |
+| WIDGET     | 4         |
+| unknown    | 1         |
+
+**Impacto:**
+- Dificulta análise de origem das conversas IA
+- Dados incompletos para relatórios
+
+**Correção:**
+Adicionar parâmetro `source: 'whatsapp'` nas chamadas de `recordAIConversationUsage` no `evolution-webhook`.
+
+## Itens Verificados que Estão Corretos ✅
+
+### Contagem de Conversas IA
+- Widget (WIDGET): ✅ Sendo contabilizado corretamente
+- WhatsApp: ✅ Sendo contabilizado corretamente
+- Regra de 1 conversa = 1 contagem por período: ✅ Funcionando
+
+### Contagem de Agentes
+- View `company_usage_summary`: ✅ Conta apenas agentes ativos (`is_active = true`)
+- Dashboard: ✅ Usa dados corretos da view
+
+### Contagem de Empresas
+- Métricas granulares: ✅ Funcionando (Ativas, Trial, Pendentes, etc.)
+- Dashboard vs Empresas: ✅ Sincronizados após correção anterior
+
+### Dados Comparativos (Janeiro 2026)
+| Empresa         | Conv. IA (BD) | Conv. IA (View) | Match |
+|-----------------|---------------|-----------------|-------|
+| FMO Advogados   | 28            | 28              | ✅    |
+| Jr              | 11            | 11              | ✅    |
+| Liz importados  | 6             | 6               | ✅    |
+| Suporte MiauChat| 2             | 2               | ✅    |
 
 ## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/components/global-admin/CompanyUsageTable.tsx` | Alterar de `differenceInDays` para `Math.ceil` |
+| `supabase/functions/elevenlabs-tts/index.ts` | Adicionar `recordTTSUsage()` |
+| `supabase/functions/ai-text-to-speech/index.ts` | Adicionar `recordTTSUsage()` |
+| `supabase/functions/evolution-webhook/index.ts` | Adicionar campo `source` nos metadados |
 
-## Detalhes da Correção
+## Implementação Detalhada
 
-### Antes (CompanyUsageTable.tsx - linha 144)
+### 1. Modificar `elevenlabs-tts/index.ts`
+
+Adicionar função helper e chamada após sucesso:
+
 ```typescript
-const daysLeft = differenceInDays(new Date(company.trial_ends_at), new Date());
+// Helper function to record TTS usage
+async function recordTTSUsage(
+  lawFirmId: string,
+  textLength: number
+): Promise<void> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !supabaseKey) return;
+  
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const billingPeriod = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  
+  // Estimate duration: avg 150 words/min, 5 chars/word = 750 chars/min
+  const estimatedSeconds = Math.ceil((textLength / 750) * 60);
+  
+  await supabase.from('usage_records').insert({
+    law_firm_id: lawFirmId,
+    usage_type: 'tts_audio',
+    count: 1,
+    duration_seconds: estimatedSeconds,
+    billing_period: billingPeriod,
+    metadata: {
+      source: 'frontend_preview',
+      text_length: textLength,
+    }
+  });
+}
 ```
 
-### Depois
+Chamar após gerar áudio com sucesso (linha ~238):
 ```typescript
-const trialEnd = new Date(company.trial_ends_at);
-const now = new Date();
-const diffTime = trialEnd.getTime() - now.getTime();
-const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+// Record TTS usage for billing
+if (profile.law_firm_id) {
+  await recordTTSUsage(profile.law_firm_id, text.length);
+}
 ```
 
-## Resultado Esperado
+### 2. Modificar `ai-text-to-speech/index.ts`
 
-Após a correção:
-- Dashboard mostrará: "Trial **6d**"
-- Empresas mostrará: "**6 dias** restantes"
+Similar ao elevenlabs-tts, adicionar tracking após gerar áudio.
 
-Ambos os locais exibirão o mesmo número de dias, eliminando a confusão.
+### 3. Modificar `evolution-webhook/index.ts`
+
+Atualizar a função `recordAIConversationUsage` para aceitar `source`:
+
+```typescript
+async function recordAIConversationUsage(
+  supabaseClient: any,
+  lawFirmId: string,
+  conversationId: string,
+  automationId: string,
+  automationName: string,
+  source: string = 'whatsapp'  // ← NOVO PARÂMETRO
+): Promise<boolean> {
+  // ... existing code ...
+  
+  const { error } = await supabaseClient
+    .from('usage_records')
+    .insert({
+      // ... existing fields ...
+      metadata: {
+        conversation_id: conversationId,
+        automation_id: automationId,
+        automation_name: automationName,
+        source: source,  // ← NOVO CAMPO
+        first_ai_response_at: new Date().toISOString(),
+      }
+    });
+}
+```
+
+E atualizar todas as chamadas para incluir o source:
+```typescript
+await recordAIConversationUsage(
+  supabaseClient,
+  context.lawFirmId,
+  context.conversationId,
+  automation.id,
+  automation.name,
+  'whatsapp'  // ← ADICIONAR
+);
+```
 
 ## Benefícios
 
-1. **Consistência**: Mesmo valor em todo o sistema
-2. **Intuitivo**: Arredondar para cima faz mais sentido para o usuário
-3. **Simples**: Mantém lógica idêntica à já existente em GlobalAdminCompanies
+1. **Faturamento completo**: Todo uso de TTS será contabilizado
+2. **Rastreabilidade**: Origem de cada conversa IA identificável
+3. **Relatórios precisos**: Dados mais ricos para análise
+4. **Sem regressão**: Mudanças são aditivas, não alteram lógica existente
 
 ## Checklist de Validação
 
-- [ ] Dashboard e Empresas mostram mesmo número de dias
-- [ ] Trial com horas restantes mostra pelo menos "1 dia"
-- [ ] Trial expirado continua mostrando "Expirado"
-- [ ] Cores dos badges mantêm consistência (azul > 2d, laranja ≤ 2d, vermelho expirado)
+- [ ] TTS gerado no preview de agente registra `usage_records`
+- [ ] TTS gerado em configurações de voz registra `usage_records`
+- [ ] Conversas IA do webhook incluem `source: 'whatsapp'` nos metadados
+- [ ] Dashboard mostra métricas de TTS atualizadas
+- [ ] CompanyUsageTable mostra TTS minutos corretamente
+- [ ] Contagem de agentes permanece correta (só ativos)
+- [ ] Contagem de conversas IA permanece correta
