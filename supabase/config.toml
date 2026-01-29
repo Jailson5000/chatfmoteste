@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.generate-payment-link]
 verify_jwt = false
+
+[functions.cleanup-orphan-lawfirm]
+verify_jwt = false

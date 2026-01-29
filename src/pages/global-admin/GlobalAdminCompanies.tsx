@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2 } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
@@ -55,10 +55,13 @@ import { companyFieldConfig, adminCreateCompanySchema } from "@/lib/schemas/comp
 import { generateSubdomainFromName } from "@/hooks/useTenant";
 import { formatPhone, formatDocument } from "@/lib/inputMasks";
 import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSection";
+import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
+import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
   const { plans } = usePlans();
+  const { summary: orphanSummary } = useOrphanLawFirms();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -856,7 +859,7 @@ export default function GlobalAdminCompanies() {
 
       {/* Tabs for Approval Status */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3 mb-4">
+        <TabsList className="grid w-full grid-cols-4 mb-4">
           <TabsTrigger value="pending" className="flex items-center gap-2">
             <Hourglass className="h-4 w-4" />
             Pendentes
@@ -871,6 +874,13 @@ export default function GlobalAdminCompanies() {
           <TabsTrigger value="rejected" className="flex items-center gap-2">
             <UserX className="h-4 w-4" />
             Rejeitadas
+          </TabsTrigger>
+          <TabsTrigger value="orphans" className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            Órfãos
+            {orphanSummary.total > 0 && (
+              <Badge variant="secondary" className="ml-1">{orphanSummary.total}</Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -1466,6 +1476,11 @@ export default function GlobalAdminCompanies() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Orphan Law Firms Tab */}
+        <TabsContent value="orphans">
+          <OrphanLawFirmsTab />
         </TabsContent>
       </Tabs>
 
