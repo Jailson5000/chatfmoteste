@@ -1,113 +1,163 @@
 
-# Plano: Contabilização e Cobrança de Adicionais
+# Plano: Correção do Sistema de Faturamento e Adicionais
 
-## Problema Identificado
+## Problemas Identificados
 
-Quando um Global Admin aprova uma solicitação de adicionais:
-1. ✅ A tabela `companies` é atualizada (`max_users`, `max_instances`, `use_custom_limits`)
-2. ✅ O cálculo de `calculateAdditionalCosts` já funciona corretamente
-3. ✅ O cliente vê o novo valor em "Meu Plano" (Resumo Mensal)
-4. ✅ O admin vê o valor correto em `CompanyUsageTable`
-5. ❌ **O ASAAS NÃO É ATUALIZADO** - A próxima cobrança continua com o valor antigo
+### 1. Fatura não aparece no ASAAS nem para o cliente
+**Causa raiz**: A tabela `company_subscriptions` não possui um UNIQUE constraint na coluna `company_id`, fazendo com que o upsert falhe silenciosamente.
+
+```sql
+-- Índice atual (NÃO é unique):
+CREATE INDEX idx_company_subscriptions_company ON company_subscriptions USING btree (company_id)
+```
+
+**Resultado**: O `asaas_customer_id` não é salvo, então quando o cliente clica em "Ver Faturas", a função `list-asaas-invoices` não encontra o customer ID e retorna "Nenhuma fatura encontrada".
+
+### 2. Valor dos adicionais não aparece na fatura do ASAAS
+**Causa raiz**: Tanto `admin-create-asaas-subscription` quanto `generate-payment-link` calculam o valor da assinatura apenas usando o preço do plano base (`company.plan.price`), sem considerar os adicionais aprovados.
+
+```typescript
+// Código atual (linha 178-180):
+const monthlyPrice = company.plan.price || 0;
+const yearlyPrice = monthlyPrice * 11;
+const priceInReais = billing_type === "yearly" ? yearlyPrice : monthlyPrice;
+// ❌ Não considera adicionais!
+```
+
+### 3. Resumo Mensal não exibe breakdown claro
+**Análise**: O código de `MyPlanSettings.tsx` já exibe corretamente o breakdown quando há adicionais (linhas 445-475), mas precisamos melhorar a clareza visual para o cliente entender melhor.
+
+---
 
 ## Solução Proposta
 
-### Parte 1: Atualizar Subscription no ASAAS Após Aprovação
+### Parte 1: Corrigir Banco de Dados
 
-Modificar a função `approve_addon_request` para chamar uma Edge Function que:
-1. Calcula o novo valor total (plano base + adicionais)
-2. Atualiza a subscription existente no ASAAS com o novo valor
-3. Registra a alteração em `company_subscriptions`
+Adicionar UNIQUE constraint na tabela `company_subscriptions`:
 
-#### Nova Edge Function: `update-asaas-subscription`
+```sql
+-- Adicionar unique constraint para permitir upsert funcionar
+ALTER TABLE company_subscriptions 
+ADD CONSTRAINT company_subscriptions_company_id_unique UNIQUE (company_id);
+```
+
+### Parte 2: Calcular Valor Total com Adicionais nas Edge Functions
+
+Modificar as Edge Functions para buscar e calcular os adicionais:
+
+#### 2.1 `admin-create-asaas-subscription/index.ts`
 ```typescript
-// Recebe: company_id, new_value
-// 1. Busca asaas_subscription_id da tabela company_subscriptions
-// 2. Chama ASAAS API PUT /subscriptions/{id} com o novo valor
-// 3. Registra em audit_logs
+// 1. Buscar limites do plano
+const planLimits = {
+  max_users: company.plan.max_users || 0,
+  max_instances: company.plan.max_instances || 0,
+};
+
+// 2. Buscar limites efetivos da empresa (com adicionais)
+const effectiveLimits = {
+  max_users: company.max_users || planLimits.max_users,
+  max_instances: company.max_instances || planLimits.max_instances,
+  use_custom_limits: company.use_custom_limits || false,
+};
+
+// 3. Calcular adicionais
+const additionalUsers = Math.max(0, effectiveLimits.max_users - planLimits.max_users);
+const additionalInstances = Math.max(0, effectiveLimits.max_instances - planLimits.max_instances);
+
+const usersCost = additionalUsers * 47.90;
+const instancesCost = additionalInstances * 79.90;
+const totalAdditional = usersCost + instancesCost;
+
+// 4. Preço final
+const basePlanPrice = company.plan.price || 0;
+const monthlyPrice = basePlanPrice + totalAdditional;
 ```
 
-#### Fluxo Técnico
+#### 2.2 `generate-payment-link/index.ts`
+Aplicar a mesma lógica de cálculo.
+
+### Parte 3: Melhorar Exibição do Resumo Mensal
+
+Atualizar `MyPlanSettings.tsx` para exibir claramente:
+
 ```text
-┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│ Admin clica Aprovar │ →  │ approve_addon_request│ →  │ Atualiza companies  │
-│ em AddonRequests    │    │ (RPC existente)      │    │ max_users/instances │
-└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│ Cliente recebe      │ ←  │ update-asaas-        │ ←  │ Frontend chama EF   │
-│ cobrança atualizada │    │ subscription (EF)    │    │ após aprovar        │
-└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+┌─────────────────────────────────────┐
+│       Resumo Mensal                 │
+├─────────────────────────────────────┤
+│ Plano ENTERPRISE         R$ 1.697,00│
+│                                     │
+│ ADICIONAIS CONTRATADOS:             │
+│ +2 usuário(s)            R$   95,80 │
+│ +1 conexão(ões) WhatsApp R$   79,90 │
+├─────────────────────────────────────┤
+│ TOTAL MENSAL             R$ 1.872,70│
+└─────────────────────────────────────┘
 ```
 
-### Parte 2: Exibir Histórico de Adicionais Aprovados
+### Parte 4: Melhorar Feedback nas Faturas
 
-#### No Global Admin (`CompanyUsageTable` / Details Panel)
-- Exibir breakdown dos adicionais aprovados:
-  - Usuários extras: X
-  - Conexões extras: X
-  - Valor adicional: R$ X
+Adicionar no diálogo de faturas a descrição que vem do ASAAS incluindo os adicionais:
 
-#### Na aba "Meu Plano" do Cliente
-- Já exibe corretamente (verificado no código)
-- Garantir que "Histórico de Solicitações" mostra status aprovado
-
-### Parte 3: Feedback Visual Após Aprovação
-
-Modificar `AddonRequestsSection`:
-1. Após aprovar, mostrar toast com o novo valor total
-2. Exibir confirmação de que ASAAS foi atualizado
+```text
+Descrição da fatura:
+"Assinatura MiauChat ENTERPRISE - FMO Advogados
+ Inclui: +2 usuários, +1 WhatsApp"
+```
 
 ---
 
 ## Detalhes Técnicos
 
-### Arquivos a Criar
-| Arquivo | Descrição |
-|---------|-----------|
-| `supabase/functions/update-asaas-subscription/index.ts` | Atualiza valor da subscription no ASAAS |
-
 ### Arquivos a Modificar
+
 | Arquivo | Modificação |
 |---------|-------------|
-| `src/hooks/useAddonRequests.tsx` | Chamar Edge Function após aprovar |
-| `src/components/global-admin/AddonRequestsSection.tsx` | Feedback visual melhorado |
-| `src/components/global-admin/CompanyUsageTable.tsx` | Exibir breakdown de adicionais no painel de detalhes |
+| Migration SQL | Adicionar UNIQUE constraint em `company_subscriptions.company_id` |
+| `supabase/functions/admin-create-asaas-subscription/index.ts` | Calcular valor com adicionais + melhorar descrição + logging de upsert |
+| `supabase/functions/generate-payment-link/index.ts` | Calcular valor com adicionais + melhorar descrição |
+| `src/components/settings/MyPlanSettings.tsx` | Melhorar visual do Resumo Mensal com labels claros |
 
-### API ASAAS para Atualizar Subscription
-```http
-PUT /v3/subscriptions/{subscription_id}
-Content-Type: application/json
+### Fluxo Corrigido
 
-{
-  "value": 624.70,  // Novo valor = plano + adicionais
-  "updatePendingPayments": true
-}
-```
-
-### Cálculo do Novo Valor
-```typescript
-// Usa a função existente calculateAdditionalCosts
-const planLimits = { max_users: 5, max_instances: 2, ... }
-const effectiveLimits = { max_users: 7, max_instances: 3, use_custom_limits: true, ... }
-const basePlanPrice = 497
-
-const { totalMonthly } = calculateAdditionalCosts(planLimits, effectiveLimits, basePlanPrice)
-// totalMonthly = 497 + (2 * 47.90) + (1 * 79.90) = 672.70
+```text
+┌─────────────────────┐
+│ Admin gera fatura   │
+│ para empresa FMO    │
+└─────────┬───────────┘
+          │
+          ▼
+┌─────────────────────┐    ┌──────────────────────────────┐
+│ Edge Function busca │ →  │ Plano: ENTERPRISE = R$ 1.697 │
+│ plano + adicionais  │    │ +2 users = R$ 95,80          │
+└─────────────────────┘    │ +1 WhatsApp = R$ 79,90       │
+                           │ TOTAL = R$ 1.872,70          │
+                           └──────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────┐    ┌──────────────────────────────┐
+│ ASAAS cria payment  │ ←  │ Descrição: "ENTERPRISE +     │
+│ link com valor total│    │ 2 usuários, 1 WhatsApp"      │
+└─────────────────────┘    └──────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────┐    ┌──────────────────────────────┐
+│ company_subscriptions│ ←  │ asaas_customer_id salvo      │
+│ atualizado          │    │ (UNIQUE constraint funciona) │
+└─────────────────────┘    └──────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────┐    ┌──────────────────────────────┐
+│ Cliente vê faturas  │ →  │ list-asaas-invoices encontra │
+│ em "Meu Plano"      │    │ customer_id e retorna faturas│
+└─────────────────────┘    └──────────────────────────────┘
 ```
 
 ---
 
 ## Benefícios
 
-1. **Cobrança Automática Atualizada**: O ASAAS cobra o valor correto automaticamente
-2. **Transparência**: Admin e cliente veem exatamente o que está sendo cobrado
-3. **Rastreabilidade**: Histórico completo de aprovações e alterações
-4. **Consistência**: O valor exibido no sistema é o mesmo cobrado
-
-## Considerações Importantes
-
-1. **Subscriptions Inativas**: Se a empresa não tem subscription ativa no ASAAS, mostrar aviso ao admin
-2. **Rollback**: Se a atualização no ASAAS falhar, fazer rollback dos limites aprovados
-3. **Próxima Cobrança**: O ASAAS aplica o novo valor na próxima fatura automática
+1. **Faturamento Correto**: O valor cobrado no ASAAS refletirá o plano base + adicionais
+2. **Faturas Visíveis**: O cliente verá suas faturas em "Meu Plano → Ver Faturas"
+3. **Transparência**: Descrição clara do que está sendo cobrado
+4. **Persistência**: O `asaas_customer_id` será salvo corretamente para futuras consultas
+5. **Resumo Claro**: O cliente verá exatamente o breakdown do que está pagando
