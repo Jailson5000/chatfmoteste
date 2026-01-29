@@ -141,7 +141,10 @@ const getAlertLevel = (percentage: number): "ok" | "warning" | "critical" => {
 function TrialBadge({ company }: { company: CompanyWithStatus }) {
   if (!company.trial_type || company.trial_type === 'none' || !company.trial_ends_at) return null;
   
-  const daysLeft = differenceInDays(new Date(company.trial_ends_at), new Date());
+  const trialEnd = new Date(company.trial_ends_at);
+  const now = new Date();
+  const diffTime = trialEnd.getTime() - now.getTime();
+  const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   
   if (daysLeft < 0) {
     return (
