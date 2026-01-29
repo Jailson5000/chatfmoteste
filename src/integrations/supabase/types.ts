@@ -2393,6 +2393,76 @@ export type Database = {
           },
         ]
       }
+      company_subscriptions: {
+        Row: {
+          asaas_customer_id: string | null
+          asaas_subscription_id: string | null
+          billing_type: string | null
+          company_id: string
+          created_at: string | null
+          current_period_end: string | null
+          current_period_start: string | null
+          id: string
+          last_payment_at: string | null
+          next_payment_at: string | null
+          plan_id: string | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          asaas_customer_id?: string | null
+          asaas_subscription_id?: string | null
+          billing_type?: string | null
+          company_id: string
+          created_at?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          last_payment_at?: string | null
+          next_payment_at?: string | null
+          plan_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          asaas_customer_id?: string | null
+          asaas_subscription_id?: string | null
+          billing_type?: string | null
+          company_id?: string
+          created_at?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          last_payment_at?: string | null
+          next_payment_at?: string | null
+          plan_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_subscriptions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_subscriptions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_usage_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "company_subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       consent_logs: {
         Row: {
           client_id: string
