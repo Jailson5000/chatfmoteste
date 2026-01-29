@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Volume2 } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Loader2, Bot, Workflow, Key, CheckCircle2, XCircle, Eye, EyeOff, TestTube, AlertTriangle, Volume2, Brain, Shield, Zap } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { toast } from "sonner";
@@ -14,6 +16,15 @@ import { AVAILABLE_VOICES, DEFAULT_VOICE_ID } from "@/lib/voiceConfig";
 
 export default function GlobalAdminAIAPIs() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
+  
+  // Global AI Provider state
+  const [primaryProvider, setPrimaryProvider] = useState<"lovable" | "gemini">("lovable");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
+  const [enableFallback, setEnableFallback] = useState(true);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ success: boolean; message: string } | null>(null);
   
   // State for each provider
   const [internalEnabled, setInternalEnabled] = useState(true);
@@ -44,8 +55,26 @@ export default function GlobalAdminAIAPIs() {
     if (settings) {
       const getSetting = (key: string, defaultValue: any = "") => {
         const setting = settings.find(s => s.key === key);
-        return setting?.value ?? defaultValue;
+        if (!setting?.value) return defaultValue;
+        // Handle JSON strings
+        const val = setting.value;
+        if (typeof val === "string") {
+          try {
+            const parsed = JSON.parse(val);
+            return typeof parsed === "string" ? parsed : val;
+          } catch {
+            return val.replace(/^"|"$/g, "");
+          }
+        }
+        return val ?? defaultValue;
       };
+      
+      // Global AI Provider
+      setPrimaryProvider(getSetting("ai_primary_provider", "lovable") as "lovable" | "gemini");
+      setGeminiApiKey(getSetting("ai_gemini_api_key", ""));
+      setGeminiModel(getSetting("ai_gemini_model", "gemini-2.5-flash"));
+      const fallbackVal = getSetting("ai_enable_fallback", true);
+      setEnableFallback(fallbackVal === true || fallbackVal === "true");
       
       setInternalEnabled(getSetting("ai_internal_enabled", true) === true || getSetting("ai_internal_enabled", true) === "true");
       setOpenaiEnabled(getSetting("ai_openai_enabled", false) === true || getSetting("ai_openai_enabled", false) === "true");
@@ -64,6 +93,12 @@ export default function GlobalAdminAIAPIs() {
     setSaving(true);
     try {
       const settingsToSave = [
+        // Global AI Provider settings
+        { key: "ai_primary_provider", value: primaryProvider, category: "ai" },
+        { key: "ai_gemini_api_key", value: geminiApiKey, category: "ai" },
+        { key: "ai_gemini_model", value: geminiModel, category: "ai" },
+        { key: "ai_enable_fallback", value: enableFallback, category: "ai" },
+        // Other providers
         { key: "ai_internal_enabled", value: internalEnabled, category: "ai" },
         { key: "ai_openai_enabled", value: openaiEnabled, category: "ai" },
         { key: "ai_n8n_enabled", value: n8nEnabled, category: "ai" },
@@ -90,6 +125,45 @@ export default function GlobalAdminAIAPIs() {
       toast.error("Erro ao salvar configurações");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const testGeminiConnection = async () => {
+    if (!geminiApiKey) {
+      toast.error("Configure a chave API do Gemini primeiro");
+      return;
+    }
+    
+    setTestingGemini(true);
+    setGeminiTestResult(null);
+    
+    try {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${geminiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: geminiModel,
+          messages: [{ role: "user", content: "Olá! Responda apenas 'OK' para confirmar que está funcionando." }],
+          max_tokens: 50,
+        }),
+      });
+      
+      if (response.ok) {
+        setGeminiTestResult({ success: true, message: "Conexão estabelecida com sucesso!" });
+        toast.success("Conexão com Gemini estabelecida!");
+      } else {
+        const errorText = await response.text();
+        setGeminiTestResult({ success: false, message: `Erro: ${response.status}` });
+        toast.error(`Erro ao conectar: ${response.status}`);
+      }
+    } catch (error) {
+      setGeminiTestResult({ success: false, message: error instanceof Error ? error.message : "Erro de rede" });
+      toast.error("Erro de rede ao testar conexão");
+    } finally {
+      setTestingGemini(false);
     }
   };
 
@@ -188,6 +262,174 @@ export default function GlobalAdminAIAPIs() {
 
       {/* Provider Cards */}
       <div className="grid gap-6">
+        {/* Global AI Provider - PRIMARY CARD */}
+        <Card className="bg-[#1a1a1a] border-primary/30">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/20">
+                <Brain className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-white">Provedor IA Principal + Fallback</CardTitle>
+                <CardDescription className="text-white/50">
+                  Configure o provedor global de IA para todas as empresas do sistema
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Primary Provider Selection */}
+            <div className="space-y-4">
+              <Label className="text-white font-semibold">Provedor Principal</Label>
+              <RadioGroup
+                value={primaryProvider}
+                onValueChange={(value) => setPrimaryProvider(value as "lovable" | "gemini")}
+                className="grid gap-3"
+              >
+                <div className="flex items-center space-x-4 rounded-lg border border-white/10 p-4 hover:bg-white/5 transition-colors">
+                  <RadioGroupItem value="lovable" id="ai-lovable" />
+                  <Label htmlFor="ai-lovable" className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-white">Lovable AI (Padrão)</p>
+                        <p className="text-sm text-white/50">
+                          Gateway gerenciado com gemini-2.5-flash. Sem configuração adicional.
+                        </p>
+                      </div>
+                      <Badge variant={primaryProvider === "lovable" ? "default" : "outline"} className={primaryProvider === "lovable" ? "bg-green-600" : "bg-white/10"}>
+                        {primaryProvider === "lovable" ? "Ativo" : "Inativo"}
+                      </Badge>
+                    </div>
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-4 rounded-lg border border-white/10 p-4 hover:bg-white/5 transition-colors">
+                  <RadioGroupItem value="gemini" id="ai-gemini" />
+                  <Label htmlFor="ai-gemini" className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-white">Gemini (Sua Chave)</p>
+                        <p className="text-sm text-white/50">
+                          Use sua própria chave API do Google AI Studio. Controle total de limites.
+                        </p>
+                      </div>
+                      <Badge variant={primaryProvider === "gemini" ? "default" : "outline"} className={primaryProvider === "gemini" ? "bg-green-600" : "bg-white/10"}>
+                        {primaryProvider === "gemini" ? "Ativo" : "Inativo"}
+                      </Badge>
+                    </div>
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <Separator className="bg-white/10" />
+
+            {/* Gemini API Key */}
+            <div className="space-y-3">
+              <Label className="text-white font-semibold">Chave API Gemini (Google AI Studio)</Label>
+              <p className="text-sm text-white/50">
+                Obtenha sua chave em <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com/apikey</a>
+              </p>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    type={showGeminiKey ? "text" : "password"}
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="AIza..."
+                    className="bg-white/5 border-white/10 text-white pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full text-white/50 hover:text-white"
+                    onClick={() => setShowGeminiKey(!showGeminiKey)}
+                  >
+                    {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={testGeminiConnection}
+                  disabled={testingGemini || !geminiApiKey}
+                  className="border-white/10 text-white hover:bg-white/10"
+                >
+                  {testingGemini ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <TestTube className="h-4 w-4" />
+                  )}
+                  <span className="ml-2">Testar</span>
+                </Button>
+              </div>
+              {geminiTestResult && (
+                <div className={`flex items-center gap-2 text-sm ${geminiTestResult.success ? "text-green-400" : "text-red-400"}`}>
+                  {geminiTestResult.success ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <XCircle className="h-4 w-4" />
+                  )}
+                  {geminiTestResult.message}
+                </div>
+              )}
+            </div>
+
+            {/* Gemini Model Selection */}
+            <div className="space-y-2">
+              <Label className="text-white/70">Modelo Gemini</Label>
+              <Select value={geminiModel} onValueChange={setGeminiModel}>
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a1a] border-white/10">
+                  <SelectItem value="gemini-2.5-flash">gemini-2.5-flash (Recomendado)</SelectItem>
+                  <SelectItem value="gemini-2.5-pro">gemini-2.5-pro (Mais Poderoso)</SelectItem>
+                  <SelectItem value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Mais Rápido)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-white/40">
+                flash = equilíbrio | pro = mais inteligente | lite = mais rápido e barato
+              </p>
+            </div>
+
+            <Separator className="bg-white/10" />
+
+            {/* Fallback Toggle */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-primary/30 bg-primary/5">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-primary" />
+                  <Label className="font-medium text-white">Fallback Automático</Label>
+                </div>
+                <p className="text-sm text-white/50">
+                  Se o provedor primário falhar (429/402/500), tenta o secundário automaticamente.
+                </p>
+              </div>
+              <Switch
+                checked={enableFallback}
+                onCheckedChange={setEnableFallback}
+              />
+            </div>
+
+            {enableFallback && (
+              <div className="p-3 rounded-lg bg-primary/10 border border-primary/30 text-sm flex items-start gap-2">
+                <Shield className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+                <span className="text-white/80">
+                  Fallback <strong>ativo</strong>. Se {primaryProvider === "lovable" ? "Lovable AI" : "Gemini"} falhar, 
+                  o sistema tentará {primaryProvider === "lovable" ? "Gemini (sua chave)" : "Lovable AI"}.
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              <AlertTriangle className="h-4 w-4 text-yellow-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-yellow-200/80">
+                Esta configuração afeta TODAS as empresas do sistema. A chave é armazenada de forma segura.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Internal AI */}
         <Card className="bg-[#1a1a1a] border-white/10">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
