@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard, Globe, Loader2, Check, X } from "lucide-react";
+import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard, Globe, Loader2, Check, X, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,12 +23,18 @@ function generateSubdomainSuggestion(name: string): string {
     .substring(0, 30);
 }
 
+type RegistrationMode = 'trial' | 'pay_now';
+
 export default function Register() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isAutoApproved, setIsAutoApproved] = useState(false);
   const { plans, isLoading: plansLoading } = usePlans();
+  
+  // Registration mode: trial or pay_now
+  const [registrationMode, setRegistrationMode] = useState<RegistrationMode>('trial');
   
   // Filter only active plans
   const activePlans = plans.filter(plan => plan.is_active);
@@ -125,6 +131,11 @@ export default function Register() {
     };
   }, []);
 
+  // Get selected plan details
+  const selectedPlan = useMemo(() => {
+    return activePlans.find(p => p.id === formData.planId);
+  }, [activePlans, formData.planId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -141,15 +152,49 @@ export default function Register() {
     setIsLoading(true);
 
     try {
+      if (registrationMode === 'pay_now') {
+        // FLOW: Redirect to ASAAS checkout
+        if (!selectedPlan) {
+          throw new Error('Selecione um plano para continuar');
+        }
+
+        const { data, error } = await supabase.functions.invoke('create-asaas-checkout', {
+          body: {
+            plan: selectedPlan.name.toLowerCase().replace('miauchat ', ''),
+            billingPeriod: 'monthly',
+            companyName: formData.companyName,
+            adminName: formData.adminName,
+            adminEmail: formData.email,
+            adminPhone: formData.phone,
+            document: formData.document,
+            subdomain: formData.subdomain || undefined,
+          },
+        });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        if (!data?.url) {
+          throw new Error('Não foi possível gerar o link de pagamento');
+        }
+
+        // Redirect to ASAAS checkout
+        window.location.href = data.url;
+        return;
+      }
+
+      // FLOW: Trial registration
       const { data, error } = await supabase.functions.invoke('register-company', {
         body: {
           company_name: formData.companyName,
           admin_name: formData.adminName,
           admin_email: formData.email,
-          phone: formData.phone || undefined,
-          document: formData.document || undefined,
+          phone: formData.phone,
+          document: formData.document,
           plan_id: formData.planId,
           subdomain: formData.subdomain || undefined,
+          registration_mode: 'trial',
         },
       });
 
@@ -161,10 +206,13 @@ export default function Register() {
         throw new Error(data.error || 'Erro ao realizar cadastro');
       }
 
+      setIsAutoApproved(data.auto_approved === true);
       setIsSuccess(true);
       toast({
-        title: "Cadastro realizado!",
-        description: "Sua solicitação foi enviada para análise.",
+        title: data.auto_approved ? "Conta criada!" : "Cadastro realizado!",
+        description: data.auto_approved 
+          ? "Seu período de teste foi ativado. Verifique seu email."
+          : "Sua solicitação foi enviada para análise.",
       });
 
     } catch (err: any) {
@@ -192,38 +240,67 @@ export default function Register() {
             </div>
             
             <h2 className="text-2xl font-bold text-white mb-4">
-              Cadastro Enviado!
+              {isAutoApproved ? "Conta Ativada!" : "Cadastro Enviado!"}
             </h2>
             
-            <p className="text-zinc-400 mb-6">
-              Sua solicitação foi enviada para análise. Nossa equipe entrará em contato 
-              em breve através do email <strong className="text-zinc-300">{formData.email}</strong>.
-            </p>
-            
-            <div className="bg-zinc-800/50 rounded-lg p-4 mb-6 text-left">
-              <p className="text-sm text-zinc-400 mb-2">O que acontece agora?</p>
-              <ul className="text-sm text-zinc-300 space-y-2">
-                <li className="flex items-start gap-2">
-                  <span className="text-red-500">1.</span>
-                  Nossa equipe analisará seu cadastro
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-red-500">2.</span>
-                  Após aprovação, você receberá um email com seus dados de acesso
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-red-500">3.</span>
-                  Acesse sua conta e comece a usar o MiauChat!
-                </li>
-              </ul>
-            </div>
+            {isAutoApproved ? (
+              <>
+                <p className="text-zinc-400 mb-6">
+                  Seu período de teste de <strong className="text-green-400">7 dias</strong> foi ativado! 
+                  Enviamos os dados de acesso para <strong className="text-zinc-300">{formData.email}</strong>.
+                </p>
+                
+                <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mb-6 text-left">
+                  <p className="text-sm text-green-400 mb-2 font-semibold">✨ Seu trial inclui:</p>
+                  <ul className="text-sm text-zinc-300 space-y-2">
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5" />
+                      Acesso completo ao plano selecionado
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5" />
+                      7 dias para testar todas as funcionalidades
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5" />
+                      Sem cobrança durante o período de teste
+                    </li>
+                  </ul>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-zinc-400 mb-6">
+                  Sua solicitação foi enviada para análise. Nossa equipe entrará em contato 
+                  em breve através do email <strong className="text-zinc-300">{formData.email}</strong>.
+                </p>
+                
+                <div className="bg-zinc-800/50 rounded-lg p-4 mb-6 text-left">
+                  <p className="text-sm text-zinc-400 mb-2">O que acontece agora?</p>
+                  <ul className="text-sm text-zinc-300 space-y-2">
+                    <li className="flex items-start gap-2">
+                      <span className="text-red-500">1.</span>
+                      Nossa equipe analisará seu cadastro
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-red-500">2.</span>
+                      Após aprovação, você receberá um email com seus dados de acesso
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-red-500">3.</span>
+                      Acesse sua conta e comece a usar o MiauChat!
+                    </li>
+                  </ul>
+                </div>
+              </>
+            )}
             
             <Button 
               variant="outline" 
               onClick={() => navigate("/auth")}
               className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
             >
-              Voltar para Login
+              {isAutoApproved ? "Fazer Login" : "Voltar para Login"}
             </Button>
           </CardContent>
         </Card>
@@ -290,8 +367,8 @@ export default function Register() {
       </div>
 
       {/* Right Panel - Registration Form */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-zinc-950">
-        <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl animate-scale-in" style={{ animationDelay: "0.3s" }}>
+      <div className="flex-1 flex items-center justify-center p-8 bg-zinc-950 overflow-y-auto">
+        <Card className="w-full max-w-md border-zinc-800 bg-zinc-900/50 backdrop-blur-sm shadow-2xl animate-scale-in my-8" style={{ animationDelay: "0.3s" }}>
           <CardHeader className="text-center pb-2">
             <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
               <img src={miauchatLogo} alt="MiauChat" className="w-20 h-20 object-contain bg-transparent" />
@@ -302,7 +379,7 @@ export default function Register() {
             </div>
             <CardTitle className="text-2xl text-white">Cadastre sua Empresa</CardTitle>
             <CardDescription className="text-zinc-400">
-              Preencha os dados para solicitar acesso ao MiauChat
+              Preencha os dados para começar a usar o MiauChat
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -410,7 +487,7 @@ export default function Register() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="phone" className="text-zinc-300">
-                    {companyFieldConfig.phone.label}
+                    {companyFieldConfig.phone.label} *
                   </Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
@@ -421,23 +498,25 @@ export default function Register() {
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
+                      required
                     />
                   </div>
                 </div>
                 
                 <div className="space-y-2">
                   <Label htmlFor="document" className="text-zinc-300">
-                    {companyFieldConfig.document.label}
+                    {companyFieldConfig.document.label} *
                   </Label>
                   <div className="relative">
                     <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <Input
                       id="document"
                       type="text"
-                      placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                      placeholder="000.000.000-00"
                       className="pl-10 bg-zinc-800/50 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-red-500 focus:ring-red-500/20"
                       value={formData.document}
                       onChange={(e) => setFormData({ ...formData, document: formatDocument(e.target.value) })}
+                      required
                     />
                   </div>
                 </div>
@@ -504,23 +583,113 @@ export default function Register() {
                 )}
               </div>
               
-              <div className="bg-zinc-800/30 rounded-lg p-3 border border-zinc-700/50">
+              {/* Registration Mode Selection */}
+              <div className="space-y-3 pt-2">
+                <Label className="text-zinc-300 font-medium">
+                  Como deseja começar?
+                </Label>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Pay Now Option */}
+                  <button
+                    type="button"
+                    onClick={() => setRegistrationMode('pay_now')}
+                    className={`relative p-4 rounded-lg border-2 transition-all text-left ${
+                      registrationMode === 'pay_now'
+                        ? "border-red-500 bg-red-500/10"
+                        : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <CreditCard className={`h-5 w-5 ${registrationMode === 'pay_now' ? 'text-red-400' : 'text-zinc-500'}`} />
+                      <span className={`font-semibold ${registrationMode === 'pay_now' ? 'text-white' : 'text-zinc-300'}`}>
+                        Pagar Agora
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-500">
+                      Acesso imediato após confirmação do pagamento
+                    </p>
+                    {registrationMode === 'pay_now' && (
+                      <div className="absolute top-2 right-2">
+                        <Check className="h-4 w-4 text-red-400" />
+                      </div>
+                    )}
+                  </button>
+                  
+                  {/* Trial Option */}
+                  <button
+                    type="button"
+                    onClick={() => setRegistrationMode('trial')}
+                    className={`relative p-4 rounded-lg border-2 transition-all text-left ${
+                      registrationMode === 'trial'
+                        ? "border-green-500 bg-green-500/10"
+                        : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Gift className={`h-5 w-5 ${registrationMode === 'trial' ? 'text-green-400' : 'text-zinc-500'}`} />
+                      <span className={`font-semibold ${registrationMode === 'trial' ? 'text-white' : 'text-zinc-300'}`}>
+                        Trial Grátis
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-500">
+                      7 dias grátis para testar todas as funcionalidades
+                    </p>
+                    {registrationMode === 'trial' && (
+                      <div className="absolute top-2 right-2">
+                        <Check className="h-4 w-4 text-green-400" />
+                      </div>
+                    )}
+                  </button>
+                </div>
+              </div>
+              
+              {/* Info box based on selected mode */}
+              <div className={`rounded-lg p-3 border ${
+                registrationMode === 'pay_now' 
+                  ? 'bg-red-500/5 border-red-500/30' 
+                  : 'bg-green-500/5 border-green-500/30'
+              }`}>
                 <p className="text-xs text-zinc-400">
-                  ⚠️ Após o cadastro, sua solicitação será analisada pela nossa equipe. 
-                  Você receberá um email com os dados de acesso após a aprovação.
-                  <span className="block mt-1 text-zinc-500">
-                    O plano selecionado só será ativado após a aprovação do cadastro.
-                  </span>
+                  {registrationMode === 'pay_now' ? (
+                    <>
+                      💳 Você será redirecionado para a página de pagamento. 
+                      Após a confirmação, sua conta será ativada automaticamente.
+                    </>
+                  ) : (
+                    <>
+                      🎁 Experimente o MiauChat por 7 dias sem compromisso. 
+                      Ao final do período, você pode assinar o plano escolhido.
+                    </>
+                  )}
                 </p>
               </div>
               
               <Button 
                 type="submit" 
-                className="w-full bg-red-600 hover:bg-red-700 text-white" 
-                disabled={isLoading}
+                className={`w-full ${
+                  registrationMode === 'pay_now'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-green-600 hover:bg-green-700'
+                } text-white`} 
+                disabled={isLoading || !formData.planId}
               >
-                {isLoading ? "Enviando..." : "Solicitar Cadastro"}
-                <ArrowRight className="ml-2 h-4 w-4" />
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processando...
+                  </>
+                ) : registrationMode === 'pay_now' ? (
+                  <>
+                    Continuar para Pagamento
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                ) : (
+                  <>
+                    Iniciar Período de Teste
+                    <Gift className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </Button>
               
               <p className="text-center text-sm text-zinc-500">

@@ -138,15 +138,15 @@ export const publicRegistrationSchema = z.object({
 
   phone: z
     .string()
+    .min(10, "Telefone é obrigatório")
     .max(20, "Telefone deve ter no máximo 20 caracteres")
-    .optional()
-    .transform((val) => val?.trim() || undefined),
+    .transform((val) => val.trim()),
 
   document: z
     .string()
+    .min(11, "CPF/CNPJ é obrigatório")
     .max(20, "Documento deve ter no máximo 20 caracteres")
-    .optional()
-    .transform((val) => val?.trim() || undefined),
+    .transform((val) => val.trim()),
 
   // Plan selection - Required
   planId: z
