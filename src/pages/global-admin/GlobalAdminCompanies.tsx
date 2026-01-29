@@ -191,37 +191,14 @@ export default function GlobalAdminCompanies() {
         throw new Error(response.data?.error || 'Erro desconhecido');
       }
       
-      const paymentUrl = response.data.payment_url;
       const priceFormatted = response.data.price?.toFixed(2).replace('.', ',');
+      const nextDueDate = response.data.next_due_date;
       
-      // Try to copy to clipboard with fallback
-      try {
-        await navigator.clipboard.writeText(paymentUrl);
-        toast.success(
-          `Link de pagamento gerado e copiado!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}\n\n${paymentUrl}`,
-          { duration: 15000 }
-        );
-      } catch (clipboardError) {
-        // Fallback: show link in toast with copy action
-        console.warn("Clipboard access denied, showing link in toast:", clipboardError);
-        toast.success(
-          `Link de pagamento gerado!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}\n\n${paymentUrl}`,
-          { 
-            duration: 30000,
-            action: {
-              label: "Copiar",
-              onClick: () => {
-                navigator.clipboard.writeText(paymentUrl).then(() => {
-                  toast.success("Link copiado!");
-                }).catch(() => {
-                  // Last resort: prompt user to copy manually
-                  window.prompt("Copie o link abaixo:", paymentUrl);
-                });
-              }
-            }
-          }
-        );
-      }
+      // Show success message with subscription details
+      toast.success(
+        `✅ Assinatura criada com sucesso!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}/${billingType === 'yearly' ? 'ano' : 'mês'}\nPróximo vencimento: ${nextDueDate}\n\nO cliente receberá email/SMS do ASAAS para pagamento via Boleto, PIX ou Cartão.`,
+        { duration: 15000 }
+      );
       
       setBillingCompany(null);
     } catch (error: any) {
