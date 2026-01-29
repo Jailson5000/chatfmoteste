@@ -1,238 +1,196 @@
 
-# Plano: Corrigir Exibição de Contatos WABA e Adicionar Suporte a Figurinhas (Stickers)
 
-## Problemas Identificados
+# Plano: Ajustes Landing Page + Correção de Nomes WABA em Conversas Existentes
 
-### Problema 1: Contatos da API do WhatsApp Business (WABA) não mostram nome
-**Análise técnica:**
-- Mensagens vindas de números usando WABA às vezes não incluem o campo `pushName` no payload
-- O webhook Evolution API (`evolution-webhook/index.ts`, linha 3755) usa APENAS `data.pushName` para definir o nome do contato
-- Quando `pushName` está ausente, o sistema usa apenas o número de telefone como nome
-- WABA pode enviar o nome em campos alternativos que não estamos capturando
+## Resumo dos Problemas
 
-**Código atual (linha 3755):**
+### 1. Landing Page
+- **Botão "Entrar"**: Precisa ser removido do header
+- **"Falar com especialista"**: Mudar para texto mais chamativo e redirecionar para `/register` ao invés de WhatsApp
+- **Área de Teste Grátis**: Adicionar fundo verde claro transparente ao redor
+
+### 2. WABA - Contatos sem Nome (Conversas Existentes)
+**Problema**: A função `getContactName()` com suporte a campos WABA alternativos (`notify`, `verifiedName`, `formattedName`, `sender.pushName`) foi adicionada apenas para **novas conversas**.
+
+Para **conversas existentes**, o código ainda usa apenas `data.pushName`:
 ```typescript
-const contactName = (!isFromMe && data.pushName) ? data.pushName : phoneNumber;
+// Linha 4312 - Só verifica data.pushName
+const shouldUpdateContactName = !isFromMe && !conversation.client_id && data.pushName;
+
+// Linha 4338 - Só usa data.pushName
+contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
 ```
 
-### Problema 2: Figurinhas aparecem como "📎 Mídia" ao invés da imagem
-**Análise técnica:**
-- A interface `stickerMessage` está definida na linha 750-754, mas **NÃO há código para processar stickers**
-- O bloco de extração de conteúdo (linhas 3996-4139) trata: `conversation`, `extendedTextMessage`, `imageMessage`, `audioMessage`, `videoMessage`, `documentMessage`
-- **NÃO existe tratamento para `stickerMessage`** - stickers são ignorados completamente
-- O frontend (`MessageBubble.tsx`) também não tem lógica para renderizar stickers como imagens
+**Resultado**: Mensagens de WABA em conversas existentes não atualizam o nome do contato porque `pushName` está vazio.
 
 ---
 
-## Solução Proposta
+## Alterações Propostas
 
-### Parte 1: Suporte a Nomes de Contatos WABA
+### Parte 1: Landing Page (`LandingPage.tsx`)
 
-Expandir a lógica de extração de nome para buscar em campos alternativos que a Evolution API pode fornecer para mensagens WABA:
+#### 1.1 Remover botão "Entrar"
+Remover o Link para `/auth` no header (linhas 236-241):
+```tsx
+// REMOVER ESTE BLOCO
+<Link
+  to="/auth"
+  className="text-sm text-white/50 hover:text-white transition-colors"
+>
+  Entrar
+</Link>
+```
+
+#### 1.2 Alterar "Falar com especialista" no Hero
+Mudar o botão secundário (linhas 311-321) para:
+- Novo texto: **"Testar gratuitamente"** ou **"Teste 7 dias grátis"**
+- Redirecionar para `/register` ao invés de link para `#contato`
+- Ícone adequado (Rocket ou similar)
+
+```tsx
+// ANTES
+<Button asChild variant="outline" ...>
+  <a href="#contato">
+    <Phone className="mr-2 h-4 w-4" />
+    Falar com especialista
+  </a>
+</Button>
+
+// DEPOIS
+<Button
+  variant="outline"
+  onClick={() => navigate("/register")}
+>
+  <Rocket className="mr-2 h-4 w-4" />
+  Teste 7 dias grátis
+</Button>
+```
+
+#### 1.3 Alterar botão Enterprise nos planos
+No card Enterprise (linhas 740-743), mudar:
+- Texto: **"Solicitar proposta"** (mais chamativo que "Falar com especialista")
+- Redirecionar para `/register?plan=enterprise`
+
+```tsx
+// ANTES
+onClick={() => window.open("https://wa.me/5563999540484...", "_blank")
+
+// DEPOIS  
+onClick={() => navigate("/register?plan=enterprise")}
+```
+
+#### 1.4 Adicionar fundo verde ao banner Trial
+Aplicar estilo verde claro transparente ao banner (linha 668):
+
+```tsx
+// ANTES
+<div className="py-3 px-4 rounded-lg border border-white/[0.06] bg-white/[0.01] ...">
+
+// DEPOIS
+<div className="py-3 px-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 ...">
+```
+
+---
+
+### Parte 2: Correção WABA para Conversas Existentes (`evolution-webhook/index.ts`)
+
+#### 2.1 Criar função auxiliar reutilizável
+Mover a lógica `getContactName()` para fora do bloco de criação de nova conversa, tornando-a acessível para o update:
 
 ```typescript
-// Extrair nome do contato de múltiplas fontes possíveis
-// WABA pode não enviar pushName, mas pode ter outros campos
-const getContactName = (data: MessageData, isFromMe: boolean, phoneNumber: string): string => {
-  // Não usar pushName para mensagens enviadas por nós
+// Função auxiliar para extrair nome do contato com suporte a WABA
+const extractContactName = (messageData: MessageData, isFromMe: boolean, phoneNumber: string): string => {
   if (isFromMe) return phoneNumber;
-  
-  // Prioridade de fontes de nome:
-  // 1. pushName (WhatsApp pessoal)
-  // 2. notify (alguns payloads WABA)
-  // 3. verifiedName (WABA verificado)
-  // 4. formattedName (alguns casos WABA)
-  // 5. Fallback para número de telefone
-  return data.pushName || 
-         (data as any).notify || 
-         (data as any).verifiedName || 
-         (data as any).formattedName ||
-         (data as any).sender?.pushName ||
-         (data as any).sender?.name ||
+  return messageData.pushName || 
+         messageData.notify || 
+         messageData.verifiedName || 
+         messageData.formattedName ||
+         messageData.sender?.pushName ||
+         messageData.sender?.name ||
          phoneNumber;
 };
 ```
 
-**Atualização da interface MessageData** para incluir campos WABA:
-```typescript
-interface MessageData {
-  key: { remoteJid: string; fromMe: boolean; id: string };
-  pushName?: string;
-  // Campos alternativos para WABA
-  notify?: string;
-  verifiedName?: string;
-  formattedName?: string;
-  sender?: {
-    pushName?: string;
-    name?: string;
-  };
-  // ... resto
-}
-```
-
-### Parte 2: Suporte Completo a Figurinhas (Stickers)
-
-#### 2.1. Backend: Processar `stickerMessage` no Webhook
-
-Adicionar tratamento de stickers no bloco de extração de mensagens (após linha 4139):
+#### 2.2 Atualizar lógica de update para usar extração WABA
+Modificar a verificação e atribuição de contact_name para usar a função auxiliar:
 
 ```typescript
-// Adicionar após } else if (data.message?.documentMessage) { ... }
-} else if (data.message?.stickerMessage) {
-  messageType = 'sticker';
-  messageContent = ''; // Stickers não têm texto
-  mediaUrl = data.message.stickerMessage.url || '';
-  mediaMimeType = data.message.stickerMessage.mimetype || 'image/webp';
-}
-```
+// ANTES (linha 4312)
+const shouldUpdateContactName = !isFromMe && !conversation.client_id && data.pushName;
 
-#### 2.2. Frontend: Renderizar Stickers como Imagens
+// DEPOIS - Verifica qualquer campo de nome WABA
+const extractedName = extractContactName(data, isFromMe, phoneNumber);
+const shouldUpdateContactName = !isFromMe && !conversation.client_id && extractedName !== phoneNumber;
 
-**MessageBubble.tsx** - Adicionar suporte a stickers no `renderMedia()`:
+// ANTES (linha 4338)
+contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
 
-```typescript
-// Adicionar sticker às verificações de media type
-const isSticker = messageType === "sticker" || mediaMimeType === "image/webp";
-
-// No canFetchWithoutUrl, incluir sticker
-const canFetchWithoutUrl = !mediaUrl && !!whatsappMessageId && !!conversationId &&
-  (messageType === "image" || messageType === "document" || 
-   messageType === "audio" || messageType === "video" || 
-   messageType === "ptt" || messageType === "sticker");
-
-// No renderMedia(), adicionar após verificação de isImage:
-if ((isSticker || mediaMimeType === "image/webp") && (mediaUrl || canFetchWithoutUrl)) {
-  return (
-    <StickerViewer
-      src={srcForMedia}
-      mimeType={mediaMimeType || "image/webp"}
-      whatsappMessageId={whatsappMessageId || undefined}
-      conversationId={conversationId}
-    />
-  );
-}
-```
-
-#### 2.3. Criar Componente StickerViewer
-
-Componente específico para stickers (tamanho menor, sem clique para expandir):
-
-```typescript
-function StickerViewer({ src, mimeType, whatsappMessageId, conversationId }: {
-  src: string;
-  mimeType?: string;
-  whatsappMessageId?: string;
-  conversationId?: string;
-}) {
-  // Lógica similar ao ImageViewer, mas:
-  // - Tamanho máximo menor (160x160px típico de sticker)
-  // - Sem modal de expansão
-  // - Fundo transparente preservado (WebP com alpha)
-  
-  return (
-    <div className="max-w-[160px] max-h-[160px]">
-      <img
-        src={decryptedSrc || src}
-        alt="Figurinha"
-        className="max-w-full max-h-[160px] object-contain"
-      />
-    </div>
-  );
-}
+// DEPOIS - Usa o nome extraído
+contact_name: shouldUpdateContactName ? extractedName : conversation.contact_name,
 ```
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Modificação |
-|---------|-------------|
-| `supabase/functions/evolution-webhook/index.ts` | 1. Expandir `MessageData` com campos WABA 2. Criar função `getContactName()` 3. Adicionar processamento de `stickerMessage` |
-| `src/components/conversations/MessageBubble.tsx` | 1. Criar componente `StickerViewer` 2. Adicionar `sticker` ao `canFetchWithoutUrl` 3. Renderizar stickers no `renderMedia()` |
-| `src/pages/Conversations.tsx` | Já tem suporte a "sticker" no preview (linha 988-989) - OK |
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/landing/LandingPage.tsx` | Remover "Entrar", alterar "Falar com especialista", adicionar fundo verde |
+| `supabase/functions/evolution-webhook/index.ts` | Aplicar extração WABA no update de conversas existentes |
 
 ---
 
-## Detalhes Técnicos
+## Resposta à Pergunta sobre WABA
 
-### Fluxo de Processamento de Sticker
+> "Ainda não aparece o nome nem a mensagem que foi recebida pelo WABA. Vai atualizar nas próximas?"
 
-```
-┌─────────────────────────┐
-│ WhatsApp envia sticker  │
-│ (message.stickerMessage)│
-└───────────┬─────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────┐
-│ evolution-webhook/index.ts:                     │
-│                                                 │
-│ } else if (data.message?.stickerMessage) {     │
-│   messageType = 'sticker';                      │
-│   mediaUrl = data.message.stickerMessage.url;   │
-│   mediaMimeType = 'image/webp';                 │
-│ }                                               │
-└───────────┬─────────────────────────────────────┘
-            │ Salva no DB com message_type='sticker'
-            ▼
-┌─────────────────────────────────────────────────┐
-│ MessageBubble.tsx:                              │
-│                                                 │
-│ if (messageType === 'sticker') {               │
-│   return <StickerViewer ... />                 │
-│ }                                               │
-└───────────┬─────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────┐
-│ StickerViewer:                                  │
-│ - Decrypt via evolution-api (se necessário)    │
-│ - Renderiza como imagem WebP (160x160 max)     │
-│ - Preserva transparência                        │
-└─────────────────────────────────────────────────┘
-```
+**Resposta**: O código atual só extrai nomes WABA para **novas conversas**. Para conversas existentes, a lógica ainda usa apenas `pushName`. Com esta correção:
 
-### Extração de Nome de Contato WABA
-
-```
-┌─────────────────────────┐
-│ Mensagem WABA recebida  │
-│ (sem pushName)          │
-└───────────┬─────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────┐
-│ getContactName(data):                           │
-│                                                 │
-│ 1. data.pushName       → ❌ undefined           │
-│ 2. data.notify         → ✅ "João Silva"        │
-│ 3. data.verifiedName   → (não chega aqui)      │
-│ 4. phoneNumber         → (fallback)             │
-│                                                 │
-│ return "João Silva"                             │
-└───────────┬─────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────┐
-│ Conversa criada/atualizada com:                │
-│ contact_name = "João Silva" (não mais número)  │
-└─────────────────────────────────────────────────┘
-```
+- **Próximas mensagens**: Sim, o nome será extraído corretamente dos campos WABA alternativos
+- **Conversas existentes**: Se receberem nova mensagem do cliente, o nome será atualizado
+- **Mensagens já salvas**: O conteúdo já está no banco de dados, mas figurinhas antigas podem aparecer como "📎 Mídia" (precisariam reprocessamento)
 
 ---
 
-## Prevenção de Regressões
+## Fluxo Visual das Mudanças
 
-1. **Mantém lógica existente intacta** - Apenas adiciona novos casos, não modifica os existentes
-2. **Fallback seguro** - Se nenhum nome alternativo existir, continua usando o número de telefone
-3. **Compatibilidade retroativa** - Stickers antigos no banco de dados serão exibidos como "📎 Mídia" até reprocessamento
-4. **Teste de tipos de mídia** - Não afeta processamento de image/audio/video/document existentes
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  LANDING PAGE - ANTES                                           │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ [Logo]                    [Entrar] [Começar]             │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  [Quero conhecer] [📞 Falar com especialista → WhatsApp]        │
+│                                                                  │
+│  ┌─ Trial Banner (sem destaque) ─────────────────────────────┐  │
+│  │ Faça seu cadastro... 7 dias...                            │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+
+                           ▼
+
+┌─────────────────────────────────────────────────────────────────┐
+│  LANDING PAGE - DEPOIS                                          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ [Logo]                              [Começar]             │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  [Quero conhecer] [🚀 Teste 7 dias grátis → /register]          │
+│                                                                  │
+│  ┌─ Trial Banner (VERDE CLARO) ──────────────────────────────┐  │
+│  │ ✨ Faça seu cadastro... 7 dias...                         │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Benefícios
 
-1. **Contatos WABA com nome**: Usuários verão nomes reais ao invés de apenas números
-2. **Figurinhas visíveis**: Stickers aparecem como imagens, igual ao WhatsApp
-3. **UX consistente**: Experiência de chat mais próxima do WhatsApp nativo
-4. **Sem quebras**: Funcionalidade existente permanece inalterada
+1. **CTA mais claro**: "Teste 7 dias grátis" é mais direto que "Falar com especialista"
+2. **Fluxo simplificado**: Todos os caminhos levam ao registro
+3. **Destaque visual**: Banner verde chama atenção para o trial grátis
+4. **WABA corrigido**: Nomes de contatos WABA serão extraídos corretamente para conversas existentes
+5. **Interface limpa**: Menos botões = menos confusão para o visitante
+
