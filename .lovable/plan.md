@@ -1,192 +1,236 @@
 
-# Plano: Correção do Sistema de Cobranças ASAAS
+# Plano: Sistema de Acompanhamento de Cobranças e Inadimplência
 
-## Diagnóstico Completo
+## Situação Atual
 
-### Problema 1: "Copiado pra onde?"
-**Status**: ✅ Funcionando - O toast exibe o link completo quando a cópia automática falha
-**Evidência**: Screenshot mostra toast com "Link de pagamento gerado e copiado!" + URL visível
+### 1. Data de Vencimento
+**Problema**: O vencimento é calculado como "7 dias a partir da criação da assinatura", não como "dia fixo mensal baseado no cadastro".
 
-### Problema 2: Faturas não aparecem para o cliente
-**Causa Raiz**: A função `list-asaas-invoices` busca `/payments?customer={customer_id}` - mas **pagamentos só existem após o cliente concluir um link de pagamento**. Como ninguém pagou ainda, retorna vazio.
+```typescript
+// Código atual
+const nextDueDate = new Date();
+nextDueDate.setDate(nextDueDate.getDate() + 7);
+```
 
-### Problema 3: Faturas não aparecem no ASAAS (em "Cobranças")
-**Causa Raiz**: O sistema está criando **Links de Pagamento** (`POST /paymentLinks`), não **Cobranças** (`POST /payments`).
+**Comportamento esperado**: Se a empresa foi cadastrada dia 15, o vencimento deveria ser todo dia 15 de cada mês.
 
-Diferença no ASAAS:
-- **Link de Pagamento**: Aparece em "Links de Pagamento" - é um URL que o cliente acessa
-- **Cobrança**: Aparece em "Cobranças/Todas" - é uma fatura com vencimento e método definido
-
-### Problema 4: Cliente já criado - reutilização
-**Status**: ✅ Funcionando - O código já busca o cliente existente via `asaas_customer_id` ou email antes de criar um novo.
+### 2. Acompanhamento de Inadimplência
+**Problema**: O Dashboard de Pagamentos atual (`GlobalAdminPayments.tsx`) não oferece:
+- Lista de empresas inadimplentes
+- Filtros por status de pagamento
+- Alertas de vencimento próximo
+- Ações de cobrança
 
 ---
 
 ## Solução Proposta
 
-### Alterar `admin-create-asaas-subscription` para criar Cobrança Direta
+### Parte 1: Vencimento Baseado na Data de Cadastro
 
-Ao invés de criar um link de pagamento, criar uma **cobrança (payment)** diretamente:
+Modificar `admin-create-asaas-subscription/index.ts` para calcular o vencimento usando a data de aprovação/criação da empresa:
 
 ```typescript
-// ANTES: Cria link de pagamento
-POST /paymentLinks { name, value, chargeType: "RECURRENT", ... }
+// Buscar data de aprovação ou criação da empresa
+const companyCreatedAt = new Date(company.approved_at || company.created_at);
+const dayOfMonth = companyCreatedAt.getDate();
 
-// DEPOIS: Cria cobrança direta
-POST /payments {
-  customer: customerId,
-  value: priceInReais,
-  billingType: "UNDEFINED",  // Cliente escolhe (Boleto/PIX/Cartão)
-  dueDate: "YYYY-MM-DD",     // 7 dias a partir de hoje
-  description: "Assinatura MiauChat ENTERPRISE + adicionais",
-  externalReference: "company:UUID"
+// Calcular próximo vencimento no mesmo dia do mês
+const nextDueDate = new Date();
+if (nextDueDate.getDate() >= dayOfMonth) {
+  // Já passou este mês, vai para o próximo
+  nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+}
+nextDueDate.setDate(Math.min(dayOfMonth, getDaysInMonth(nextDueDate)));
+```
+
+### Parte 2: Novo Painel de Acompanhamento Financeiro
+
+Adicionar nova aba "Inadimplência" no Dashboard de Pagamentos com:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  DASHBOARD DE PAGAMENTOS                                        │
+│                                                                  │
+│  [Visão Geral] [Inadimplência] [Vencimentos]                    │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  📊 RESUMO RÁPIDO                                           ││
+│  │                                                              ││
+│  │  🔴 3 Vencidas    🟡 5 Pendentes    🟢 12 Em Dia            ││
+│  │  Total em atraso: R$ 4.590,00                               ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  EMPRESAS INADIMPLENTES                                     ││
+│  │                                                              ││
+│  │  🔴 FMO Advogados         R$ 2.128,30    15 dias atraso     ││
+│  │     Plano: ENTERPRISE     Venceu: 14/01/2026                ││
+│  │     [📧 Cobrar] [⚠️ Bloquear] [📋 Ver Histórico]            ││
+│  │                                                              ││
+│  │  🔴 Empresa XYZ           R$ 897,00      8 dias atraso      ││
+│  │     Plano: PROFESSIONAL   Venceu: 21/01/2026                ││
+│  │     [📧 Cobrar] [⚠️ Bloquear] [📋 Ver Histórico]            ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  PRÓXIMOS VENCIMENTOS (7 DIAS)                              ││
+│  │                                                              ││
+│  │  🟡 30/01 - Suporte MiauChat      R$ 197,00    (amanhã)     ││
+│  │  🟡 01/02 - Jr Importados         R$ 497,00    (3 dias)     ││
+│  │  🟡 05/02 - Liz Importados        R$ 897,00    (7 dias)     ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Parte 3: Nova Edge Function para Buscar Status de Pagamentos
+
+Criar `get-billing-status/index.ts` que busca do ASAAS:
+
+```typescript
+// Buscar todas as cobranças pendentes e vencidas
+const overduePayments = await fetch(
+  `${asaasBaseUrl}/payments?status=OVERDUE&limit=100`,
+  { headers: { "access_token": asaasApiKey } }
+);
+
+const pendingPayments = await fetch(
+  `${asaasBaseUrl}/payments?status=PENDING&limit=100`,
+  { headers: { "access_token": asaasApiKey } }
+);
+
+// Retornar com dados enriquecidos (nome da empresa, dias em atraso)
+return {
+  overdue: overduePayments.map(p => ({
+    ...p,
+    daysOverdue: diffDays(new Date(), new Date(p.dueDate)),
+    companyName: findCompanyByAsaasId(p.customer)
+  })),
+  pending: pendingPayments,
+  summary: {
+    totalOverdue: overduePayments.length,
+    totalPending: pendingPayments.length,
+    totalAmountOverdue: sum(overduePayments.map(p => p.value))
+  }
 }
 ```
 
-### Criar Assinatura Recorrente
-Se você quer cobranças automáticas mensais, é necessário criar uma **Subscription**:
+### Parte 4: Salvar Vencimento no Banco
 
-```typescript
-POST /subscriptions {
-  customer: customerId,
-  billingType: "UNDEFINED",
-  nextDueDate: "YYYY-MM-DD",
-  value: priceInReais,
-  cycle: "MONTHLY",
-  description: "Assinatura MiauChat ENTERPRISE + adicionais"
-}
+Adicionar coluna para rastrear vencimentos localmente:
+
+```sql
+-- Já existe next_payment_at em company_subscriptions
+-- Vamos usar para exibir no painel
+UPDATE company_subscriptions 
+SET next_payment_at = (asaas_next_due_date)
+WHERE asaas_subscription_id IS NOT NULL;
 ```
 
 ---
 
-## Arquivos a Modificar
+## Arquivos a Criar/Modificar
 
-| Arquivo | Modificação |
-|---------|-------------|
-| `supabase/functions/admin-create-asaas-subscription/index.ts` | Trocar `POST /paymentLinks` por `POST /payments` (ou `/subscriptions` para recorrente) |
-| `supabase/functions/generate-payment-link/index.ts` | Mesma lógica para o cliente |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Melhorar feedback - exibir que cobrança foi criada (não link) |
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `supabase/functions/admin-create-asaas-subscription/index.ts` | Modificar | Calcular vencimento baseado na data de aprovação |
+| `supabase/functions/get-billing-status/index.ts` | Criar | Buscar cobranças pendentes/vencidas do ASAAS |
+| `src/pages/global-admin/GlobalAdminPayments.tsx` | Modificar | Adicionar abas de Inadimplência e Vencimentos |
+| `src/components/global-admin/BillingOverdueList.tsx` | Criar | Componente para listar inadimplentes |
+| `src/components/global-admin/UpcomingPaymentsList.tsx` | Criar | Componente para próximos vencimentos |
 
 ---
 
-## Fluxo Corrigido
+## Detalhes Técnicos
+
+### Fluxo do Cálculo de Vencimento
 
 ```text
 ┌─────────────────────────┐
-│ Admin clica "Gerar      │
-│ Fatura/Cobrança" para   │
-│ FMO Advogados           │
+│ Empresa aprovada        │
+│ Data: 15/01/2026        │
 └───────────┬─────────────┘
             │
             ▼
 ┌─────────────────────────────────────────────────┐
-│ admin-create-asaas-subscription:                │
+│ Gerar assinatura:                               │
 │                                                 │
-│ 1. Busca/cria customer no ASAAS                 │
-│ 2. Calcula valor: R$ 1.697 + R$ 431,30 = R$ 2.128,30 │
-│ 3. POST /subscriptions (ou /payments)          │
-│    - billingType: "UNDEFINED" (cliente escolhe) │
-│    - nextDueDate: +7 dias                       │
-│    - cycle: "MONTHLY"                           │
-│    - externalReference: company:UUID            │
+│ 1. Buscar company.approved_at = 15/01          │
+│ 2. dayOfMonth = 15                              │
+│ 3. Hoje = 29/01, já passou dia 15              │
+│ 4. nextDueDate = 15/02/2026                    │
 └───────────┬─────────────────────────────────────┘
             │
             ▼
 ┌─────────────────────────────────────────────────┐
-│ ASAAS cria:                                     │
-│ - Subscription recorrente                       │
-│ - Primeira cobrança (aparece em "Cobranças")    │
-│ - Envia email/SMS ao cliente                    │
-│ - Salva asaas_subscription_id no banco         │
-└───────────┬─────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────┐
-│ Cliente:                                        │
-│ - Vê cobrança em "Ver Faturas" no MiauChat      │
-│ - Recebe email/SMS do ASAAS                     │
-│ - Pode pagar via Boleto, PIX ou Cartão          │
+│ ASAAS cria subscription com:                   │
+│ - nextDueDate: 15/02/2026                       │
+│ - cycle: MONTHLY                                │
+│ - Próximos: 15/03, 15/04, 15/05...             │
 └─────────────────────────────────────────────────┘
 ```
 
----
-
-## Detalhes Técnicos da Nova Edge Function
-
-Trocar o payload de `/paymentLinks` para `/subscriptions`:
+### Estrutura da Nova Edge Function
 
 ```typescript
-// Calcular data de vencimento (7 dias a partir de hoje)
-const dueDate = new Date();
-dueDate.setDate(dueDate.getDate() + 7);
-const dueDateStr = dueDate.toISOString().split('T')[0];
-
-// Criar subscription com cobrança recorrente
-const subscriptionPayload = {
-  customer: customerId,
-  billingType: "UNDEFINED",  // Cliente escolhe (Boleto, PIX, Cartão)
-  nextDueDate: dueDateStr,
-  value: priceInReais,
-  cycle: billing_type === "yearly" ? "YEARLY" : "MONTHLY",
-  description: description,
-  externalReference: `company:${company.id}`.slice(0, 100),
-};
-
-const subscriptionResponse = await fetch(`${asaasBaseUrl}/subscriptions`, {
-  method: "POST",
-  headers: {
-    "access_token": asaasApiKey,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(subscriptionPayload),
-});
-```
-
-### Retorno da API de Subscription
-
-```json
-{
-  "id": "sub_abc123",
-  "customer": "cus_000158741524",
-  "value": 2128.30,
-  "nextDueDate": "2026-02-05",
-  "cycle": "MONTHLY",
-  "status": "ACTIVE"
+// get-billing-status/index.ts
+interface BillingStatusResponse {
+  summary: {
+    totalOverdue: number;
+    totalPending: number;
+    totalAmountOverdue: number;
+    totalAmountPending: number;
+  };
+  overdue: {
+    paymentId: string;
+    customerId: string;
+    companyId: string;
+    companyName: string;
+    planName: string;
+    value: number;
+    dueDate: string;
+    daysOverdue: number;
+    invoiceUrl: string;
+  }[];
+  pending: { /* similar */ }[];
+  upcomingThisWeek: {
+    companyId: string;
+    companyName: string;
+    value: number;
+    dueDate: string;
+    daysUntilDue: number;
+  }[];
 }
 ```
 
-### Salvar no Banco
+### Enriquecimento com Dados Locais
+
+Para exibir o nome da empresa ao lado de cada cobrança:
 
 ```typescript
-await supabase
+// Buscar mapeamento customer_id -> company
+const { data: subscriptions } = await supabase
   .from("company_subscriptions")
-  .upsert({
-    company_id: company.id,
-    asaas_customer_id: customerId,
-    asaas_subscription_id: subscriptionData.id,  // SALVAR!
-    plan_id: company.plan.id,
-    billing_type,
-    status: "active",
-  }, { onConflict: "company_id" });
+  .select("company_id, asaas_customer_id, companies(name, plan:plans(name))");
+
+// Criar lookup map
+const customerToCompany = new Map(
+  subscriptions.map(s => [s.asaas_customer_id, s.companies])
+);
+
+// Enriquecer dados do ASAAS
+overduePayments.map(payment => ({
+  ...payment,
+  companyName: customerToCompany.get(payment.customer)?.name || "Desconhecido",
+  planName: customerToCompany.get(payment.customer)?.plan?.name || "-"
+}));
 ```
 
 ---
 
 ## Benefícios
 
-1. **Cobranças visíveis no ASAAS**: Aparecem em "Cobranças → Todas"
-2. **Cliente vê faturas**: `list-asaas-invoices` encontrará os payments criados
-3. **Recorrência automática**: ASAAS gera cobranças mensais automaticamente
-4. **Múltiplos métodos**: Cliente escolhe Boleto, PIX ou Cartão
-5. **`asaas_subscription_id` salvo**: Permite atualizar valor via `update-asaas-subscription`
-6. **Notificações**: ASAAS envia email/SMS automaticamente
-
----
-
-## Observações Importantes
-
-1. **billingType "UNDEFINED"**: Permite que o cliente escolha o método de pagamento no momento do pagamento. Se quiser forçar um método específico, use "BOLETO", "PIX" ou "CREDIT_CARD".
-
-2. **Manter `/paymentLinks` para trial/registro**: O fluxo de registro/trial pode continuar usando links de pagamento, pois o cliente ainda não tem vínculo.
-
-3. **Webhook já funciona**: O `asaas-webhook` já salva o `asaas_subscription_id` quando recebe PAYMENT_CONFIRMED, então os dados ficarão sincronizados.
+1. **Vencimento Previsível**: Cliente sempre sabe que vence no mesmo dia do mês
+2. **Visibilidade Total**: Admin vê rapidamente quem está inadimplente
+3. **Ação Rápida**: Botões para cobrar, bloquear ou ver histórico
+4. **Prevenção**: Alertas de vencimentos próximos para contato proativo
+5. **Métricas**: Total em atraso para decisões financeiras
