@@ -7,18 +7,36 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Brain, Eye, EyeOff, CheckCircle, XCircle } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { Json } from "@/integrations/supabase/types";
+import { toast } from "sonner";
 
 export default function GlobalAdminSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
   const [localSettings, setLocalSettings] = useState<Record<string, Json>>({});
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
 
   const getSetting = (key: string) => {
     if (localSettings[key] !== undefined) return localSettings[key];
     const setting = settings.find((s) => s.key === key);
     return setting?.value;
+  };
+
+  const getSettingString = (key: string, defaultValue: string = ""): string => {
+    const value = getSetting(key);
+    if (value === undefined || value === null) return defaultValue;
+    // Handle JSON strings like '"lovable"' -> 'lovable'
+    const strValue = String(value);
+    try {
+      const parsed = JSON.parse(strValue);
+      return typeof parsed === "string" ? parsed : strValue;
+    } catch {
+      return strValue.replace(/^"|"$/g, "");
+    }
   };
 
   const handleChange = (key: string, value: Json) => {
@@ -33,12 +51,57 @@ export default function GlobalAdminSettings() {
       if (existingSetting) {
         await updateSetting.mutateAsync({ key, value });
       } else {
-        await createSetting.mutateAsync({ key, value, category: "payments" });
+        // Determine category based on key
+        let category = "general";
+        if (key.startsWith("payment") || key.includes("trial")) category = "payments";
+        if (key.startsWith("ai_")) category = "ai";
+        if (key.startsWith("system_")) category = "system";
+        await createSetting.mutateAsync({ key, value, category });
       }
       setLocalSettings((prev) => {
         const { [key]: _, ...rest } = prev;
         return rest;
       });
+    }
+  };
+
+  const testGeminiConnection = async () => {
+    const apiKey = getSettingString("ai_gemini_api_key");
+    if (!apiKey) {
+      toast.error("Configure a chave API do Gemini primeiro");
+      return;
+    }
+    
+    setTestingConnection(true);
+    setConnectionStatus("idle");
+    
+    try {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: getSettingString("ai_gemini_model", "gemini-2.5-flash"),
+          messages: [{ role: "user", content: "Olá! Responda apenas 'OK' para confirmar que está funcionando." }],
+          max_tokens: 50,
+        }),
+      });
+      
+      if (response.ok) {
+        setConnectionStatus("success");
+        toast.success("Conexão com Gemini estabelecida com sucesso!");
+      } else {
+        const errorText = await response.text();
+        setConnectionStatus("error");
+        toast.error(`Erro ao conectar: ${response.status} - ${errorText.substring(0, 100)}`);
+      }
+    } catch (error) {
+      setConnectionStatus("error");
+      toast.error(`Erro de rede: ${error instanceof Error ? error.message : "Desconhecido"}`);
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -61,6 +124,200 @@ export default function GlobalAdminSettings() {
           Configurações globais do sistema MiauChat
         </p>
       </div>
+
+      {/* AI Global Configuration */}
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Brain className="h-5 w-5" />
+            Configuração de IA Global
+          </CardTitle>
+          <CardDescription>
+            Configure o provedor de IA para todas as empresas do sistema. Suporte a fallback automático.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Primary Provider Selection */}
+          <div className="space-y-4">
+            <Label className="text-base font-semibold">Provedor Principal</Label>
+            <RadioGroup
+              value={getSettingString("ai_primary_provider", "lovable")}
+              onValueChange={(value) => handleChange("ai_primary_provider", `"${value}"`)}
+              className="grid gap-4"
+            >
+              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
+                <RadioGroupItem value="lovable" id="ai-lovable" />
+                <Label htmlFor="ai-lovable" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Lovable AI (Padrão)</p>
+                      <p className="text-sm text-muted-foreground">
+                        Gateway gerenciado com gemini-2.5-flash. Sem configuração adicional.
+                      </p>
+                    </div>
+                    <Badge variant={getSettingString("ai_primary_provider", "lovable") === "lovable" ? "default" : "outline"}>
+                      {getSettingString("ai_primary_provider", "lovable") === "lovable" ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </div>
+                </Label>
+              </div>
+              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
+                <RadioGroupItem value="gemini" id="ai-gemini" />
+                <Label htmlFor="ai-gemini" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Gemini (Sua Chave)</p>
+                      <p className="text-sm text-muted-foreground">
+                        Use sua própria chave API do Google AI Studio. Controle total de limites.
+                      </p>
+                    </div>
+                    <Badge variant={getSettingString("ai_primary_provider", "lovable") === "gemini" ? "default" : "outline"}>
+                      {getSettingString("ai_primary_provider", "lovable") === "gemini" ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </div>
+                </Label>
+              </div>
+            </RadioGroup>
+            {localSettings["ai_primary_provider"] !== undefined && (
+              <Button onClick={() => handleSave("ai_primary_provider")} className="w-full">
+                <Save className="h-4 w-4 mr-2" />
+                Salvar Provedor Principal
+              </Button>
+            )}
+          </div>
+
+          <Separator />
+
+          {/* Gemini API Key */}
+          <div className="space-y-4">
+            <Label className="text-base font-semibold">Chave API Gemini (Google AI Studio)</Label>
+            <p className="text-sm text-muted-foreground">
+              Obtenha sua chave em <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-primary underline">aistudio.google.com/apikey</a>
+            </p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  type={showGeminiKey ? "text" : "password"}
+                  value={getSettingString("ai_gemini_api_key", "")}
+                  onChange={(e) => handleChange("ai_gemini_api_key", `"${e.target.value}"`)}
+                  placeholder="AIza..."
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3"
+                  onClick={() => setShowGeminiKey(!showGeminiKey)}
+                >
+                  {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              {localSettings["ai_gemini_api_key"] !== undefined && (
+                <Button size="icon" onClick={() => handleSave("ai_gemini_api_key")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Gemini Model Selection */}
+          <div className="space-y-2">
+            <Label>Modelo Gemini</Label>
+            <div className="flex gap-2">
+              <Select
+                value={getSettingString("ai_gemini_model", "gemini-2.5-flash")}
+                onValueChange={(value) => handleChange("ai_gemini_model", `"${value}"`)}
+              >
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini-2.5-flash">gemini-2.5-flash (Recomendado)</SelectItem>
+                  <SelectItem value="gemini-2.5-pro">gemini-2.5-pro (Mais Poderoso)</SelectItem>
+                  <SelectItem value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Mais Rápido)</SelectItem>
+                </SelectContent>
+              </Select>
+              {localSettings["ai_gemini_model"] !== undefined && (
+                <Button size="icon" onClick={() => handleSave("ai_gemini_model")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              flash = equilíbrio | pro = mais inteligente | lite = mais rápido e barato
+            </p>
+          </div>
+
+          <Separator />
+
+          {/* Fallback Toggle */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-primary/30 bg-primary/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-primary" />
+                <Label className="font-medium">Fallback Automático</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Se o provedor primário falhar (429/402/500), tenta o secundário automaticamente.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("ai_enable_fallback") === "true" || getSetting("ai_enable_fallback") === true}
+                onCheckedChange={(checked) => handleChange("ai_enable_fallback", checked.toString())}
+              />
+              {localSettings["ai_enable_fallback"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("ai_enable_fallback")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("ai_enable_fallback") === "true" || getSetting("ai_enable_fallback") === true) && (
+            <div className="p-3 rounded-lg bg-primary/10 border border-primary/30 text-sm flex items-start gap-2">
+              <Shield className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+              <span>
+                Fallback <strong>ativo</strong>. Se {getSettingString("ai_primary_provider", "lovable") === "lovable" ? "Lovable AI" : "Gemini"} falhar, 
+                o sistema tentará {getSettingString("ai_primary_provider", "lovable") === "lovable" ? "Gemini (sua chave)" : "Lovable AI"}.
+              </span>
+            </div>
+          )}
+
+          {/* Test Connection */}
+          <div className="pt-2">
+            <Button
+              variant="outline"
+              onClick={testGeminiConnection}
+              disabled={testingConnection || !getSettingString("ai_gemini_api_key")}
+              className="w-full"
+            >
+              {testingConnection ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent mr-2" />
+                  Testando Conexão...
+                </>
+              ) : connectionStatus === "success" ? (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                  Conexão Verificada
+                </>
+              ) : connectionStatus === "error" ? (
+                <>
+                  <XCircle className="h-4 w-4 mr-2 text-destructive" />
+                  Falha na Conexão - Clique para Testar Novamente
+                </>
+              ) : (
+                <>
+                  <Zap className="h-4 w-4 mr-2" />
+                  Testar Conexão Gemini
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Payment Provider Settings */}
       <Card className="border-primary/20">
