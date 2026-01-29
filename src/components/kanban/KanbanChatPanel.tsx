@@ -1889,15 +1889,39 @@ export function KanbanChatPanel({
         // CRITICAL: Chat Web/Widget não permite áudio (somente texto + imagens)
         throw new Error("Não é possível enviar áudio para o Chat Web. Use apenas texto ou imagens.");
       } else {
-        // WhatsApp: send directly via Evolution API (no storage upload needed)
-        console.log('[Kanban] WhatsApp channel - sending audio via Evolution API', { 
+        // WhatsApp: send directly via Evolution API (async, no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending audio via Evolution API (async)', { 
           mimeType: normalizedMimeType, 
           originalType: blobMimeType,
           fileName 
         });
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = URL.createObjectURL(audioBlob);
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        
+        // Add optimistic message immediately
+        const optimisticMessage = {
+          id: tempId,
+          content: "[Áudio]",
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: "audio",
+          media_url: blobUrl,
+          media_mime_type: normalizedMimeType,
+          status: "sending" as const,
+          whatsapp_message_id: null,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+        
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId,
             mediaBase64,
             mediaType: "audio",
@@ -1908,13 +1932,26 @@ export function KanbanChatPanel({
         
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar áudio");
         }
         
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar áudio");
         }
+        
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
       
       toast({ title: "Áudio enviado" });
@@ -2006,11 +2043,36 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: send directly via Evolution API (no storage upload needed)
-        console.log('[Kanban] WhatsApp channel - sending file via Evolution API');
+        // WhatsApp: send directly via Evolution API (async, no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending file via Evolution API (async)');
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = URL.createObjectURL(file);
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        const mediaTypeDisplay = mediaType === "image" ? "[Imagem]" : `[${file.name}]`;
+        
+        // Add optimistic message immediately
+        const optimisticMessage = {
+          id: tempId,
+          content: mediaTypeDisplay,
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: mediaType,
+          media_url: blobUrl,
+          media_mime_type: file.type,
+          status: "sending" as const,
+          whatsapp_message_id: null,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+        
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId,
             mediaBase64,
             mediaType: mediaType === "image" ? "image" : "document",
@@ -2021,13 +2083,26 @@ export function KanbanChatPanel({
         
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar arquivo");
         }
         
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar arquivo");
         }
+        
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
       
       toast({ title: `${mediaType === "image" ? "Imagem" : "Documento"} enviado` });
@@ -2119,11 +2194,38 @@ export function KanbanChatPanel({
           })
           .eq("id", conversationId);
       } else {
-        // WhatsApp: send directly via Evolution API (no storage upload needed)
-        console.log('[Kanban] WhatsApp channel - sending media via Evolution API');
+        // WhatsApp: send directly via Evolution API (async, no storage upload needed)
+        console.log('[Kanban] WhatsApp channel - sending media via Evolution API (async)');
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = mediaPreview.previewUrl || URL.createObjectURL(mediaPreview.file);
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        const mediaTypeDisplay = mediaPreview.mediaType === "image" ? "[Imagem]" 
+          : mediaPreview.mediaType === "audio" ? "[Áudio]"
+          : `[${mediaPreview.file.name}]`;
+        
+        // Add optimistic message immediately
+        const optimisticMessage = {
+          id: tempId,
+          content: caption || mediaTypeDisplay,
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: mediaPreview.mediaType,
+          media_url: blobUrl,
+          media_mime_type: mediaPreview.file.type,
+          status: "sending" as const,
+          whatsapp_message_id: null,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+        
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId,
             mediaBase64,
             mediaType: mediaPreview.mediaType,
@@ -2135,13 +2237,26 @@ export function KanbanChatPanel({
 
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
         
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
+        
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
 
       toast({ title: "Mídia enviada" });

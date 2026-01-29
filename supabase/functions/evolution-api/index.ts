@@ -53,6 +53,7 @@ type EvolutionAction =
   | "send_message"
   | "send_message_async"
   | "send_media"
+  | "send_media_async" // Async media sending with background task
   | "get_media"
   | "delete_message" // Delete message for everyone on WhatsApp
   | "send_reaction" // Send emoji reaction to a message
@@ -2154,6 +2155,293 @@ serve(async (req) => {
         );
       }
 
+      // =========================
+      // ASYNC SEND MEDIA (<500ms response) - uses background task
+      // Returns immediately with temp message ID, processes in background
+      // =========================
+      case "send_media_async": {
+        if (!body.conversationId && !body.remoteJid) {
+          throw new Error("conversationId or remoteJid is required");
+        }
+        if (!body.mediaBase64 && !body.mediaUrl) {
+          throw new Error("mediaBase64 or mediaUrl is required");
+        }
+        if (!body.mediaType) {
+          throw new Error("mediaType is required (image, audio, video, document)");
+        }
+
+        const startTime = Date.now();
+        console.log(`[Evolution API] ASYNC Sending media`, { 
+          conversationId: body.conversationId, 
+          mediaType: body.mediaType,
+        });
+
+        let targetRemoteJid = body.remoteJid;
+        let conversationId = body.conversationId;
+        let instanceId = body.instanceId;
+        let contactPhone: string | null = null;
+
+        // If we have a conversationId, get the remoteJid and instanceId from it
+        if (conversationId && !targetRemoteJid) {
+          const { data: conversation, error: convError } = await supabaseClient
+            .from("conversations")
+            .select("remote_jid, whatsapp_instance_id, contact_phone, origin")
+            .eq("id", conversationId)
+            .eq("law_firm_id", lawFirmId)
+            .single();
+
+          if (convError || !conversation) {
+            console.error("[Evolution API] Conversation not found:", convError);
+            throw new Error("Conversation not found");
+          }
+
+          // CRITICAL: Block non-WhatsApp channels
+          const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+          if (conversation.origin && nonWhatsAppOrigins.includes(conversation.origin.toUpperCase())) {
+            return new Response(
+              JSON.stringify({ 
+                success: false, 
+                error: `Canal incorreto: Esta conversa é do ${conversation.origin}. Use o canal correto.`,
+                errorCode: 'WRONG_CHANNEL',
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+            );
+          }
+
+          targetRemoteJid = conversation.remote_jid;
+          instanceId = conversation.whatsapp_instance_id;
+          contactPhone = conversation.contact_phone || null;
+        }
+
+        // Fallback to connected instance if not set
+        if (!instanceId && conversationId) {
+          const { data: fallbackInstance } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("status", "connected")
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (fallbackInstance?.id) {
+            instanceId = fallbackInstance.id;
+            await supabaseClient
+              .from("conversations")
+              .update({ whatsapp_instance_id: instanceId })
+              .eq("id", conversationId);
+          }
+        }
+
+        if (!instanceId) {
+          throw new Error("Nenhuma instância WhatsApp conectada para enviar arquivos.");
+        }
+
+        const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        const jidPart = (targetRemoteJid || "").split("@")[0];
+        const targetNumber = ((contactPhone || jidPart) || "").replace(/\D/g, "");
+        if (!targetNumber) {
+          throw new Error("remoteJid inválido para envio de mídia");
+        }
+
+        // Create temporary message in DB immediately with "sending" status
+        const tempMessageId = crypto.randomUUID();
+        const mediaTypeDisplay = body.mediaType === "audio" ? "[Áudio]" 
+          : body.mediaType === "image" ? "[Imagem]"
+          : body.mediaType === "video" ? "[Vídeo]"
+          : `[${body.fileName || body.mediaType}]`;
+
+        // Insert temp message for immediate UI feedback via Realtime
+        if (conversationId) {
+          await supabaseClient
+            .from("messages")
+            .insert({
+              id: tempMessageId,
+              conversation_id: conversationId,
+              content: body.caption || mediaTypeDisplay,
+              message_type: body.mediaType,
+              media_url: body.mediaUrl || null, // Storage URL for preview if available
+              media_mime_type: body.mimeType || null,
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+              status: "sending",
+            });
+
+          await supabaseClient
+            .from("conversations")
+            .update({
+              last_message_at: new Date().toISOString(),
+              archived_at: null,
+              archived_reason: null,
+            })
+            .eq("id", conversationId);
+        }
+
+        // Background task - send to WhatsApp and update message
+        const backgroundSendMedia = async () => {
+          try {
+            console.log(`[Evolution API] Background: Starting media send for ${body.mediaType}`);
+            
+            let whatsappMessageId: string | null = null;
+            let extractedMediaUrl: string | null = null;
+            let extractedMimeType: string | null = body.mimeType || null;
+
+            // AUDIO: Special handling for voice notes (PTT)
+            if (body.mediaType === "audio") {
+              const audioBase64 = body.mediaBase64 || "";
+              if (!audioBase64 || audioBase64.length < 1000) {
+                throw new Error("Áudio inválido/muito pequeno para enviar.");
+              }
+
+              const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
+              const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
+              const audioPayload = {
+                number: targetNumber,
+                audio: cleanedAudioBase64,
+                delay: 500,
+              };
+
+              console.log(`[Evolution API] Background: Sending audio via sendWhatsAppAudio`);
+              let audioResponse = await fetch(audioEndpoint, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(audioPayload),
+              });
+
+              // Fallback to sendMedia if sendWhatsAppAudio fails
+              if (!audioResponse.ok) {
+                console.warn(`[Evolution API] Background: sendWhatsAppAudio failed, trying sendMedia`);
+                const fallbackEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                audioResponse = await fetch(fallbackEndpoint, {
+                  method: "POST",
+                  headers: {
+                    apikey: instance.api_key || "",
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    number: targetNumber,
+                    mediatype: "audio",
+                    mimetype: body.mimeType || "audio/ogg;codecs=opus",
+                    fileName: body.fileName || "audio.ogg",
+                    media: audioBase64,
+                  }),
+                });
+              }
+
+              if (!audioResponse.ok) {
+                const errorText = await audioResponse.text();
+                throw new Error(`Falha ao enviar áudio: ${audioResponse.status}`);
+              }
+
+              const audioData = await audioResponse.json();
+              whatsappMessageId = audioData.key?.id || audioData.messageId || audioData.id;
+              extractedMediaUrl = audioData.message?.audioMessage?.url || null;
+              extractedMimeType = audioData.message?.audioMessage?.mimetype || body.mimeType || "audio/ogg";
+              
+              // Normalize video/webm to audio/webm
+              if (extractedMimeType === "video/webm") extractedMimeType = "audio/webm";
+            } else {
+              // IMAGE, VIDEO, DOCUMENT: Use sendMedia endpoint
+              const endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+              const payload: Record<string, unknown> = {
+                number: targetNumber,
+                mediatype: body.mediaType,
+                mimetype: body.mimeType || (body.mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
+                caption: body.caption || "",
+                media: body.mediaBase64 || body.mediaUrl,
+              };
+
+              if (body.mediaType === "document") {
+                payload.fileName = body.fileName || "document";
+              }
+
+              console.log(`[Evolution API] Background: Sending ${body.mediaType} via sendMedia`);
+              const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Falha ao enviar mídia: ${response.status}`);
+              }
+
+              const sendData = await response.json();
+              whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id;
+              extractedMediaUrl = 
+                sendData.message?.imageMessage?.url ||
+                sendData.message?.videoMessage?.url ||
+                sendData.message?.documentMessage?.url ||
+                body.mediaUrl || 
+                null;
+              extractedMimeType =
+                sendData.message?.imageMessage?.mimetype ||
+                sendData.message?.videoMessage?.mimetype ||
+                sendData.message?.documentMessage?.mimetype ||
+                body.mimeType;
+            }
+
+            console.log(`[Evolution API] Background: Media sent successfully, id=${whatsappMessageId}`);
+
+            // Update message with real WhatsApp ID and status
+            if (conversationId && whatsappMessageId) {
+              await supabaseClient
+                .from("messages")
+                .update({ 
+                  whatsapp_message_id: whatsappMessageId,
+                  media_url: extractedMediaUrl || body.mediaUrl,
+                  media_mime_type: extractedMimeType,
+                  status: "sent",
+                })
+                .eq("id", tempMessageId);
+            }
+          } catch (error) {
+            console.error("[Evolution API] Background media send error:", error);
+            // Mark message as failed
+            if (conversationId) {
+              const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
+              await supabaseClient
+                .from("messages")
+                .update({ 
+                  status: "failed",
+                  content: `❌ Falha no envio: ${body.caption || body.mediaType}`,
+                })
+                .eq("id", tempMessageId);
+            }
+          }
+        };
+
+        // Fire and forget
+        // @ts-ignore: EdgeRuntime is available in Supabase Edge Functions
+        (globalThis as any).EdgeRuntime?.waitUntil?.(backgroundSendMedia()) || backgroundSendMedia();
+
+        console.log(`[Evolution API] ASYNC Media response in ${Date.now() - startTime}ms`);
+
+        // Return immediately
+        return new Response(
+          JSON.stringify({
+            success: true,
+            messageId: tempMessageId,
+            async: true,
+            message: "Media queued for sending",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // =========================
+      // SYNC SEND MEDIA (legacy, waits for Evolution response)
+      // =========================
       case "send_media": {
         if (!body.conversationId && !body.remoteJid) {
           throw new Error("conversationId or remoteJid is required");
@@ -2165,7 +2453,7 @@ serve(async (req) => {
           throw new Error("mediaType is required (image, audio, video, document)");
         }
 
-        console.log(`[Evolution API] Sending media`, { 
+        console.log(`[Evolution API] Sending media`, {
           conversationId: body.conversationId, 
           remoteJid: body.remoteJid,
           mediaType: body.mediaType,

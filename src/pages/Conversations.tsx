@@ -1923,7 +1923,33 @@ export default function Conversations() {
           
       } else {
         // ============ WHATSAPP PATH ============
-        console.log("[Media] WhatsApp conversation, using Evolution API");
+        console.log("[Media] WhatsApp conversation, using Evolution API (async)");
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = URL.createObjectURL(file);
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        const mediaTypeDisplay = mediaType === "audio" ? "[Áudio]" 
+          : mediaType === "image" ? "[Imagem]"
+          : mediaType === "video" ? "[Vídeo]"
+          : `[${file.name}]`;
+        
+        // Add optimistic message immediately with local blob preview
+        const optimisticMessage = {
+          id: tempId,
+          content: mediaTypeDisplay,
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: mediaType,
+          media_url: blobUrl, // Local preview URL
+          media_mime_type: file.type,
+          status: "sending" as const,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
         
         // Convert file to base64
         const reader = new FileReader();
@@ -1941,7 +1967,7 @@ export default function Conversations() {
 
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId: selectedConversationId,
             mediaType,
             mediaBase64,
@@ -1952,16 +1978,29 @@ export default function Conversations() {
         });
 
         if (response.error) {
+          // Update optimistic message to error
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
 
         if (!response.data?.success) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
+        
+        // Update optimistic message with real ID from backend
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
-
-      // Do NOT add optimistic message here - backend already inserted via send_media
-      // Realtime will bring the message with correct whatsapp_message_id
+      
+      // Don't show toast for optimistic updates - Realtime will handle final state
       
       toast({
         title: "Mídia enviada",
@@ -2147,11 +2186,33 @@ export default function Conversations() {
         console.log('[MediaPreviewSend] Widget media saved successfully');
       } else {
         // ============ WHATSAPP PATH ============
-        console.log('[MediaPreviewSend] WhatsApp conversation, using Evolution API');
+        console.log('[MediaPreviewSend] WhatsApp conversation, using Evolution API (async)');
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = mediaPreview.file ? URL.createObjectURL(mediaPreview.file) : mediaUrl;
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        
+        // Add optimistic message immediately
+        const optimisticMessage = {
+          id: tempId,
+          content: caption || `[${fileName}]`,
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: mediaPreview.mediaType,
+          media_url: blobUrl || null,
+          media_mime_type: mimeType,
+          status: "sending" as const,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
         
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId: selectedConversationId,
             mediaType: mediaPreview.mediaType,
             ...(mediaBase64 ? { mediaBase64 } : { mediaUrl }),
@@ -2168,16 +2229,28 @@ export default function Conversations() {
         });
 
         if (response.error) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
 
         if (!response.data?.success) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
+        
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
 
-      // Do NOT add optimistic message - backend already inserted via send_media
-      // Realtime will bring the message with correct whatsapp_message_id
+      // Don't add optimistic message - it's already added above for WhatsApp path
       handleMediaPreviewClose();
       
       toast({
@@ -2253,8 +2326,30 @@ export default function Conversations() {
 
       {
         // ============ WHATSAPP PATH ============
-        // Use Evolution API for WhatsApp delivery
-        console.log("[AudioSend] WhatsApp conversation, using Evolution API");
+        // Use Evolution API for WhatsApp delivery (async)
+        console.log("[AudioSend] WhatsApp conversation, using Evolution API (async)");
+        
+        // Create blob URL for optimistic preview
+        const blobUrl = URL.createObjectURL(audioBlob);
+        
+        // Generate temp ID for optimistic message
+        const tempId = crypto.randomUUID();
+        const messageTimestamp = new Date().toISOString();
+        
+        // Add optimistic message immediately
+        const optimisticMessage = {
+          id: tempId,
+          content: "[Áudio]",
+          created_at: messageTimestamp,
+          is_from_me: true,
+          sender_type: "human",
+          ai_generated: false,
+          message_type: "audio",
+          media_url: blobUrl, // Local preview URL
+          media_mime_type: audioBlob.type || "audio/webm;codecs=opus",
+          status: "sending" as const,
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
         
         // Convert blob to base64 for WhatsApp path
         const reader = new FileReader();
@@ -2271,6 +2366,9 @@ export default function Conversations() {
         const mediaBase64 = await base64Promise;
 
         if (!mediaBase64 || mediaBase64.length < 1000) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error("Falha ao preparar o áudio (base64 vazio). Tente gravar novamente.");
         }
 
@@ -2278,7 +2376,7 @@ export default function Conversations() {
         
         const response = await supabase.functions.invoke("evolution-api", {
           body: {
-            action: "send_media",
+            action: "send_media_async", // Use async version
             conversationId: selectedConversationId,
             mediaType: "audio",
             mediaBase64,
@@ -2295,16 +2393,28 @@ export default function Conversations() {
         });
 
         if (response.error) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.error.message || "Falha ao enviar áudio");
         }
 
         if (!response.data?.success) {
+          setMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: "error" as const } : m
+          ));
           throw new Error(response.data?.error || "Falha ao enviar áudio");
         }
+        
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => 
+          m.id === tempId 
+            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
+            : m
+        ));
       }
 
-      // Do NOT add optimistic message here - let realtime handle it
-      // The backend already inserted the message and realtime will bring it
+      // Don't add optimistic message here - it's already added above
       setShowAudioRecorder(false);
       
       toast({
