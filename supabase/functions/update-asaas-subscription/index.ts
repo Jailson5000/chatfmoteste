@@ -86,6 +86,22 @@ serve(async (req) => {
 
     console.log(`Updating subscription for company ${company_id} to value ${new_value}`);
 
+    // Fetch company data with plan info for description generation
+    const { data: company, error: companyError } = await supabase
+      .from("companies")
+      .select(`
+        name,
+        max_users,
+        max_instances,
+        plan:plans!companies_plan_id_fkey(name, max_users, max_instances)
+      `)
+      .eq("id", company_id)
+      .single();
+
+    if (companyError) {
+      console.log("Warning: Could not fetch company data for description:", companyError);
+    }
+
     // Fetch company subscription from database
     const { data: subscription, error: subError } = await supabase
       .from("company_subscriptions")
@@ -119,6 +135,34 @@ serve(async (req) => {
       );
     }
 
+    // Generate updated description based on current limits
+    let newDescription: string | undefined;
+    if (company) {
+      const planData = company.plan as { name?: string; max_users?: number; max_instances?: number } | null;
+      const planName = planData?.name || "PLANO";
+      const planMaxUsers = planData?.max_users || 0;
+      const planMaxInstances = planData?.max_instances || 0;
+      
+      const additionalUsers = Math.max(0, (company.max_users || 0) - planMaxUsers);
+      const additionalInstances = Math.max(0, (company.max_instances || 0) - planMaxInstances);
+      
+      const descriptionParts: string[] = [`Assinatura MiauChat ${planName.toUpperCase()}`];
+      
+      if (additionalUsers > 0 || additionalInstances > 0) {
+        descriptionParts.push("Inclui:");
+        if (additionalUsers > 0) {
+          descriptionParts.push(`+${additionalUsers} usuário(s)`);
+        }
+        if (additionalInstances > 0) {
+          descriptionParts.push(`+${additionalInstances} WhatsApp`);
+        }
+      }
+      
+      descriptionParts.push(`- ${company.name}`);
+      newDescription = descriptionParts.join(" ");
+      console.log("Generated new description:", newDescription);
+    }
+
     // Fetch current subscription from ASAAS to get old value
     const getSubResponse = await fetch(
       `${ASAAS_API_URL}/subscriptions/${subscription.asaas_subscription_id}`,
@@ -138,11 +182,15 @@ serve(async (req) => {
       console.log(`Current ASAAS subscription value: ${oldValue}`);
     }
 
-    // Update subscription in ASAAS
-    const updatePayload = {
+    // Update subscription in ASAAS - include description if generated
+    const updatePayload: { value: number; description?: string; updatePendingPayments: boolean } = {
       value: new_value,
       updatePendingPayments: true, // Apply to next invoice
     };
+    
+    if (newDescription) {
+      updatePayload.description = newDescription;
+    }
 
     console.log(`Calling ASAAS API to update subscription ${subscription.asaas_subscription_id}:`, updatePayload);
 
