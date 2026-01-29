@@ -120,7 +120,7 @@ export function LandingPage() {
         description: plan.description || "",
         items: plan.features || [],
         cta: isEnterprise 
-          ? "Falar com especialista" 
+          ? "Solicitar proposta" 
           : isProfessional 
             ? "Escalar meu atendimento" 
             : "Começar agora",
@@ -233,12 +233,6 @@ export function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-4">
-            <Link
-              to="/auth"
-              className="text-sm text-white/50 hover:text-white transition-colors"
-            >
-              Entrar
-            </Link>
             <Button
               className="bg-red-600 hover:bg-red-500 text-white h-10 px-6 rounded-xl"
               onClick={() => handlePlanClick("PROFESSIONAL")}
@@ -309,15 +303,13 @@ export function LandingPage() {
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
             <Button
-              asChild
               size="lg"
               variant="outline"
               className="border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-white h-12 px-8 rounded-xl text-sm"
+              onClick={() => navigate("/register")}
             >
-              <a href="#contato">
-                <Phone className="mr-2 h-4 w-4" />
-                Falar com especialista
-              </a>
+              <Rocket className="mr-2 h-4 w-4" />
+              Teste 7 dias grátis
             </Button>
           </div>
         </div>
@@ -665,8 +657,8 @@ export function LandingPage() {
           {/* Banner Trial + Plano Anual */}
           <div className="mb-10 space-y-4">
             {/* Trial Info */}
-            <div className="py-3 px-4 rounded-lg border border-white/[0.06] bg-white/[0.01] flex items-center justify-center gap-2 text-white/50 text-xs">
-              <Clock className="h-3.5 w-3.5" />
+            <div className="py-3 px-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center gap-2 text-white/70 text-xs">
+              <Clock className="h-3.5 w-3.5 text-emerald-400" />
               <span>Faça seu cadastro e solicite a avaliação de 7 dias. Pagamento apenas após o período de teste.</span>
             </div>
 
@@ -738,7 +730,7 @@ export function LandingPage() {
                 </ul>
                 <Button
                   onClick={() => plan.isEnterprise 
-                    ? window.open("https://wa.me/5563999540484?text=Olá! Quero saber mais sobre o plano Enterprise", "_blank")
+                    ? navigate("/register?plan=enterprise")
                     : handlePlanClick(plan.name)
                   }
                   className={`w-full h-10 rounded-lg text-sm font-medium ${
