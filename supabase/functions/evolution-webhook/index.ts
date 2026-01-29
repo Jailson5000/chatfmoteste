@@ -4305,11 +4305,26 @@ serve(async (req) => {
         // IMPORTANT: If conversation is archived (archived_at is not null), unarchive it when a new message arrives
         const isArchived = conversation.archived_at !== null;
         
-        // Only update contact_name from pushName if:
+        // WABA FIX: Extract contact name from multiple possible sources
+        // Helper function to extract name with WABA support (same logic as new conversation creation)
+        const extractContactName = (): string => {
+          if (isFromMe) return phoneNumber;
+          return data.pushName || 
+                 data.notify || 
+                 data.verifiedName || 
+                 data.formattedName ||
+                 data.sender?.pushName ||
+                 data.sender?.name ||
+                 phoneNumber;
+        };
+        const extractedContactName = extractContactName();
+        
+        // Only update contact_name if:
         // 1. Message is from client (not from us)
         // 2. Conversation does NOT have a linked client (client_id is null)
+        // 3. We found a valid name (not just the phone number)
         // This protects manual name edits made by users
-        const shouldUpdateContactName = !isFromMe && !conversation.client_id && data.pushName;
+        const shouldUpdateContactName = !isFromMe && !conversation.client_id && extractedContactName !== phoneNumber;
         
         // ========================================================================
         // HANDOFF AUTOMÁTICO: Mensagem externa do atendente desativa a IA
@@ -4335,7 +4350,7 @@ serve(async (req) => {
         
         const updatePayload: Record<string, unknown> = {
           last_message_at: new Date().toISOString(),
-          contact_name: shouldUpdateContactName ? data.pushName : conversation.contact_name,
+          contact_name: shouldUpdateContactName ? extractedContactName : conversation.contact_name,
         };
         
         // Apply handoff if external message detected from attendant while AI was active
