@@ -13,11 +13,16 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  ArrowUpRight
+  AlertCircle,
+  Calendar
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { toast } from "sonner";
+import { BillingSummaryCards } from "@/components/global-admin/BillingSummaryCards";
+import { BillingOverdueList } from "@/components/global-admin/BillingOverdueList";
+import { UpcomingPaymentsList } from "@/components/global-admin/UpcomingPaymentsList";
 
 interface PaymentMetrics {
   activeProvider: string;
@@ -45,16 +50,61 @@ interface Payment {
   description: string;
 }
 
+interface BillingStatusResponse {
+  summary: {
+    totalOverdue: number;
+    totalPending: number;
+    totalAmountOverdue: number;
+    totalAmountPending: number;
+    totalActive: number;
+  };
+  overdue: PaymentRecord[];
+  pending: PaymentRecord[];
+  upcomingThisWeek: PaymentRecord[];
+}
+
+interface PaymentRecord {
+  paymentId: string;
+  customerId: string;
+  companyId: string | null;
+  companyName: string;
+  planName: string;
+  value: number;
+  dueDate: string;
+  daysOverdue: number;
+  daysUntilDue: number;
+  invoiceUrl: string | null;
+  status: string;
+}
+
 export default function GlobalAdminPayments() {
-  const { data: metrics, isLoading, refetch, isFetching } = useQuery({
+  const { data: metrics, isLoading: metricsLoading, refetch: refetchMetrics, isFetching: metricsFetching } = useQuery({
     queryKey: ["payment-metrics"],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("get-payment-metrics");
       if (error) throw error;
       return data as PaymentMetrics;
     },
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 60000,
   });
+
+  const { data: billingStatus, isLoading: billingLoading, refetch: refetchBilling, isFetching: billingFetching } = useQuery({
+    queryKey: ["billing-status"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("get-billing-status");
+      if (error) throw error;
+      return data as BillingStatusResponse;
+    },
+    refetchInterval: 60000,
+  });
+
+  const isLoading = metricsLoading || billingLoading;
+  const isFetching = metricsFetching || billingFetching;
+
+  const handleRefresh = () => {
+    refetchMetrics();
+    refetchBilling();
+  };
 
   const formatCurrency = (value: number, currency = "BRL") => {
     return new Intl.NumberFormat("pt-BR", {
@@ -77,6 +127,18 @@ export default function GlobalAdminPayments() {
 
     const config = statusMap[status] || { label: status, variant: "outline" as const };
     return <Badge variant={config.variant}>{config.label}</Badge>;
+  };
+
+  const handleSendReminder = (paymentId: string, companyName: string) => {
+    toast.info(`Função de cobrança para ${companyName} em desenvolvimento`);
+  };
+
+  const handleBlockCompany = (companyId: string, companyName: string) => {
+    toast.info(`Função de bloqueio para ${companyName} em desenvolvimento`);
+  };
+
+  const handleViewInvoice = (invoiceUrl: string) => {
+    window.open(invoiceUrl, "_blank");
   };
 
   const renderProviderMetrics = (provider: ProviderMetrics, providerName: string) => {
@@ -104,7 +166,7 @@ export default function GlobalAdminPayments() {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-500">
+              <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                 {formatCurrency(provider.mrr)}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -248,12 +310,12 @@ export default function GlobalAdminPayments() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard de Pagamentos</h1>
           <p className="text-muted-foreground">
-            Visão geral das métricas de receita e assinaturas
+            Visão geral das métricas de receita, assinaturas e inadimplência
           </p>
         </div>
         <Button
           variant="outline"
-          onClick={() => refetch()}
+          onClick={handleRefresh}
           disabled={isFetching}
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
@@ -272,31 +334,87 @@ export default function GlobalAdminPayments() {
         </div>
       )}
 
-      {/* Provider Tabs */}
-      <Tabs defaultValue={metrics?.activeProvider || "stripe"} className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="stripe" className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4" />
-            Stripe
-            {metrics?.stripe.connected && (
-              <CheckCircle2 className="h-3 w-3 text-green-500" />
+      {/* Main Tabs */}
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList className="grid w-full max-w-lg grid-cols-3">
+          <TabsTrigger value="overview" className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="delinquency" className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            Inadimplência
+            {billingStatus && billingStatus.summary.totalOverdue > 0 && (
+              <Badge variant="destructive" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                {billingStatus.summary.totalOverdue}
+              </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="asaas" className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4" />
-            ASAAS
-            {metrics?.asaas.connected && (
-              <CheckCircle2 className="h-3 w-3 text-green-500" />
+          <TabsTrigger value="upcoming" className="flex items-center gap-2">
+            <Calendar className="h-4 w-4" />
+            Vencimentos
+            {billingStatus && billingStatus.upcomingThisWeek.length > 0 && (
+              <Badge variant="secondary" className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                {billingStatus.upcomingThisWeek.length}
+              </Badge>
             )}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="stripe">
-          {metrics && renderProviderMetrics(metrics.stripe, "Stripe")}
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          {/* Provider Sub-tabs */}
+          <Tabs defaultValue={metrics?.activeProvider || "stripe"} className="space-y-6">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="stripe" className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4" />
+                Stripe
+                {metrics?.stripe.connected && (
+                  <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="asaas" className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4" />
+                ASAAS
+                {metrics?.asaas.connected && (
+                  <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="stripe">
+              {metrics && renderProviderMetrics(metrics.stripe, "Stripe")}
+            </TabsContent>
+
+            <TabsContent value="asaas">
+              {metrics && renderProviderMetrics(metrics.asaas, "ASAAS")}
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
-        <TabsContent value="asaas">
-          {metrics && renderProviderMetrics(metrics.asaas, "ASAAS")}
+        {/* Delinquency Tab */}
+        <TabsContent value="delinquency" className="space-y-6">
+          {billingStatus && (
+            <>
+              <BillingSummaryCards summary={billingStatus.summary} />
+              <BillingOverdueList
+                payments={billingStatus.overdue}
+                onSendReminder={handleSendReminder}
+                onBlockCompany={handleBlockCompany}
+                onViewInvoice={handleViewInvoice}
+              />
+            </>
+          )}
+        </TabsContent>
+
+        {/* Upcoming Tab */}
+        <TabsContent value="upcoming" className="space-y-6">
+          {billingStatus && (
+            <>
+              <BillingSummaryCards summary={billingStatus.summary} />
+              <UpcomingPaymentsList payments={billingStatus.upcomingThisWeek} />
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>
