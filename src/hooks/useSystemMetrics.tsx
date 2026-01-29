@@ -21,6 +21,12 @@ interface DashboardMetrics {
   totalAIConversations: number;
   totalTTSMinutes: number;
   revenue: number;
+  // Granular company status metrics
+  companiesApproved: number;
+  companiesPendingApproval: number;
+  companiesInTrial: number;
+  companiesTrialExpired: number;
+  companiesRejected: number;
 }
 
 export function useSystemMetrics() {
@@ -47,10 +53,12 @@ export function useSystemMetrics() {
         companiesResult,
         usageSummaryResult,
         plansResult,
+        companiesDetailResult,
       ] = await Promise.all([
         supabase.from("companies").select("id, status", { count: "exact" }),
         supabase.from("company_usage_summary").select("*"),
         supabase.from("companies").select("plan:plans!companies_plan_id_fkey(price)"),
+        supabase.from("companies").select("id, approval_status, trial_type, trial_ends_at"),
       ]);
 
       // Calculate totals from usage summary (already aggregated per company)
@@ -86,6 +94,30 @@ export function useSystemMetrics() {
 
       const activeCompanies = companiesResult.data?.filter(c => c.status === "active").length || 0;
 
+      // Calculate granular company status metrics
+      const now = new Date();
+      let companiesApproved = 0;
+      let companiesPendingApproval = 0;
+      let companiesInTrial = 0;
+      let companiesTrialExpired = 0;
+      let companiesRejected = 0;
+
+      companiesDetailResult.data?.forEach((company: any) => {
+        if (company.approval_status === 'pending_approval') {
+          companiesPendingApproval++;
+        } else if (company.approval_status === 'rejected') {
+          companiesRejected++;
+        } else if (company.trial_type && company.trial_type !== 'none' && company.trial_ends_at) {
+          if (new Date(company.trial_ends_at) > now) {
+            companiesInTrial++;
+          } else {
+            companiesTrialExpired++;
+          }
+        } else if (company.approval_status === 'approved') {
+          companiesApproved++;
+        }
+      });
+
       // Calculate MRR
       let revenue = 0;
       if (plansResult.data) {
@@ -107,6 +139,12 @@ export function useSystemMetrics() {
         totalAIConversations,
         totalTTSMinutes: Math.round(totalTTSMinutes * 100) / 100,
         revenue,
+        // Granular company status metrics
+        companiesApproved,
+        companiesPendingApproval,
+        companiesInTrial,
+        companiesTrialExpired,
+        companiesRejected,
       } as DashboardMetrics;
     },
   });
