@@ -149,7 +149,7 @@ serve(async (req) => {
 
     const subscriptionPayload = {
       customer: customerId,
-      billingType: "CREDIT_CARD",
+      billingType: "UNDEFINED", // Permite PIX, Boleto e Cartão
       value: priceInReais,
       nextDueDate: new Date().toISOString().split("T")[0],
       description: `MiauChat ${PLAN_NAMES[planKey]} - ${billingPeriod === "yearly" ? "Anual" : "Mensal"}`,

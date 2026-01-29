@@ -54,6 +54,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { companyFieldConfig, adminCreateCompanySchema } from "@/lib/schemas/companySchema";
 import { generateSubdomainFromName } from "@/hooks/useTenant";
 import { formatPhone, formatDocument } from "@/lib/inputMasks";
+import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSection";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
@@ -839,6 +840,9 @@ export default function GlobalAdminCompanies() {
           )}
         </CardContent>
       </Card>
+
+      {/* Addon Requests Section - Show above tabs when there are pending requests */}
+      <AddonRequestsSection />
 
       {/* Tabs for Approval Status */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
