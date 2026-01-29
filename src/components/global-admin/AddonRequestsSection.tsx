@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,19 +21,87 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, X, Users, Wifi, Loader2, Package } from "lucide-react";
+import { Check, X, Users, Wifi, Loader2, Package, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAdminAddonRequests } from "@/hooks/useAddonRequests";
-import { formatCurrency } from "@/lib/billing-config";
+import { formatCurrency, calculateAdditionalCosts, ADDITIONAL_PRICING } from "@/lib/billing-config";
 
 export function AddonRequestsSection() {
   const { pendingRequests, isLoading, approveRequest, rejectRequest } = useAdminAddonRequests();
   const [rejectingRequest, setRejectingRequest] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  const handleApprove = (requestId: string) => {
-    approveRequest.mutate(requestId);
+  // Fetch company details with plan info for calculating new total
+  const { data: companiesData } = useQuery({
+    queryKey: ["addon-companies-plans"],
+    queryFn: async () => {
+      // First get companies
+      const { data: companies, error: companyError } = await supabase
+        .from("companies")
+        .select(`
+          id,
+          plan_id,
+          max_users,
+          max_instances,
+          max_agents,
+          max_ai_conversations,
+          max_tts_minutes,
+          use_custom_limits
+        `);
+      if (companyError) throw companyError;
+      
+      // Then get plans
+      const { data: plans, error: planError } = await supabase
+        .from("plans")
+        .select("id, name, price, max_users, max_instances, max_agents, max_ai_conversations, max_tts_minutes");
+      if (planError) throw planError;
+      
+      // Join manually
+      return companies?.map(company => ({
+        ...company,
+        plan: plans?.find(p => p.id === company.plan_id) || null,
+      }));
+    },
+    enabled: pendingRequests.length > 0,
+  });
+
+  const getCompanyBillingInfo = (companyId: string, additionalUsers: number, additionalInstances: number) => {
+    const company = companiesData?.find(c => c.id === companyId);
+    if (!company || !company.plan) return null;
+
+    const plan = company.plan;
+
+    // Calculate what the NEW limits will be after approval
+    const currentExtraUsers = company.use_custom_limits ? Math.max(0, (company.max_users || 0) - plan.max_users) : 0;
+    const currentExtraInstances = company.use_custom_limits ? Math.max(0, (company.max_instances || 0) - plan.max_instances) : 0;
+
+    const newTotalExtraUsers = currentExtraUsers + additionalUsers;
+    const newTotalExtraInstances = currentExtraInstances + additionalInstances;
+
+    const additionalCost = (newTotalExtraUsers * ADDITIONAL_PRICING.user) + (newTotalExtraInstances * ADDITIONAL_PRICING.whatsappInstance);
+    const newMonthlyTotal = plan.price + additionalCost;
+
+    return {
+      planName: plan.name,
+      planPrice: plan.price,
+      currentExtraUsers,
+      currentExtraInstances,
+      newTotalExtraUsers,
+      newTotalExtraInstances,
+      additionalCost,
+      newMonthlyTotal,
+    };
+  };
+
+  const handleApprove = (requestId: string, companyId: string, additionalUsers: number, additionalInstances: number) => {
+    const billingInfo = getCompanyBillingInfo(companyId, additionalUsers, additionalInstances);
+    
+    approveRequest.mutate({
+      requestId,
+      companyId,
+      newMonthlyValue: billingInfo?.newMonthlyTotal,
+    });
   };
 
   const handleReject = () => {
@@ -139,8 +209,13 @@ export function AddonRequestsSection() {
                         </Button>
                         <Button
                           size="sm"
-                          className="bg-green-600 hover:bg-green-700"
-                          onClick={() => handleApprove(request.id)}
+                          className="bg-primary hover:bg-primary/90"
+                          onClick={() => handleApprove(
+                            request.id, 
+                            request.company_id, 
+                            request.additional_users, 
+                            request.additional_instances
+                          )}
                           disabled={approveRequest.isPending}
                         >
                           {approveRequest.isPending ? (

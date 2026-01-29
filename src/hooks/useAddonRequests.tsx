@@ -131,24 +131,72 @@ export function useAdminAddonRequests() {
     },
   });
 
-  // Approve request using the database function
+  // Approve request using the database function + update ASAAS subscription
   const approveRequest = useMutation({
-    mutationFn: async (requestId: string) => {
+    mutationFn: async (params: { requestId: string; newMonthlyValue?: number; companyId?: string }) => {
+      const { requestId, newMonthlyValue, companyId } = params;
+      
+      // 1. Approve in database (updates company limits)
       const { data, error } = await supabase.rpc("approve_addon_request", {
         _request_id: requestId,
       });
 
       if (error) throw error;
       
-      const result = data as Record<string, unknown> | null;
-      if (!result?.success) throw new Error((result?.error as string) || "Erro ao aprovar");
+      const result = data as { success: boolean; new_max_users?: number; new_max_instances?: number; company_name?: string; error?: string } | null;
+      if (!result?.success) throw new Error(result?.error || "Erro ao aprovar");
       
-      return result;
+      // 2. If we have the new value and company_id, update ASAAS subscription
+      let asaasUpdated = false;
+      let asaasError: string | null = null;
+      
+      if (newMonthlyValue && companyId) {
+        try {
+          const { data: asaasResult, error: asaasErr } = await supabase.functions.invoke(
+            "update-asaas-subscription",
+            {
+              body: { 
+                company_id: companyId, 
+                new_value: newMonthlyValue,
+                reason: "Addon request approved"
+              },
+            }
+          );
+
+          if (asaasErr) {
+            console.error("ASAAS update error:", asaasErr);
+            asaasError = asaasErr.message;
+          } else if (asaasResult?.error) {
+            console.error("ASAAS update failed:", asaasResult);
+            asaasError = asaasResult.details || asaasResult.error;
+          } else {
+            asaasUpdated = true;
+            console.log("ASAAS subscription updated:", asaasResult);
+          }
+        } catch (e) {
+          console.error("Error calling update-asaas-subscription:", e);
+          asaasError = e instanceof Error ? e.message : "Erro desconhecido";
+        }
+      }
+      
+      return { 
+        ...result, 
+        asaas_updated: asaasUpdated,
+        asaas_error: asaasError
+      };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin-addon-requests"] });
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      toast.success(`Aprovado! Novos limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões.`);
+      queryClient.invalidateQueries({ queryKey: ["company-usage-dashboard"] });
+      
+      if (data.asaas_updated) {
+        toast.success(`Aprovado! Limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões. ASAAS atualizado ✓`);
+      } else if (data.asaas_error) {
+        toast.warning(`Aprovado! Limites atualizados. Aviso: ${data.asaas_error}`);
+      } else {
+        toast.success(`Aprovado! Novos limites: ${data.new_max_users} usuários, ${data.new_max_instances} conexões.`);
+      }
     },
     onError: (error: Error) => {
       console.error("Error approving addon request:", error);
