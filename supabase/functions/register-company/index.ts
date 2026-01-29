@@ -5,11 +5,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
  * Register Company - Self-Service Registration
  * 
  * This function handles public company registration requests.
- * Companies registered through this endpoint:
- * - Receive status 'pending_approval'
- * - Do NOT get provisioned (no app, no n8n, no admin user)
- * - Trigger an email notification to suporte@miauchat.com.br
- * - Must be manually approved by a Global Admin
+ * 
+ * TWO MODES:
+ * 1. Trial Mode (registration_mode = 'trial'):
+ *    - If auto_approve_trial_enabled = true: Auto-approve and provision with 7-day trial
+ *    - If auto_approve_trial_enabled = false: Pending approval (manual)
+ * 
+ * 2. Pay Now Mode (registration_mode = 'pay_now'):
+ *    - Handled by create-asaas-checkout, not this function
  */
 
 const corsHeaders = {
@@ -18,16 +21,14 @@ const corsHeaders = {
 };
 
 // Simple in-memory rate limiter (per IP, per hour)
-// Note: This resets on function cold starts, but provides basic protection
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_MAX = 5; // Max registrations per IP per hour
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
   const now = Date.now();
   const record = rateLimitStore.get(ip);
   
-  // Clean up expired entries periodically
   if (rateLimitStore.size > 1000) {
     for (const [key, value] of rateLimitStore.entries()) {
       if (value.resetAt < now) rateLimitStore.delete(key);
@@ -35,7 +36,6 @@ function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
   }
   
   if (!record || record.resetAt < now) {
-    // New window
     rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
   }
@@ -55,11 +55,11 @@ interface RegisterRequest {
   phone?: string;
   document?: string;
   plan_id?: string;
-  subdomain?: string; // Custom subdomain chosen by user
-  website?: string; // Honeypot field - should be empty
+  subdomain?: string;
+  website?: string; // Honeypot field
+  registration_mode?: 'trial' | 'pay_now';
 }
 
-// Generate subdomain from company name (no hyphens, only letters and numbers)
 function generateSubdomain(companyName: string): string {
   return companyName
     .toLowerCase()
@@ -70,17 +70,14 @@ function generateSubdomain(companyName: string): string {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Get client IP for rate limiting
   const clientIP = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
                    req.headers.get('cf-connecting-ip') || 
                    'unknown';
   
-  // Check rate limit
   const rateLimit = checkRateLimit(clientIP);
   if (!rateLimit.allowed) {
     console.warn(`[register-company] Rate limit exceeded for IP: ${clientIP}`);
@@ -107,19 +104,24 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    // Parse request body
     const body: RegisterRequest = await req.json();
-    const { company_name, admin_name, admin_email, phone, document, plan_id, subdomain: customSubdomain, website } = body;
+    const { 
+      company_name, 
+      admin_name, 
+      admin_email, 
+      phone, 
+      document, 
+      plan_id, 
+      subdomain: customSubdomain, 
+      website,
+      registration_mode = 'trial'
+    } = body;
 
-    // Honeypot check - if website field is filled, it's a bot
+    // Honeypot check
     if (website) {
       console.warn(`[register-company] Honeypot triggered from IP: ${clientIP}`);
-      // Return success to fool the bot, but don't actually register
       return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'Cadastro realizado com sucesso!',
-        }),
+        JSON.stringify({ success: true, message: 'Cadastro realizado com sucesso!' }),
         { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -127,9 +129,7 @@ serve(async (req) => {
     // Validate required fields
     if (!company_name || !admin_name || !admin_email) {
       return new Response(
-        JSON.stringify({ 
-          error: 'Campos obrigatórios: company_name, admin_name, admin_email' 
-        }),
+        JSON.stringify({ error: 'Campos obrigatórios: company_name, admin_name, admin_email' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -151,12 +151,24 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[register-company] New registration request: ${company_name} - ${admin_email} (IP: ${clientIP}, remaining: ${rateLimit.remaining})`);
+    console.log(`[register-company] New registration: ${company_name} - ${admin_email} (mode: ${registration_mode}, IP: ${clientIP})`);
 
-    // Use custom subdomain if provided, otherwise generate from company name
+    // Check if auto-approve trial is enabled
+    let autoApproveEnabled = false;
+    if (registration_mode === 'trial') {
+      const { data: settingData } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'auto_approve_trial_enabled')
+        .single();
+      
+      autoApproveEnabled = settingData?.value === true || settingData?.value === 'true';
+      console.log(`[register-company] Auto-approve trial enabled: ${autoApproveEnabled}`);
+    }
+
+    // Generate/validate subdomain
     let subdomain = customSubdomain || generateSubdomain(company_name);
     
-    // Validate subdomain format (only lowercase letters and numbers, 3-30 chars)
     if (!/^[a-z0-9]{3,30}$/.test(subdomain)) {
       return new Response(
         JSON.stringify({ error: 'Subdomínio inválido. Use apenas letras minúsculas e números (3-30 caracteres)' }),
@@ -164,7 +176,7 @@ serve(async (req) => {
       );
     }
     
-    // Check if subdomain is available
+    // Check subdomain availability
     const { data: existingSubdomain } = await supabase
       .from('law_firms')
       .select('id')
@@ -172,21 +184,19 @@ serve(async (req) => {
       .maybeSingle();
 
     if (existingSubdomain) {
-      // If user provided a custom subdomain that's taken, return error
       if (customSubdomain) {
         return new Response(
           JSON.stringify({ error: 'Este subdomínio já está em uso. Por favor, escolha outro.' }),
           { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      // For auto-generated subdomains, use sequential numbering
+      // Auto-generate unique subdomain
       const { data: similarSubdomains } = await supabase
         .from('law_firms')
         .select('subdomain')
         .or(`subdomain.eq.${subdomain},subdomain.like.${subdomain}%`);
       
       if (similarSubdomains && similarSubdomains.length > 0) {
-        // Find the highest number suffix
         const numbers: number[] = [1];
         for (const row of similarSubdomains) {
           if (row.subdomain === subdomain) continue;
@@ -214,7 +224,7 @@ serve(async (req) => {
       );
     }
 
-    // Create law_firm (tenant) - but with no users yet
+    // Create law_firm (tenant)
     const { data: lawFirm, error: lawFirmError } = await supabase
       .from('law_firms')
       .insert({
@@ -237,8 +247,13 @@ serve(async (req) => {
 
     console.log(`[register-company] Law firm created: ${lawFirm.id}`);
 
-    // Create company with PENDING_APPROVAL status
-    // NO provisioning happens here - no app, no n8n, no admin user
+    // Determine approval status and trial dates
+    const shouldAutoApprove = registration_mode === 'trial' && autoApproveEnabled;
+    const trialEndsAt = shouldAutoApprove 
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+
+    // Create company
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .insert({
@@ -247,22 +262,19 @@ serve(async (req) => {
         phone: phone || null,
         document: document || null,
         law_firm_id: lawFirm.id,
-        // Plan selected by user (pending activation)
         plan_id: plan_id || null,
-        // Critical: Set to pending_approval
-        approval_status: 'pending_approval',
-        status: 'active', // Company is active, but not approved
-        // Provisioning NOT started
-        client_app_status: 'pending',
+        approval_status: shouldAutoApprove ? 'approved' : 'pending_approval',
+        status: 'active',
+        trial_ends_at: trialEndsAt,
+        client_app_status: shouldAutoApprove ? 'pending' : 'pending',
         n8n_workflow_status: 'pending',
-        provisioning_status: 'pending',
+        provisioning_status: shouldAutoApprove ? 'pending' : 'pending',
       })
       .select()
       .single();
 
     if (companyError) {
       console.error('[register-company] Error creating company:', companyError);
-      // Rollback law_firm
       await supabase.from('law_firms').delete().eq('id', lawFirm.id);
       
       return new Response(
@@ -271,9 +283,9 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[register-company] Company created with pending_approval: ${company.id}`);
+    console.log(`[register-company] Company created: ${company.id} (auto_approved: ${shouldAutoApprove})`);
 
-    // Fetch plan name if plan was selected
+    // Fetch plan name
     let planName = 'Não selecionado';
     if (plan_id) {
       const { data: planData } = await supabase
@@ -286,9 +298,39 @@ serve(async (req) => {
       }
     }
 
+    // If auto-approved, call provision-company to create admin user
+    if (shouldAutoApprove) {
+      console.log(`[register-company] Auto-approving trial, calling provision-company...`);
+      
+      try {
+        const provisionResponse = await fetch(`${supabaseUrl}/functions/v1/provision-company`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+          },
+          body: JSON.stringify({
+            company_id: company.id,
+            admin_name,
+            admin_email,
+          }),
+        });
+
+        const provisionResult = await provisionResponse.json();
+        console.log(`[register-company] Provision result:`, provisionResult);
+
+        if (!provisionResponse.ok || !provisionResult.success) {
+          console.error(`[register-company] Provision failed:`, provisionResult);
+          // Don't fail the whole registration, just log it
+        }
+      } catch (provisionError) {
+        console.error(`[register-company] Error calling provision-company:`, provisionError);
+      }
+    }
+
     // Log audit event
     await supabase.from('audit_logs').insert({
-      action: 'COMPANY_SELF_REGISTRATION',
+      action: shouldAutoApprove ? 'COMPANY_TRIAL_AUTO_APPROVED' : 'COMPANY_SELF_REGISTRATION',
       entity_type: 'company',
       entity_id: company.id,
       new_values: {
@@ -298,7 +340,9 @@ serve(async (req) => {
         subdomain,
         plan_id,
         plan_name: planName,
-        approval_status: 'pending_approval',
+        registration_mode,
+        auto_approved: shouldAutoApprove,
+        trial_ends_at: trialEndsAt,
         timestamp: new Date().toISOString(),
       },
     });
@@ -308,9 +352,92 @@ serve(async (req) => {
     let userEmailSent = false;
     
     if (resendApiKey) {
-      // 1) Send confirmation email TO THE USER who registered
-      try {
-        const userEmailHtml = `
+      if (shouldAutoApprove) {
+        // Send auto-approved trial email to user
+        try {
+          const trialEndDate = new Date(trialEndsAt!).toLocaleDateString('pt-BR', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+          });
+
+          const userEmailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Seu Trial foi Ativado — MIAUCHAT</title>
+</head>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; line-height: 1.6;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+    
+    <div style="background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); padding: 30px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">🎉 Seu Trial foi Ativado!</h1>
+    </div>
+    
+    <div style="padding: 30px;">
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Olá, <strong>${admin_name}</strong>!
+      </p>
+      
+      <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
+        Sua conta no MiauChat foi criada com sucesso! Você tem <strong>7 dias grátis</strong> para testar todas as funcionalidades.
+      </p>
+      
+      <div style="background: #dcfce7; border: 1px solid #16a34a; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #166534; margin: 0; font-weight: 600;">
+          ✅ Período de teste ativo até: ${trialEndDate}
+        </p>
+      </div>
+      
+      <div style="background: #f3f4f6; border-radius: 8px; padding: 16px; margin: 24px 0;">
+        <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;">Seu acesso:</p>
+        <p style="color: #1f2937; margin: 0; font-weight: 600; font-size: 16px;">
+          ${subdomain}.miauchat.com.br
+        </p>
+        <p style="color: #6b7280; margin: 8px 0 0 0; font-size: 14px;">
+          Seus dados de login foram enviados em um email separado.
+        </p>
+      </div>
+      
+      <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
+        Ao final do período de teste, você pode assinar o plano <strong>${planName}</strong> para continuar usando.
+      </p>
+    </div>
+    
+    <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="color: #6b7280; font-size: 14px; margin: 0;">— MIAUCHAT</p>
+    </div>
+  </div>
+</body>
+</html>
+          `;
+
+          const userEmailResponse = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${resendApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: 'MiauChat <suporte@miauchat.com.br>',
+              to: [admin_email],
+              subject: `🎉 Seu trial de 7 dias foi ativado — ${company_name}`,
+              html: userEmailHtml,
+            }),
+          });
+
+          if (userEmailResponse.ok) {
+            userEmailSent = true;
+            console.log('[register-company] Trial confirmation email sent to:', admin_email);
+          }
+        } catch (emailError) {
+          console.error('[register-company] User email exception:', emailError);
+        }
+      } else {
+        // Send pending approval email to user
+        try {
+          const userEmailHtml = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -359,53 +486,41 @@ serve(async (req) => {
       <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
         Este processo geralmente leva até 24 horas úteis.
       </p>
-      
-      <p style="color: #9ca3af; font-size: 14px; font-style: italic; margin-top: 16px;">
-        Caso tenha dúvidas, responda este email ou entre em contato pelo suporte@miauchat.com.br
-      </p>
     </div>
     
     <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
-      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
-        — MIAUCHAT
-      </p>
-      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-        Multiplataforma de Inteligência Artificial Unificada
-      </p>
+      <p style="color: #6b7280; font-size: 14px; margin: 0;">— MIAUCHAT</p>
     </div>
   </div>
 </body>
 </html>
-        `;
+          `;
 
-        const userEmailResponse = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: 'MiauChat <suporte@miauchat.com.br>',
-            to: [admin_email],
-            subject: `✅ Cadastro recebido — ${company_name}`,
-            html: userEmailHtml,
-          }),
-        });
+          const userEmailResponse = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${resendApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: 'MiauChat <suporte@miauchat.com.br>',
+              to: [admin_email],
+              subject: `✅ Cadastro recebido — ${company_name}`,
+              html: userEmailHtml,
+            }),
+          });
 
-        if (userEmailResponse.ok) {
-          userEmailSent = true;
-          console.log('[register-company] User confirmation email sent to:', admin_email);
-        } else {
-          const errorText = await userEmailResponse.text();
-          console.error('[register-company] User email error:', errorText);
+          if (userEmailResponse.ok) {
+            userEmailSent = true;
+            console.log('[register-company] Pending approval email sent to:', admin_email);
+          }
+        } catch (emailError) {
+          console.error('[register-company] User email exception:', emailError);
         }
-      } catch (emailError) {
-        console.error('[register-company] User email exception:', emailError);
-      }
 
-      // 2) Send notification email TO ADMIN (suporte@miauchat.com.br)
-      try {
-        const adminEmailHtml = `
+        // Send notification email to admin
+        try {
+          const adminEmailHtml = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -423,16 +538,6 @@ serve(async (req) => {
       <p style="color: #1f2937; font-size: 16px; margin-bottom: 20px;">
         Uma nova empresa solicitou cadastro no MIAUCHAT.
       </p>
-      
-      <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 24px 0;">
-        <p style="color: #92400e; margin: 0; font-weight: 600; font-size: 18px;">
-          📋 Status: AGUARDANDO APROVAÇÃO
-        </p>
-      </div>
-      
-      <h3 style="color: #1f2937; font-size: 16px; margin-top: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">
-        Dados do Cadastro
-      </h3>
       
       <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
         <tr>
@@ -478,57 +583,50 @@ serve(async (req) => {
     </div>
     
     <div style="background: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
-      <p style="color: #6b7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 500;">
-        — MIAUCHAT
-      </p>
-      <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-        Plataforma de Comunicação
-      </p>
+      <p style="color: #6b7280; font-size: 14px; margin: 0;">— MIAUCHAT</p>
     </div>
   </div>
 </body>
 </html>
-        `;
+          `;
 
-        const adminEmailResponse = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: 'MiauChat <suporte@miauchat.com.br>',
-            to: [adminEmail],
-            subject: `⏳ Novo cadastro pendente: ${company_name}`,
-            html: adminEmailHtml,
-          }),
-        });
+          const adminEmailResponse = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${resendApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: 'MiauChat <suporte@miauchat.com.br>',
+              to: [adminEmail],
+              subject: `⏳ Novo cadastro pendente: ${company_name}`,
+              html: adminEmailHtml,
+            }),
+          });
 
-        if (adminEmailResponse.ok) {
-          adminEmailSent = true;
-          console.log('[register-company] Admin notification email sent to:', adminEmail);
-        } else {
-          const errorText = await adminEmailResponse.text();
-          console.error('[register-company] Admin email error:', errorText);
+          if (adminEmailResponse.ok) {
+            adminEmailSent = true;
+            console.log('[register-company] Admin notification email sent');
+          }
+        } catch (emailError) {
+          console.error('[register-company] Admin email exception:', emailError);
         }
-      } catch (emailError) {
-        console.error('[register-company] Admin email exception:', emailError);
       }
-    } else {
-      console.warn('[register-company] RESEND_API_KEY not configured');
     }
 
     // Log notification
     await supabase.from('admin_notification_logs').insert({
       tenant_id: company.id,
       company_name,
-      event_type: 'COMPANY_PENDING_APPROVAL',
-      event_key: `pending_${company.id}`,
-      email_sent_to: adminEmail,
+      event_type: shouldAutoApprove ? 'COMPANY_TRIAL_AUTO_APPROVED' : 'COMPANY_PENDING_APPROVAL',
+      event_key: `${shouldAutoApprove ? 'trial' : 'pending'}_${company.id}`,
+      email_sent_to: shouldAutoApprove ? admin_email : adminEmail,
       metadata: {
         admin_name,
         admin_email,
         subdomain,
+        auto_approved: shouldAutoApprove,
+        trial_ends_at: trialEndsAt,
         admin_email_sent: adminEmailSent,
         user_email_sent: userEmailSent,
       },
@@ -537,10 +635,14 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Cadastro realizado com sucesso! Sua solicitação será analisada pela equipe MiauChat.',
+        message: shouldAutoApprove 
+          ? 'Seu período de teste foi ativado! Verifique seu email para os dados de acesso.'
+          : 'Cadastro realizado com sucesso! Sua solicitação será analisada pela equipe MiauChat.',
         company_id: company.id,
         subdomain,
-        approval_status: 'pending_approval',
+        approval_status: shouldAutoApprove ? 'approved' : 'pending_approval',
+        auto_approved: shouldAutoApprove,
+        trial_ends_at: trialEndsAt,
       }),
       { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
