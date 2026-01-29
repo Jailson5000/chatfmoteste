@@ -89,6 +89,55 @@ async function getTenantAIConfig(lawFirmId: string): Promise<TenantAIConfig> {
   }
 }
 
+// Helper to get current billing period in YYYY-MM format
+function getCurrentBillingPeriod(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Estimate audio duration based on text length (avg 150 words/min, 5 chars/word = 750 chars/min)
+function estimateAudioDuration(textLength: number): number {
+  const CHARS_PER_SECOND = 12.5;
+  return Math.ceil(textLength / CHARS_PER_SECOND);
+}
+
+// Record TTS usage for billing (frontend preview)
+async function recordTTSUsage(lawFirmId: string, textLength: number): Promise<void> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !supabaseKey) {
+      console.log('[TTS] Skipping usage tracking: missing credentials');
+      return;
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const billingPeriod = getCurrentBillingPeriod();
+    const durationSeconds = estimateAudioDuration(textLength);
+    
+    const { error } = await supabase.from('usage_records').insert({
+      law_firm_id: lawFirmId,
+      usage_type: 'tts_audio',
+      count: 1,
+      duration_seconds: durationSeconds,
+      billing_period: billingPeriod,
+      metadata: {
+        source: 'frontend_preview',
+        text_length: textLength,
+        generated_at: new Date().toISOString(),
+      }
+    });
+    
+    if (error) {
+      console.error('[TTS] Failed to record usage:', error.message);
+    } else {
+      console.log(`[TTS] Usage recorded: ${durationSeconds}s, period: ${billingPeriod}`);
+    }
+  } catch (err) {
+    console.error('[TTS] Error recording usage:', err instanceof Error ? err.message : err);
+  }
+}
+
 async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
   console.log('[TTS-ElevenLabs] Starting audio generation...');
   
@@ -305,6 +354,13 @@ serve(async (req) => {
       const result = await generateOpenAIAudio(text, 'nova');
       
       if (result.success) {
+        // Record TTS usage for billing (non-blocking)
+        if (lawFirmId) {
+          recordTTSUsage(lawFirmId, text.length).catch(err => {
+            console.error('[TTS] Usage recording failed:', err);
+          });
+        }
+        
         return new Response(
           JSON.stringify({
             success: true,
@@ -331,6 +387,14 @@ serve(async (req) => {
       
       if (result.success) {
         console.log('[TTS] ElevenLabs SUCCESS');
+        
+        // Record TTS usage for billing (non-blocking)
+        if (lawFirmId) {
+          recordTTSUsage(lawFirmId, text.length).catch(err => {
+            console.error('[TTS] Usage recording failed:', err);
+          });
+        }
+        
         return new Response(
           JSON.stringify({
             success: true,
@@ -347,6 +411,14 @@ serve(async (req) => {
       
       if (openaiResult.success) {
         console.log('[TTS] OpenAI fallback SUCCESS');
+        
+        // Record TTS usage for billing (non-blocking)
+        if (lawFirmId) {
+          recordTTSUsage(lawFirmId, text.length).catch(err => {
+            console.error('[TTS] Usage recording failed:', err);
+          });
+        }
+        
         return new Response(
           JSON.stringify({
             success: true,
@@ -376,6 +448,13 @@ serve(async (req) => {
     const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
     if (openaiResult.success) {
+      // Record TTS usage for billing (non-blocking)
+      if (lawFirmId) {
+        recordTTSUsage(lawFirmId, text.length).catch(err => {
+          console.error('[TTS] Usage recording failed:', err);
+        });
+      }
+      
       return new Response(
         JSON.stringify({
           success: true,

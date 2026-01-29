@@ -166,7 +166,8 @@ async function recordAIConversationUsage(
   lawFirmId: string,
   conversationId: string,
   automationId: string,
-  automationName: string
+  automationName: string,
+  source: string = 'whatsapp'
 ): Promise<boolean> {
   const billingPeriod = getCurrentBillingPeriod();
   
@@ -201,6 +202,7 @@ async function recordAIConversationUsage(
           conversation_id: conversationId,
           automation_id: automationId,
           automation_name: automationName,
+          source: source,
           first_ai_response_at: new Date().toISOString(),
         }
       });
