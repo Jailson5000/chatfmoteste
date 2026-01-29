@@ -4,8 +4,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 /**
  * Admin Create ASAAS Subscription
  * 
- * Allows global admins to generate ASAAS invoices/subscriptions for existing companies.
- * This is useful for companies that were created before ASAAS integration or for manual billing.
+ * Allows global admins to create ASAAS subscriptions (recurring charges) for existing companies.
+ * Creates a real subscription in ASAAS that generates automatic monthly charges.
+ * Charges appear in "Cobranças" section in ASAAS dashboard.
  */
 
 const corsHeaders = {
@@ -135,14 +136,42 @@ serve(async (req) => {
     let customerId: string | null = null;
 
     // Check existing subscription record
-    const { data: subscription } = await supabase
+    const { data: existingSubscription } = await supabase
       .from("company_subscriptions")
       .select("asaas_customer_id, asaas_subscription_id")
       .eq("company_id", company.id)
       .maybeSingle();
 
-    if (subscription?.asaas_customer_id) {
-      customerId = subscription.asaas_customer_id;
+    // Check if subscription already exists and is active
+    if (existingSubscription?.asaas_subscription_id) {
+      // Verify if subscription is still active in ASAAS
+      const checkResponse = await fetch(
+        `${asaasBaseUrl}/subscriptions/${existingSubscription.asaas_subscription_id}`,
+        {
+          headers: {
+            "access_token": asaasApiKey,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      
+      if (checkResponse.ok) {
+        const existingSub = await checkResponse.json();
+        if (existingSub.status === "ACTIVE") {
+          console.log("[admin-create-asaas-subscription] Subscription already active:", existingSub.id);
+          return new Response(
+            JSON.stringify({ 
+              error: "Esta empresa já possui uma assinatura ativa no ASAAS. Use 'Atualizar Assinatura' para modificar o valor.",
+              existing_subscription_id: existingSub.id,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+      }
+    }
+
+    if (existingSubscription?.asaas_customer_id) {
+      customerId = existingSubscription.asaas_customer_id;
       console.log("[admin-create-asaas-subscription] Using existing ASAAS customer:", customerId);
     } else {
       // Search by email
@@ -247,58 +276,57 @@ serve(async (req) => {
       priceInReais,
     });
 
-    // Create payment link
-    // NOTE: ASAAS externalReference has a max length of 100 characters
-    const origin = "https://miauchat.com.br";
+    // ============ CREATE SUBSCRIPTION (RECURRING CHARGE) ============
+    // Calculate next due date (7 days from now)
+    const nextDueDate = new Date();
+    nextDueDate.setDate(nextDueDate.getDate() + 7);
+    const nextDueDateStr = nextDueDate.toISOString().split('T')[0];
+
     const externalReference = `company:${company.id}`.slice(0, 100);
 
-    const paymentLinkPayload = {
-      name: `${company.plan.name} - ${billing_type === "yearly" ? "Anual" : "Mensal"} (Admin)`,
-      description,
+    const subscriptionPayload = {
+      customer: customerId,
+      billingType: "UNDEFINED", // Customer chooses: Boleto, PIX, or Card
+      nextDueDate: nextDueDateStr,
       value: priceInReais,
-      billingType: "UNDEFINED", // Customer chooses payment method
-      chargeType: "RECURRENT",
-      subscriptionCycle: billing_type === "yearly" ? "YEARLY" : "MONTHLY",
-      dueDateLimitDays: 7,
-      externalReference,
-      callback: {
-        successUrl: `${origin}/payment-success?provider=asaas&company_id=${company.id}`,
-        autoRedirect: true,
-      },
+      cycle: billing_type === "yearly" ? "YEARLY" : "MONTHLY",
+      description: description,
+      externalReference: externalReference,
     };
 
-    console.log("[admin-create-asaas-subscription] Creating payment link for:", company.name);
+    console.log("[admin-create-asaas-subscription] Creating subscription for:", company.name, subscriptionPayload);
 
-    const paymentLinkResponse = await fetch(`${asaasBaseUrl}/paymentLinks`, {
+    const subscriptionResponse = await fetch(`${asaasBaseUrl}/subscriptions`, {
       method: "POST",
       headers: {
         "access_token": asaasApiKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(paymentLinkPayload),
+      body: JSON.stringify(subscriptionPayload),
     });
 
-    const paymentLinkData = await paymentLinkResponse.json();
+    const subscriptionData = await subscriptionResponse.json();
 
-    if (paymentLinkData.errors) {
-      console.error("[admin-create-asaas-subscription] Payment link error:", paymentLinkData.errors);
+    if (subscriptionData.errors) {
+      console.error("[admin-create-asaas-subscription] Subscription error:", subscriptionData.errors);
       return new Response(
-        JSON.stringify({ error: "Erro ao gerar link: " + paymentLinkData.errors[0]?.description }),
+        JSON.stringify({ error: "Erro ao criar assinatura: " + subscriptionData.errors[0]?.description }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
       );
     }
 
-    console.log("[admin-create-asaas-subscription] Payment link created:", paymentLinkData.url);
+    console.log("[admin-create-asaas-subscription] Subscription created:", subscriptionData.id, "Status:", subscriptionData.status);
 
-    // Save or update subscription record
+    // Save or update subscription record with the ASAAS subscription ID
     await supabase
       .from("company_subscriptions")
       .upsert({
         company_id: company.id,
         asaas_customer_id: customerId,
+        asaas_subscription_id: subscriptionData.id,
         plan_id: company.plan.id,
         billing_type,
-        status: "pending",
+        status: "active",
       }, { onConflict: "company_id" });
 
     // Log audit with add-ons breakdown
@@ -318,15 +346,17 @@ serve(async (req) => {
         instances_cost: instancesCost,
         total_additional: totalAdditional,
         total_price: priceInReais,
-        payment_url: paymentLinkData.url,
+        asaas_subscription_id: subscriptionData.id,
         asaas_customer_id: customerId,
+        next_due_date: nextDueDateStr,
       },
     });
 
     return new Response(
       JSON.stringify({
         success: true,
-        payment_url: paymentLinkData.url,
+        subscription_id: subscriptionData.id,
+        next_due_date: nextDueDateStr,
         company_name: company.name,
         plan_name: company.plan.name,
         base_plan_price: basePlanPrice,
@@ -336,13 +366,14 @@ serve(async (req) => {
         price: priceInReais,
         billing_type,
         asaas_customer_id: customerId,
+        message: `Assinatura criada com sucesso! Primeira cobrança em ${nextDueDateStr}. O cliente receberá email/SMS do ASAAS para pagamento.`,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
     );
 
   } catch (error: unknown) {
     console.error("[admin-create-asaas-subscription] Error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Erro ao criar cobrança";
+    const errorMessage = error instanceof Error ? error.message : "Erro ao criar assinatura";
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
