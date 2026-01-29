@@ -1,151 +1,174 @@
 
-# Plano: Limite de Cadastros de Trial por Dia
 
-## Problema
+# Plano: Sincronização de Limites com ASAAS ao Editar Empresa
 
-Com a aprovação automática de trial ativada, atacantes podem criar múltiplas contas em massa. É necessário limitar o número de cadastros automáticos por dia e forçar aprovação manual após atingir esse limite.
+## Problema Identificado
 
-## Solução
+Quando você edita os limites de uma empresa em **Configurações > Empresas** (aba "Editar"), o sistema:
 
-Adicionar uma configuração `max_daily_auto_trials` no `system_settings` que:
-1. Define quantos trials podem ser auto-aprovados por dia
-2. Quando o limite é atingido, novos cadastros vão para aprovação manual
-3. O contador reseta automaticamente a cada dia (00:00 UTC)
+1. ✅ Atualiza os limites no banco de dados (`companies` table)
+2. ❌ **NÃO** atualiza o valor da assinatura no ASAAS
+3. ❌ **NÃO** atualiza a descrição da fatura no ASAAS
 
-## Arquitetura
+Isso causa:
+- Descompasso entre o que está no sistema vs o que é cobrado
+- Se você reduz limites, os "adicionais" desaparecem porque `limites - plano = 0 ou negativo`
+- Cliente vê uma cobrança diferente do que o sistema mostra
+
+## Como o Addon Request Funciona (Correto)
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                    FLUXO DE CADASTRO COM LIMITE                     │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  [Cadastro Trial]                                                   │
-│        │                                                            │
-│        ▼                                                            │
-│  ┌──────────────────┐    ┌──────────────────────────────┐          │
-│  │ auto_approve     │ NO │ Cadastro vai para            │          │
-│  │ trial_enabled?   │───►│ aprovação manual             │          │
-│  └──────────────────┘    └──────────────────────────────┘          │
-│        │ YES                                                        │
-│        ▼                                                            │
-│  ┌──────────────────┐                                               │
-│  │ Contar cadastros │                                               │
-│  │ auto-aprovados   │                                               │
-│  │ HOJE             │                                               │
-│  └──────────────────┘                                               │
-│        │                                                            │
-│        ▼                                                            │
-│  ┌──────────────────┐    ┌──────────────────────────────┐          │
-│  │ count >=         │YES │ Cadastro vai para            │          │
-│  │ max_daily_auto   │───►│ aprovação manual             │          │
-│  │ _trials?         │    │ (mas usuário vê msg normal)  │          │
-│  └──────────────────┘    └──────────────────────────────┘          │
-│        │ NO                                                         │
-│        ▼                                                            │
-│  ┌──────────────────────────────┐                                   │
-│  │ Auto-aprovar e provisionar   │                                   │
-│  │ + enviar email de acesso     │                                   │
-│  └──────────────────────────────┘                                   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ FLUXO ADDON REQUEST (funciona corretamente)                      │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [Usuário solicita] → [Admin aprova] → [approve_addon_request]   │
+│                                              │                   │
+│                                              ▼                   │
+│                                    ┌──────────────────────┐      │
+│                                    │ 1. Atualiza BD       │      │
+│                                    │ 2. Chama ASAAS API   │◄──── │ ✅
+│                                    └──────────────────────┘      │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## Implementação
+## Como Editar Empresa Funciona (Incorreto)
 
-### 1. Nova Configuração (system_settings)
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│ FLUXO EDITAR EMPRESA (quebrado)                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [Admin edita limites] → [handleUpdate] → [UPDATE companies]     │
+│                                                                  │
+│                            ⚠️ NÃO CHAMA ASAAS!                   │
+│                                                                  │
+│  Resultado: BD atualizado, ASAAS desatualizado                   │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-| Key | Value | Descrição |
-|-----|-------|-----------|
-| `max_daily_auto_trials` | `10` | Limite de trials auto-aprovados por dia |
+## Solução Proposta
 
-### 2. Modificar Edge Function register-company
+### 1. Modificar `handleUpdate` em GlobalAdminCompanies.tsx
 
-**Arquivo:** `supabase/functions/register-company/index.ts`
-
-Após verificar `auto_approve_trial_enabled`, adicionar:
+Após atualizar a empresa no banco, calcular o novo valor mensal e chamar `update-asaas-subscription`:
 
 ```typescript
-// Check daily limit for auto-approve trials
-let todayAutoApprovedCount = 0;
-let maxDailyTrials = 10; // default
-
-if (autoApproveEnabled) {
-  // Get max daily limit from settings
-  const { data: maxDailySetting } = await supabase
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'max_daily_auto_trials')
-    .single();
+const handleUpdate = async () => {
+  if (!editingCompany) return;
   
-  if (maxDailySetting?.value) {
-    maxDailyTrials = parseInt(String(maxDailySetting.value), 10) || 10;
+  // 1. Buscar plano para calcular valor
+  const selectedPlan = plans.find(p => p.id === formData.plan_id);
+  
+  // 2. Calcular novo valor mensal
+  let newMonthlyValue = selectedPlan?.price || 0;
+  if (formData.use_custom_limits && selectedPlan) {
+    const additionalUsers = Math.max(0, formData.max_users - selectedPlan.max_users);
+    const additionalInstances = Math.max(0, formData.max_instances - selectedPlan.max_instances);
+    newMonthlyValue += (additionalUsers * 47.90) + (additionalInstances * 79.90);
   }
   
-  // Count today's auto-approved trials
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
+  // 3. Atualizar no banco
+  await updateCompany.mutateAsync({ id: editingCompany, ...updateData });
   
-  const { count } = await supabase
-    .from('companies')
-    .select('*', { count: 'exact', head: true })
-    .eq('approval_status', 'approved')
-    .gte('created_at', todayStart.toISOString())
-    .not('trial_ends_at', 'is', null); // só trials
-  
-  todayAutoApprovedCount = count || 0;
-  
-  // If limit reached, switch to manual approval
-  if (todayAutoApprovedCount >= maxDailyTrials) {
-    console.log(`[register-company] Daily auto-trial limit reached (${todayAutoApprovedCount}/${maxDailyTrials})`);
-    autoApproveEnabled = false; // Force manual approval
+  // 4. Sincronizar com ASAAS (se houve mudança de limites)
+  if (formData.use_custom_limits || limitsChanged) {
+    await supabase.functions.invoke('update-asaas-subscription', {
+      body: {
+        company_id: editingCompany,
+        new_value: newMonthlyValue,
+        reason: "Limites atualizados pelo admin"
+      }
+    });
   }
-}
+};
 ```
 
-### 3. UI no GlobalAdminSettings
+### 2. Adicionar Confirmação Visual
 
-**Arquivo:** `src/pages/global-admin/GlobalAdminSettings.tsx`
+Antes de salvar, mostrar ao admin o impacto financeiro:
+- Valor atual no ASAAS
+- Novo valor calculado
+- Diferença (aumento ou redução)
 
-Adicionar campo numérico logo abaixo do switch de "Aprovação Automática de Trial":
+### 3. Melhorar a UX do CompanyLimitsEditor
 
-- Input type="number" para `max_daily_auto_trials`
-- Valor padrão: 10
-- Min: 1, Max: 1000
-- Descrição: "Limite de cadastros automáticos por dia. Após atingir, novos cadastros vão para aprovação manual."
+Adicionar badge de alerta quando limites são reduzidos abaixo do plano base:
 
-### 4. Mostrar Contador no Admin
-
-Na mesma seção, exibir:
-- Cadastros auto-aprovados hoje: X / Y
-- Barra de progresso visual
+```text
+⚠️ Limite abaixo do plano: max_users = 3, mas plano inclui 5
+    Isso zera os adicionais e reduz a cobrança.
+```
 
 ## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/register-company/index.ts` | Adicionar lógica de limite diário |
-| `src/pages/global-admin/GlobalAdminSettings.tsx` | Adicionar campo de limite + contador |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Chamar `update-asaas-subscription` em `handleUpdate` |
+| `src/components/global-admin/CompanyLimitsEditor.tsx` | Adicionar alerta quando limite < plano |
+| `src/hooks/useCompanies.tsx` | Opcional: mover lógica ASAAS para hook |
 
-## Experiência do Usuário
+## Fluxo Corrigido
 
-**Quando o limite é atingido:**
-- Usuário continua vendo "Cadastro realizado com sucesso"
-- Recebe email de "Cadastro em análise" (não de trial ativado)
-- Admin recebe notificação de novo cadastro pendente
-- Nenhuma mensagem de erro é exibida (evita revelar proteção)
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│ FLUXO EDITAR EMPRESA (corrigido)                                 │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [Admin edita limites] → [handleUpdate]                          │
+│                               │                                  │
+│                               ▼                                  │
+│                    ┌────────────────────┐                        │
+│                    │ 1. Calcular valor  │                        │
+│                    │ 2. UPDATE companies│                        │
+│                    │ 3. CALL ASAAS API  │◄── ✅ NOVO             │
+│                    └────────────────────┘                        │
+│                                                                  │
+│  Resultado: BD + ASAAS sincronizados                             │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-## Benefícios de Segurança
+## Caso de Redução de Limites
 
-1. **Anti-abuso:** Limita criação massiva de contas
-2. **Invisível:** Atacantes não sabem que existe limite
-3. **Flexível:** Admin pode ajustar limite conforme demanda
-4. **Auditável:** Logs mostram quando limite foi atingido
+Quando limites são reduzidos para igual ou abaixo do plano:
+
+1. Sistema calcula: `adicionais = max(0, limites - plano) = 0`
+2. Novo valor = apenas preço do plano base
+3. ASAAS atualiza descrição: "Assinatura MiauChat STARTER - Empresa X" (sem adicionais)
+4. Próxima fatura vem apenas com valor do plano
+
+**Importante**: Isso é o comportamento esperado se o admin conscientemente reduz os limites. Mas precisamos confirmar com ele antes de aplicar.
+
+## Confirmação de Impacto
+
+Adicionar dialog de confirmação quando houver mudança de valor:
+
+```
+┌───────────────────────────────────────────────────┐
+│  ⚠️ Atualização de Cobrança                       │
+├───────────────────────────────────────────────────┤
+│                                                   │
+│  Valor atual:     R$ 644,70/mês                   │
+│  Novo valor:      R$ 497,00/mês                   │
+│  Diferença:       -R$ 147,70 (↓ redução)          │
+│                                                   │
+│  Isso atualizará a assinatura no ASAAS e a       │
+│  próxima fatura terá o novo valor.               │
+│                                                   │
+│  [Cancelar]              [Confirmar Alteração]   │
+│                                                   │
+└───────────────────────────────────────────────────┘
+```
 
 ## Checklist de Validação
 
-- [x] Campo de limite aparece no Global Admin Settings
-- [x] Limite é respeitado na Edge Function
-- [x] Cadastros após limite vão para aprovação manual
-- [x] Contador de "hoje" é exibido corretamente
-- [x] Logs registram quando limite é atingido
-- [x] Reset automático à meia-noite UTC funciona
+- [ ] Editar limites para cima → ASAAS atualiza com valor maior
+- [ ] Editar limites para baixo → ASAAS atualiza com valor menor
+- [ ] Manter limites iguais ao plano → ASAAS mostra apenas plano base
+- [ ] Desativar limites customizados → ASAAS volta ao valor do plano
+- [ ] Empresa sem assinatura ASAAS → Mostra mensagem "será aplicado quando assinar"
+- [ ] Toast/notificação mostra resultado da sincronização
+
