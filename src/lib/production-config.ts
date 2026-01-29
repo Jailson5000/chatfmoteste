@@ -11,6 +11,12 @@ export const PRODUCTION_DOMAINS = {
   api: 'api.miauchat.com.br',
 };
 
+// Support configuration
+export const SUPPORT_CONFIG = {
+  whatsappNumber: '556399540484', // Número real do suporte
+  email: 'suporte@miauchat.com.br',
+};
+
 // Allowed authentication redirect URLs
 export const AUTH_REDIRECT_URLS = [
   'https://miauchat.com.br',
@@ -62,4 +68,10 @@ export function getTenantUrl(subdomain: string, path: string = '/'): string {
   // Development - use query param simulation
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
   return `${baseUrl}${path}?tenant=${subdomain}`;
+}
+
+// Generate WhatsApp link with pre-filled message
+export function getWhatsAppSupportLink(message: string): string {
+  const encodedMessage = encodeURIComponent(message);
+  return `https://wa.me/${SUPPORT_CONFIG.whatsappNumber}?text=${encodedMessage}`;
 }

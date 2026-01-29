@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { SUPPORT_CONFIG, getWhatsAppSupportLink } from "@/lib/production-config";
 
 interface TrialExpiredProps {
   trialEndsAt?: string;
@@ -41,11 +42,12 @@ export default function TrialExpired({ trialEndsAt, planName, planPrice }: Trial
   };
 
   const handleContactSupport = () => {
-    window.open("mailto:suporte@miauchat.com.br?subject=Upgrade de Plano - Trial Expirado", "_blank");
+    window.open(`mailto:${SUPPORT_CONFIG.email}?subject=Upgrade de Plano - Trial Expirado`, "_blank");
   };
 
   const handleWhatsAppContact = () => {
-    window.open("https://wa.me/5511999999999?text=Olá! Meu período de trial expirou e gostaria de contratar um plano.", "_blank");
+    const message = `Olá! Meu período de trial expirou e gostaria de contratar um plano.${planName ? `\n\nPlano: ${planName}` : ""}`;
+    window.open(getWhatsAppSupportLink(message), "_blank");
   };
 
   const formattedPrice = planPrice 
