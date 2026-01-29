@@ -103,9 +103,28 @@ serve(async (req) => {
       );
     }
 
-    if (!company.email) {
+    // Get email: prefer company.email, fallback to admin user email from law_firm
+    let billingEmail = company.email;
+    
+    if (!billingEmail && company.law_firm_id) {
+      // Try to get the admin user's email from profiles
+      const { data: adminProfile } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("law_firm_id", company.law_firm_id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      
+      if (adminProfile?.email) {
+        billingEmail = adminProfile.email;
+        console.log("[admin-create-asaas-subscription] Using admin profile email:", billingEmail);
+      }
+    }
+
+    if (!billingEmail) {
       return new Response(
-        JSON.stringify({ error: "Empresa não possui email cadastrado" }),
+        JSON.stringify({ error: "Empresa não possui email cadastrado e não foi encontrado email do administrador" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
       );
     }
@@ -128,7 +147,7 @@ serve(async (req) => {
     } else {
       // Search by email
       const searchResponse = await fetch(
-        `${asaasBaseUrl}/customers?email=${encodeURIComponent(company.email)}`,
+        `${asaasBaseUrl}/customers?email=${encodeURIComponent(billingEmail)}`,
         {
           headers: {
             "access_token": asaasApiKey,
@@ -146,7 +165,7 @@ serve(async (req) => {
         // Create new customer
         const customerPayload = {
           name: company.name,
-          email: company.email,
+          email: billingEmail,
           phone: company.phone?.replace(/\D/g, "") || undefined,
           cpfCnpj: company.document?.replace(/\D/g, "") || undefined,
           externalReference: `company_${company.id}`,
