@@ -147,7 +147,41 @@ export default function GlobalAdminSettings() {
 
           <Separator />
 
-          {/* Auto Trial + Plan Mode */}
+          {/* Auto-approve Trial Registration */}
+          <div className="flex items-center justify-between p-4 rounded-lg border border-purple-500/30 bg-purple-500/5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-purple-500" />
+                <Label className="font-medium">Aprovação Automática de Trial</Label>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Empresas que escolhem trial são aprovadas automaticamente sem intervenção manual.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={getSetting("auto_approve_trial_enabled") === "true" || getSetting("auto_approve_trial_enabled") === true}
+                onCheckedChange={(checked) => handleChange("auto_approve_trial_enabled", checked.toString())}
+              />
+              {localSettings["auto_approve_trial_enabled"] !== undefined && (
+                <Button size="sm" onClick={() => handleSave("auto_approve_trial_enabled")}>
+                  <Save className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {(getSetting("auto_approve_trial_enabled") === "true" || getSetting("auto_approve_trial_enabled") === true) && (
+            <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 text-sm flex items-start gap-2">
+              <Zap className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                Aprovação automática <strong>ativa</strong>. 
+                Empresas que escolherem trial serão aprovadas imediatamente sem aprovação manual.
+              </span>
+            </div>
+          )}
+
+          <Separator />
           <div className="flex items-center justify-between p-4 rounded-lg border border-green-500/30 bg-green-500/5">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">

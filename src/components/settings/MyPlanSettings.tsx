@@ -16,13 +16,15 @@ import {
   CheckCircle2,
   Loader2,
   Crown,
-  Mail
+  Mail,
+  Clock,
+  AlertTriangle
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts, AdditionalBreakdown } from "@/lib/billing-config";
-import { format } from "date-fns";
+import { format, differenceInDays, isPast } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { generateInvoicePDF } from "@/lib/invoiceGenerator";
@@ -43,6 +45,7 @@ export function MyPlanSettings() {
   const { lawFirm } = useLawFirm();
   const queryClient = useQueryClient();
   const [showAddonsDialog, setShowAddonsDialog] = useState(false);
+  const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [addonRequest, setAddonRequest] = useState({
     users: 0,
     instances: 0,
@@ -167,6 +170,34 @@ export function MyPlanSettings() {
     window.open("mailto:suporte@miauchat.com.br?subject=Solicitação de Upgrade de Plano", "_blank");
   };
 
+  const handlePayNow = async () => {
+    setIsPaymentLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-payment-link", {
+        body: { billing_type: "monthly" },
+      });
+
+      if (error) throw error;
+
+      if (data?.payment_url) {
+        window.location.href = data.payment_url;
+      } else {
+        throw new Error("Link de pagamento não gerado");
+      }
+    } catch (err: any) {
+      console.error("[MyPlanSettings] Error generating payment link:", err);
+      toast.error("Erro ao gerar link de pagamento. Entre em contato com o suporte.");
+    } finally {
+      setIsPaymentLoading(false);
+    }
+  };
+
+  // Check if user is in trial
+  const isInTrial = companyData?.trial_ends_at && !isPast(new Date(companyData.trial_ends_at));
+  const trialDaysLeft = companyData?.trial_ends_at 
+    ? differenceInDays(new Date(companyData.trial_ends_at), new Date())
+    : 0;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -189,6 +220,63 @@ export function MyPlanSettings() {
         ]}
         tip="Para upgrade de plano ou dúvidas sobre faturamento, entre em contato com nosso suporte."
       />
+
+      {/* Trial Banner - Show only if user is in trial */}
+      {isInTrial && (
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                  <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    Período de Teste
+                    <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400">
+                      {trialDaysLeft} {trialDaysLeft === 1 ? "dia restante" : "dias restantes"}
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription>
+                    Seu trial termina em {companyData?.trial_ends_at 
+                      ? format(new Date(companyData.trial_ends_at), "d 'de' MMMM 'de' yyyy", { locale: ptBR })
+                      : "breve"
+                    }
+                  </CardDescription>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {plan?.name 
+                  ? `Assine o plano ${plan.name} para continuar usando após o trial.`
+                  : "Assine um plano para continuar usando após o trial."
+                }
+              </p>
+              <Button 
+                onClick={handlePayNow}
+                disabled={isPaymentLoading}
+                className="gap-2 bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+              >
+                {isPaymentLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CreditCard className="h-4 w-4" />
+                )}
+                Assinar Agora - {formatCurrency(plan?.price || 497)}
+              </Button>
+            </div>
+            {trialDaysLeft <= 2 && (
+              <div className="mt-3 flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Seu trial está prestes a expirar. Assine para não perder o acesso!</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Current Plan Card */}
