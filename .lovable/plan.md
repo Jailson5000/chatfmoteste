@@ -1,9 +1,26 @@
 
 # Plano: Adicionar Opção Trial no Checkout da Landing Page + Criar Faturas ASAAS para Empresas Existentes
 
-## Problema Identificado
+## ✅ IMPLEMENTADO
 
-### 1. Falta da Opção Trial no CheckoutModal
+### 1. CheckoutModal Atualizado
+- Adicionada seleção Trial/Pagar Agora
+- Trial chama `register-company` diretamente
+- Pagar Agora redireciona para ASAAS checkout
+
+### 2. Edge Function `admin-create-asaas-subscription`
+- Permite admins gerarem faturas para empresas existentes
+- Cria cliente ASAAS se não existir
+- Gera link de pagamento recorrente
+
+### 3. GlobalAdminCompanies
+- Botão "Gerar Cobrança ASAAS" no menu de cada empresa
+- Dialog para escolher período (mensal/anual)
+- Link copiado automaticamente
+
+---
+
+## Problema Original
 
 O fluxo atual:
 - **Landing Page** → clica "Começar agora" → abre `CheckoutModal` → **SÓ PAGAMENTO** (sem opção Trial)

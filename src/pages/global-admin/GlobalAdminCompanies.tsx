@@ -28,6 +28,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Select,
@@ -70,6 +71,9 @@ export default function GlobalAdminCompanies() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [activeTab, setActiveTab] = useState("approved");
   const [editParamProcessed, setEditParamProcessed] = useState(false);
+  const [billingCompany, setBillingCompany] = useState<typeof companies[0] | null>(null);
+  const [billingType, setBillingType] = useState<"monthly" | "yearly">("monthly");
+  const [isGeneratingBilling, setIsGeneratingBilling] = useState(false);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -155,6 +159,53 @@ export default function GlobalAdminCompanies() {
       toast.error(`Erro ao resetar senha: ${error.message}`);
     } finally {
       setResettingPassword(null);
+    }
+  };
+
+  const handleGenerateBilling = async () => {
+    if (!billingCompany) return;
+    
+    setIsGeneratingBilling(true);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        toast.error("Você precisa estar logado como admin global");
+        return;
+      }
+      
+      const response = await supabase.functions.invoke('admin-create-asaas-subscription', {
+        body: {
+          company_id: billingCompany.id,
+          billing_type: billingType,
+        }
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'Erro desconhecido');
+      }
+      
+      const paymentUrl = response.data.payment_url;
+      
+      // Copy to clipboard
+      await navigator.clipboard.writeText(paymentUrl);
+      
+      toast.success(
+        `Link de pagamento gerado!\n\nLink copiado para a área de transferência.\n\nPlano: ${response.data.plan_name}\nValor: R$ ${response.data.price?.toFixed(2).replace('.', ',')}`,
+        { duration: 10000 }
+      );
+      
+      setBillingCompany(null);
+    } catch (error: any) {
+      console.error("Error generating billing:", error);
+      toast.error(`Erro ao gerar cobrança: ${error.message}`);
+    } finally {
+      setIsGeneratingBilling(false);
     }
   };
   
@@ -1312,6 +1363,18 @@ export default function GlobalAdminCompanies() {
                                   <KeyRound className="mr-2 h-4 w-4" />
                                   {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
                                 </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    setBillingCompany(company);
+                                    setBillingType("monthly");
+                                  }}
+                                  disabled={!company.plan_id}
+                                  className="text-green-600 focus:text-green-600"
+                                >
+                                  <CreditCard className="mr-2 h-4 w-4" />
+                                  Gerar Cobrança ASAAS
+                                </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleDelete(company)}
                                   className="text-destructive"
@@ -1609,6 +1672,90 @@ export default function GlobalAdminCompanies() {
           law_firm_id: usersDialogCompany.law_firm_id,
         } : null}
       />
+
+      {/* Generate ASAAS Billing Dialog */}
+      <Dialog open={!!billingCompany} onOpenChange={(open) => !open && setBillingCompany(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-green-600" />
+              Gerar Cobrança ASAAS
+            </DialogTitle>
+            <DialogDescription>
+              Crie um link de pagamento para a empresa "{billingCompany?.name}"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Empresa</Label>
+              <div className="p-3 bg-muted rounded-md">
+                <p className="font-medium">{billingCompany?.name}</p>
+                <p className="text-sm text-muted-foreground">{billingCompany?.email}</p>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Plano</Label>
+              <div className="p-3 bg-muted rounded-md">
+                <p className="font-medium">{billingCompany?.plan?.name || 'Não definido'}</p>
+                <p className="text-sm text-muted-foreground">
+                  R$ {billingCompany?.plan?.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês
+                </p>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Período de Cobrança</Label>
+              <Select value={billingType} onValueChange={(v) => setBillingType(v as "monthly" | "yearly")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="monthly">
+                    <div className="flex items-center gap-2">
+                      <span>Mensal</span>
+                      <span className="text-muted-foreground">
+                        R$ {billingCompany?.plan?.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="yearly">
+                    <div className="flex items-center gap-2">
+                      <span>Anual</span>
+                      <span className="text-muted-foreground">
+                        R$ {((billingCompany?.plan?.price || 0) * 11).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                      <Badge variant="outline" className="ml-1 text-xs">1 mês grátis</Badge>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBillingCompany(null)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleGenerateBilling}
+              disabled={isGeneratingBilling || !billingCompany?.plan}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {isGeneratingBilling ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Gerando...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Gerar Link de Pagamento
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
