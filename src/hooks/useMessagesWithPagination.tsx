@@ -434,8 +434,30 @@ export function useMessagesWithPagination({
           const isTempId = (id?: string | null) => id && id.length === 36 && id.includes('-');
 
           setMessages(prev => {
-            // Prevent duplicates by DB id
-            if (prev.some(m => m.id === rawMsg.id)) return prev;
+            // Check if message with same ID exists (unified ID flow)
+            const existingIndex = prev.findIndex(m => m.id === rawMsg.id);
+            if (existingIndex !== -1) {
+              // MERGE instead of skip: optimistic message exists with same ID
+              // Update with backend data while preserving blob URL and client-side fields
+              const existingMsg = prev[existingIndex];
+              const shouldKeepBlobUrl = isBlobUrl(existingMsg.media_url) && !rawMsg.media_url;
+              
+              const updated = [...prev];
+              updated[existingIndex] = {
+                ...existingMsg,
+                ...rawMsg,
+                // Preserve blob URL until backend provides real URL
+                media_url: shouldKeepBlobUrl ? existingMsg.media_url : (rawMsg.media_url ?? existingMsg.media_url),
+                media_mime_type: rawMsg.media_mime_type ?? existingMsg.media_mime_type,
+                // Preserve client-side ordering fields
+                _clientOrder: existingMsg._clientOrder,
+                _clientTempId: existingMsg._clientTempId,
+                // Keep local timestamp to prevent visual shuffle
+                created_at: existingMsg.created_at,
+              };
+              console.log("[useMessagesWithPagination] MERGED existing message:", rawMsg.id, "status:", rawMsg.status);
+              return updated;
+            }
             
             // CRITICAL: System messages should bypass all deduplication and be added immediately
             if (rawMsg.sender_type === 'system') {

@@ -101,6 +101,8 @@ interface EvolutionRequest {
   // For send_reaction
   reaction?: string; // Emoji to react with (e.g., "👍", "❤️") or empty string to remove
   isFromMe?: boolean; // Whether the message being reacted to was sent by us
+  // For send_media_async - client-generated message ID for ID unification
+  clientMessageId?: string;
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -2246,8 +2248,10 @@ serve(async (req) => {
           throw new Error("remoteJid inválido para envio de mídia");
         }
 
-        // Create temporary message in DB immediately with "sending" status
-        const tempMessageId = crypto.randomUUID();
+        // Use client-provided ID or generate new one
+        // This ensures frontend optimistic message and DB record have the same ID
+        const isValidUUID = (id?: string) => id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const tempMessageId = isValidUUID(body.clientMessageId) ? body.clientMessageId! : crypto.randomUUID();
         const mediaTypeDisplay = body.mediaType === "audio" ? "[Áudio]" 
           : body.mediaType === "image" ? "[Imagem]"
           : body.mediaType === "video" ? "[Vídeo]"

@@ -1899,13 +1899,13 @@ export function KanbanChatPanel({
         // Create blob URL for optimistic preview
         const blobUrl = URL.createObjectURL(audioBlob);
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         
         // Add optimistic message immediately
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: "[Áudio]",
           created_at: messageTimestamp,
           is_from_me: true,
@@ -1927,13 +1927,14 @@ export function KanbanChatPanel({
             mediaType: "audio",
             mimeType: normalizedMimeType,
             fileName,
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
         
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar áudio");
         }
@@ -1941,17 +1942,13 @@ export function KanbanChatPanel({
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar áudio");
         }
         
-        // Update optimistic message with real ID
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        console.log('[Kanban Audio] Async send successful, ID:', clientMessageId);
       }
       
       toast({ title: "Áudio enviado" });
@@ -2049,14 +2046,14 @@ export function KanbanChatPanel({
         // Create blob URL for optimistic preview
         const blobUrl = URL.createObjectURL(file);
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         const mediaTypeDisplay = mediaType === "image" ? "[Imagem]" : `[${file.name}]`;
         
         // Add optimistic message immediately
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: mediaTypeDisplay,
           created_at: messageTimestamp,
           is_from_me: true,
@@ -2078,13 +2075,14 @@ export function KanbanChatPanel({
             mediaType: mediaType === "image" ? "image" : "document",
             mimeType: file.type || (mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
             fileName: file.name,
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
         
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar arquivo");
         }
@@ -2092,17 +2090,13 @@ export function KanbanChatPanel({
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar arquivo");
         }
         
-        // Update optimistic message with real ID
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        console.log('[Kanban File] Async send successful, ID:', clientMessageId);
       }
       
       toast({ title: `${mediaType === "image" ? "Imagem" : "Documento"} enviado` });
@@ -2200,8 +2194,8 @@ export function KanbanChatPanel({
         // Create blob URL for optimistic preview
         const blobUrl = mediaPreview.previewUrl || URL.createObjectURL(mediaPreview.file);
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         const mediaTypeDisplay = mediaPreview.mediaType === "image" ? "[Imagem]" 
           : mediaPreview.mediaType === "audio" ? "[Áudio]"
@@ -2209,7 +2203,7 @@ export function KanbanChatPanel({
         
         // Add optimistic message immediately
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: caption || mediaTypeDisplay,
           created_at: messageTimestamp,
           is_from_me: true,
@@ -2232,13 +2226,14 @@ export function KanbanChatPanel({
             mimeType: mediaPreview.file.type || "application/octet-stream",
             fileName: mediaPreview.file.name,
             caption: caption || undefined,
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
 
         if (response.error) {
           console.error('[Kanban] Evolution API error:', response.error);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
@@ -2246,17 +2241,13 @@ export function KanbanChatPanel({
         if (!response.data?.success) {
           console.error('[Kanban] Evolution API failed:', response.data);
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
         
-        // Update optimistic message with real ID
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        console.log('[Kanban Preview] Async send successful, ID:', clientMessageId);
       }
 
       toast({ title: "Mídia enviada" });
