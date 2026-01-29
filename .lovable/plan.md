@@ -1,238 +1,190 @@
 
-# Plano: Adicionar Opção Trial no Checkout da Landing Page + Criar Faturas ASAAS para Empresas Existentes
+# Plano: Correção do Fluxo ASAAS e Testes de Webhook
 
-## ✅ IMPLEMENTADO
+## Problemas Identificados
 
-### 1. CheckoutModal Atualizado
-- Adicionada seleção Trial/Pagar Agora
-- Trial chama `register-company` diretamente
-- Pagar Agora redireciona para ASAAS checkout
+### 1. `externalReference` Excedendo 100 Caracteres
+O ASAAS limita o campo `externalReference` a 100 caracteres. A função `admin-create-asaas-subscription` gera uma referência muito longa:
+```
+company:a5e5147b-0d98-4d87-ab95-fd30c03e52d7;plan:d0cec231-ff01-4874-b5e7-e777d551f89f;period:monthly;admin_created:true
+// Total: ~120 caracteres - ERRO!
+```
 
-### 2. Edge Function `admin-create-asaas-subscription`
-- Permite admins gerarem faturas para empresas existentes
-- Cria cliente ASAAS se não existir
-- Gera link de pagamento recorrente
+### 2. Formato Inconsistente do `externalReference`
+Cada Edge Function usa um formato diferente:
 
-### 3. GlobalAdminCompanies
-- Botão "Gerar Cobrança ASAAS" no menu de cada empresa
-- Dialog para escolher período (mensal/anual)
-- Link copiado automaticamente
+| Função | Formato | Company ID |
+|--------|---------|------------|
+| `generate-payment-link` | `company:UUID;plan:UUID;period:X` | ✅ Sim |
+| `admin-create-asaas-subscription` | `company:UUID;plan:UUID;period:X;admin:true` | ✅ Sim (mas muito longo) |
+| `create-asaas-checkout` | `source:miauchat;plan:X;period:X` | ❌ NÃO! |
+
+O webhook não consegue identificar a empresa quando vem do checkout da landing page!
+
+### 3. Webhook Sem Atividade
+- Nenhum log encontrado = ASAAS ainda não enviou webhooks
+- Possíveis causas:
+  - Webhook não configurado no painel ASAAS
+  - Nenhum pagamento foi confirmado ainda
+  - Token de autenticação incorreto
 
 ---
 
-## Problema Original
+## Correções Necessárias
 
-O fluxo atual:
-- **Landing Page** → clica "Começar agora" → abre `CheckoutModal` → **SÓ PAGAMENTO** (sem opção Trial)
-- **Página `/register`** → tem opção Trial/Pagar (mas só é acessada se `manual_registration_enabled = true`)
+### Correção 1: Padronizar `externalReference` (Todas as Funções)
 
-O `CheckoutModal` não tem a seleção "Trial Grátis" vs "Pagar Agora" que foi implementada no `Register.tsx`.
-
-### 2. Criar Faturas no ASAAS para Empresas Existentes
-
-Para empresas já cadastradas no sistema, podemos criar assinaturas no ASAAS de duas formas:
-- **Via Painel Admin**: Criar uma Edge Function que gera cobranças para empresas específicas
-- **Via empresa**: A empresa pode acessar "Meu Plano" e clicar em "Assinar Agora"
-
----
-
-## Solução Parte 1: Adicionar Opção Trial no CheckoutModal
-
-### Arquivo: `src/components/landing/CheckoutModal.tsx`
-
-**Mudanças necessárias:**
-
-1. Adicionar estado para modo de registro:
+**Novo formato padrão (máximo 100 chars):**
 ```typescript
-const [registrationMode, setRegistrationMode] = useState<'trial' | 'pay_now'>('pay_now');
+// Formato curto e seguro
+const shortCompanyId = companyId.split("-")[0]; // Primeiros 8 chars do UUID
+const externalReference = `co:${shortCompanyId};pl:${planKey};pe:${period}`.slice(0, 100);
+// Exemplo: "co:a5e5147b;pl:basic;pe:monthly" (~35 chars)
 ```
 
-2. Adicionar seleção visual (antes do formulário de billing):
+**OU usar apenas company_id (recomendado):**
 ```typescript
-{/* Registration Mode Selection */}
-<div className="space-y-3">
-  <Label className="text-white/70 font-medium">Como deseja começar?</Label>
-  
-  <div className="grid grid-cols-2 gap-3">
-    {/* Pagar Agora */}
-    <button onClick={() => setRegistrationMode('pay_now')} ...>
-      💳 Pagar Agora
-      Acesso imediato após pagamento
-    </button>
-    
-    {/* Trial Grátis */}
-    <button onClick={() => setRegistrationMode('trial')} ...>
-      🎁 Trial Grátis
-      7 dias para testar
-    </button>
-  </div>
-</div>
+const externalReference = `company_${companyId}`.slice(0, 100);
+// O webhook já busca por company_id no company_subscriptions como fallback
 ```
 
-3. Alterar o `handleSubmit`:
+### Correção 2: Atualizar `admin-create-asaas-subscription`
 ```typescript
-if (registrationMode === 'trial') {
-  // Redirecionar para /register com dados do plano
-  navigate(`/register?plan=${plan.name.toLowerCase()}`);
-  // OU chamar register-company diretamente
-} else {
-  // Checkout ASAAS (fluxo atual)
-}
+// ANTES (erro)
+const externalReference = `company:${company.id};plan:${company.plan.id};period:${billing_type};admin_created:true`;
+
+// DEPOIS (corrigido)
+const externalReference = `company:${company.id}`.slice(0, 100);
 ```
 
-4. Esconder seleção de período de cobrança quando Trial selecionado
+### Correção 3: Atualizar `generate-payment-link`
+```typescript
+// ANTES (pode exceder)
+const externalReference = `company:${company.id};plan:${company.plan.id};period:${billing_type}`;
 
-5. Atualizar botão de submit dinamicamente:
-- Trial: "Iniciar Período de Teste" (verde)
-- Pagar: "Continuar para Pagamento" (vermelho)
+// DEPOIS (seguro)
+const externalReference = `company:${company.id}`.slice(0, 100);
+```
 
----
+### Correção 4: Atualizar `create-asaas-checkout`
 
-## Solução Parte 2: Criar Faturas ASAAS para Empresas Existentes
+Esta função é usada na **landing page** para novos registros. O problema é que não há `company_id` ainda (a empresa não foi criada).
 
-### Opção A: Via Painel Admin Global (Recomendado)
+**Solução:** Após o webhook confirmar o pagamento, usar o `customerId` do ASAAS para vincular:
 
-Criar uma nova Edge Function `admin-create-asaas-subscription` que:
-- Recebe `company_id` do admin
-- Busca dados da empresa e plano
-- Cria cliente no ASAAS (se não existir)
-- Cria assinatura/cobrança para a empresa
-- Atualiza `company_subscriptions`
+1. Salvar `asaas_customer_id` no registro de `company_subscriptions` quando a empresa for provisionada
+2. O webhook já tem fallback para buscar por `asaas_customer_id`
 
-**Interface no Admin Global:**
-Na tabela de empresas, adicionar botão "Gerar Cobrança ASAAS" que:
-1. Abre modal com opções (mensal/anual)
-2. Chama a Edge Function
-3. Exibe link gerado ou confirma criação
+**OU** incluir dados identificáveis no `externalReference`:
+```typescript
+// Incluir email no externalReference para identificação posterior
+const externalReference = `email:${adminEmail};plan:${planKey}`.slice(0, 100);
+```
 
-### Opção B: Via Própria Empresa
+### Correção 5: Melhorar Lógica do Webhook
 
-A empresa já pode fazer isso através de:
-- **Configurações > Meu Plano > Assinar Agora** (que usa `generate-payment-link`)
-- **Página Trial Expirado** (para empresas com trial expirado)
+Atualizar `asaas-webhook` para:
+1. Suportar múltiplos formatos de `externalReference`
+2. Buscar por email se não encontrar por company_id
+3. Logar melhor para debug
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Modificação |
-|---------|-------------|
-| `src/components/landing/CheckoutModal.tsx` | Adicionar seleção Trial/Pagar + novo fluxo de submit |
-| `supabase/functions/admin-create-asaas-subscription/index.ts` | Nova Edge Function para admin criar cobranças |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Botão "Gerar Cobrança" na tabela |
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/admin-create-asaas-subscription/index.ts` | Encurtar `externalReference` |
+| `supabase/functions/generate-payment-link/index.ts` | Adicionar `.slice(0, 100)` |
+| `supabase/functions/create-asaas-checkout/index.ts` | Incluir email no `externalReference` |
+| `supabase/functions/asaas-webhook/index.ts` | Melhorar parsing e fallbacks |
 
 ---
 
-## Fluxo Atualizado da Landing Page
+## Passos para Testar o Webhook
 
+### Passo 1: Configurar Webhook no Painel ASAAS
+
+Verificar se está configurado:
+- **URL:** `https://jiragtersejnarxruqyd.supabase.co/functions/v1/asaas-webhook`
+- **Token:** Valor do secret `ASAAS_WEBHOOK_TOKEN`
+- **Eventos:** 
+  - `PAYMENT_CONFIRMED`
+  - `PAYMENT_RECEIVED`
+  - `PAYMENT_OVERDUE`
+  - `SUBSCRIPTION_CANCELLED`
+
+### Passo 2: Gerar Cobrança de Teste (após correções)
+
+1. No painel Global Admin > Empresas
+2. Clicar "Gerar Cobrança ASAAS" em uma empresa
+3. Escolher período (Mensal)
+4. Copiar link gerado
+5. Fazer pagamento de teste no sandbox ASAAS (se disponível) ou aguardar cliente real
+
+### Passo 3: Verificar Logs
+
+Após correções, os logs mostrarão:
 ```
+[asaas-webhook] Received event: PAYMENT_CONFIRMED {...}
+[asaas-webhook] Processing event for company: a5e5147b-0d98-4d87-ab95-fd30c03e52d7
+[asaas-webhook] Company activated successfully: a5e5147b-0d98-4d87-ab95-fd30c03e52d7
+```
+
+### Passo 4: Verificar Banco de Dados
+
+```sql
+SELECT * FROM audit_logs WHERE action = 'PAYMENT_CONFIRMED' ORDER BY created_at DESC;
+SELECT * FROM company_subscriptions WHERE status = 'active';
+SELECT * FROM companies WHERE trial_type = 'paid';
+```
+
+---
+
+## Fluxo Corrigido
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
-│  Usuário clica "Começar Agora" em qualquer plano            │
+│  ADMIN GERA COBRANÇA (ou cliente assina)                    │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  CHECKOUT MODAL                                              │
-│                                                              │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │ 💳 Pagar Agora  │  │ 🎁 Trial Grátis │                   │
-│  │                 │  │                  │                   │
-│  │ Acesso imediato │  │ 7 dias grátis   │                   │
-│  └─────────────────┘  └─────────────────┘                   │
-│                                                              │
-│  [Se Pagar] → Período: Mensal/Anual                         │
-│  [Formulário: Nome, Email, Telefone*, CPF*]                  │
-│                                                              │
-│  [Botão dinâmico baseado na escolha]                        │
+│  Edge Function gera link com:                                │
+│  externalReference = "company:UUID" (≤100 chars)            │
+│  Salva asaas_customer_id no company_subscriptions           │
 └─────────────────────────┬───────────────────────────────────┘
                           │
-          ┌───────────────┴───────────────┐
-          │                               │
-          ▼                               ▼
-┌─────────────────┐             ┌─────────────────┐
-│  PAGAR AGORA    │             │  TRIAL GRÁTIS   │
-│                 │             │                 │
-│  → create-asaas │             │  → register-    │
-│    -checkout    │             │    company      │
-│  → Redireciona  │             │  → Auto-aprovar │
-│    para ASAAS   │             │    se habilitado│
-└─────────────────┘             └─────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Cliente paga no ASAAS                                       │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ASAAS envia webhook: PAYMENT_CONFIRMED                      │
+│  Header: asaas-access-token = ASAAS_WEBHOOK_TOKEN           │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  asaas-webhook processa:                                     │
+│  1. Valida token                                             │
+│  2. Extrai company_id do externalReference                  │
+│  3. Fallback: busca por asaas_customer_id                   │
+│  4. Atualiza company_subscriptions.status = 'active'        │
+│  5. Atualiza companies.approval_status = 'approved'         │
+│  6. Registra audit_log                                       │
+└─────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Detalhes Técnicos do CheckoutModal Atualizado
-
-### Estado Adicional
-```typescript
-const [registrationMode, setRegistrationMode] = useState<'trial' | 'pay_now'>('pay_now');
-```
-
-### Novo handleSubmit
-```typescript
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // Validação (já existente)
-  if (!formData.companyName || !formData.adminName || !formData.adminEmail) {...}
-  if (!formData.adminPhone || !formData.document) {
-    toast.error("Telefone e CPF/CNPJ são obrigatórios");
-    return;
-  }
-
-  if (registrationMode === 'trial') {
-    // FLUXO TRIAL: chamar register-company
-    const { data, error } = await supabase.functions.invoke('register-company', {
-      body: {
-        company_name: formData.companyName,
-        admin_name: formData.adminName,
-        admin_email: formData.adminEmail,
-        phone: formData.adminPhone,
-        document: formData.document,
-        plan_name: plan.name.toLowerCase(),
-        registration_mode: 'trial',
-      },
-    });
-
-    if (data?.auto_approved) {
-      toast.success("Trial ativado! Verifique seu email.");
-    } else {
-      toast.success("Cadastro enviado para análise!");
-    }
-    onOpenChange(false);
-    return;
-  }
-
-  // FLUXO PAGAR (código atual)
-  const functionName = paymentProvider === "asaas" ? "create-asaas-checkout" : "create-checkout-session";
-  // ... resto do código atual
-};
-```
-
----
-
-## Criar Faturas para Empresas Existentes - Edge Function
-
-### Nova Edge Function: `admin-create-asaas-subscription`
-
-```typescript
-// Recebe: company_id, billing_type (monthly/yearly)
-// Valida: usuário é admin global
-// Busca: empresa, plano
-// Cria: cliente ASAAS (se não existir)
-// Cria: assinatura recorrente ou link de pagamento
-// Atualiza: company_subscriptions
-// Retorna: URL de pagamento ou confirmação
-```
-
-Isso permitirá que o admin global gere cobranças para qualquer empresa do sistema diretamente do painel administrativo.
 
 ---
 
 ## Ordem de Implementação
 
-1. **Atualizar CheckoutModal** - Adicionar seleção Trial/Pagar
-2. **Atualizar register-company** - Aceitar plan_name além de plan_id
-3. **Criar admin-create-asaas-subscription** - Para admin gerar cobranças
-4. **Atualizar GlobalAdminCompanies** - Adicionar botão na tabela
-5. **Testar fluxos** - Landing → Trial, Landing → Pagar, Admin → Gerar cobrança
+1. **Corrigir `admin-create-asaas-subscription`** - Encurtar externalReference
+2. **Corrigir `generate-payment-link`** - Adicionar .slice(0, 100)
+3. **Corrigir `create-asaas-checkout`** - Incluir email para identificação
+4. **Melhorar `asaas-webhook`** - Adicionar fallback por email
+5. **Deploy e testar** - Gerar cobrança de teste
+6. **Verificar logs** - Confirmar que webhook está funcionando
