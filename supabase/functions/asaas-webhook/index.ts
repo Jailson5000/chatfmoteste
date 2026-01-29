@@ -38,6 +38,14 @@ interface AsaasPaymentEvent {
   };
 }
 
+// Helper to extract value from externalReference
+function extractFromReference(ref: string, key: string): string | null {
+  // Format: "key:value;key2:value2" or "key:value"
+  const regex = new RegExp(`${key}[:|]([^;]+)`, 'i');
+  const match = ref.match(regex);
+  return match ? match[1].trim() : null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -67,20 +75,48 @@ serve(async (req) => {
 
     console.log("[asaas-webhook] Received event:", event, JSON.stringify(body).slice(0, 500));
 
-    // Parse company ID from externalReference
+    // Parse company ID from externalReference with multiple fallback strategies
     let companyId: string | null = null;
+    let identifiedVia = "unknown";
     const externalRef = payment?.externalReference || subscription?.externalReference;
     
+    console.log("[asaas-webhook] Parsing externalReference:", externalRef);
+    
     if (externalRef) {
-      // Format: "company:uuid;plan:uuid;period:monthly" or "source:miauchat;..."
-      const companyMatch = externalRef.match(/company[:|]([a-f0-9-]+)/i);
+      // Strategy 1: Direct company ID (format: "company:uuid" or "company_uuid")
+      const companyMatch = externalRef.match(/company[_:|]([a-f0-9-]+)/i);
       if (companyMatch) {
         companyId = companyMatch[1];
+        identifiedVia = "company_ref";
+        console.log("[asaas-webhook] Found company from externalReference:", companyId);
+      }
+      
+      // Strategy 2: Email lookup (format: "email:user@example.com;...")
+      if (!companyId) {
+        const email = extractFromReference(externalRef, "email");
+        if (email) {
+          console.log("[asaas-webhook] Looking up company by email:", email);
+          
+          // Find company by admin email
+          const { data: companyData } = await supabase
+            .from("companies")
+            .select("id")
+            .eq("email", email)
+            .maybeSingle();
+          
+          if (companyData) {
+            companyId = companyData.id;
+            identifiedVia = "email_lookup";
+            console.log("[asaas-webhook] Found company by email:", companyId);
+          }
+        }
       }
     }
 
-    // If no company ID from reference, try to find by ASAAS customer ID
+    // Strategy 3: Fallback to ASAAS customer ID lookup
     if (!companyId && payment?.customer) {
+      console.log("[asaas-webhook] Looking up by asaas_customer_id:", payment.customer);
+      
       const { data: subData } = await supabase
         .from("company_subscriptions")
         .select("company_id")
@@ -89,17 +125,24 @@ serve(async (req) => {
       
       if (subData) {
         companyId = subData.company_id;
+        identifiedVia = "asaas_customer";
+        console.log("[asaas-webhook] Found company by asaas_customer_id:", companyId);
       }
     }
 
     if (!companyId) {
-      console.warn("[asaas-webhook] Could not identify company from event");
+      console.warn("[asaas-webhook] Could not identify company from event", {
+        externalRef,
+        customerId: payment?.customer,
+      });
       // Don't return error - ASAAS might retry
       return new Response(
         JSON.stringify({ received: true, warning: "Company not identified" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     }
+    
+    console.log("[asaas-webhook] Identified company:", companyId, "via:", identifiedVia);
 
     console.log("[asaas-webhook] Processing event for company:", companyId);
 
