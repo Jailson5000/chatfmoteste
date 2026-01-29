@@ -3002,22 +3002,54 @@ serve(async (req) => {
       console.log(`[AI_ISOLATION] Knowledge base loaded ONLY for agent ${automationId}`);
     }
 
-    // Determine which AI to use
+    // Determine which AI to use - now with global provider selection and fallback
     let useOpenAI = false;
     let openaiModel = "gpt-4o-mini";
     
+    // Global AI settings (system-wide)
     const { data: globalSettings } = await supabase
       .from("system_settings")
       .select("key, value")
-      .in("key", ["ai_openai_model"]);
+      .in("key", [
+        "ai_openai_model",
+        "ai_primary_provider",
+        "ai_gemini_api_key",
+        "ai_gemini_model",
+        "ai_enable_fallback"
+      ]);
+    
+    const getGlobalSetting = (key: string, defaultVal: any): any => {
+      const setting = globalSettings?.find((s: any) => s.key === key);
+      if (!setting?.value) return defaultVal;
+      // Handle JSON strings like '"lovable"' -> 'lovable'
+      if (typeof setting.value === "string") {
+        try {
+          return JSON.parse(setting.value);
+        } catch {
+          return setting.value;
+        }
+      }
+      return setting.value;
+    };
+    
+    // Global provider configuration
+    const globalPrimaryProvider = getGlobalSetting("ai_primary_provider", "lovable");
+    const globalGeminiApiKey = getGlobalSetting("ai_gemini_api_key", "");
+    const globalGeminiModel = getGlobalSetting("ai_gemini_model", "gemini-2.5-flash");
+    const globalEnableFallback = getGlobalSetting("ai_enable_fallback", true);
     
     if (globalSettings) {
       const modelSetting = globalSettings.find((s: any) => s.key === "ai_openai_model");
       if (modelSetting?.value && typeof modelSetting.value === "string") {
-        openaiModel = modelSetting.value;
+        try {
+          openaiModel = JSON.parse(modelSetting.value);
+        } catch {
+          openaiModel = modelSetting.value;
+        }
       }
     }
     
+    // Per-tenant override (Enterprise only - uses their own OpenAI key)
     if (context?.lawFirmId) {
       const { data: settings } = await supabase
         .from("law_firm_settings")
@@ -3031,10 +3063,12 @@ serve(async (req) => {
         
         if (iaOpenAI && OPENAI_API_KEY) {
           useOpenAI = true;
-          console.log(`[AI Chat] Using OpenAI (model=${openaiModel})`);
+          console.log(`[AI Chat] Using OpenAI per-tenant override (model=${openaiModel})`);
         }
       }
     }
+    
+    console.log(`[AI Chat] Provider config: primary=${globalPrimaryProvider}, gemini_key=${globalGeminiApiKey ? "SET" : "NOT_SET"}, fallback=${globalEnableFallback}`);
 
     // Build messages array
     const fullSystemPrompt = systemPrompt + knowledgeText;
@@ -3100,19 +3134,48 @@ serve(async (req) => {
       true // Template tools
     );
 
-    // Call AI
+    // Call AI with provider selection and fallback logic
     let aiResponse: string;
     let usedTokens = 0;
+    let usedProvider = "lovable";
 
-    const apiUrl = useOpenAI 
-      ? "https://api.openai.com/v1/chat/completions"
-      : "https://ai.gateway.lovable.dev/v1/chat/completions";
-    
-    const apiKey = useOpenAI ? OPENAI_API_KEY : LOVABLE_API_KEY;
-    const model = useOpenAI ? openaiModel : "google/gemini-2.5-flash";
+    // Helper function to call Lovable AI
+    const callLovableAI = async (body: Record<string, unknown>): Promise<Response> => {
+      return fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...body, model: "google/gemini-2.5-flash" }),
+      });
+    };
+
+    // Helper function to call Gemini directly (user's own API key)
+    const callGeminiDirect = async (apiKey: string, model: string, body: Record<string, unknown>): Promise<Response> => {
+      return fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...body, model }),
+      });
+    };
+
+    // Helper function to call OpenAI (tenant's own API key - Enterprise)
+    const callOpenAI = async (body: Record<string, unknown>): Promise<Response> => {
+      return fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...body, model: openaiModel }),
+      });
+    };
 
     const aiRequestBody: Record<string, unknown> = {
-      model,
       messages,
       temperature,
     };
@@ -3122,20 +3185,72 @@ serve(async (req) => {
       aiRequestBody.tool_choice = "auto";
     }
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(aiRequestBody),
-    });
+    let response: Response;
+
+    try {
+      // If tenant has their own OpenAI key (Enterprise), use that directly
+      if (useOpenAI) {
+        console.log(`[AI Chat] Using tenant's OpenAI key (Enterprise)`);
+        response = await callOpenAI(aiRequestBody);
+        usedProvider = "openai-enterprise";
+      }
+      // Otherwise use global provider configuration
+      else if (globalPrimaryProvider === "gemini" && globalGeminiApiKey) {
+        console.log(`[AI Chat] Using Gemini as primary (global config)`);
+        response = await callGeminiDirect(globalGeminiApiKey, globalGeminiModel, aiRequestBody);
+        usedProvider = "gemini";
+      } else {
+        console.log(`[AI Chat] Using Lovable AI as primary (global config)`);
+        response = await callLovableAI(aiRequestBody);
+        usedProvider = "lovable";
+      }
+
+      // Check for rate limit or payment errors - trigger fallback
+      if (!response.ok && globalEnableFallback && !useOpenAI) {
+        const status = response.status;
+        if (status === 429 || status === 402 || status >= 500) {
+          const errorText = await response.text();
+          console.log(`[AI Chat] Primary ${usedProvider} failed (${status}): ${errorText.substring(0, 200)}, trying fallback...`);
+          
+          // Switch to fallback provider
+          if (usedProvider === "lovable" && globalGeminiApiKey) {
+            console.log(`[AI Chat] Fallback to Gemini (${globalGeminiModel})`);
+            response = await callGeminiDirect(globalGeminiApiKey, globalGeminiModel, aiRequestBody);
+            usedProvider = "gemini-fallback";
+          } else if (usedProvider === "gemini") {
+            console.log(`[AI Chat] Fallback to Lovable AI`);
+            response = await callLovableAI(aiRequestBody);
+            usedProvider = "lovable-fallback";
+          }
+        }
+      }
+    } catch (networkError) {
+      // Network error - try fallback if enabled
+      console.error(`[AI Chat] Network error with primary provider:`, networkError);
+      
+      if (globalEnableFallback && !useOpenAI) {
+        console.log(`[AI Chat] Network error, trying fallback...`);
+        if (globalPrimaryProvider === "lovable" && globalGeminiApiKey) {
+          response = await callGeminiDirect(globalGeminiApiKey, globalGeminiModel, aiRequestBody);
+          usedProvider = "gemini-fallback";
+        } else if (globalPrimaryProvider === "gemini") {
+          response = await callLovableAI(aiRequestBody);
+          usedProvider = "lovable-fallback";
+        } else {
+          throw networkError;
+        }
+      } else {
+        throw networkError;
+      }
+    }
+
+    console.log(`[AI Chat] Response from provider: ${usedProvider}`);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[AI Chat] AI API error:`, errorText);
+      console.error(`[AI Chat] AI API error (${usedProvider}):`, errorText);
       return new Response(
-        JSON.stringify({ error: "AI service error", ref: errorRef }),
+        JSON.stringify({ error: "AI service error", ref: errorRef, provider: usedProvider }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -3189,21 +3304,24 @@ serve(async (req) => {
         });
       }
 
-      // Call AI again with tool results
-      const followUpResponse = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature,
-          tools: tools.length > 0 ? tools : undefined,
-          tool_choice: tools.length > 0 ? "auto" : undefined,
-        }),
-      });
+      // Call AI again with tool results - use the same provider that was selected
+      const followUpBody = {
+        ...aiRequestBody,
+        messages,
+        tools: tools.length > 0 ? tools : undefined,
+        tool_choice: tools.length > 0 ? "auto" : undefined,
+      };
+      
+      let followUpResponse: Response;
+      
+      // Use the same provider path that was initially selected
+      if (usedProvider.startsWith("openai")) {
+        followUpResponse = await callOpenAI(followUpBody);
+      } else if (usedProvider.includes("gemini")) {
+        followUpResponse = await callGeminiDirect(globalGeminiApiKey, globalGeminiModel, followUpBody);
+      } else {
+        followUpResponse = await callLovableAI(followUpBody);
+      }
 
       if (!followUpResponse.ok) {
         const errorText = await followUpResponse.text();
