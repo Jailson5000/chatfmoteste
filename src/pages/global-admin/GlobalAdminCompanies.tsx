@@ -192,14 +192,36 @@ export default function GlobalAdminCompanies() {
       }
       
       const paymentUrl = response.data.payment_url;
+      const priceFormatted = response.data.price?.toFixed(2).replace('.', ',');
       
-      // Copy to clipboard
-      await navigator.clipboard.writeText(paymentUrl);
-      
-      toast.success(
-        `Link de pagamento gerado!\n\nLink copiado para a área de transferência.\n\nPlano: ${response.data.plan_name}\nValor: R$ ${response.data.price?.toFixed(2).replace('.', ',')}`,
-        { duration: 10000 }
-      );
+      // Try to copy to clipboard with fallback
+      try {
+        await navigator.clipboard.writeText(paymentUrl);
+        toast.success(
+          `Link de pagamento gerado e copiado!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}\n\n${paymentUrl}`,
+          { duration: 15000 }
+        );
+      } catch (clipboardError) {
+        // Fallback: show link in toast with copy action
+        console.warn("Clipboard access denied, showing link in toast:", clipboardError);
+        toast.success(
+          `Link de pagamento gerado!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}\n\n${paymentUrl}`,
+          { 
+            duration: 30000,
+            action: {
+              label: "Copiar",
+              onClick: () => {
+                navigator.clipboard.writeText(paymentUrl).then(() => {
+                  toast.success("Link copiado!");
+                }).catch(() => {
+                  // Last resort: prompt user to copy manually
+                  window.prompt("Copie o link abaixo:", paymentUrl);
+                });
+              }
+            }
+          }
+        );
+      }
       
       setBillingCompany(null);
     } catch (error: any) {
