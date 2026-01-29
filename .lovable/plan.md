@@ -1,67 +1,82 @@
 
 
-# Atualização: Informações Comerciais na Landing Page
+# Configuração: Ativar ASAAS e Sistema de Pagamento com Trial
 
-## Dados Fornecidos
+## Análise do Estado Atual
 
-| Campo | Valor |
-|-------|-------|
-| Razão Social | MIAU - SOLUCOES DIGITAIS |
-| CNPJ | 64.774.567/0001-06 |
-| Endereço | COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504 |
+| Configuração | Valor Atual | Ação Necessária |
+|--------------|-------------|-----------------|
+| `ASAAS_API_KEY` | Configurada (antiga) | **Atualizar** com nova chave |
+| `payment_provider` | `asaas` | ✅ OK - Já está ASAAS |
+| `payments_disabled` | `true` | **Mudar para `false`** |
+| `manual_registration_enabled` | `true` | ✅ OK - Mantém cadastro manual |
+| `auto_trial_with_plan_enabled` | `true` | ✅ OK - Trial já habilitado |
 
-## Onde Aplicar
+## O que será feito
 
-A landing page atualmente não exibe informações comerciais/jurídicas como CNPJ e razão social. Vou adicionar essas informações no **Footer** da página, que é o local padrão para dados empresariais.
+### 1. Atualizar Chave API do ASAAS
+A chave atual será substituída pela nova chave fornecida:
+```
+$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OmEyMDlm...
+```
 
-## Mudanças no Arquivo
+### 2. Ativar Pagamentos Online
+Mudar `payments_disabled` de `true` → `false` para liberar o checkout.
 
-### `src/pages/landing/LandingPage.tsx`
+### 3. Fluxo do Cliente (Já Configurado)
 
-Vou atualizar a seção do Footer (linhas 872-921) para incluir:
-
-1. **Razão social e CNPJ** em texto discreto
-2. **Endereço comercial** 
-3. Manter toda a identidade visual "MiauChat" inalterada
-
-### Layout Proposto
+O sistema atual já está preparado para:
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    Documentos Legais:                       │
-│      🔒 Política de Privacidade    📋 Termos de Serviço    │
-├─────────────────────────────────────────────────────────────┤
-│  🐱 MIAUCHAT    |    Links legais    |    © 2026 MiauChat  │
-├─────────────────────────────────────────────────────────────┤
-│         MIAU - SOLUCOES DIGITAIS                            │
-│         CNPJ: 64.774.567/0001-06                            │
-│         COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504  │
-└─────────────────────────────────────────────────────────────┘
+Cliente acessa Landing Page
+         │
+         ▼
+Clica em "Escolher Plano"
+         │
+         ▼
+Modal de Checkout abre
+         │
+         ▼ (manual_registration_enabled = true)
+         │
+Redireciona para página de Cadastro (/register)
+         │
+         ▼
+Preenche dados + Escolhe Plano
+         │
+         ▼
+Empresa fica PENDENTE para aprovação
+         │
+         ▼
+Admin aprova → Trial de 7 dias inicia
+         │
+         ▼
+Após trial → Cobrança ASAAS
 ```
 
-## Código a ser Modificado
+## Passos Técnicos
 
-Na seção do footer, adicionar uma nova `<div>` após o copyright:
+### Passo 1: Atualizar Secret
+Usar a ferramenta `add_secret` para atualizar `ASAAS_API_KEY`
 
-```tsx
-{/* Informações Comerciais */}
-<div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
-  <p className="text-xs text-white/30">
-    MIAU - SOLUCOES DIGITAIS
-  </p>
-  <p className="text-xs text-white/25 mt-1">
-    CNPJ: 64.774.567/0001-06
-  </p>
-  <p className="text-xs text-white/20 mt-1">
-    COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
-  </p>
-</div>
+### Passo 2: Atualizar system_settings
+```sql
+UPDATE system_settings 
+SET value = 'false' 
+WHERE key = 'payments_disabled';
 ```
 
-## Observações
+## Segurança
 
-- **Nome do projeto permanece "MiauChat"** - sem alterações
-- **Marca visual inalterada** - logo, cores e identidade mantidos
-- Informações comerciais ficam em texto discreto (30% de opacidade)
-- Padrão de mercado: razão social e CNPJ no rodapé
+- A chave API ASAAS é armazenada de forma segura nas Secrets do backend
+- Nunca é exposta no frontend
+- Apenas as Edge Functions têm acesso
+
+## Teste Recomendado
+
+Após configuração:
+1. Acessar a Landing Page
+2. Clicar em "Escolher Plano" em qualquer plano
+3. Verificar se o modal redireciona para `/register`
+4. Preencher formulário de teste
+5. Verificar se empresa aparece em Empresas → Pendentes
 
