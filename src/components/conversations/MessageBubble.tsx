@@ -1726,8 +1726,13 @@ export function MessageBubble({
     }
 
     // Images/videos: hide a pure filename when there's no real caption
+    // Also hide system placeholders like "[Imagem]", "[Vídeo]", etc.
     if (messageType === "image" || messageType === "video") {
       if (looksLikeFileName) return "";
+      
+      // Hide media placeholders when no caption was provided
+      const mediaPlaceholders = /^\[(imagem|vídeo|video|imagen|image)\]$/i;
+      if (mediaPlaceholders.test(normalized)) return "";
     }
 
     // Documents: we already render the filename in the document card
