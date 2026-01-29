@@ -1,82 +1,63 @@
 
-# Plano de Implementação: Sistema de Solicitação de Adicionais + PIX no Checkout
+# Plano: Contabilização e Cobrança de Adicionais
 
-## Contexto do Problema
+## Problema Identificado
 
-### 1. Solicitação de Adicionais não Funcional
-O cliente pode solicitar adicionais (usuários/WhatsApp) em **Meu Plano → Contratar Adicionais**, mas:
-- O sistema apenas exibe um toast de sucesso
-- **Não há registro no banco de dados**
-- **Global Admin não recebe notificação nem consegue aprovar**
-
-### 2. PIX não Disponível no Checkout
-Clientes em trial que clicam em "Pagar Agora" são redirecionados para o ASAAS, mas:
-- A função `create-asaas-checkout` cria subscription com `billingType: "CREDIT_CARD"` fixo
-- Isso impede que o cliente escolha PIX ou Boleto
-- O correto seria usar `billingType: "UNDEFINED"` para permitir escolha
-
----
+Quando um Global Admin aprova uma solicitação de adicionais:
+1. ✅ A tabela `companies` é atualizada (`max_users`, `max_instances`, `use_custom_limits`)
+2. ✅ O cálculo de `calculateAdditionalCosts` já funciona corretamente
+3. ✅ O cliente vê o novo valor em "Meu Plano" (Resumo Mensal)
+4. ✅ O admin vê o valor correto em `CompanyUsageTable`
+5. ❌ **O ASAAS NÃO É ATUALIZADO** - A próxima cobrança continua com o valor antigo
 
 ## Solução Proposta
 
-### Parte 1: Sistema de Solicitação de Adicionais
+### Parte 1: Atualizar Subscription no ASAAS Após Aprovação
 
-#### 1.1 Nova Tabela `addon_requests`
-```sql
-CREATE TABLE addon_requests (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  company_id UUID NOT NULL REFERENCES companies(id),
-  law_firm_id UUID NOT NULL REFERENCES law_firms(id),
-  requested_by UUID REFERENCES auth.users(id),
-  -- Quantidades solicitadas
-  additional_users INTEGER DEFAULT 0,
-  additional_instances INTEGER DEFAULT 0,
-  -- Valor calculado
-  monthly_cost DECIMAL(10,2),
-  -- Status do fluxo
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
-  -- Ações do admin
-  reviewed_by UUID REFERENCES auth.users(id),
-  reviewed_at TIMESTAMPTZ,
-  rejection_reason TEXT,
-  -- Timestamps
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
+Modificar a função `approve_addon_request` para chamar uma Edge Function que:
+1. Calcula o novo valor total (plano base + adicionais)
+2. Atualiza a subscription existente no ASAAS com o novo valor
+3. Registra a alteração em `company_subscriptions`
 
-#### 1.2 Notificação para Global Admin
-- Trigger automático que cria notificação ao inserir na tabela
-- Tipo de notificação: `ADDON_REQUEST`
-- Aparece no sino de notificações do Global Admin
-
-#### 1.3 Atualização do Cliente (`MyPlanSettings.tsx`)
-- Ao clicar "Solicitar Adicionais", inserir registro na tabela `addon_requests`
-- Exibir histórico de solicitações com status
-
-#### 1.4 Nova Aba no Global Admin
-- Exibir solicitações pendentes na página de Empresas ou nova aba dedicada
-- Botões: **Aprovar** (atualiza limites da empresa) / **Rejeitar** (com motivo)
-- Aprovação automática atualiza `max_users` e `max_instances` da empresa
-
----
-
-### Parte 2: Habilitar PIX no Checkout
-
-#### 2.1 Corrigir `create-asaas-checkout/index.ts`
+#### Nova Edge Function: `update-asaas-subscription`
 ```typescript
-// ANTES (linha 152)
-billingType: "CREDIT_CARD",
-
-// DEPOIS
-billingType: "UNDEFINED", // Permite PIX, Boleto e Cartão
+// Recebe: company_id, new_value
+// 1. Busca asaas_subscription_id da tabela company_subscriptions
+// 2. Chama ASAAS API PUT /subscriptions/{id} com o novo valor
+// 3. Registra em audit_logs
 ```
 
-#### 2.2 Corrigir `generate-payment-link/index.ts`
-Já está correto com `billingType: "UNDEFINED"`, mas validar que o link de pagamento permite todas as opções.
+#### Fluxo Técnico
+```text
+┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+│ Admin clica Aprovar │ →  │ approve_addon_request│ →  │ Atualiza companies  │
+│ em AddonRequests    │    │ (RPC existente)      │    │ max_users/instances │
+└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
+│ Cliente recebe      │ ←  │ update-asaas-        │ ←  │ Frontend chama EF   │
+│ cobrança atualizada │    │ subscription (EF)    │    │ após aprovar        │
+└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
+```
 
-#### 2.3 Garantir Recorrência
-Manter `chargeType: "RECURRENT"` e `subscriptionCycle: "MONTHLY"` para cobranças mensais automáticas.
+### Parte 2: Exibir Histórico de Adicionais Aprovados
+
+#### No Global Admin (`CompanyUsageTable` / Details Panel)
+- Exibir breakdown dos adicionais aprovados:
+  - Usuários extras: X
+  - Conexões extras: X
+  - Valor adicional: R$ X
+
+#### Na aba "Meu Plano" do Cliente
+- Já exibe corretamente (verificado no código)
+- Garantir que "Histórico de Solicitações" mostra status aprovado
+
+### Parte 3: Feedback Visual Após Aprovação
+
+Modificar `AddonRequestsSection`:
+1. Após aprovar, mostrar toast com o novo valor total
+2. Exibir confirmação de que ASAAS foi atualizado
 
 ---
 
@@ -85,48 +66,48 @@ Manter `chargeType: "RECURRENT"` e `subscriptionCycle: "MONTHLY"` para cobrança
 ### Arquivos a Criar
 | Arquivo | Descrição |
 |---------|-----------|
-| Migration SQL | Cria tabela `addon_requests` e trigger de notificação |
+| `supabase/functions/update-asaas-subscription/index.ts` | Atualiza valor da subscription no ASAAS |
 
 ### Arquivos a Modificar
 | Arquivo | Modificação |
 |---------|-------------|
-| `src/components/settings/MyPlanSettings.tsx` | Inserir no banco + exibir histórico |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar seção de solicitações pendentes |
-| `supabase/functions/create-asaas-checkout/index.ts` | Alterar `billingType` para `UNDEFINED` |
+| `src/hooks/useAddonRequests.tsx` | Chamar Edge Function após aprovar |
+| `src/components/global-admin/AddonRequestsSection.tsx` | Feedback visual melhorado |
+| `src/components/global-admin/CompanyUsageTable.tsx` | Exibir breakdown de adicionais no painel de detalhes |
 
-### Fluxo de Aprovação de Adicionais
-```text
-┌──────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│  Cliente solicita│ →  │ Registro na tabela │ →  │ Notificação Admin  │
-│  em Meu Plano    │    │ addon_requests     │    │ (sino vermelho)    │
-└──────────────────┘    └────────────────────┘    └────────────────────┘
-                                                           │
-                                                           ▼
-┌──────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│  Empresa ativada │ ←  │ Admin atualiza     │ ←  │ Admin aprova       │
-│  com novos limites│   │ max_users/instances│    │ na aba Empresas    │
-└──────────────────┘    └────────────────────┘    └────────────────────┘
+### API ASAAS para Atualizar Subscription
+```http
+PUT /v3/subscriptions/{subscription_id}
+Content-Type: application/json
+
+{
+  "value": 624.70,  // Novo valor = plano + adicionais
+  "updatePendingPayments": true
+}
 ```
 
-### Fluxo de Checkout com PIX
-```text
-┌──────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│  Cliente em trial│ →  │ Clica "Pagar Agora"│ →  │ create-asaas-      │
-│  ou Trial Expired│    │                    │    │ checkout invocado  │
-└──────────────────┘    └────────────────────┘    └────────────────────┘
-                                                           │
-                                                           ▼
-┌──────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│  Webhook ativa   │ ←  │ Cliente escolhe    │ ←  │ ASAAS exibe PIX,   │
-│  empresa paga    │    │ PIX/Boleto/Cartão  │    │ Boleto e Cartão    │
-└──────────────────┘    └────────────────────┘    └────────────────────┘
+### Cálculo do Novo Valor
+```typescript
+// Usa a função existente calculateAdditionalCosts
+const planLimits = { max_users: 5, max_instances: 2, ... }
+const effectiveLimits = { max_users: 7, max_instances: 3, use_custom_limits: true, ... }
+const basePlanPrice = 497
+
+const { totalMonthly } = calculateAdditionalCosts(planLimits, effectiveLimits, basePlanPrice)
+// totalMonthly = 497 + (2 * 47.90) + (1 * 79.90) = 672.70
 ```
 
 ---
 
 ## Benefícios
 
-1. **Fluxo completo de adicionais**: Solicitação → Notificação → Aprovação → Ativação
-2. **Mais opções de pagamento**: PIX é preferido por muitos clientes brasileiros
-3. **Rastreabilidade**: Histórico de solicitações e aprovações
-4. **Recorrência garantida**: Cobranças automáticas mensais após primeiro pagamento
+1. **Cobrança Automática Atualizada**: O ASAAS cobra o valor correto automaticamente
+2. **Transparência**: Admin e cliente veem exatamente o que está sendo cobrado
+3. **Rastreabilidade**: Histórico completo de aprovações e alterações
+4. **Consistência**: O valor exibido no sistema é o mesmo cobrado
+
+## Considerações Importantes
+
+1. **Subscriptions Inativas**: Se a empresa não tem subscription ativa no ASAAS, mostrar aviso ao admin
+2. **Rollback**: Se a atualização no ASAAS falhar, fazer rollback dos limites aprovados
+3. **Próxima Cobrança**: O ASAAS aplica o novo valor na próxima fatura automática
