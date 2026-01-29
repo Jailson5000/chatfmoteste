@@ -1,242 +1,236 @@
 
-# Plano: Correção de Descrição ASAAS + Análise de Capacidade + Melhorias do Sistema
+# Plano: Limpeza de Law Firms Órfãos (Empresas Sem Company)
 
-## Análise Detalhada das Questões
+## Análise dos Dados
 
-### 1. Problema: Descrição Não Atualiza no ASAAS
+### Law Firms Órfãos Identificados: 11
 
-**Diagnóstico da imagem:**
-A descrição mostra: `Assinatura MiauChat ENTERPRISE Inclui: +4 usuário(s) +3 WhatsApp - FMO Advogados`
+| Nome | Subdomain | Usuários | Conversas | Clientes | Mensagens | Risco |
+|------|-----------|----------|-----------|----------|-----------|-------|
+| Escritório de Gabrielle Martins | gabriellemartins | 0 | 0 | 0 | 0 | Seguro |
+| Empresa Teste MIAUCHAT | empresatestemiauchat | 1 | 0 | 0 | 0 | Baixo |
+| Empresa Teste MIAUCHAT | (null) | 0 | 0 | 0 | 0 | Seguro |
+| Empresa Teste Aprovação | empresa-teste-aprovacao | 0 | 0 | 0 | 0 | Seguro |
+| Escritório de Junior | (null) | 0 | 0 | 0 | 0 | Seguro |
+| Escritório de Gabrielle | (null) | 1 | 0 | 0 | 0 | Baixo |
+| JuninLaranjinha | junin | 0 | 0 | 0 | 0 | Seguro |
+| Escritório de Jair | (null) | 1 | 0 | 0 | 0 | Baixo |
+| Junin | junin-3iki | 0 | 0 | 0 | 0 | Seguro |
+| **Teste Miau** | teste-miau | **1** | **6** | **6** | **82** | **Atenção** |
+| Miau test | miau-test | 0 | 0 | 0 | 0 | Seguro |
 
-Isso é o valor **inicial** quando a assinatura foi criada. Quando o admin atualiza os limites via "Atualizar Assinatura", a função `update-asaas-subscription` **NÃO atualiza a descrição** - apenas o valor:
+### Perfis de Usuários Órfãos: 4
+
+| Email | Law Firm | Dados |
+|-------|----------|-------|
+| teste@exemplo.com | Empresa Teste MIAUCHAT | Sem dados |
+| tulipabelezacuidados@gmail.com | Escritório de Gabrielle | Sem dados |
+| jailsonferreira@fmo.adv.br | Escritório de Jair | Sem dados |
+| **miautest00@gmail.com** | **Teste Miau** | **82 mensagens, 6 clientes** |
+
+---
+
+## Problema de Origem
+
+Esses law_firms órfãos foram criados por:
+1. **Fluxos de registro antigos** - antes do sistema de provisionamento completo
+2. **Testes de desenvolvimento** - cadastros de teste incompletos
+3. **Falhas no provisionamento** - company não foi criada após law_firm
+
+---
+
+## Solução Proposta
+
+### Abordagem: Ferramenta de Limpeza no Admin Global
+
+Criar uma seção dedicada em GlobalAdminCompanies para visualizar e limpar law_firms órfãos de forma segura e controlada.
+
+### Parte 1: Hook para Law Firms Órfãos
+
+Criar `useOrphanLawFirms.tsx`:
 
 ```typescript
-// Código atual em update-asaas-subscription (linha 142-145)
-const updatePayload = {
-  value: new_value,
-  updatePendingPayments: true, // Apenas o valor!
-};
-// ❌ FALTA: description não é atualizado
-```
-
-**Solução:** Adicionar campo `description` ao payload de atualização, recalculando com base nos novos limites.
-
----
-
-### 2. Análise de Capacidade Enterprise
-
-**Dados Reais do Sistema:**
-
-| Métrica | Valor |
-|---------|-------|
-| **Total de law_firms** | 18 |
-| **Law firms COM company** | 7 |
-| **Law firms SEM company (órfãos)** | 11 |
-| **Companies aprovadas** | 6 |
-| **Companies pendentes** | 1 |
-| **Em trial ativo** | 1 |
-| **Usuários (profiles)** | 12 |
-| **WhatsApp instances** | 6 |
-| **Conversas** | 157 |
-| **Mensagens** | 2.692 |
-
-**Empresas Enterprise Atuais:**
-
-| Empresa | Max Users | Atual | Max Instances | Atual | Max Agents | Atual |
-|---------|-----------|-------|---------------|-------|------------|-------|
-| Jr | 10 | 2 | 6 | 0 | - | 0 |
-| FMO Advogados | 16 (+6 addon) | 2 | 9 (+3 addon) | 2 | - | 5 |
-
-**Limites do Plano Enterprise:**
-- Max Users: 10 (base)
-- Max Instances: 6 (base)
-- Max AI Conversations: 600/mês
-- Max TTS Minutes: 60/mês
-- Preço: R$ 1.697,00
-
-**Capacidade Estimada do Sistema:**
-O Supabase Pro suporta ~500 conexões Realtime simultâneas. Com a arquitetura atual:
-- **50-100 empresas Enterprise** podem ser suportadas
-- **Atualmente**: 2 empresas Enterprise (2% da capacidade)
-- O sistema está **muito abaixo** da capacidade máxima
-
----
-
-### 3. Análise Geral ("Pente Fino")
-
-**Issues Identificados:**
-
-| Prioridade | Issue | Impacto | Solução |
-|------------|-------|---------|---------|
-| 🔴 ALTA | Descrição ASAAS não atualiza | Confusão no faturamento | Adicionar `description` ao update payload |
-| 🟡 MÉDIA | 11 law_firms órfãos | Dados inconsistentes | Limpeza ou vinculação |
-| 🟡 MÉDIA | Tabela `tray_customer_map` sem RLS policies | Segurança | Adicionar policies ou remover RLS |
-| 🟢 BAIXA | TODOs no código (Stripe price IDs) | Funcionalidade incompleta | Configurar IDs reais |
-| 🟢 BAIXA | Leaked Password Protection desabilitado | Segurança menor | Habilitar no Dashboard |
-
-**Segurança:**
-- ✅ 84 tabelas com RLS habilitado
-- ✅ 210+ policies RLS
-- ⚠️ 1 tabela (`tray_customer_map`) com RLS habilitado mas sem policies (está vazia)
-
----
-
-## Alterações Propostas
-
-### Parte 1: Corrigir Atualização de Descrição ASAAS
-
-**Arquivo:** `supabase/functions/update-asaas-subscription/index.ts`
-
-Modificar para:
-1. Buscar dados da empresa e plano
-2. Calcular descrição atualizada com base nos novos limites
-3. Incluir `description` no payload de atualização
-
-```typescript
-// Adicionar à interface
-interface UpdateRequest {
-  company_id: string;
-  new_value: number;
-  reason?: string;
-  description?: string;  // Permitir descrição customizada
+interface OrphanLawFirm {
+  id: string;
+  name: string;
+  subdomain: string | null;
+  created_at: string;
+  user_count: number;
+  conversation_count: number;
+  client_count: number;
+  message_count: number;
+  has_data: boolean;
 }
 
-// Antes de fazer o update, buscar dados da empresa
-const { data: company } = await supabase
-  .from("companies")
-  .select(`
-    name,
-    max_users,
-    max_instances,
-    plan:plans!companies_plan_id_fkey(name, max_users, max_instances)
-  `)
-  .eq("id", company_id)
-  .single();
-
-// Calcular adicionais
-const additionalUsers = Math.max(0, (company.max_users || 0) - (company.plan?.max_users || 0));
-const additionalInstances = Math.max(0, (company.max_instances || 0) - (company.plan?.max_instances || 0));
-
-// Gerar nova descrição
-let descriptionParts = [`Assinatura MiauChat ${company.plan?.name || 'PLANO'}`];
-if (additionalUsers > 0 || additionalInstances > 0) {
-  descriptionParts.push("Inclui:");
-  if (additionalUsers > 0) descriptionParts.push(`+${additionalUsers} usuário(s)`);
-  if (additionalInstances > 0) descriptionParts.push(`+${additionalInstances} WhatsApp`);
-}
-descriptionParts.push(`- ${company.name}`);
-const newDescription = descriptionParts.join(" ");
-
-// Incluir no payload
-const updatePayload = {
-  value: new_value,
-  description: newDescription,
-  updatePendingPayments: true,
-};
+// Query para buscar órfãos com métricas
+// DELETE com cascade para remover dados dependentes
 ```
 
-### Parte 2: Adicionar RLS Policy para `tray_customer_map`
+### Parte 2: UI de Limpeza
 
-**Via migração SQL:**
+Adicionar nova aba "Órfãos" em GlobalAdminCompanies:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  EMPRESAS ADMIN                                                              │
+│                                                                              │
+│  [Aprovadas] [Pendentes] [Rejeitadas] [🧹 Órfãos (11)]                       │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │ ⚠️ Law Firms sem Company Associada                                    │ │
+│  │                                                                        │ │
+│  │ Esses registros ficaram órfãos por falhas no provisionamento ou       │ │
+│  │ fluxos de teste antigos.                                              │ │
+│  │                                                                        │ │
+│  │ [🗑️ Limpar Todos Vazios (8)]  [⚠️ Limpar Selecionados]               │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│  Nome                        | Subdomain          | Users | Conv | Ação     │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│  ☐ Escritório Gabrielle M.  | gabriellemartins   | 0     | 0    | 🗑️       │
+│  ☐ Empresa Teste MIAUCHAT   | empresateste...    | 1     | 0    | 🗑️ ⚠️    │
+│  ☑ Teste Miau ⚠️            | teste-miau         | 1     | 6    | 🔒 DADOS │
+│                                                                              │
+│  ⚠️ Items com dados requerem confirmação adicional                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Parte 3: Lógica de Exclusão Segura
+
+A exclusão deve seguir ordem correta para respeitar foreign keys:
 
 ```sql
--- Tabela está vazia e com RLS habilitado mas sem policies
--- Adicionar policy básica para evitar warning do linter
-CREATE POLICY "Tenant isolation for tray_customer_map" 
-  ON public.tray_customer_map 
-  FOR ALL 
-  USING (
-    law_firm_id = public.get_user_law_firm_id(auth.uid())
-    OR public.is_admin(auth.uid())
-  );
+-- Ordem de exclusão (respeitando FK constraints):
+1. messages (via conversation_id)
+2. client_tags (via client_id)
+3. client_memories (via client_id)
+4. scheduled_follow_ups (via client_id)
+5. clients
+6. conversations
+7. automations
+8. agent_knowledge (via automation_id)
+9. knowledge_items
+10. departments
+11. custom_statuses
+12. tags
+13. templates
+14. law_firm_settings
+15. profiles (limpa vínculo, não deleta usuário auth)
+16. law_firms
 ```
 
-### Parte 3: Atualizar Dashboard com Dados Precisos
+### Parte 4: Salvaguardas
 
-**Já implementado** no commit anterior - cards mostram:
-- Total: 7 empresas
-- Ativas: 5 (approved sem trial)
-- Em Trial: 1
-- Pendentes: 1
+1. **Confirmação dupla** para law_firms com dados
+2. **Log de auditoria** de exclusões
+3. **Não excluir usuários auth.users** - apenas desvincula profiles
+4. **Backup em memória** antes de exclusão (exibir dados que serão perdidos)
 
 ---
 
-## Arquivos a Modificar
+## Arquivos a Criar/Modificar
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `supabase/functions/update-asaas-subscription/index.ts` | Adicionar atualização de descrição |
-| Migração SQL | Adicionar RLS policy para `tray_customer_map` |
-
----
-
-## Sobre os Law Firms Órfãos
-
-Existem **11 law_firms** sem company associada. Isso pode ter ocorrido por:
-1. Fluxos de teste antigos
-2. Registros incompletos
-3. Dados de desenvolvimento
-
-**Recomendação:** Criar um script de limpeza que pode ser executado manualmente no Admin Global, mas **não automatizar** para evitar exclusões acidentais.
+| Arquivo | Ação |
+|---------|------|
+| `src/hooks/useOrphanLawFirms.tsx` | **CRIAR** - Hook para buscar e gerenciar órfãos |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | **MODIFICAR** - Adicionar aba "Órfãos" |
+| `supabase/functions/cleanup-orphan-lawfirm/index.ts` | **CRIAR** - Edge function para exclusão segura |
 
 ---
 
-## Resumo de Capacidade
+## Fluxo de Exclusão
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  CAPACIDADE DO SISTEMA                                                   │
-│                                                                          │
-│  Conexões Realtime Supabase Pro: ~500 simultâneas                       │
-│  Estimativa de empresas: 50-100 Enterprise com uso moderado            │
-│                                                                          │
-│  USO ATUAL:                                                              │
-│  ├─ Empresas Enterprise: 2/100 (2%)                                     │
-│  ├─ Usuários ativos: 12/~500 (2.4%)                                     │
-│  ├─ WhatsApp instances: 6/~100 (6%)                                     │
-│  └─ Conversas: 157 (sem limite definido)                                │
-│                                                                          │
-│  ✅ Sistema opera com folga para crescimento 50x                        │
-└─────────────────────────────────────────────────────────────────────────┘
+USUÁRIO SELECIONA LAW FIRM ÓRFÃ
+         ↓
+SISTEMA MOSTRA RESUMO DE DADOS
+┌────────────────────────────────┐
+│ Excluir "Teste Miau"?          │
+│                                │
+│ Serão removidos:               │
+│ • 1 usuário (perfil)           │
+│ • 6 conversas                  │
+│ • 6 clientes                   │
+│ • 82 mensagens                 │
+│ • 1 automação                  │
+│ • 1 tag                        │
+│                                │
+│ ⚠️ Esta ação é irreversível!  │
+│                                │
+│ Digite "CONFIRMAR" para prosseguir │
+│ [___________]                  │
+│                                │
+│ [Cancelar]  [Excluir]          │
+└────────────────────────────────┘
+         ↓
+EDGE FUNCTION cleanup-orphan-lawfirm
+         ↓
+EXCLUSÃO EM CASCATA
+         ↓
+LOG EM audit_logs
+         ↓
+✅ SUCESSO
 ```
 
 ---
 
-## Fluxo da Correção de Descrição
+## Categorização dos Órfãos
 
+| Categoria | Quantidade | Ação Recomendada |
+|-----------|------------|------------------|
+| **Vazios** (sem dados) | 8 | Exclusão automática segura |
+| **Com usuários apenas** | 2 | Revisar antes de excluir |
+| **Com dados reais** | 1 | Requer análise manual |
+
+---
+
+## Seção Técnica
+
+### Interface TypeScript
+
+```typescript
+interface OrphanLawFirm {
+  id: string;
+  name: string;
+  subdomain: string | null;
+  email: string | null;
+  created_at: string;
+  
+  // Contagens
+  user_count: number;
+  conversation_count: number;
+  client_count: number;
+  message_count: number;
+  automation_count: number;
+  
+  // Computed
+  has_data: boolean;
+  risk_level: 'safe' | 'low' | 'attention';
+}
 ```
-ANTES:
-┌─────────────────────────────────────────────────────────┐
-│ Admin aprova addon (+2 usuários)                        │
-│         ↓                                               │
-│ update-asaas-subscription                               │
-│         ↓                                               │
-│ Atualiza apenas { value: 1897 }                         │
-│         ↓                                               │
-│ ❌ Descrição continua antiga: "+4 usuários +3 WhatsApp" │
-└─────────────────────────────────────────────────────────┘
 
-DEPOIS:
-┌─────────────────────────────────────────────────────────┐
-│ Admin aprova addon (+2 usuários)                        │
-│         ↓                                               │
-│ update-asaas-subscription                               │
-│         ↓                                               │
-│ Busca dados atuais da empresa                           │
-│         ↓                                               │
-│ Calcula: +6 usuários +3 WhatsApp (valores atuais)       │
-│         ↓                                               │
-│ Atualiza { value: 1897, description: "...+6 usuários"}  │
-│         ↓                                               │
-│ ✅ Descrição atualizada no ASAAS                        │
-└─────────────────────────────────────────────────────────┘
+### Edge Function Payload
+
+```typescript
+interface CleanupRequest {
+  law_firm_ids: string[];
+  confirm_data_deletion: boolean; // Required if any has data
+}
+
+interface CleanupResponse {
+  success: boolean;
+  deleted_count: number;
+  errors: { law_firm_id: string; error: string }[];
+  audit_log_ids: string[];
+}
 ```
 
 ---
 
 ## Prevenção de Regressões
 
-1. **Lógica aditiva:** Apenas adiciona campo `description` ao payload existente
-2. **Fallback:** Se busca de empresa falhar, mantém lógica atual (só atualiza valor)
-3. **Não modifica admin-create-asaas-subscription:** Essa função já gera descrição corretamente na criação
-4. **Migração segura:** Policy para tabela vazia não afeta dados existentes
+1. **Isolar funcionalidade** - Nova aba separada, não afeta fluxos existentes
+2. **Edge function dedicada** - Não modifica delete existente de companies
+3. **Validação de admin** - Apenas super_admin pode executar limpeza
+4. **Não afeta law_firms com company** - Query filtra apenas órfãos
+5. **Auditoria completa** - Todas ações registradas em audit_logs
