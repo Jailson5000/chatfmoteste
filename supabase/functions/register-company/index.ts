@@ -164,6 +164,43 @@ serve(async (req) => {
       
       autoApproveEnabled = settingData?.value === true || settingData?.value === 'true';
       console.log(`[register-company] Auto-approve trial enabled: ${autoApproveEnabled}`);
+
+      // Check daily limit for auto-approve trials
+      if (autoApproveEnabled) {
+        let maxDailyTrials = 10; // default
+        
+        // Get max daily limit from settings
+        const { data: maxDailySetting } = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'max_daily_auto_trials')
+          .maybeSingle();
+        
+        if (maxDailySetting?.value) {
+          maxDailyTrials = parseInt(String(maxDailySetting.value), 10) || 10;
+        }
+        
+        // Count today's auto-approved trials (reset at midnight UTC)
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        
+        const { count } = await supabase
+          .from('companies')
+          .select('*', { count: 'exact', head: true })
+          .eq('approval_status', 'approved')
+          .gte('created_at', todayStart.toISOString())
+          .not('trial_ends_at', 'is', null); // only trials
+        
+        const todayAutoApprovedCount = count || 0;
+        
+        // If limit reached, switch to manual approval
+        if (todayAutoApprovedCount >= maxDailyTrials) {
+          console.log(`[register-company] Daily auto-trial limit reached (${todayAutoApprovedCount}/${maxDailyTrials}) - switching to manual approval`);
+          autoApproveEnabled = false; // Force manual approval
+        } else {
+          console.log(`[register-company] Daily auto-trial count: ${todayAutoApprovedCount}/${maxDailyTrials}`);
+        }
+      }
     }
 
     // Generate/validate subdomain

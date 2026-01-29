@@ -143,9 +143,9 @@ Na mesma seção, exibir:
 
 ## Checklist de Validação
 
-- [ ] Campo de limite aparece no Global Admin Settings
-- [ ] Limite é respeitado na Edge Function
-- [ ] Cadastros após limite vão para aprovação manual
-- [ ] Contador de "hoje" é exibido corretamente
-- [ ] Logs registram quando limite é atingido
-- [ ] Reset automático à meia-noite UTC funciona
+- [x] Campo de limite aparece no Global Admin Settings
+- [x] Limite é respeitado na Edge Function
+- [x] Cadastros após limite vão para aprovação manual
+- [x] Contador de "hoje" é exibido corretamente
+- [x] Logs registram quando limite é atingido
+- [x] Reset automático à meia-noite UTC funciona
