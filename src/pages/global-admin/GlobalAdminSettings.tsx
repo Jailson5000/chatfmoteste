@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,14 +8,45 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Users } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
+import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
 import { toast } from "sonner";
 
 export default function GlobalAdminSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
   const [localSettings, setLocalSettings] = useState<Record<string, Json>>({});
+  const [todayTrialCount, setTodayTrialCount] = useState<number>(0);
+  const [loadingTrialCount, setLoadingTrialCount] = useState(true);
+
+  // Fetch today's auto-approved trial count
+  useEffect(() => {
+    const fetchTodayTrialCount = async () => {
+      try {
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        
+        const { count, error } = await supabase
+          .from('companies')
+          .select('*', { count: 'exact', head: true })
+          .eq('approval_status', 'approved')
+          .gte('created_at', todayStart.toISOString())
+          .not('trial_ends_at', 'is', null);
+        
+        if (!error) {
+          setTodayTrialCount(count || 0);
+        }
+      } catch (err) {
+        console.error('Error fetching trial count:', err);
+      } finally {
+        setLoadingTrialCount(false);
+      }
+    };
+    
+    fetchTodayTrialCount();
+  }, []);
 
   const getSetting = (key: string) => {
     if (localSettings[key] !== undefined) return localSettings[key];
@@ -189,13 +220,73 @@ export default function GlobalAdminSettings() {
           </div>
 
           {(getSetting("auto_approve_trial_enabled") === "true" || getSetting("auto_approve_trial_enabled") === true) && (
-            <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 text-sm flex items-start gap-2">
-              <Zap className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>
-                Aprovação automática <strong>ativa</strong>. 
-                Empresas que escolherem trial serão aprovadas imediatamente sem aprovação manual.
-              </span>
-            </div>
+            <>
+              <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-400 text-sm flex items-start gap-2">
+                <Zap className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  Aprovação automática <strong>ativa</strong>. 
+                  Empresas que escolherem trial serão aprovadas imediatamente sem aprovação manual.
+                </span>
+              </div>
+
+              {/* Daily Trial Limit */}
+              <div className="space-y-4 p-4 rounded-lg border border-purple-500/20 bg-purple-500/5">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-purple-500" />
+                    <Label className="font-medium">Limite Diário de Trials Automáticos</Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Após atingir o limite, novos cadastros vão para aprovação manual (reseta à meia-noite UTC).
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={Number(getSetting("max_daily_auto_trials")) || 10}
+                    onChange={(e) => handleChange("max_daily_auto_trials", parseInt(e.target.value, 10) || 10)}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-muted-foreground">por dia</span>
+                  {localSettings["max_daily_auto_trials"] !== undefined && (
+                    <Button size="sm" onClick={() => handleSave("max_daily_auto_trials")}>
+                      <Save className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+
+                {/* Today's counter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Cadastros auto-aprovados hoje:</span>
+                    <span className="font-medium">
+                      {loadingTrialCount ? (
+                        <span className="text-muted-foreground">...</span>
+                      ) : (
+                        <>
+                          {todayTrialCount} / {Number(getSetting("max_daily_auto_trials")) || 10}
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {!loadingTrialCount && (
+                    <Progress 
+                      value={Math.min((todayTrialCount / (Number(getSetting("max_daily_auto_trials")) || 10)) * 100, 100)} 
+                      className="h-2"
+                    />
+                  )}
+                  {!loadingTrialCount && todayTrialCount >= (Number(getSetting("max_daily_auto_trials")) || 10) && (
+                    <div className="flex items-center gap-2 text-xs text-amber-500">
+                      <AlertTriangle className="h-3 w-3" />
+                      <span>Limite atingido! Novos cadastros estão indo para aprovação manual.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
           )}
 
           <Separator />
