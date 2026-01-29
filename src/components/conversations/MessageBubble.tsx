@@ -1363,6 +1363,114 @@ function DocumentViewer({
   );
 }
 
+// Sticker viewer component - displays stickers at a smaller size (max 160x160px) like WhatsApp
+function StickerViewer({ 
+  src, 
+  mimeType,
+  whatsappMessageId,
+  conversationId,
+}: { 
+  src: string; 
+  mimeType?: string;
+  whatsappMessageId?: string;
+  conversationId?: string;
+}) {
+  const [error, setError] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedSrc, setDecryptedSrc] = useState<string | null>(null);
+
+  // Check if this is a public URL (e.g., Supabase Storage)
+  const isPublicUrl = isPublicStorageUrl(src);
+  
+  // For WhatsApp stickers, always need decryption unless it's a public URL
+  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
+
+  // Decrypt sticker on mount if needed
+  useEffect(() => {
+    if (!needsDecryption) return;
+    
+    const loadSticker = async () => {
+      // Check memory cache first
+      const memoryCached = memoryCache.get(whatsappMessageId!);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+
+      // Check IndexedDB cache
+      const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (dbCached) {
+        memoryCache.set(whatsappMessageId!, dbCached);
+        setDecryptedSrc(dbCached);
+        return;
+      }
+
+      // Fetch from API
+      setIsDecrypting(true);
+      try {
+        const response = await supabase.functions.invoke("evolution-api", {
+          body: {
+            action: "get_media",
+            conversationId,
+            whatsappMessageId,
+          },
+        });
+
+        if (response.error || !response.data?.success || !response.data?.base64) {
+          console.error("Failed to decrypt sticker:", response.error || response.data?.error);
+          setError(true);
+          return;
+        }
+
+        const actualMimeType = response.data.mimetype || mimeType || "image/webp";
+        const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+        
+        // Cache in both memory and IndexedDB
+        memoryCache.set(whatsappMessageId!, dataUrl);
+        await setCachedAudio(whatsappMessageId!, dataUrl);
+        
+        setDecryptedSrc(dataUrl);
+      } catch (err) {
+        console.error("Error decrypting sticker:", err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+
+    loadSticker();
+  }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+
+  const stickerSrc = needsDecryption ? decryptedSrc : src;
+
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center justify-center w-[120px] h-[120px] rounded-lg bg-muted/30 animate-pulse">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error || (!stickerSrc && needsDecryption)) {
+    return (
+      <div className="flex items-center justify-center w-[120px] h-[120px] rounded-lg bg-muted/30">
+        <span className="text-xs text-muted-foreground">Figurinha</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[160px] max-h-[160px]">
+      <img
+        src={stickerSrc || src}
+        alt="Figurinha"
+        className="max-w-full max-h-[160px] object-contain"
+        onError={() => setError(true)}
+      />
+    </div>
+  );
+}
+
 export function MessageBubble({
   id,
   content,
@@ -1485,14 +1593,29 @@ export function MessageBubble({
       !!whatsappMessageId &&
       !!conversationId &&
       (messageType === "image" || messageType === "document" || 
-       messageType === "audio" || messageType === "video" || messageType === "ptt");
+       messageType === "audio" || messageType === "video" || messageType === "ptt" ||
+       messageType === "sticker");
 
     const srcForMedia = mediaUrl || "";
 
-    const isImage = mediaMimeType?.startsWith("image/") || messageType === "image";
+    // Sticker detection: explicit type or webp mime type (typical for WhatsApp stickers)
+    const isSticker = messageType === "sticker" || (mediaMimeType === "image/webp" && messageType !== "image");
+    const isImage = !isSticker && (mediaMimeType?.startsWith("image/") || messageType === "image");
     const isAudio = mediaMimeType?.startsWith("audio/") || messageType === "audio" || messageType === "ptt";
     const isVideo = mediaMimeType?.startsWith("video/") || messageType === "video";
-    const isDocument = messageType === "document" || (!isImage && !isAudio && !isVideo && !!mediaUrl);
+    const isDocument = messageType === "document" || (!isSticker && !isImage && !isAudio && !isVideo && !!mediaUrl);
+
+    // Render stickers as small images (max 160x160px, like WhatsApp)
+    if (isSticker && (mediaUrl || canFetchWithoutUrl)) {
+      return (
+        <StickerViewer
+          src={srcForMedia}
+          mimeType={mediaMimeType || "image/webp"}
+          whatsappMessageId={whatsappMessageId || undefined}
+          conversationId={conversationId}
+        />
+      );
+    }
 
     if (isImage && (mediaUrl || canFetchWithoutUrl)) {
       return (
@@ -1552,7 +1675,8 @@ export function MessageBubble({
     !!whatsappMessageId &&
     !!conversationId &&
     (messageType === "image" || messageType === "document" || 
-     messageType === "audio" || messageType === "video" || messageType === "ptt");
+     messageType === "audio" || messageType === "video" || messageType === "ptt" ||
+     messageType === "sticker");
 
   const hasMedia =
     (!!mediaUrl &&
@@ -1563,7 +1687,8 @@ export function MessageBubble({
         messageType === "audio" ||
         messageType === "video" ||
         messageType === "ptt" ||
-        messageType === "document")) ||
+        messageType === "document" ||
+        messageType === "sticker")) ||
     canFetchWithoutUrl;
 
   const displayContent = (() => {

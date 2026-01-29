@@ -715,6 +715,14 @@ interface MessageData {
     id: string;
   };
   pushName?: string;
+  // Alternative fields for WABA (WhatsApp Business API) contacts
+  notify?: string;
+  verifiedName?: string;
+  formattedName?: string;
+  sender?: {
+    pushName?: string;
+    name?: string;
+  };
   /** Some Evolution payloads provide reply/quote context at this level */
   contextInfo?: ContextInfo;
   message?: {
@@ -3752,7 +3760,19 @@ serve(async (req) => {
         if (!conversation) {
           // Conversation doesn't exist, create it
           // IMPORTANT: Only trust pushName for inbound messages. For outbound (fromMe), pushName is usually our own name.
-          const contactName = (!isFromMe && data.pushName) ? data.pushName : phoneNumber;
+          // WABA FIX: WABA messages may not include pushName, check alternative fields
+          const getContactName = (): string => {
+            if (isFromMe) return phoneNumber;
+            // Priority: pushName > notify > verifiedName > formattedName > sender.pushName > sender.name > phoneNumber
+            return data.pushName || 
+                   data.notify || 
+                   data.verifiedName || 
+                   data.formattedName ||
+                   data.sender?.pushName ||
+                   data.sender?.name ||
+                   phoneNumber;
+          };
+          const contactName = getContactName();
           logDebug('DB', `Creating new conversation for: ${contactName}`, { requestId });
           
           // Use instance defaults for handler
@@ -4137,6 +4157,13 @@ serve(async (req) => {
           messageContent = data.message.documentMessage.fileName || '';
           mediaUrl = data.message.documentMessage.url || '';
           mediaMimeType = data.message.documentMessage.mimetype || 'application/octet-stream';
+        } else if (data.message?.stickerMessage) {
+          // Sticker support: treat as image with webp mime type
+          messageType = 'sticker';
+          messageContent = ''; // Stickers don't have text content
+          mediaUrl = data.message.stickerMessage.url || '';
+          mediaMimeType = data.message.stickerMessage.mimetype || 'image/webp';
+          logDebug('STICKER', 'Sticker message detected', { requestId, hasUrl: !!mediaUrl, mimeType: mediaMimeType });
         }
 
         logDebug('MESSAGE', `Message content extracted`, { 
