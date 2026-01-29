@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard, Globe, Loader2, Check, X, Gift } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Mail, User, Building2, ArrowRight, Phone, FileText, CheckCircle2, CreditCard, Globe, Loader2, Check, X, Gift, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,7 @@ type RegistrationMode = 'trial' | 'pay_now';
 
 export default function Register() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -35,6 +36,9 @@ export default function Register() {
   
   // Registration mode: trial or pay_now
   const [registrationMode, setRegistrationMode] = useState<RegistrationMode>('trial');
+  
+  // Billing period: monthly or yearly (only for pay_now)
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
   
   // Filter only active plans
   const activePlans = plans.filter(plan => plan.is_active);
@@ -130,11 +134,36 @@ export default function Register() {
       }
     };
   }, []);
+  
+  // Auto-select plan from URL parameter
+  useEffect(() => {
+    const planFromUrl = searchParams.get('plan');
+    if (planFromUrl && activePlans.length > 0) {
+      const matchingPlan = activePlans.find(
+        p => p.name.toUpperCase() === planFromUrl.toUpperCase()
+      );
+      if (matchingPlan && !formData.planId) {
+        setFormData(prev => ({ ...prev, planId: matchingPlan.id }));
+      }
+    }
+  }, [activePlans, searchParams, formData.planId]);
 
-  // Get selected plan details
+  // Get selected plan details with pricing calculations
   const selectedPlan = useMemo(() => {
     return activePlans.find(p => p.id === formData.planId);
   }, [activePlans, formData.planId]);
+  
+  // Calculate yearly price (11 months = 1 month free)
+  const yearlyPrice = useMemo(() => {
+    if (!selectedPlan) return 0;
+    return selectedPlan.price * 11;
+  }, [selectedPlan]);
+  
+  // Calculate monthly equivalent for yearly
+  const yearlyMonthlyEquivalent = useMemo(() => {
+    if (!selectedPlan) return 0;
+    return (selectedPlan.price * 11) / 12;
+  }, [selectedPlan]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +190,7 @@ export default function Register() {
         const { data, error } = await supabase.functions.invoke('create-asaas-checkout', {
           body: {
             plan: selectedPlan.name.toLowerCase().replace('miauchat ', ''),
-            billingPeriod: 'monthly',
+            billingPeriod: billingPeriod,
             companyName: formData.companyName,
             adminName: formData.adminName,
             adminEmail: formData.email,
@@ -644,6 +673,76 @@ export default function Register() {
                 </div>
               </div>
               
+              {/* Billing Period Selection (only for pay_now) */}
+              {registrationMode === 'pay_now' && selectedPlan && (
+                <div className="space-y-3">
+                  <Label className="text-zinc-300 font-medium flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-zinc-500" />
+                    Período de Cobrança
+                  </Label>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Monthly Option */}
+                    <button
+                      type="button"
+                      onClick={() => setBillingPeriod('monthly')}
+                      className={`relative p-4 rounded-lg border-2 transition-all text-left ${
+                        billingPeriod === 'monthly'
+                          ? "border-red-500 bg-red-500/10"
+                          : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
+                      }`}
+                    >
+                      <div className="mb-2">
+                        <span className={`font-semibold ${billingPeriod === 'monthly' ? 'text-white' : 'text-zinc-300'}`}>
+                          Mensal
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold text-red-400">
+                        R$ {selectedPlan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        <span className="text-xs text-zinc-500 font-normal">/mês</span>
+                      </div>
+                      {billingPeriod === 'monthly' && (
+                        <div className="absolute top-2 right-2">
+                          <Check className="h-4 w-4 text-red-400" />
+                        </div>
+                      )}
+                    </button>
+                    
+                    {/* Yearly Option */}
+                    <button
+                      type="button"
+                      onClick={() => setBillingPeriod('yearly')}
+                      className={`relative p-4 rounded-lg border-2 transition-all text-left ${
+                        billingPeriod === 'yearly'
+                          ? "border-green-500 bg-green-500/10"
+                          : "border-zinc-700 bg-zinc-800/30 hover:border-zinc-600"
+                      }`}
+                    >
+                      <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-green-600 text-[10px] font-bold rounded-full uppercase text-white">
+                        1 mês grátis
+                      </div>
+                      <div className="mb-2">
+                        <span className={`font-semibold ${billingPeriod === 'yearly' ? 'text-white' : 'text-zinc-300'}`}>
+                          Anual
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold text-green-400">
+                        R$ {yearlyPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        <span className="text-xs text-zinc-500 font-normal">/ano</span>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        ≈ R$ {yearlyMonthlyEquivalent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês
+                      </p>
+                      {billingPeriod === 'yearly' && (
+                        <div className="absolute top-2 right-2">
+                          <Check className="h-4 w-4 text-green-400" />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+              
               {/* Info box based on selected mode */}
               <div className={`rounded-lg p-3 border ${
                 registrationMode === 'pay_now' 
@@ -653,7 +752,7 @@ export default function Register() {
                 <p className="text-xs text-zinc-400">
                   {registrationMode === 'pay_now' ? (
                     <>
-                      💳 Você será redirecionado para a página de pagamento. 
+                      💳 Você será redirecionado para a página de pagamento{billingPeriod === 'yearly' ? ' (cobrança anual)' : ''}. 
                       Após a confirmação, sua conta será ativada automaticamente.
                     </>
                   ) : (
