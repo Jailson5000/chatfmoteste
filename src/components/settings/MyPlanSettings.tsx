@@ -437,29 +437,36 @@ export function MyPlanSettings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
+            {/* Base Plan */}
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Plano {plan?.name}</span>
               <span className="font-medium">{formatCurrency(plan?.price || 0)}</span>
             </div>
 
+            {/* Add-ons Section - Only show if there are add-ons */}
             {billingInfo && billingInfo.breakdown.totalAdditional > 0 && (
               <>
                 <Separator className="my-2" />
-                <div className="space-y-1">
+                <div className="space-y-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Adicionais Contratados
+                  </span>
                   {billingInfo.breakdown.users.quantity > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <Users className="h-3 w-3" />
                         +{billingInfo.breakdown.users.quantity} usuário(s)
                       </span>
-                      <span>{formatCurrency(billingInfo.breakdown.users.cost)}</span>
+                      <span className="font-medium text-primary">{formatCurrency(billingInfo.breakdown.users.cost)}</span>
                     </div>
                   )}
                   {billingInfo.breakdown.instances.quantity > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">
-                        +{billingInfo.breakdown.instances.quantity} conexão(ões)
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <Wifi className="h-3 w-3" />
+                        +{billingInfo.breakdown.instances.quantity} conexão(ões) WhatsApp
                       </span>
-                      <span>{formatCurrency(billingInfo.breakdown.instances.cost)}</span>
+                      <span className="font-medium text-primary">{formatCurrency(billingInfo.breakdown.instances.cost)}</span>
                     </div>
                   )}
                 </div>
@@ -468,9 +475,10 @@ export function MyPlanSettings() {
 
             <Separator className="my-2" />
             
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-medium">Total Mensal</span>
-              <span className="text-lg font-bold text-primary">
+            {/* Total */}
+            <div className="flex justify-between items-center p-2 rounded-lg bg-primary/5 border border-primary/10">
+              <span className="text-sm font-semibold">Total Mensal</span>
+              <span className="text-xl font-bold text-primary">
                 {formatCurrency(billingInfo?.totalMonthly || plan?.price || 0)}
               </span>
             </div>

@@ -68,12 +68,12 @@ serve(async (req) => {
       );
     }
 
-    // Get company data
+    // Get company data (including plan limits for add-on calculation)
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select(`
         *,
-        plan:plans!companies_plan_id_fkey(id, name, price, billing_period)
+        plan:plans!companies_plan_id_fkey(id, name, price, billing_period, max_users, max_instances)
       `)
       .eq("law_firm_id", profile.law_firm_id)
       .single();
@@ -174,10 +174,56 @@ serve(async (req) => {
         }, { onConflict: "company_id" });
     }
 
-    // Calculate price
-    const monthlyPrice = company.plan.price || 0;
+    // ============ CALCULATE PRICE WITH ADD-ONS ============
+    // Pricing constants (must match src/lib/billing-config.ts)
+    const PRICING_USER = 47.90;
+    const PRICING_INSTANCE = 79.90;
+    
+    // Plan limits (base)
+    const planLimits = {
+      max_users: company.plan.max_users || 0,
+      max_instances: company.plan.max_instances || 0,
+    };
+    
+    // Effective limits (with add-ons)
+    const effectiveLimits = {
+      max_users: company.max_users || planLimits.max_users,
+      max_instances: company.max_instances || planLimits.max_instances,
+    };
+    
+    // Calculate add-ons
+    const additionalUsers = Math.max(0, effectiveLimits.max_users - planLimits.max_users);
+    const additionalInstances = Math.max(0, effectiveLimits.max_instances - planLimits.max_instances);
+    
+    const usersCost = additionalUsers * PRICING_USER;
+    const instancesCost = additionalInstances * PRICING_INSTANCE;
+    const totalAdditional = usersCost + instancesCost;
+    
+    // Final price
+    const basePlanPrice = company.plan.price || 0;
+    const monthlyPrice = basePlanPrice + totalAdditional;
     const yearlyPrice = monthlyPrice * 11; // 11 months (1 free)
     const priceInReais = billing_type === "yearly" ? yearlyPrice : monthlyPrice;
+    
+    // Build description with add-ons breakdown
+    let descriptionParts = [`Assinatura MiauChat ${company.plan.name}`];
+    if (additionalUsers > 0 || additionalInstances > 0) {
+      descriptionParts.push("- Inclui:");
+      if (additionalUsers > 0) descriptionParts.push(`+${additionalUsers} usuário(s)`);
+      if (additionalInstances > 0) descriptionParts.push(`+${additionalInstances} WhatsApp`);
+    }
+    const description = descriptionParts.join(" ");
+    
+    console.log("[generate-payment-link] Pricing breakdown:", {
+      basePlanPrice,
+      additionalUsers,
+      usersCost,
+      additionalInstances,
+      instancesCost,
+      totalAdditional,
+      monthlyPrice,
+      priceInReais,
+    });
 
     // Create payment link
     // NOTE: ASAAS externalReference has a max length of 100 characters
@@ -186,7 +232,7 @@ serve(async (req) => {
 
     const paymentLinkPayload = {
       name: `${company.plan.name} - ${billing_type === "yearly" ? "Anual" : "Mensal"}`,
-      description: `Assinatura MiauChat ${company.plan.name}`,
+      description,
       value: priceInReais,
       billingType: "UNDEFINED", // Customer chooses payment method
       chargeType: "RECURRENT",
@@ -227,6 +273,10 @@ serve(async (req) => {
         success: true,
         payment_url: paymentLinkData.url,
         plan_name: company.plan.name,
+        base_plan_price: basePlanPrice,
+        additional_users: additionalUsers,
+        additional_instances: additionalInstances,
+        total_additional: totalAdditional,
         price: priceInReais,
         billing_type,
       }),
