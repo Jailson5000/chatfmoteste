@@ -1,89 +1,59 @@
 
-# Plano de Correção: Add-ons e Geração de Fatura
+# Plano: Correção do Sistema de Cobranças ASAAS
 
-## Problemas Identificados
+## Diagnóstico Completo
 
-### Problema 1: Add-ons Aprovados Não Aparecem no Resumo
+### Problema 1: "Copiado pra onde?"
+**Status**: ✅ Funcionando - O toast exibe o link completo quando a cópia automática falha
+**Evidência**: Screenshot mostra toast com "Link de pagamento gerado e copiado!" + URL visível
 
-**Causa Raiz**: A função SQL `approve_addon_request` usa valores hardcoded como fallback:
-```sql
-_new_max_users := COALESCE(_company.max_users, 5) + _request.additional_users;
-```
+### Problema 2: Faturas não aparecem para o cliente
+**Causa Raiz**: A função `list-asaas-invoices` busca `/payments?customer={customer_id}` - mas **pagamentos só existem após o cliente concluir um link de pagamento**. Como ninguém pagou ainda, retorna vazio.
 
-Quando `max_users` é NULL (primeira solicitação), usa `5` ao invés do limite do **plano**.
+### Problema 3: Faturas não aparecem no ASAAS (em "Cobranças")
+**Causa Raiz**: O sistema está criando **Links de Pagamento** (`POST /paymentLinks`), não **Cobranças** (`POST /payments`).
 
-**Dados Atuais da FMO**:
-- Plano ENTERPRISE: `max_users = 10`, `max_instances = 6`
-- Empresa atual: `max_users = 9`, `max_instances = 5`
-- Resultado: `9 - 10 = -1` → 0 adicionais (ERRADO!)
+Diferença no ASAAS:
+- **Link de Pagamento**: Aparece em "Links de Pagamento" - é um URL que o cliente acessa
+- **Cobrança**: Aparece em "Cobranças/Todas" - é uma fatura com vencimento e método definido
 
-**Esperado** (após 3 aprovações: +4 users, +3 instances):
-- `max_users = 10 + 4 = 14`
-- `max_instances = 6 + 3 = 9`
-
-### Problema 2: Erro ao Copiar Link de Pagamento
-
-**Causa**: `navigator.clipboard.writeText()` falha quando o documento perde foco.
-
-**Erro**: `Failed to execute 'writeText' on 'Clipboard': Document is not focused`
+### Problema 4: Cliente já criado - reutilização
+**Status**: ✅ Funcionando - O código já busca o cliente existente via `asaas_customer_id` ou email antes de criar um novo.
 
 ---
 
-## Solução
+## Solução Proposta
 
-### Parte 1: Corrigir Função de Aprovação
+### Alterar `admin-create-asaas-subscription` para criar Cobrança Direta
 
-Atualizar `approve_addon_request` para buscar limites do plano como baseline:
-
-```sql
-DECLARE
-  _plan_max_users integer;
-  _plan_max_instances integer;
-BEGIN
-  -- Buscar limites do plano
-  SELECT max_users, max_instances INTO _plan_max_users, _plan_max_instances
-  FROM plans WHERE id = _company.plan_id;
-  
-  -- Usar limite do plano como base quando max_users/instances é NULL
-  _new_max_users := COALESCE(_company.max_users, _plan_max_users, 5) + _request.additional_users;
-  _new_max_instances := COALESCE(_company.max_instances, _plan_max_instances, 2) + _request.additional_instances;
-END;
-```
-
-### Parte 2: Corrigir Dados da FMO Advogados
-
-Executar SQL para corrigir os limites atuais baseado nos add-ons aprovados:
-
-```sql
--- FMO tem 3 add-ons aprovados: +4 users, +3 instances
--- Plano Enterprise: max_users=10, max_instances=6
-UPDATE companies 
-SET 
-  max_users = 10 + 4,  -- 14
-  max_instances = 6 + 3  -- 9
-WHERE id = '08370f53-1f7c-4e72-91bc-425c8da3613b';
-```
-
-### Parte 3: Corrigir Cópia para Clipboard
-
-Usar try-catch com fallback e exibir link no toast:
+Ao invés de criar um link de pagamento, criar uma **cobrança (payment)** diretamente:
 
 ```typescript
-try {
-  await navigator.clipboard.writeText(paymentUrl);
-  toast.success(`Link copiado! ${paymentUrl}`, { duration: 15000 });
-} catch (clipboardError) {
-  // Fallback: exibir link clicável no toast
-  toast.success(
-    `Link gerado: ${paymentUrl}`,
-    { 
-      duration: 30000,
-      action: {
-        label: "Copiar",
-        onClick: () => navigator.clipboard.writeText(paymentUrl)
-      }
-    }
-  );
+// ANTES: Cria link de pagamento
+POST /paymentLinks { name, value, chargeType: "RECURRENT", ... }
+
+// DEPOIS: Cria cobrança direta
+POST /payments {
+  customer: customerId,
+  value: priceInReais,
+  billingType: "UNDEFINED",  // Cliente escolhe (Boleto/PIX/Cartão)
+  dueDate: "YYYY-MM-DD",     // 7 dias a partir de hoje
+  description: "Assinatura MiauChat ENTERPRISE + adicionais",
+  externalReference: "company:UUID"
+}
+```
+
+### Criar Assinatura Recorrente
+Se você quer cobranças automáticas mensais, é necessário criar uma **Subscription**:
+
+```typescript
+POST /subscriptions {
+  customer: customerId,
+  billingType: "UNDEFINED",
+  nextDueDate: "YYYY-MM-DD",
+  value: priceInReais,
+  cycle: "MONTHLY",
+  description: "Assinatura MiauChat ENTERPRISE + adicionais"
 }
 ```
 
@@ -93,9 +63,9 @@ try {
 
 | Arquivo | Modificação |
 |---------|-------------|
-| Migration SQL | Atualizar função `approve_addon_request` para buscar limites do plano |
-| Migration SQL | Corrigir dados da FMO Advogados |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar try-catch no clipboard + exibir link no toast |
+| `supabase/functions/admin-create-asaas-subscription/index.ts` | Trocar `POST /paymentLinks` por `POST /payments` (ou `/subscriptions` para recorrente) |
+| `supabase/functions/generate-payment-link/index.ts` | Mesma lógica para o cliente |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Melhorar feedback - exibir que cobrança foi criada (não link) |
 
 ---
 
@@ -103,40 +73,120 @@ try {
 
 ```text
 ┌─────────────────────────┐
-│ Cliente solicita        │
-│ +2 usuários, +1 WhatsApp│
-└───────────┬─────────────┘
-            │
-            ▼
-┌─────────────────────────┐
-│ Admin aprova solicitação│
+│ Admin clica "Gerar      │
+│ Fatura/Cobrança" para   │
+│ FMO Advogados           │
 └───────────┬─────────────┘
             │
             ▼
 ┌─────────────────────────────────────────────────┐
-│ approve_addon_request:                          │
+│ admin-create-asaas-subscription:                │
 │                                                 │
-│ 1. Busca plano: max_users=10, max_instances=6   │
-│ 2. Usa COALESCE(company.max_users, plan.max_users)│
-│ 3. Novo max_users = 10 + 2 = 12                 │
-│ 4. Novo max_instances = 6 + 1 = 7              │
+│ 1. Busca/cria customer no ASAAS                 │
+│ 2. Calcula valor: R$ 1.697 + R$ 431,30 = R$ 2.128,30 │
+│ 3. POST /subscriptions (ou /payments)          │
+│    - billingType: "UNDEFINED" (cliente escolhe) │
+│    - nextDueDate: +7 dias                       │
+│    - cycle: "MONTHLY"                           │
+│    - externalReference: company:UUID            │
 └───────────┬─────────────────────────────────────┘
             │
             ▼
 ┌─────────────────────────────────────────────────┐
-│ calculateAdditionalCosts:                       │
-│                                                 │
-│ additionalUsers = 12 - 10 = 2 → R$ 95,80        │
-│ additionalInstances = 7 - 6 = 1 → R$ 79,90      │
-│ TOTAL = R$ 1.697 + R$ 175,70 = R$ 1.872,70      │
+│ ASAAS cria:                                     │
+│ - Subscription recorrente                       │
+│ - Primeira cobrança (aparece em "Cobranças")    │
+│ - Envia email/SMS ao cliente                    │
+│ - Salva asaas_subscription_id no banco         │
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────┐
+│ Cliente:                                        │
+│ - Vê cobrança em "Ver Faturas" no MiauChat      │
+│ - Recebe email/SMS do ASAAS                     │
+│ - Pode pagar via Boleto, PIX ou Cartão          │
 └─────────────────────────────────────────────────┘
+```
+
+---
+
+## Detalhes Técnicos da Nova Edge Function
+
+Trocar o payload de `/paymentLinks` para `/subscriptions`:
+
+```typescript
+// Calcular data de vencimento (7 dias a partir de hoje)
+const dueDate = new Date();
+dueDate.setDate(dueDate.getDate() + 7);
+const dueDateStr = dueDate.toISOString().split('T')[0];
+
+// Criar subscription com cobrança recorrente
+const subscriptionPayload = {
+  customer: customerId,
+  billingType: "UNDEFINED",  // Cliente escolhe (Boleto, PIX, Cartão)
+  nextDueDate: dueDateStr,
+  value: priceInReais,
+  cycle: billing_type === "yearly" ? "YEARLY" : "MONTHLY",
+  description: description,
+  externalReference: `company:${company.id}`.slice(0, 100),
+};
+
+const subscriptionResponse = await fetch(`${asaasBaseUrl}/subscriptions`, {
+  method: "POST",
+  headers: {
+    "access_token": asaasApiKey,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(subscriptionPayload),
+});
+```
+
+### Retorno da API de Subscription
+
+```json
+{
+  "id": "sub_abc123",
+  "customer": "cus_000158741524",
+  "value": 2128.30,
+  "nextDueDate": "2026-02-05",
+  "cycle": "MONTHLY",
+  "status": "ACTIVE"
+}
+```
+
+### Salvar no Banco
+
+```typescript
+await supabase
+  .from("company_subscriptions")
+  .upsert({
+    company_id: company.id,
+    asaas_customer_id: customerId,
+    asaas_subscription_id: subscriptionData.id,  // SALVAR!
+    plan_id: company.plan.id,
+    billing_type,
+    status: "active",
+  }, { onConflict: "company_id" });
 ```
 
 ---
 
 ## Benefícios
 
-1. **Cálculo Correto**: Add-ons baseados no limite do plano, não em valores hardcoded
-2. **Resumo Mensal Correto**: Cliente verá breakdown de adicionais
-3. **Faturamento Correto**: ASAAS receberá valor incluindo adicionais
-4. **UX Melhorada**: Link de pagamento sempre acessível, mesmo se clipboard falhar
+1. **Cobranças visíveis no ASAAS**: Aparecem em "Cobranças → Todas"
+2. **Cliente vê faturas**: `list-asaas-invoices` encontrará os payments criados
+3. **Recorrência automática**: ASAAS gera cobranças mensais automaticamente
+4. **Múltiplos métodos**: Cliente escolhe Boleto, PIX ou Cartão
+5. **`asaas_subscription_id` salvo**: Permite atualizar valor via `update-asaas-subscription`
+6. **Notificações**: ASAAS envia email/SMS automaticamente
+
+---
+
+## Observações Importantes
+
+1. **billingType "UNDEFINED"**: Permite que o cliente escolha o método de pagamento no momento do pagamento. Se quiser forçar um método específico, use "BOLETO", "PIX" ou "CREDIT_CARD".
+
+2. **Manter `/paymentLinks` para trial/registro**: O fluxo de registro/trial pode continuar usando links de pagamento, pois o cliente ainda não tem vínculo.
+
+3. **Webhook já funciona**: O `asaas-webhook` já salva o `asaas_subscription_id` quando recebe PAYMENT_CONFIRMED, então os dados ficarão sincronizados.
