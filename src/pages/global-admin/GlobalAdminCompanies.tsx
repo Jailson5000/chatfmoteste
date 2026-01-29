@@ -183,11 +183,22 @@ export default function GlobalAdminCompanies() {
         }
       });
       
+      // Check for edge function invocation error
       if (response.error) {
         throw new Error(response.error.message);
       }
 
+      // Check for business logic error in response data
       if (!response.data?.success) {
+        // Handle specific case of existing subscription
+        if (response.data?.existing_subscription_id) {
+          toast.error(
+            `Esta empresa já possui uma assinatura ativa (${response.data.existing_subscription_id}). Use "Atualizar Assinatura" para modificar o valor.`,
+            { duration: 8000 }
+          );
+          setBillingCompany(null);
+          return;
+        }
         throw new Error(response.data?.error || 'Erro desconhecido');
       }
       
