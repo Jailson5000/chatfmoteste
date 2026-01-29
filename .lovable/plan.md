@@ -1,99 +1,67 @@
 
 
-# Correção: Ver Usuários de Empresas no Admin Global
+# Atualização: Informações Comerciais na Landing Page
 
-## Problemas Identificados
+## Dados Fornecidos
 
-### 1. Contagem do Dashboard
-Analisei os dados:
-- Total no banco: 12 perfis distribuídos em 7 empresas
-- `company_usage_summary` mostra corretamente: FMO=2, Jr=2, Liz=1, Miau=1, Miau test=1, Suporte=1, Formulário=0
-- Dashboard soma `current_users` de cada empresa = totais corretos
+| Campo | Valor |
+|-------|-------|
+| Razão Social | MIAU - SOLUCOES DIGITAIS |
+| CNPJ | 64.774.567/0001-06 |
+| Endereço | COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504 |
 
-**Resultado: As contagens estão CORRETAS.**
+## Onde Aplicar
 
-### 2. Ver Usuários - NÃO FUNCIONA
+A landing page atualmente não exibe informações comerciais/jurídicas como CNPJ e razão social. Vou adicionar essas informações no **Footer** da página, que é o local padrão para dados empresariais.
 
-**Causa Raiz**: As políticas RLS na tabela `profiles` e `user_roles` restringem visualização apenas ao mesmo `law_firm_id`:
+## Mudanças no Arquivo
 
-```sql
--- Política atual em profiles:
-SELECT: (law_firm_id = get_user_law_firm_id(auth.uid()))
+### `src/pages/landing/LandingPage.tsx`
 
--- Política atual em user_roles:
-SELECT: EXISTS (... AND p.law_firm_id = get_user_law_firm_id(auth.uid()))
-```
+Vou atualizar a seção do Footer (linhas 872-921) para incluir:
 
-Isso significa que mesmo Admin Global não consegue ver perfis de outras empresas, pois não há exceção para `is_admin(auth.uid())`.
+1. **Razão social e CNPJ** em texto discreto
+2. **Endereço comercial** 
+3. Manter toda a identidade visual "MiauChat" inalterada
 
----
-
-## Solução: Atualizar RLS para Permitir Admin Global
-
-### Migração SQL
-
-```sql
--- 1. Adicionar política para Admin Global ver TODOS os profiles
-DROP POLICY IF EXISTS "Global admins can view all profiles" ON public.profiles;
-CREATE POLICY "Global admins can view all profiles"
-  ON public.profiles
-  FOR SELECT
-  TO authenticated
-  USING (is_admin(auth.uid()));
-
--- 2. Adicionar política para Admin Global ver TODOS os user_roles
-DROP POLICY IF EXISTS "Global admins can view all user roles" ON public.user_roles;
-CREATE POLICY "Global admins can view all user roles"
-  ON public.user_roles
-  FOR SELECT
-  TO authenticated
-  USING (is_admin(auth.uid()));
-```
-
-### Fluxo Corrigido
+### Layout Proposto
 
 ```text
-Admin Global clica "Ver Usuários" da empresa "Jr"
-     │
-     ▼
-CompanyUsersDialog abre com law_firm_id = "7cd827bc-..."
-     │
-     ▼
-Query: SELECT * FROM profiles WHERE law_firm_id = "..."
-     │
-     ├── Política antiga: BLOCKED (usuário não pertence a Jr)
-     │
-     └── Com nova política: is_admin(auth.uid()) = true → ALLOWED
-     │
-     ▼
-Mostra 2 usuários da empresa Jr
+┌─────────────────────────────────────────────────────────────┐
+│                    Documentos Legais:                       │
+│      🔒 Política de Privacidade    📋 Termos de Serviço    │
+├─────────────────────────────────────────────────────────────┤
+│  🐱 MIAUCHAT    |    Links legais    |    © 2026 MiauChat  │
+├─────────────────────────────────────────────────────────────┤
+│         MIAU - SOLUCOES DIGITAIS                            │
+│         CNPJ: 64.774.567/0001-06                            │
+│         COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
+## Código a ser Modificado
 
-## Segurança
+Na seção do footer, adicionar uma nova `<div>` após o copyright:
 
-A função `is_admin()` é `SECURITY DEFINER` e verifica a tabela `admin_user_roles`:
-
-```sql
--- Função existente (segura)
-CREATE FUNCTION is_admin(_user_id uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.admin_user_roles WHERE user_id = _user_id
-  )
-$$;
+```tsx
+{/* Informações Comerciais */}
+<div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
+  <p className="text-xs text-white/30">
+    MIAU - SOLUCOES DIGITAIS
+  </p>
+  <p className="text-xs text-white/25 mt-1">
+    CNPJ: 64.774.567/0001-06
+  </p>
+  <p className="text-xs text-white/20 mt-1">
+    COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
+  </p>
+</div>
 ```
 
-Isso garante que apenas usuários na tabela `admin_user_roles` (Admin Global) podem acessar todos os profiles.
+## Observações
 
----
-
-## Testes Recomendados
-
-1. Logar como Admin Global
-2. Ir em Empresas → Ações → "Ver Usuários"
-3. Verificar se lista mostra usuários da empresa selecionada
-4. Verificar que atendente comum NÃO consegue ver usuários de outras empresas
+- **Nome do projeto permanece "MiauChat"** - sem alterações
+- **Marca visual inalterada** - logo, cores e identidade mantidos
+- Informações comerciais ficam em texto discreto (30% de opacidade)
+- Padrão de mercado: razão social e CNPJ no rodapé
 
