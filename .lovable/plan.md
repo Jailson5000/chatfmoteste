@@ -1,163 +1,142 @@
 
-# Plano: Correção do Sistema de Faturamento e Adicionais
+# Plano de Correção: Add-ons e Geração de Fatura
 
 ## Problemas Identificados
 
-### 1. Fatura não aparece no ASAAS nem para o cliente
-**Causa raiz**: A tabela `company_subscriptions` não possui um UNIQUE constraint na coluna `company_id`, fazendo com que o upsert falhe silenciosamente.
+### Problema 1: Add-ons Aprovados Não Aparecem no Resumo
 
+**Causa Raiz**: A função SQL `approve_addon_request` usa valores hardcoded como fallback:
 ```sql
--- Índice atual (NÃO é unique):
-CREATE INDEX idx_company_subscriptions_company ON company_subscriptions USING btree (company_id)
+_new_max_users := COALESCE(_company.max_users, 5) + _request.additional_users;
 ```
 
-**Resultado**: O `asaas_customer_id` não é salvo, então quando o cliente clica em "Ver Faturas", a função `list-asaas-invoices` não encontra o customer ID e retorna "Nenhuma fatura encontrada".
+Quando `max_users` é NULL (primeira solicitação), usa `5` ao invés do limite do **plano**.
 
-### 2. Valor dos adicionais não aparece na fatura do ASAAS
-**Causa raiz**: Tanto `admin-create-asaas-subscription` quanto `generate-payment-link` calculam o valor da assinatura apenas usando o preço do plano base (`company.plan.price`), sem considerar os adicionais aprovados.
+**Dados Atuais da FMO**:
+- Plano ENTERPRISE: `max_users = 10`, `max_instances = 6`
+- Empresa atual: `max_users = 9`, `max_instances = 5`
+- Resultado: `9 - 10 = -1` → 0 adicionais (ERRADO!)
 
-```typescript
-// Código atual (linha 178-180):
-const monthlyPrice = company.plan.price || 0;
-const yearlyPrice = monthlyPrice * 11;
-const priceInReais = billing_type === "yearly" ? yearlyPrice : monthlyPrice;
-// ❌ Não considera adicionais!
-```
+**Esperado** (após 3 aprovações: +4 users, +3 instances):
+- `max_users = 10 + 4 = 14`
+- `max_instances = 6 + 3 = 9`
 
-### 3. Resumo Mensal não exibe breakdown claro
-**Análise**: O código de `MyPlanSettings.tsx` já exibe corretamente o breakdown quando há adicionais (linhas 445-475), mas precisamos melhorar a clareza visual para o cliente entender melhor.
+### Problema 2: Erro ao Copiar Link de Pagamento
+
+**Causa**: `navigator.clipboard.writeText()` falha quando o documento perde foco.
+
+**Erro**: `Failed to execute 'writeText' on 'Clipboard': Document is not focused`
 
 ---
 
-## Solução Proposta
+## Solução
 
-### Parte 1: Corrigir Banco de Dados
+### Parte 1: Corrigir Função de Aprovação
 
-Adicionar UNIQUE constraint na tabela `company_subscriptions`:
+Atualizar `approve_addon_request` para buscar limites do plano como baseline:
 
 ```sql
--- Adicionar unique constraint para permitir upsert funcionar
-ALTER TABLE company_subscriptions 
-ADD CONSTRAINT company_subscriptions_company_id_unique UNIQUE (company_id);
+DECLARE
+  _plan_max_users integer;
+  _plan_max_instances integer;
+BEGIN
+  -- Buscar limites do plano
+  SELECT max_users, max_instances INTO _plan_max_users, _plan_max_instances
+  FROM plans WHERE id = _company.plan_id;
+  
+  -- Usar limite do plano como base quando max_users/instances é NULL
+  _new_max_users := COALESCE(_company.max_users, _plan_max_users, 5) + _request.additional_users;
+  _new_max_instances := COALESCE(_company.max_instances, _plan_max_instances, 2) + _request.additional_instances;
+END;
 ```
 
-### Parte 2: Calcular Valor Total com Adicionais nas Edge Functions
+### Parte 2: Corrigir Dados da FMO Advogados
 
-Modificar as Edge Functions para buscar e calcular os adicionais:
+Executar SQL para corrigir os limites atuais baseado nos add-ons aprovados:
 
-#### 2.1 `admin-create-asaas-subscription/index.ts`
+```sql
+-- FMO tem 3 add-ons aprovados: +4 users, +3 instances
+-- Plano Enterprise: max_users=10, max_instances=6
+UPDATE companies 
+SET 
+  max_users = 10 + 4,  -- 14
+  max_instances = 6 + 3  -- 9
+WHERE id = '08370f53-1f7c-4e72-91bc-425c8da3613b';
+```
+
+### Parte 3: Corrigir Cópia para Clipboard
+
+Usar try-catch com fallback e exibir link no toast:
+
 ```typescript
-// 1. Buscar limites do plano
-const planLimits = {
-  max_users: company.plan.max_users || 0,
-  max_instances: company.plan.max_instances || 0,
-};
-
-// 2. Buscar limites efetivos da empresa (com adicionais)
-const effectiveLimits = {
-  max_users: company.max_users || planLimits.max_users,
-  max_instances: company.max_instances || planLimits.max_instances,
-  use_custom_limits: company.use_custom_limits || false,
-};
-
-// 3. Calcular adicionais
-const additionalUsers = Math.max(0, effectiveLimits.max_users - planLimits.max_users);
-const additionalInstances = Math.max(0, effectiveLimits.max_instances - planLimits.max_instances);
-
-const usersCost = additionalUsers * 47.90;
-const instancesCost = additionalInstances * 79.90;
-const totalAdditional = usersCost + instancesCost;
-
-// 4. Preço final
-const basePlanPrice = company.plan.price || 0;
-const monthlyPrice = basePlanPrice + totalAdditional;
-```
-
-#### 2.2 `generate-payment-link/index.ts`
-Aplicar a mesma lógica de cálculo.
-
-### Parte 3: Melhorar Exibição do Resumo Mensal
-
-Atualizar `MyPlanSettings.tsx` para exibir claramente:
-
-```text
-┌─────────────────────────────────────┐
-│       Resumo Mensal                 │
-├─────────────────────────────────────┤
-│ Plano ENTERPRISE         R$ 1.697,00│
-│                                     │
-│ ADICIONAIS CONTRATADOS:             │
-│ +2 usuário(s)            R$   95,80 │
-│ +1 conexão(ões) WhatsApp R$   79,90 │
-├─────────────────────────────────────┤
-│ TOTAL MENSAL             R$ 1.872,70│
-└─────────────────────────────────────┘
-```
-
-### Parte 4: Melhorar Feedback nas Faturas
-
-Adicionar no diálogo de faturas a descrição que vem do ASAAS incluindo os adicionais:
-
-```text
-Descrição da fatura:
-"Assinatura MiauChat ENTERPRISE - FMO Advogados
- Inclui: +2 usuários, +1 WhatsApp"
+try {
+  await navigator.clipboard.writeText(paymentUrl);
+  toast.success(`Link copiado! ${paymentUrl}`, { duration: 15000 });
+} catch (clipboardError) {
+  // Fallback: exibir link clicável no toast
+  toast.success(
+    `Link gerado: ${paymentUrl}`,
+    { 
+      duration: 30000,
+      action: {
+        label: "Copiar",
+        onClick: () => navigator.clipboard.writeText(paymentUrl)
+      }
+    }
+  );
+}
 ```
 
 ---
 
-## Detalhes Técnicos
-
-### Arquivos a Modificar
+## Arquivos a Modificar
 
 | Arquivo | Modificação |
 |---------|-------------|
-| Migration SQL | Adicionar UNIQUE constraint em `company_subscriptions.company_id` |
-| `supabase/functions/admin-create-asaas-subscription/index.ts` | Calcular valor com adicionais + melhorar descrição + logging de upsert |
-| `supabase/functions/generate-payment-link/index.ts` | Calcular valor com adicionais + melhorar descrição |
-| `src/components/settings/MyPlanSettings.tsx` | Melhorar visual do Resumo Mensal com labels claros |
+| Migration SQL | Atualizar função `approve_addon_request` para buscar limites do plano |
+| Migration SQL | Corrigir dados da FMO Advogados |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar try-catch no clipboard + exibir link no toast |
 
-### Fluxo Corrigido
+---
+
+## Fluxo Corrigido
 
 ```text
-┌─────────────────────┐
-│ Admin gera fatura   │
-│ para empresa FMO    │
-└─────────┬───────────┘
-          │
-          ▼
-┌─────────────────────┐    ┌──────────────────────────────┐
-│ Edge Function busca │ →  │ Plano: ENTERPRISE = R$ 1.697 │
-│ plano + adicionais  │    │ +2 users = R$ 95,80          │
-└─────────────────────┘    │ +1 WhatsApp = R$ 79,90       │
-                           │ TOTAL = R$ 1.872,70          │
-                           └──────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────┐    ┌──────────────────────────────┐
-│ ASAAS cria payment  │ ←  │ Descrição: "ENTERPRISE +     │
-│ link com valor total│    │ 2 usuários, 1 WhatsApp"      │
-└─────────────────────┘    └──────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────┐    ┌──────────────────────────────┐
-│ company_subscriptions│ ←  │ asaas_customer_id salvo      │
-│ atualizado          │    │ (UNIQUE constraint funciona) │
-└─────────────────────┘    └──────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────┐    ┌──────────────────────────────┐
-│ Cliente vê faturas  │ →  │ list-asaas-invoices encontra │
-│ em "Meu Plano"      │    │ customer_id e retorna faturas│
-└─────────────────────┘    └──────────────────────────────┘
+┌─────────────────────────┐
+│ Cliente solicita        │
+│ +2 usuários, +1 WhatsApp│
+└───────────┬─────────────┘
+            │
+            ▼
+┌─────────────────────────┐
+│ Admin aprova solicitação│
+└───────────┬─────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────┐
+│ approve_addon_request:                          │
+│                                                 │
+│ 1. Busca plano: max_users=10, max_instances=6   │
+│ 2. Usa COALESCE(company.max_users, plan.max_users)│
+│ 3. Novo max_users = 10 + 2 = 12                 │
+│ 4. Novo max_instances = 6 + 1 = 7              │
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────┐
+│ calculateAdditionalCosts:                       │
+│                                                 │
+│ additionalUsers = 12 - 10 = 2 → R$ 95,80        │
+│ additionalInstances = 7 - 6 = 1 → R$ 79,90      │
+│ TOTAL = R$ 1.697 + R$ 175,70 = R$ 1.872,70      │
+└─────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Benefícios
 
-1. **Faturamento Correto**: O valor cobrado no ASAAS refletirá o plano base + adicionais
-2. **Faturas Visíveis**: O cliente verá suas faturas em "Meu Plano → Ver Faturas"
-3. **Transparência**: Descrição clara do que está sendo cobrado
-4. **Persistência**: O `asaas_customer_id` será salvo corretamente para futuras consultas
-5. **Resumo Claro**: O cliente verá exatamente o breakdown do que está pagando
+1. **Cálculo Correto**: Add-ons baseados no limite do plano, não em valores hardcoded
+2. **Resumo Mensal Correto**: Cliente verá breakdown de adicionais
+3. **Faturamento Correto**: ASAAS receberá valor incluindo adicionais
+4. **UX Melhorada**: Link de pagamento sempre acessível, mesmo se clipboard falhar
