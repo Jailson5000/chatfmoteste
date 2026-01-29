@@ -14,6 +14,76 @@ export type Database = {
   }
   public: {
     Tables: {
+      addon_requests: {
+        Row: {
+          additional_instances: number
+          additional_users: number
+          company_id: string
+          created_at: string
+          id: string
+          law_firm_id: string
+          monthly_cost: number
+          rejection_reason: string | null
+          requested_by: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          additional_instances?: number
+          additional_users?: number
+          company_id: string
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          monthly_cost?: number
+          rejection_reason?: string | null
+          requested_by?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          additional_instances?: number
+          additional_users?: number
+          company_id?: string
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          monthly_cost?: number
+          rejection_reason?: string | null
+          requested_by?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "addon_requests_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "addon_requests_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_usage_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "addon_requests_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_notification_logs: {
         Row: {
           company_name: string | null
@@ -5515,6 +5585,7 @@ export type Database = {
       }
     }
     Functions: {
+      approve_addon_request: { Args: { _request_id: string }; Returns: Json }
       check_company_limit: {
         Args: { _increment?: number; _law_firm_id: string; _limit_type: string }
         Returns: Json
@@ -5628,6 +5699,10 @@ export type Database = {
       normalize_phone: { Args: { phone: string }; Returns: string }
       reassociate_orphan_records: {
         Args: { _instance_id: string }
+        Returns: Json
+      }
+      reject_addon_request: {
+        Args: { _reason?: string; _request_id: string }
         Returns: Json
       }
       toggle_admin_active: {

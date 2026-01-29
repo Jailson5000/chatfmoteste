@@ -20,11 +20,14 @@ import {
   Clock,
   AlertTriangle,
   FileText,
-  ExternalLink
+  ExternalLink,
+  X,
+  History
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useAddonRequests } from "@/hooks/useAddonRequests";
 import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts, AdditionalBreakdown } from "@/lib/billing-config";
 import { format, differenceInDays, isPast } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -48,9 +51,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 export function MyPlanSettings() {
   const { lawFirm } = useLawFirm();
   const queryClient = useQueryClient();
+  const { requests, createRequest, cancelRequest, pendingRequests } = useAddonRequests();
   const [showAddonsDialog, setShowAddonsDialog] = useState(false);
   const [showInvoicesDialog, setShowInvoicesDialog] = useState(false);
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
+  const [isSubmittingAddon, setIsSubmittingAddon] = useState(false);
   const [addonRequest, setAddonRequest] = useState({
     users: 0,
     instances: 0,
@@ -131,9 +137,14 @@ export function MyPlanSettings() {
 
   const currentBillingPeriod = format(new Date(), "MMMM yyyy", { locale: ptBR });
 
-  const handleRequestAddons = () => {
+  const handleRequestAddons = async () => {
     if (addonRequest.users === 0 && addonRequest.instances === 0) {
       toast.error("Selecione pelo menos um adicional");
+      return;
+    }
+
+    if (!companyData?.id) {
+      toast.error("Empresa não encontrada");
       return;
     }
 
@@ -141,13 +152,19 @@ export function MyPlanSettings() {
       addonRequest.users * ADDITIONAL_PRICING.user + 
       addonRequest.instances * ADDITIONAL_PRICING.whatsappInstance;
 
-    toast.success(
-      `Solicitação enviada! Um consultor entrará em contato para adicionar ${addonRequest.users > 0 ? `${addonRequest.users} usuário(s)` : ""} ${addonRequest.instances > 0 ? `${addonRequest.instances} conexão(ões) WhatsApp` : ""}. Valor adicional: ${formatCurrency(totalCost)}/mês`,
-      { duration: 8000 }
-    );
-    
-    setShowAddonsDialog(false);
-    setAddonRequest({ users: 0, instances: 0 });
+    setIsSubmittingAddon(true);
+    try {
+      await createRequest.mutateAsync({
+        companyId: companyData.id,
+        additionalUsers: addonRequest.users,
+        additionalInstances: addonRequest.instances,
+        monthlyCost: totalCost,
+      });
+      setShowAddonsDialog(false);
+      setAddonRequest({ users: 0, instances: 0 });
+    } finally {
+      setIsSubmittingAddon(false);
+    }
   };
 
   const handleDownloadInvoice = () => {
@@ -402,6 +419,12 @@ export function MyPlanSettings() {
               <Plus className="h-3 w-3" />
               Contratar Adicionais
             </Button>
+            {requests.length > 0 && (
+              <Button variant="ghost" size="sm" className="gap-1.5 text-xs h-8" onClick={() => setShowHistoryDialog(true)}>
+                <History className="h-3 w-3" />
+                Histórico ({pendingRequests.length > 0 ? `${pendingRequests.length} pendente${pendingRequests.length > 1 ? 's' : ''}` : requests.length})
+              </Button>
+            )}
           </CardFooter>
         </Card>
 
@@ -514,8 +537,93 @@ export function MyPlanSettings() {
             <Button variant="outline" onClick={() => setShowAddonsDialog(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleRequestAddons}>
-              Solicitar Adicionais
+            <Button onClick={handleRequestAddons} disabled={isSubmittingAddon}>
+              {isSubmittingAddon ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                "Solicitar Adicionais"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Addon Requests History Dialog */}
+      <Dialog open={showHistoryDialog} onOpenChange={setShowHistoryDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Histórico de Solicitações
+            </DialogTitle>
+            <DialogDescription>
+              Acompanhe o status das suas solicitações de adicionais
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="max-h-[400px]">
+            {requests.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <History className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                <p>Nenhuma solicitação encontrada.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {requests.map((request) => (
+                  <div key={request.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">
+                          {request.additional_users > 0 && `${request.additional_users} usuário(s)`}
+                          {request.additional_users > 0 && request.additional_instances > 0 && " + "}
+                          {request.additional_instances > 0 && `${request.additional_instances} conexão(ões)`}
+                        </span>
+                        <Badge 
+                          variant="outline" 
+                          className={`text-xs ${
+                            request.status === 'approved' ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/30 dark:text-green-400' :
+                            request.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            request.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400' :
+                            'bg-muted text-muted-foreground'
+                          }`}
+                        >
+                          {request.status === 'approved' ? 'Aprovado' :
+                           request.status === 'pending' ? 'Pendente' :
+                           request.status === 'rejected' ? 'Rejeitado' : 'Cancelado'}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatCurrency(request.monthly_cost)}/mês • {format(new Date(request.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                      </div>
+                      {request.rejection_reason && (
+                        <div className="text-xs text-destructive">
+                          Motivo: {request.rejection_reason}
+                        </div>
+                      )}
+                    </div>
+                    {request.status === 'pending' && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => cancelRequest.mutate(request.id)}
+                        title="Cancelar solicitação"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setShowHistoryDialog(false)}>
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
