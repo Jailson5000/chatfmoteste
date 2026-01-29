@@ -3194,6 +3194,7 @@ export function KanbanChatPanel({
             onSend={handleSendAudio}
             onCancel={() => setIsRecordingAudio(false)}
             disabled={isSending}
+            autoStart={true}
           />
         ) : (
           <>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Mic, Square, X, Send, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -8,9 +8,10 @@ interface AudioRecorderProps {
   onSend: (audioBlob: Blob) => void;
   onCancel: () => void;
   disabled?: boolean;
+  autoStart?: boolean;
 }
 
-export function AudioRecorder({ onSend, onCancel, disabled }: AudioRecorderProps) {
+export function AudioRecorder({ onSend, onCancel, disabled, autoStart = false }: AudioRecorderProps) {
   const {
     isRecording,
     recordingTime,
@@ -24,6 +25,18 @@ export function AudioRecorder({ onSend, onCancel, disabled }: AudioRecorderProps
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const hasAutoStarted = useRef(false);
+
+  // Auto-start recording if prop is set (only on mount)
+  useEffect(() => {
+    if (autoStart && !hasAutoStarted.current && !isRecording && !audioBlob && !audioUrl) {
+      hasAutoStarted.current = true;
+      startRecording().catch(error => {
+        console.error("Erro ao iniciar gravação automática:", error);
+        onCancel(); // Se falhar, cancela para não deixar UI travada
+      });
+    }
+  }, [autoStart, isRecording, audioBlob, audioUrl, startRecording, onCancel]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

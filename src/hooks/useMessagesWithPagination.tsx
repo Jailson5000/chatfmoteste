@@ -685,6 +685,14 @@ export function useMessagesWithPagination({
           const updatedMsg = payload.new as PaginatedMessage;
           const oldMsg = payload.old as Partial<PaginatedMessage>;
           
+          // DEBUG: Log UPDATE events for troubleshooting status changes
+          console.log("[useMessagesWithPagination] UPDATE received:", {
+            id: updatedMsg.id,
+            status: updatedMsg.status,
+            whatsapp_message_id: updatedMsg.whatsapp_message_id,
+            oldStatus: oldMsg.status,
+          });
+          
           // Helper to check if ID is a temporary UUID (36 chars with hyphens)
           const isTempId = (id?: string | null) => id && id.length === 36 && id.includes('-');
           const isBlobUrl = (url?: string | null) => url?.startsWith('blob:');
@@ -702,7 +710,13 @@ export function useMessagesWithPagination({
               (wasReconciled && m.whatsapp_message_id === oldMsg.whatsapp_message_id)
             );
             
-            if (targetIndex === -1) return prev;
+            // DEBUG: Log whether we found the message
+            console.log("[useMessagesWithPagination] UPDATE targetIndex:", targetIndex, "for id:", updatedMsg.id, "status:", updatedMsg.status);
+            
+            if (targetIndex === -1) {
+              console.warn("[useMessagesWithPagination] UPDATE: message not found in state for id:", updatedMsg.id);
+              return prev;
+            }
             
             const updated = [...prev];
             const prevMsg = updated[targetIndex];
