@@ -1928,8 +1928,9 @@ export default function Conversations() {
         // Create blob URL for optimistic preview
         const blobUrl = URL.createObjectURL(file);
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        // This prevents duplication when Realtime broadcasts the INSERT
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         const mediaTypeDisplay = mediaType === "audio" ? "[Áudio]" 
           : mediaType === "image" ? "[Imagem]"
@@ -1938,7 +1939,7 @@ export default function Conversations() {
         
         // Add optimistic message immediately with local blob preview
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: mediaTypeDisplay,
           created_at: messageTimestamp,
           is_from_me: true,
@@ -1974,30 +1975,28 @@ export default function Conversations() {
             fileName: uniqueFileName,
             caption: "",
             mimeType: file.type,
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
 
         if (response.error) {
           // Update optimistic message to error
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
 
         if (!response.data?.success) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
         
-        // Update optimistic message with real ID from backend
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        // No need to replace ID since clientMessageId === backend's tempMessageId
+        console.log('[Media] Async send successful, ID:', clientMessageId);
       }
       
       // Don't show toast for optimistic updates - Realtime will handle final state
@@ -2191,13 +2190,13 @@ export default function Conversations() {
         // Create blob URL for optimistic preview
         const blobUrl = mediaPreview.file ? URL.createObjectURL(mediaPreview.file) : mediaUrl;
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         
         // Add optimistic message immediately
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: caption || `[${fileName}]`,
           created_at: messageTimestamp,
           is_from_me: true,
@@ -2219,6 +2218,7 @@ export default function Conversations() {
             fileName: uniqueFileName,
             caption,
             mimeType,
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
 
@@ -2230,24 +2230,20 @@ export default function Conversations() {
 
         if (response.error) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar mídia");
         }
 
         if (!response.data?.success) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar mídia");
         }
         
-        // Update optimistic message with real ID
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        console.log('[MediaPreviewSend] Async send successful, ID:', clientMessageId);
       }
 
       // Don't add optimistic message - it's already added above for WhatsApp path
@@ -2332,13 +2328,13 @@ export default function Conversations() {
         // Create blob URL for optimistic preview
         const blobUrl = URL.createObjectURL(audioBlob);
         
-        // Generate temp ID for optimistic message
-        const tempId = crypto.randomUUID();
+        // Generate client ID that will be used both for optimistic message AND backend DB record
+        const clientMessageId = crypto.randomUUID();
         const messageTimestamp = new Date().toISOString();
         
         // Add optimistic message immediately
         const optimisticMessage = {
-          id: tempId,
+          id: clientMessageId, // Use the same ID that backend will use
           content: "[Áudio]",
           created_at: messageTimestamp,
           is_from_me: true,
@@ -2367,7 +2363,7 @@ export default function Conversations() {
 
         if (!mediaBase64 || mediaBase64.length < 1000) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error("Falha ao preparar o áudio (base64 vazio). Tente gravar novamente.");
         }
@@ -2383,6 +2379,7 @@ export default function Conversations() {
             fileName: uniqueFileName,
             // Keep original mimeType (including codecs) to maximize provider compatibility
             mimeType: audioBlob.type || "audio/webm;codecs=opus",
+            clientMessageId, // Send the same ID used for optimistic message
           },
         });
 
@@ -2394,24 +2391,20 @@ export default function Conversations() {
 
         if (response.error) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.error.message || "Falha ao enviar áudio");
         }
 
         if (!response.data?.success) {
           setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "error" as const } : m
+            m.id === clientMessageId ? { ...m, status: "error" as const } : m
           ));
           throw new Error(response.data?.error || "Falha ao enviar áudio");
         }
         
-        // Update optimistic message with real ID
-        setMessages(prev => prev.map(m => 
-          m.id === tempId 
-            ? { ...m, id: response.data.messageId || tempId, status: "sent" as const }
-            : m
-        ));
+        // ID already matches - Realtime will update this same record with status "sent"
+        console.log('[AudioSend] Async send successful, ID:', clientMessageId);
       }
 
       // Don't add optimistic message here - it's already added above
