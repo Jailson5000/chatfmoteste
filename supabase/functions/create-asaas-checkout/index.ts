@@ -143,8 +143,9 @@ serve(async (req) => {
     }
 
     // 2. Create subscription with identifiable external reference
-    // NOTE: ASAAS externalReference has a max length of 100 characters.
-    const externalReference = `source:miauchat;plan:${planKey};period:${billingPeriod}`.slice(0, 100);
+    // NOTE: ASAAS externalReference has a max length of 100 characters
+    // Include email for webhook identification (landing page checkout - no company_id yet)
+    const externalReference = `email:${adminEmail};plan:${planKey};period:${billingPeriod}`.slice(0, 100);
 
     const subscriptionPayload = {
       customer: customerId,

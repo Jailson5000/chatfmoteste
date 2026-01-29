@@ -180,8 +180,9 @@ serve(async (req) => {
     const priceInReais = billing_type === "yearly" ? yearlyPrice : monthlyPrice;
 
     // Create payment link
+    // NOTE: ASAAS externalReference has a max length of 100 characters
     const origin = req.headers.get("origin") || "https://miauchat.com.br";
-    const externalReference = `company:${company.id};plan:${company.plan.id};period:${billing_type}`;
+    const externalReference = `company:${company.id}`.slice(0, 100);
 
     const paymentLinkPayload = {
       name: `${company.plan.name} - ${billing_type === "yearly" ? "Anual" : "Mensal"}`,
