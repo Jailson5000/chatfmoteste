@@ -760,6 +760,33 @@ interface MessageData {
       mimetype?: string;
       contextInfo?: ContextInfo;
     };
+    // WABA Interactive message types (button replies, list selections, template responses)
+    buttonsResponseMessage?: {
+      selectedButtonId?: string;
+      selectedDisplayText?: string;
+      contextInfo?: ContextInfo;
+    };
+    listResponseMessage?: {
+      title?: string;
+      description?: string;
+      rowId?: string;
+      singleSelectReply?: { selectedRowId?: string };
+      contextInfo?: ContextInfo;
+    };
+    templateButtonReplyMessage?: {
+      selectedId?: string;
+      selectedDisplayText?: string;
+      selectedIndex?: number;
+      contextInfo?: ContextInfo;
+    };
+    interactiveResponseMessage?: {
+      body?: { text?: string };
+      nativeFlowResponseMessage?: { 
+        name?: string; 
+        paramsJson?: string;
+      };
+      contextInfo?: ContextInfo;
+    };
   };
   messageType?: string;
   messageTimestamp?: number;
@@ -4164,6 +4191,48 @@ serve(async (req) => {
           mediaUrl = data.message.stickerMessage.url || '';
           mediaMimeType = data.message.stickerMessage.mimetype || 'image/webp';
           logDebug('STICKER', 'Sticker message detected', { requestId, hasUrl: !!mediaUrl, mimeType: mediaMimeType });
+        } else if (data.message?.buttonsResponseMessage) {
+          // WABA: User clicked a quick reply button
+          messageType = 'text';
+          messageContent = data.message.buttonsResponseMessage.selectedDisplayText || 
+                           data.message.buttonsResponseMessage.selectedButtonId ||
+                           '[Resposta de botão]';
+          logDebug('WABA_INTERACTIVE', 'Button response received', { requestId, content: messageContent });
+        } else if (data.message?.listResponseMessage) {
+          // WABA: User selected an item from a list menu
+          messageType = 'text';
+          messageContent = data.message.listResponseMessage.title ||
+                           data.message.listResponseMessage.description ||
+                           data.message.listResponseMessage.rowId ||
+                           data.message.listResponseMessage.singleSelectReply?.selectedRowId ||
+                           '[Seleção de lista]';
+          logDebug('WABA_INTERACTIVE', 'List response received', { requestId, content: messageContent });
+        } else if (data.message?.templateButtonReplyMessage) {
+          // WABA: User clicked a template button (marketing messages)
+          messageType = 'text';
+          messageContent = data.message.templateButtonReplyMessage.selectedDisplayText ||
+                           data.message.templateButtonReplyMessage.selectedId ||
+                           '[Resposta de template]';
+          logDebug('WABA_INTERACTIVE', 'Template button response received', { requestId, content: messageContent });
+        } else if (data.message?.interactiveResponseMessage) {
+          // WABA: Generic interactive response (newer format)
+          messageType = 'text';
+          const interactiveBody = data.message.interactiveResponseMessage.body;
+          const nativeFlow = data.message.interactiveResponseMessage.nativeFlowResponseMessage;
+          if (interactiveBody?.text) {
+            messageContent = interactiveBody.text;
+          } else if (nativeFlow?.paramsJson) {
+            // Try to extract readable text from native flow params
+            try {
+              const params = JSON.parse(nativeFlow.paramsJson);
+              messageContent = params.display_text || params.text || params.title || nativeFlow.name || '[Resposta interativa]';
+            } catch {
+              messageContent = nativeFlow.name || '[Resposta interativa]';
+            }
+          } else {
+            messageContent = '[Resposta interativa]';
+          }
+          logDebug('WABA_INTERACTIVE', 'Interactive response received', { requestId, content: messageContent });
         }
 
         logDebug('MESSAGE', `Message content extracted`, { 

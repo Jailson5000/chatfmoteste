@@ -120,7 +120,7 @@ export function LandingPage() {
         description: plan.description || "",
         items: plan.features || [],
         cta: isEnterprise 
-          ? "Solicitar proposta" 
+          ? "Começar agora" 
           : isProfessional 
             ? "Escalar meu atendimento" 
             : "Começar agora",
