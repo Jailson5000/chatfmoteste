@@ -277,10 +277,37 @@ serve(async (req) => {
     });
 
     // ============ CREATE SUBSCRIPTION (RECURRING CHARGE) ============
-    // Calculate next due date (7 days from now)
-    const nextDueDate = new Date();
-    nextDueDate.setDate(nextDueDate.getDate() + 7);
+    // Calculate next due date based on company approval/creation date
+    // The due date is the same day of month as when the company was approved
+    const companyCreatedAt = new Date(company.approved_at || company.created_at);
+    const dayOfMonth = companyCreatedAt.getDate();
+    
+    // Helper to get days in a month
+    const getDaysInMonth = (date: Date): number => {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    };
+    
+    const now = new Date();
+    const nextDueDate = new Date(now.getFullYear(), now.getMonth(), dayOfMonth);
+    
+    // If we've already passed this day in the current month, go to next month
+    if (now.getDate() >= dayOfMonth) {
+      nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+    }
+    
+    // Handle months with fewer days (e.g., if company created on 31st)
+    const maxDaysInDueMonth = getDaysInMonth(nextDueDate);
+    if (dayOfMonth > maxDaysInDueMonth) {
+      nextDueDate.setDate(maxDaysInDueMonth);
+    }
+    
     const nextDueDateStr = nextDueDate.toISOString().split('T')[0];
+    
+    console.log(`[admin-create-asaas-subscription] Due date calculation:`, {
+      companyCreatedAt: company.approved_at || company.created_at,
+      dayOfMonth,
+      nextDueDate: nextDueDateStr,
+    });
 
     const externalReference = `company:${company.id}`.slice(0, 100);
 
