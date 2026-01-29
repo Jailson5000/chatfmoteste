@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import { Users, Wifi, Bot, Layers, MessageSquare, Volume2, Info, Lock, Unlock, DollarSign, TrendingUp } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Users, Wifi, Bot, Layers, MessageSquare, Volume2, Info, Lock, Unlock, DollarSign, TrendingUp, AlertTriangle, TrendingDown } from "lucide-react";
 import { calculateAdditionalCosts, formatCurrency, ADDITIONAL_PRICING } from "@/lib/billing-config";
 
 interface Plan {
@@ -110,6 +111,30 @@ export function CompanyLimitsEditor({
     return calculateAdditionalCosts(planLimits, effectiveLimits, basePlanPrice);
   }, [selectedPlan, limits, useCustomLimits]);
 
+  // Check if any limit is below the plan's base value
+  const limitsReduced = useMemo(() => {
+    if (!selectedPlan || !useCustomLimits) return [];
+    const reduced: { field: string; current: number; planValue: number }[] = [];
+    
+    if (limits.max_users < selectedPlan.max_users) {
+      reduced.push({ field: "Usuários", current: limits.max_users, planValue: selectedPlan.max_users });
+    }
+    if (limits.max_instances < selectedPlan.max_instances) {
+      reduced.push({ field: "Conexões WhatsApp", current: limits.max_instances, planValue: selectedPlan.max_instances });
+    }
+    if (limits.max_agents < selectedPlan.max_agents) {
+      reduced.push({ field: "Agentes IA", current: limits.max_agents, planValue: selectedPlan.max_agents });
+    }
+    if (limits.max_ai_conversations < selectedPlan.max_ai_conversations) {
+      reduced.push({ field: "Conversas IA", current: limits.max_ai_conversations, planValue: selectedPlan.max_ai_conversations });
+    }
+    if (limits.max_tts_minutes < selectedPlan.max_tts_minutes) {
+      reduced.push({ field: "Minutos TTS", current: limits.max_tts_minutes, planValue: selectedPlan.max_tts_minutes });
+    }
+    
+    return reduced;
+  }, [selectedPlan, limits, useCustomLimits]);
+
   const limitFields = [
     {
       key: "max_users" as const,
@@ -194,6 +219,26 @@ export function CompanyLimitsEditor({
           <Badge variant="outline" className="w-fit text-xs bg-yellow-50 text-yellow-700 border-yellow-300 mt-2">
             Os limites abaixo sobrescrevem o plano selecionado
           </Badge>
+        )}
+        
+        {/* Alert for limits reduced below plan base */}
+        {limitsReduced.length > 0 && (
+          <Alert variant="destructive" className="mt-3">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="text-sm">
+              <strong>Atenção:</strong> Os seguintes limites estão abaixo do plano base:
+              <ul className="mt-1 list-disc list-inside">
+                {limitsReduced.map((item, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{item.field}</span>: {item.current} (plano inclui {item.planValue})
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs opacity-80">
+                Isso reduzirá a cobrança mensal no ASAAS. O cliente receberá apenas o valor do plano base.
+              </p>
+            </AlertDescription>
+          </Alert>
         )}
       </CardHeader>
       <CardContent>

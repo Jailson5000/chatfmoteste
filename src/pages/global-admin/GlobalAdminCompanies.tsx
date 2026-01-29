@@ -340,6 +340,18 @@ export default function GlobalAdminCompanies() {
 
   const handleUpdate = async () => {
     if (!editingCompany) return;
+    
+    // Find selected plan for value calculation
+    const selectedPlan = plans.find(p => p.id === formData.plan_id);
+    
+    // Calculate the new monthly value for ASAAS sync
+    let newMonthlyValue = selectedPlan?.price || 0;
+    if (formData.use_custom_limits && selectedPlan) {
+      const additionalUsers = Math.max(0, formData.max_users - selectedPlan.max_users);
+      const additionalInstances = Math.max(0, formData.max_instances - selectedPlan.max_instances);
+      newMonthlyValue += (additionalUsers * 47.90) + (additionalInstances * 79.90);
+    }
+    
     // Only send fields that exist in the companies table
     const updateData = {
       name: formData.name,
@@ -355,9 +367,46 @@ export default function GlobalAdminCompanies() {
       max_tts_minutes: formData.max_tts_minutes,
       use_custom_limits: formData.use_custom_limits,
     };
-    await updateCompany.mutateAsync({ id: editingCompany, ...updateData });
-    setEditingCompany(null);
-    setFormData(resetFormData());
+    
+    try {
+      // 1. Update the company in the database
+      await updateCompany.mutateAsync({ id: editingCompany, ...updateData });
+      
+      // 2. Sync subscription value with ASAAS (if company has custom limits or plan changed)
+      if (selectedPlan) {
+        const { data: asaasResult, error: asaasError } = await supabase.functions.invoke('update-asaas-subscription', {
+          body: {
+            company_id: editingCompany,
+            new_value: newMonthlyValue,
+            reason: "Limites atualizados pelo admin"
+          }
+        });
+        
+        if (asaasError) {
+          console.error("ASAAS sync error:", asaasError);
+          toast.error("Empresa atualizada, mas houve erro ao sincronizar com ASAAS: " + asaasError.message);
+        } else if (asaasResult?.skipped) {
+          // Company doesn't have an active ASAAS subscription yet
+          toast.info(asaasResult.message || "Empresa sem assinatura ASAAS ativa. O valor será aplicado quando assinar.");
+        } else if (asaasResult?.success) {
+          const oldValue = asaasResult.old_value || 0;
+          const diff = newMonthlyValue - oldValue;
+          const diffText = diff > 0 ? `+R$ ${diff.toFixed(2).replace('.', ',')}` : 
+                          diff < 0 ? `-R$ ${Math.abs(diff).toFixed(2).replace('.', ',')}` : 
+                          "sem alteração";
+          toast.success(
+            `Empresa e ASAAS atualizados!\n\nValor anterior: R$ ${oldValue.toFixed(2).replace('.', ',')}\nNovo valor: R$ ${newMonthlyValue.toFixed(2).replace('.', ',')}\nDiferença: ${diffText}`,
+            { duration: 8000 }
+          );
+        }
+      }
+      
+      setEditingCompany(null);
+      setFormData(resetFormData());
+    } catch (error: any) {
+      console.error("Error updating company:", error);
+      toast.error("Erro ao atualizar empresa: " + error.message);
+    }
   };
 
   const handleDelete = async (company: typeof companies[0]) => {
