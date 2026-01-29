@@ -3,16 +3,15 @@ import {
   Building2, 
   CheckCircle2,
   Clock, 
-  Link2, 
   ArrowUpRight,
   ArrowDownRight,
   FileText,
   FileSpreadsheet,
   AlertTriangle,
-  Users,
-  MessageSquare,
-  Mic
+  PlayCircle,
+  Hourglass
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useSystemMetrics } from "@/hooks/useSystemMetrics";
 import { exportDashboardToPDF, exportToExcel, getFormattedDate } from "@/lib/exportUtils";
 import { toast } from "sonner";
@@ -46,6 +45,7 @@ export default function GlobalAdminDashboard() {
   const { dashboardMetrics, isLoading } = useSystemMetrics();
   const tableRef = useRef<HTMLDivElement>(null);
   const [filterByAlerts, setFilterByAlerts] = useState(false);
+  const navigate = useNavigate();
 
   // Fetch companies with alerts (80%+ usage)
   const { data: alertsData } = useQuery({
@@ -78,59 +78,60 @@ export default function GlobalAdminDashboard() {
     },
   });
 
-  // Calculate pie chart data from real metrics
+  // Calculate pie chart data from real granular metrics
   const pieChartData = [
-    { name: "Ativas", value: dashboardMetrics?.activeCompanies || 0, color: "#22c55e" },
-    { name: "Pendentes", value: (dashboardMetrics?.totalCompanies || 0) - (dashboardMetrics?.activeCompanies || 0), color: "#f59e0b" },
-    { name: "Com Alertas", value: (alertsData?.warning || 0) + (alertsData?.critical || 0), color: "#ef4444" },
+    { name: "Ativas", value: dashboardMetrics?.companiesApproved || 0, color: "#22c55e" },
+    { name: "Em Trial", value: dashboardMetrics?.companiesInTrial || 0, color: "#3b82f6" },
+    { name: "Pendentes", value: dashboardMetrics?.companiesPendingApproval || 0, color: "#f59e0b" },
+    { name: "Trial Expirado", value: dashboardMetrics?.companiesTrialExpired || 0, color: "#ef4444" },
   ].filter(item => item.value > 0);
 
   const statCards = [
     {
       title: "Total de Empresas",
       value: dashboardMetrics?.totalCompanies || 0,
-      description: "vs. mês anterior",
+      description: "Cadastradas no sistema",
       icon: Building2,
-      iconBg: "bg-red-500/10",
-      iconColor: "text-red-500",
-      trend: "+12%",
+      iconBg: "bg-slate-500/10",
+      iconColor: "text-slate-400",
+      trend: `${dashboardMetrics?.totalConnections || 0} conexões`,
       trendUp: true,
+      onClick: () => navigate("/global-admin/companies"),
     },
     {
       title: "Empresas Ativas",
-      value: dashboardMetrics?.activeCompanies || 0,
-      description: "Em operação",
+      value: dashboardMetrics?.companiesApproved || 0,
+      description: "Aprovadas e em operação",
       icon: CheckCircle2,
       iconBg: "bg-green-500/10",
       iconColor: "text-green-500",
-      trend: "+8%",
+      trend: "Em produção",
       trendUp: true,
+      onClick: () => navigate("/global-admin/companies?tab=approved"),
     },
     {
-      title: "Total de Usuários",
-      value: dashboardMetrics?.totalUsers || 0,
-      description: "Em todas as empresas",
-      icon: Users,
+      title: "Em Trial",
+      value: dashboardMetrics?.companiesInTrial || 0,
+      description: dashboardMetrics?.companiesTrialExpired 
+        ? `${dashboardMetrics.companiesTrialExpired} expirado(s)` 
+        : "Período de teste ativo",
+      icon: PlayCircle,
       iconBg: "bg-blue-500/10",
       iconColor: "text-blue-500",
-      trend: `${dashboardMetrics?.totalConnections || 0} conexões`,
-      trendUp: true,
+      trend: dashboardMetrics?.companiesTrialExpired ? "Atenção" : "Monitorando",
+      trendUp: !dashboardMetrics?.companiesTrialExpired,
+      onClick: () => navigate("/global-admin/companies?trial=active"),
     },
     {
-      title: "Alertas de Limite",
-      value: (alertsData?.warning || 0) + (alertsData?.critical || 0),
-      description: `${alertsData?.critical || 0} críticos, ${alertsData?.warning || 0} avisos`,
-      icon: AlertTriangle,
-      iconBg: alertsData?.critical ? "bg-red-500/10" : "bg-yellow-500/10",
-      iconColor: alertsData?.critical ? "text-red-500" : "text-yellow-500",
-      trend: alertsData?.critical ? "Ação necessária" : "Monitorando",
-      trendUp: false,
-      onClick: () => {
-        setFilterByAlerts(true);
-        setTimeout(() => {
-          tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 100);
-      },
+      title: "Aguardando Aprovação",
+      value: dashboardMetrics?.companiesPendingApproval || 0,
+      description: "Precisam de revisão",
+      icon: Hourglass,
+      iconBg: "bg-yellow-500/10",
+      iconColor: "text-yellow-500",
+      trend: dashboardMetrics?.companiesPendingApproval ? "Ação necessária" : "Tudo ok",
+      trendUp: !dashboardMetrics?.companiesPendingApproval,
+      onClick: () => navigate("/global-admin/companies?tab=pending"),
     },
   ];
 
