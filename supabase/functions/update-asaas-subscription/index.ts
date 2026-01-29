@@ -94,24 +94,28 @@ serve(async (req) => {
       .single();
 
     if (subError || !subscription) {
-      console.error("Subscription not found:", subError);
+      console.log("No subscription found for company:", company_id);
       return new Response(
         JSON.stringify({ 
-          error: "Empresa sem assinatura ativa no ASAAS",
-          details: "Esta empresa não possui uma subscription recorrente configurada. O valor será aplicado quando ela assinar."
+          success: false,
+          skipped: true,
+          message: "Empresa sem assinatura ativa no ASAAS. O valor será aplicado quando ela assinar.",
+          new_value: new_value
         }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!subscription.asaas_subscription_id) {
-      console.error("No ASAAS subscription ID for company:", company_id);
+      console.log("No ASAAS subscription ID for company:", company_id);
       return new Response(
         JSON.stringify({ 
-          error: "ID da assinatura ASAAS não encontrado",
-          details: "A empresa tem registro de subscription mas sem ID do ASAAS"
+          success: false,
+          skipped: true,
+          message: "Empresa sem ID de assinatura ASAAS. O valor será aplicado quando ela assinar.",
+          new_value: new_value
         }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
