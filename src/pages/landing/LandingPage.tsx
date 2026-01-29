@@ -889,7 +889,7 @@ export function LandingPage() {
             </Link>
           </div>
 
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
               <img src={miauchatLogo} alt="MiauChat" className="h-8 w-8" />
               <span className="text-sm font-medium text-white/60">
@@ -915,6 +915,19 @@ export function LandingPage() {
             <p className="text-xs text-white/30">
               © {new Date().getFullYear()} MiauChat. Todos os direitos
               reservados.
+            </p>
+          </div>
+
+          {/* Informações Comerciais */}
+          <div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
+            <p className="text-xs text-white/30">
+              MIAU - SOLUCOES DIGITAIS
+            </p>
+            <p className="text-xs text-white/25 mt-1">
+              CNPJ: 64.774.567/0001-06
+            </p>
+            <p className="text-xs text-white/20 mt-1">
+              COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
             </p>
           </div>
         </div>
