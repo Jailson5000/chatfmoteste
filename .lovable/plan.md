@@ -1,375 +1,173 @@
 
-# Plano: Rastreamento de Usuários Online e Último Acesso
+# Análise das Modificações Recentes: Problemas Identificados
 
-## Contexto
+## Resumo Executivo
 
-Atualmente, o sistema **não possui** funcionalidade para:
-- Ver quando um usuário acessou pela última vez
-- Ver se um usuário está online no momento
-- Monitorar a atividade dos usuários por empresa
-
-A tabela `profiles` não tem campos de `last_seen_at` ou similar.
-
-## Arquitetura Proposta
-
-Vamos implementar um sistema híbrido que combina:
-
-1. **Persistência (last_seen_at)**: Atualiza no banco quando o usuário navega
-2. **Realtime Presence**: Mostra quem está online em tempo real
-
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     ARQUITETURA DE PRESENÇA                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  CAMADA 1: Persistência (last_seen_at)                                     │
-│  ─────────────────────────────────────                                     │
-│  - Atualiza profiles.last_seen_at a cada 5 minutos de atividade            │
-│  - Histórico permanente de último acesso                                   │
-│  - Visível mesmo após usuário sair                                         │
-│                                                                             │
-│  CAMADA 2: Realtime Presence (online_now)                                  │
-│  ─────────────────────────────────────────                                 │
-│  - Supabase Realtime Presence API                                          │
-│  - Indica se usuário está AGORA com sessão ativa                           │
-│  - Atualiza em tempo real quando entra/sai                                 │
-│                                                                             │
-│  RESULTADO NO UI:                                                          │
-│  ┌──────────────────────────────────────────────────────────────┐          │
-│  │ 🟢 João Silva     Admin        Online agora                  │          │
-│  │ 🟡 Maria Santos   Atendente    Há 5 minutos                  │          │
-│  │ ⚫ Pedro Souza    Atendente    Há 3 dias                     │          │
-│  └──────────────────────────────────────────────────────────────┘          │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Após análise detalhada de todas as modificações recentes (Impersonation e Presence Tracking), identifiquei **3 problemas críticos** e **2 melhorias recomendadas** que precisam ser corrigidos.
 
 ---
 
-## Componentes a Implementar
+## Problema 1: URL de Redirect Incorreta na Edge Function Impersonate-User (CRÍTICO)
 
-### 1. Migração SQL
+### Localização
+`supabase/functions/impersonate-user/index.ts`, linha 117
 
-Adicionar campo `last_seen_at` à tabela `profiles`:
-
-```sql
--- Adicionar coluna de último acesso
-ALTER TABLE public.profiles
-ADD COLUMN last_seen_at timestamptz DEFAULT now();
-
--- Índice para ordenação por último acesso
-CREATE INDEX idx_profiles_last_seen_at ON public.profiles(last_seen_at DESC);
-
--- Criar tabela para tracking de sessões ativas (opcional, para histórico)
-CREATE TABLE public.user_sessions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  law_firm_id uuid REFERENCES public.law_firms(id),
-  started_at timestamptz NOT NULL DEFAULT now(),
-  ended_at timestamptz,
-  ip_address text,
-  user_agent text,
-  device_type text,
-  is_active boolean DEFAULT true
-);
-
--- RLS para sessions
-ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
-
--- Política: Admins globais podem ver tudo
-CREATE POLICY "Global admins can view all sessions"
-ON public.user_sessions FOR SELECT
-TO authenticated
-USING (public.is_admin(auth.uid()));
-
--- Política: Admins da empresa podem ver da própria empresa
-CREATE POLICY "Tenant admins can view own sessions"
-ON public.user_sessions FOR SELECT
-TO authenticated
-USING (law_firm_id = public.get_user_law_firm_id(auth.uid()));
-```
-
-### 2. Hook: usePresenceTracking
-
+### Código Problemático
 ```typescript
-// src/hooks/usePresenceTracking.tsx
-// Responsável por:
-// - Atualizar last_seen_at periodicamente
-// - Broadcast presença via Supabase Realtime
-// - Limpar presença ao sair
+redirectTo: `${SUPABASE_URL.replace('.supabase.co', '.lovable.app')}/dashboard?impersonating=true&admin=${callerUserId}&company=${company_id || targetProfile.law_firm_id}`,
 ```
 
-Este hook será chamado no `AppLayout` para todos os usuários logados.
+### Por que está errado?
+- `SUPABASE_URL` = `https://jiragtersejnarxruqyd.supabase.co`
+- Após substituição: `https://jiragtersejnarxruqyd.lovable.app/dashboard...`
+- URL real do projeto: `https://chatfmoteste.lovable.app` ou preview URL
 
-### 3. Hook: useUserPresence
+O magic link redireciona para uma URL que não existe, fazendo o impersonation falhar.
 
-```typescript
-// src/hooks/useUserPresence.tsx
-// Responsável por:
-// - Consultar usuários online de uma empresa
-// - Subscribe para atualizações em tempo real
-// - Retornar lista com status de cada usuário
-```
-
-### 4. Componente: UserPresenceIndicator
-
-```typescript
-// src/components/ui/UserPresenceIndicator.tsx
-// Badge visual que mostra:
-// - 🟢 Online (presença ativa)
-// - 🟡 Recente (< 5 min desde last_seen)
-// - ⚫ Offline (> 5 min)
-```
-
-### 5. Atualização do CompanyUsersDialog
-
-Adicionar coluna de "Último Acesso" e indicador de online:
-
-```typescript
-// Na tabela de usuários:
-<TableHead>Status Online</TableHead>
-<TableHead>Último Acesso</TableHead>
-
-// Na célula:
-<TableCell>
-  <UserPresenceIndicator userId={user.id} />
-</TableCell>
-<TableCell>
-  {user.last_seen_at 
-    ? formatDistanceToNow(new Date(user.last_seen_at), { locale: ptBR })
-    : "Nunca acessou"}
-</TableCell>
-```
+### Solução
+Usar a variável de ambiente correta ou construir a URL a partir do `origin` do request.
 
 ---
 
-## Fluxo de Funcionamento
+## Problema 2: Parâmetros de URL Inconsistentes (CRÍTICO)
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ FLUXO: USUÁRIO ACESSA O SISTEMA                                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. Login                                                                   │
-│        │                                                                    │
-│        ▼                                                                    │
-│  2. AppLayout monta com usePresenceTracking                                │
-│        │                                                                    │
-│        ├──── Atualiza profiles.last_seen_at imediatamente                  │
-│        │                                                                    │
-│        ├──── Entra no canal Realtime "presence:law_firm_id"                │
-│        │                                                                    │
-│        └──── Chama channel.track({ user_id, online_at })                   │
-│                                                                             │
-│  3. A cada 5 minutos de atividade                                          │
-│        │                                                                    │
-│        └──── Atualiza profiles.last_seen_at                                │
-│                                                                             │
-│  4. Outros usuários no canal recebem evento 'join'                         │
-│        │                                                                    │
-│        └──── UI atualiza indicador para 🟢                                 │
-│                                                                             │
-│  5. Usuário fecha aba / sai                                                │
-│        │                                                                    │
-│        ├──── beforeunload: chama channel.untrack()                         │
-│        │                                                                    │
-│        └──── Outros recebem 'leave' → UI mostra 🟡 ou ⚫                   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### Edge Function usa:
+- `admin` (linha 117)
+- `company` (linha 117)
+
+### Hook useImpersonation verifica:
+- `admin_id` OU `admin` (linha 44) ✅
+- `company_name` (linha 45)
+- NÃO verifica `company` ❌
+
+### Problema
+O Edge Function envia `company=uuid`, mas o hook procura por `company_name=nome`. O nome da empresa nunca é passado corretamente nos parâmetros.
+
+### Solução
+Alinhar os parâmetros entre Edge Function e Hook.
 
 ---
 
-## Arquivos a Criar/Modificar
+## Problema 3: Falta de Variável de Ambiente para URL da Aplicação
 
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `src/hooks/usePresenceTracking.tsx` | Criar | Hook para rastrear e emitir presença |
-| `src/hooks/useUserPresence.tsx` | Criar | Hook para consultar presença de empresa |
-| `src/components/ui/UserPresenceIndicator.tsx` | Criar | Componente visual de status |
-| `src/components/layout/AppLayout.tsx` | Modificar | Adicionar usePresenceTracking |
-| `src/components/global-admin/CompanyUsersDialog.tsx` | Modificar | Adicionar colunas de presença |
+### Situação Atual
+Não existe variável `APP_URL` ou similar nas secrets para definir a URL correta da aplicação.
 
-### Migração SQL
-
-```sql
--- 1. Adicionar last_seen_at na profiles
-ALTER TABLE public.profiles ADD COLUMN last_seen_at timestamptz DEFAULT now();
-
--- 2. Criar índice
-CREATE INDEX IF NOT EXISTS idx_profiles_last_seen_at 
-ON public.profiles(last_seen_at DESC);
-```
+### Solução
+Adicionar secret `PUBLIC_APP_URL` ou usar o header `origin` do request para construir a URL dinamicamente.
 
 ---
 
-## Implementação Detalhada
+## Melhoria 1: Dependência Potencialmente Problemática no useImpersonation
 
-### usePresenceTracking (Simplificado)
-
+### Código
 ```typescript
-export function usePresenceTracking() {
-  const { user } = useAuth();
-  const { lawFirm } = useLawFirm();
-  const channelRef = useRef<RealtimeChannel | null>(null);
-  const lastUpdateRef = useRef<number>(0);
-  
-  useEffect(() => {
-    if (!user?.id || !lawFirm?.id) return;
+useEffect(() => {
+  // ...
+}, [searchParams, setSearchParams]); // Falta 'state.companyName' na dependência
+```
 
-    // Função para atualizar last_seen_at
-    const updateLastSeen = async () => {
-      const now = Date.now();
-      // Throttle: só atualiza a cada 5 minutos
-      if (now - lastUpdateRef.current < 5 * 60 * 1000) return;
-      
-      lastUpdateRef.current = now;
-      await supabase
-        .from('profiles')
-        .update({ last_seen_at: new Date().toISOString() })
-        .eq('id', user.id);
-    };
+### Problema
+O `state.companyName` é usado dentro do effect (linha 51) mas não está no array de dependências. Isso pode causar comportamento inesperado.
 
-    // Atualizar imediatamente ao montar
-    updateLastSeen();
+### Solução
+Adicionar `state.companyName` às dependências ou usar uma referência.
 
-    // Criar canal de presença
-    const channel = supabase.channel(`presence:${lawFirm.id}`, {
-      config: { presence: { key: user.id } }
-    });
+---
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        // Sincronização de estado
-      })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        console.log('Usuário entrou:', key);
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        console.log('Usuário saiu:', key);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            user_id: user.id,
-            online_at: new Date().toISOString(),
-          });
-        }
-      });
+## Melhoria 2: Verificação de Erros Silenciosos no usePresenceTracking
 
-    channelRef.current = channel;
-
-    // Atualizar last_seen em atividade
-    const handleActivity = throttle(updateLastSeen, 60000); // 1 min throttle
-    
-    window.addEventListener('click', handleActivity);
-    window.addEventListener('keydown', handleActivity);
-
-    // Cleanup
-    return () => {
-      channel.untrack();
-      supabase.removeChannel(channel);
-      window.removeEventListener('click', handleActivity);
-      window.removeEventListener('keydown', handleActivity);
-    };
-  }, [user?.id, lawFirm?.id]);
+### Código
+```typescript
+try {
+  await supabase
+    .from("profiles")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("id", user.id);
+} catch (error) {
+  console.error("Error updating last_seen_at:", error);
 }
 ```
 
-### useUserPresence (Para Global Admin)
+### Problema
+O update não verifica o retorno do Supabase para erros RLS ou outros, apenas catch de exceções.
+
+### Solução
+Verificar também `error` do retorno do Supabase.
+
+---
+
+## Arquivos a Corrigir
+
+| Arquivo | Problema | Prioridade |
+|---------|----------|------------|
+| `supabase/functions/impersonate-user/index.ts` | URL incorreta + parâmetros | Alta |
+| `src/hooks/useImpersonation.tsx` | Dependência do effect | Média |
+| `src/hooks/usePresenceTracking.tsx` | Verificação de erro | Baixa |
+
+---
+
+## Correções Propostas
+
+### 1. Edge Function - impersonate-user/index.ts
 
 ```typescript
-export function useUserPresence(lawFirmId: string | null) {
-  const [onlineUsers, setOnlineUsers] = useState<Record<string, boolean>>({});
-  
-  useEffect(() => {
-    if (!lawFirmId) return;
+// ANTES (linha 117):
+redirectTo: `${SUPABASE_URL.replace('.supabase.co', '.lovable.app')}/dashboard?...`
 
-    const channel = supabase.channel(`presence:${lawFirmId}`);
+// DEPOIS:
+// Usar origin do request para construir URL correta
+const origin = req.headers.get("origin") || "https://chatfmoteste.lovable.app";
+const redirectUrl = new URL("/dashboard", origin);
+redirectUrl.searchParams.set("impersonating", "true");
+redirectUrl.searchParams.set("admin_id", callerUserId);
+redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+```
 
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const online: Record<string, boolean> = {};
-        Object.keys(state).forEach(key => {
-          online[key] = true;
-        });
-        setOnlineUsers(online);
-      })
-      .subscribe();
+### 2. Hook useImpersonation.tsx
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lawFirmId]);
+```typescript
+// Adicionar 'state' à lista de dependências como referência estável
+const stateRef = useRef(state);
+stateRef.current = state;
 
-  return { onlineUsers };
+useEffect(() => {
+  // usar stateRef.current.companyName
+}, [searchParams, setSearchParams]);
+```
+
+### 3. Hook usePresenceTracking.tsx
+
+```typescript
+// Adicionar verificação do erro retornado
+const { error } = await supabase
+  .from("profiles")
+  .update({ last_seen_at: new Date().toISOString() })
+  .eq("id", user.id);
+
+if (error) {
+  console.error("Error updating last_seen_at:", error);
 }
 ```
 
 ---
 
-## UX no CompanyUsersDialog
+## Impacto das Correções
 
-### Stats Atualizados
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│  👥 Total: 5  │  🟢 Online: 2  │  🔴 Admins: 1  │  ⚠️ Senha: 1          │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-### Tabela com Presença
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Usuário          │ Cargo        │ Status       │ Online    │ Último Acesso │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ 🟢 João Silva    │ Admin        │ Ativo        │ Online    │ Agora         │
-│ 🟢 Maria Santos  │ Atendente    │ Ativo        │ Online    │ Agora         │
-│ 🟡 Pedro Souza   │ Atendente    │ Ativo        │ Offline   │ Há 5 min      │
-│ ⚫ Ana Costa     │ Gerente      │ Ativo        │ Offline   │ Há 2 dias     │
-│ ⚫ Carlos Lima   │ Atendente    │ Inativo      │ Offline   │ Há 1 mês      │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+| Correção | Sem a Correção | Com a Correção |
+|----------|----------------|----------------|
+| URL Redirect | Impersonation sempre falha | Funciona corretamente |
+| Parâmetros | Nome da empresa não aparece no banner | Exibe nome correto |
+| Dependência Effect | Possível stale closure | Comportamento previsível |
+| Verificação Erro | Erros silenciosos | Logs úteis para debug |
 
 ---
 
-## Benefícios
+## Checklist de Validação Pós-Correção
 
-1. **Visibilidade**: Admin global sabe quem está usando o sistema
-2. **Suporte**: Identifica usuários que nunca acessaram (onboarding incompleto)
-3. **Monitoramento**: Detecta contas inativas para liberar licenças
-4. **Tempo real**: Presença atualiza instantaneamente via WebSockets
-
----
-
-## Considerações de Performance
-
-| Aspecto | Solução |
-|---------|---------|
-| Updates frequentes no DB | Throttle de 5 minutos |
-| Múltiplas abas | Usa mesmo canal de presença por user_id |
-| Cleanup de sessões | beforeunload + heartbeat timeout |
-| Carga no Realtime | Um canal por law_firm (não por usuário) |
-
----
-
-## Checklist de Implementação
-
-**Fase 1: Backend**
-- [ ] Migração: adicionar profiles.last_seen_at
-- [ ] Criar índice para ordenação
-
-**Fase 2: Hooks de Presença**
-- [ ] Criar usePresenceTracking
-- [ ] Criar useUserPresence
-- [ ] Integrar usePresenceTracking no AppLayout
-
-**Fase 3: UI**
-- [ ] Criar UserPresenceIndicator
-- [ ] Atualizar CompanyUsersDialog com novas colunas
-- [ ] Adicionar stat de "Online" nos cards
-
-**Fase 4: Testes**
-- [ ] Verificar atualização de last_seen_at
-- [ ] Testar presença em tempo real entre abas
-- [ ] Validar cleanup ao fechar aba
+- [ ] Impersonation abre nova aba na URL correta
+- [ ] Banner de impersonation mostra nome da empresa
+- [ ] Botão "Sair do modo Admin" funciona
+- [ ] Last seen é atualizado corretamente na tabela profiles
+- [ ] Indicador de online aparece em tempo real no CompanyUsersDialog
+- [ ] Console não mostra erros relacionados às correções
