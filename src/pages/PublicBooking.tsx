@@ -55,6 +55,16 @@ interface BusinessSettings {
   max_advance_days: number;
   min_advance_hours: number;
   timezone: string | null;
+  // Weekend settings
+  saturday_enabled: boolean;
+  saturday_start_time: string;
+  saturday_end_time: string;
+  sunday_enabled: boolean;
+  sunday_start_time: string;
+  sunday_end_time: string;
+  // Default weekday hours
+  default_start_time: string;
+  default_end_time: string;
 }
 
 type BookingStep = "service" | "professional" | "datetime" | "info" | "confirmation";
@@ -154,6 +164,16 @@ export default function PublicBooking() {
           max_advance_days: settingsData.max_advance_days || 30,
           min_advance_hours: settingsData.min_advance_hours || 2,
           timezone: settingsData.timezone,
+          // Weekend settings
+          saturday_enabled: settingsData.saturday_enabled ?? false,
+          saturday_start_time: settingsData.saturday_start_time || "08:00",
+          saturday_end_time: settingsData.saturday_end_time || "12:00",
+          sunday_enabled: settingsData.sunday_enabled ?? false,
+          sunday_start_time: settingsData.sunday_start_time || "08:00",
+          sunday_end_time: settingsData.sunday_end_time || "12:00",
+          // Default weekday hours
+          default_start_time: settingsData.default_start_time || "08:00",
+          default_end_time: settingsData.default_end_time || "18:00",
         });
         
         // Load public services with professional links
@@ -220,11 +240,40 @@ export default function PublicBooking() {
           workingHours = hours as { start_time: string; end_time: string } | null;
         }
         
-        // Default working hours if professional doesn't have specific ones
+        // Fallback using global weekend settings or weekday defaults
         if (!workingHours) {
-          workingHours = { start_time: "09:00", end_time: "18:00" };
+          const dayOfWeek = selectedDate.getDay();
+          
+          if (dayOfWeek === 6) {
+            // Saturday
+            if (!settings?.saturday_enabled) {
+              setAvailableSlots([]);
+              setLoadingSlots(false);
+              return;
+            }
+            workingHours = { 
+              start_time: settings.saturday_start_time || "08:00", 
+              end_time: settings.saturday_end_time || "12:00" 
+            };
+          } else if (dayOfWeek === 0) {
+            // Sunday
+            if (!settings?.sunday_enabled) {
+              setAvailableSlots([]);
+              setLoadingSlots(false);
+              return;
+            }
+            workingHours = { 
+              start_time: settings.sunday_start_time || "08:00", 
+              end_time: settings.sunday_end_time || "12:00" 
+            };
+          } else {
+            // Weekday (Mon-Fri): use default hours
+            workingHours = { 
+              start_time: settings?.default_start_time || "08:00", 
+              end_time: settings?.default_end_time || "18:00" 
+            };
+          }
         }
-        
         // @ts-ignore - Supabase type inference issue
         let appointmentsQuery = supabase
           .from("agenda_pro_appointments")
@@ -512,6 +561,12 @@ export default function PublicBooking() {
     for (let i = 0; i < 7; i++) {
       const day = addDays(weekStart, i);
       if (day <= maxDate) {
+        const dayOfWeek = day.getDay();
+        
+        // Skip disabled weekend days
+        if (dayOfWeek === 0 && !settings?.sunday_enabled) continue;
+        if (dayOfWeek === 6 && !settings?.saturday_enabled) continue;
+        
         days.push(day);
       }
     }
