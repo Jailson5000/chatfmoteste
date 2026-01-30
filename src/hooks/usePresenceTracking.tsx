@@ -20,12 +20,12 @@ export function usePresenceTracking() {
 
     lastUpdateRef.current = now;
     
-    try {
-      await supabase
-        .from("profiles")
-        .update({ last_seen_at: new Date().toISOString() })
-        .eq("id", user.id);
-    } catch (error) {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", user.id);
+    
+    if (error) {
       console.error("Error updating last_seen_at:", error);
     }
   }, [user?.id]);

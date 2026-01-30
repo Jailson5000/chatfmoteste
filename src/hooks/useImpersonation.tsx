@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -38,6 +38,10 @@ export function useImpersonation() {
     };
   });
 
+  // Use ref to avoid stale closure issues
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   // Check URL params for impersonation markers on mount
   useEffect(() => {
     const isImpersonating = searchParams.get("impersonating") === "true";
@@ -48,7 +52,7 @@ export function useImpersonation() {
       const newState: ImpersonationState = {
         isImpersonating: true,
         adminId,
-        companyName: companyName ? decodeURIComponent(companyName) : state.companyName,
+        companyName: companyName ? decodeURIComponent(companyName) : stateRef.current.companyName,
         targetUserId: null,
       };
       

@@ -110,11 +110,18 @@ Deno.serve(async (req) => {
 
     // 7. Generate a magic link for the target user
     // This creates a one-time login link that expires in 1 hour
+    // Use origin from request to build correct redirect URL
+    const appOrigin = origin || "https://chatfmoteste.lovable.app";
+    const redirectUrl = new URL("/dashboard", appOrigin);
+    redirectUrl.searchParams.set("impersonating", "true");
+    redirectUrl.searchParams.set("admin_id", callerUserId);
+    redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+    
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: targetProfile.email,
       options: {
-        redirectTo: `${SUPABASE_URL.replace('.supabase.co', '.lovable.app')}/dashboard?impersonating=true&admin=${callerUserId}&company=${company_id || targetProfile.law_firm_id}`,
+        redirectTo: redirectUrl.toString(),
       }
     });
 
