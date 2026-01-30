@@ -335,12 +335,16 @@ serve(async (req) => {
       }
     }
 
-    // If auto-approved, call provision-company to create admin user
+    // If auto-approved, create admin user directly via create-company-admin
+    // Note: We call create-company-admin instead of provision-company because
+    // provision-company requires user auth (JWT with sub claim), but this function
+    // runs without user authentication. create-company-admin accepts service role key.
     if (shouldAutoApprove) {
-      console.log(`[register-company] Auto-approving trial, calling provision-company...`);
+      console.log(`[register-company] Auto-approving trial, creating admin user...`);
       
       try {
-        const provisionResponse = await fetch(`${supabaseUrl}/functions/v1/provision-company`, {
+        // Call create-company-admin directly (it doesn't require user auth)
+        const adminResponse = await fetch(`${supabaseUrl}/functions/v1/create-company-admin`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -348,20 +352,70 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             company_id: company.id,
+            company_name,
+            law_firm_id: lawFirm.id,
+            subdomain,
             admin_name,
             admin_email,
           }),
         });
 
-        const provisionResult = await provisionResponse.json();
-        console.log(`[register-company] Provision result:`, provisionResult);
+        const adminResult = await adminResponse.json();
+        console.log(`[register-company] Admin creation result:`, adminResult);
 
-        if (!provisionResponse.ok || !provisionResult.success) {
-          console.error(`[register-company] Provision failed:`, provisionResult);
-          // Don't fail the whole registration, just log it
+        if (!adminResponse.ok || !adminResult.success) {
+          console.error(`[register-company] Admin creation failed:`, adminResult);
+          // Update company status to show partial provisioning
+          await supabase.from('companies').update({
+            client_app_status: 'error',
+            initial_access_email_error: adminResult.error || 'Failed to create admin user',
+          }).eq('id', company.id);
+        } else {
+          // Update company with successful provisioning
+          await supabase.from('companies').update({
+            admin_user_id: adminResult.user_id,
+            client_app_status: 'created',
+            provisioning_status: 'partial', // Partial because n8n isn't created yet
+            initial_access_email_sent: true,
+            initial_access_email_sent_at: new Date().toISOString(),
+          }).eq('id', company.id);
+          console.log(`[register-company] Admin user created successfully: ${adminResult.user_id}`);
         }
-      } catch (provisionError) {
-        console.error(`[register-company] Error calling provision-company:`, provisionError);
+      } catch (adminError) {
+        console.error(`[register-company] Error creating admin:`, adminError);
+        // Don't fail the whole registration, just log it
+      }
+      
+      // Also create n8n workflow (non-blocking)
+      try {
+        console.log(`[register-company] Creating n8n workflow...`);
+        const n8nResponse = await fetch(`${supabaseUrl}/functions/v1/create-n8n-workflow`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+          },
+          body: JSON.stringify({
+            company_id: company.id,
+            company_name,
+            law_firm_id: lawFirm.id,
+            subdomain,
+            auto_activate: true,
+          }),
+        });
+        
+        const n8nResult = await n8nResponse.json();
+        if (n8nResponse.ok && n8nResult.success) {
+          console.log(`[register-company] N8N workflow created successfully`);
+          await supabase.from('companies').update({
+            n8n_workflow_status: 'created',
+            provisioning_status: 'completed',
+          }).eq('id', company.id);
+        } else {
+          console.log(`[register-company] N8N workflow creation failed (non-critical):`, n8nResult);
+        }
+      } catch (n8nError) {
+        console.log(`[register-company] N8N workflow creation skipped/failed (non-critical):`, n8nError);
       }
     }
 
