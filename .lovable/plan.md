@@ -1,116 +1,89 @@
 
-Objetivo
-- Corrigir definitivamente o erro “Nenhum profissional disponível para este serviço” no agendamento público (/agendar/:slug), mesmo quando há profissionais cadastrados e vinculados ao serviço.
-- Fazer isso sem quebrar o projeto, mantendo fallback seguro e adicionando validações para evitar o usuário avançar até a confirmação com estado inconsistente.
+Contexto (o que está acontecendo)
+- No agendamento público (/agendar/:slug), ao escolher um serviço, aparece “Este serviço não possui profissionais disponíveis…”, mesmo existindo profissionais ativos e vinculados ao serviço.
+- Isso está acontecendo em todos os links/empresas que você testou, no ambiente publicado, e você já publicou as mudanças.
 
-Diagnóstico (com base no comportamento e no diff)
-- O erro acontece no submit (clique em “Confirmar agendamento”), quando o código tenta resolver um professional_id e não encontra nenhum:
-  - selectedProfessional?.id || serviceProfessionals[0]?.id || professionals[0]?.id
-- Como o usuário consegue avançar até a etapa “Seus dados”, isso indica que a UI está permitindo o fluxo mesmo com lista de profissionais vazia (professionals e serviceProfessionals).
-- A causa mais provável é que a busca de profissionais no agendamento público está retornando vazio (ou com erro silencioso), por exemplo:
-  - Falta de permissão para leitura pública na “view segura” usada no público (agenda_pro_professionals_public), ou
-  - A view está sendo afetada por regras de acesso (RLS) e, como o usuário do público não está autenticado, retorna 0 linhas.
-- Hoje o código não verifica “error” na query dos profissionais. Se houver “permission denied”/bloqueio, a página continua e só falha no final.
+Reformulando o problema real
+- O sistema NÃO está encontrando profissionais para o serviço no agendamento público porque a chamada que busca “profissionais do serviço” está falhando no backend (erro de função), e o frontend está tratando esse erro como “lista vazia”, exibindo a mensagem errada (“não possui profissionais”).
 
-Estratégia de correção (robusta e segura)
-Vamos corrigir em 2 camadas: (A) backend/dados e (B) frontend/fluxo.
+Do I know what the issue is?
+- Sim.
+- Identifiquei um erro específico e reproduzível no backend: a função `public.get_public_professionals_for_booking(_law_firm_id, _service_id)` quebra com:
+  - `ERROR: column reference "id" is ambiguous`
+- Causa técnica: a função retorna `RETURNS TABLE (id uuid, ...)`, e em PL/pgSQL isso cria variáveis OUT com nomes iguais às colunas. Dentro da validação do serviço existe um `WHERE id = _service_id` sem alias, e o Postgres fica em dúvida entre:
+  - `id` (variável de retorno da função)
+  - `agenda_pro_services.id` (coluna da tabela)
+- Resultado: o RPC falha quando `_service_id` é enviado, então o frontend recebe `error` e acaba mostrando “sem profissionais” (mensagem incorreta).
 
-A) Backend/Dados (fix principal)
-1) Confirmar por que o público está recebendo 0 profissionais
-   - Validar se o agendamento público consegue fazer SELECT na fonte de dados “pública” de profissionais.
-   - Se houver erro de permissão/RLS, isso explica exatamente o comportamento atual (lista vazia e erro somente no submit).
+Evidências (confirmadas no backend)
+- A função funciona quando chamada sem `_service_id` (retorna profissionais do escritório).
+- A função falha quando chamada com `_service_id`, gerando o erro “id is ambiguous”.
+- Existem vínculos válidos em `agenda_pro_service_professionals` (ex.: 2 profissionais vinculados ao serviço), então não é problema de configuração.
 
-2) Tornar a leitura pública de profissionais “determinística” e segura
-   Vamos adotar o caminho mais seguro e resistente a mudanças de política:
+Plano de correção (sem regressões)
 
-   Opção A (preferida, mínima e compatível com o que já existe)
-   - Ajustar a fonte pública de profissionais para que seja consultável pelo público e continue sem PII (apenas id, nome, specialty, avatar_url etc.).
-   - Garantir que:
-     - a view pública (agenda_pro_professionals_public) possa ser lida pelo público (GRANT SELECT para o papel de acesso público)
-     - e que ela não fique “presa” em RLS do table base (dependendo da configuração atual).
+1) Corrigir definitivamente a função do backend (migração)
+Objetivo: fazer o RPC funcionar quando `_service_id` for informado.
+Ação:
+- Criar uma nova migration que faça `CREATE OR REPLACE FUNCTION public.get_public_professionals_for_booking(...)` corrigindo as referências ambíguas.
+- Trocar todas as referências não qualificadas `id` dentro da função por referências qualificadas com alias.
+  Exemplo (ponto do bug):
+  - Antes: `WHERE id = _service_id`
+  - Depois: `FROM public.agenda_pro_services s WHERE s.id = _service_id`
+- Revisar também qualquer outro ponto com risco de conflito de nomes (boas práticas: sempre usar aliases: `s.`, `p.`, `sp.`).
+- Reaplicar `GRANT EXECUTE` para `anon` e `authenticated` na assinatura correta (por segurança, mesmo que já exista).
+- Manter a função retornando apenas campos “públicos” (id, name, specialty, avatar_url) para não expor PII.
 
-   Opção B (fallback se a Opção A não resolver por conta de RLS forçada)
-   - Criar uma função de banco “SECURITY DEFINER” para retornar profissionais públicos de forma segura:
-     - Ex.: get_public_professionals_by_law_firm(_law_firm_id uuid)
-     - ou get_public_professionals_by_service(_service_id uuid)
-   - A função valida:
-     - agenda_pro_settings.public_booking_enabled = true para o tenant
-     - profissionais is_active = true
-     - (se por serviço) serviço is_public/is_active e vínculo na agenda_pro_service_professionals
-   - Retorna somente campos seguros (sem e-mail/telefone/documentos).
-   - O frontend passa a chamar essa função (rpc) em vez de ler diretamente a view.
+Checklist SQL (o que a migration deve conter)
+- `CREATE OR REPLACE FUNCTION ... RETURNS TABLE (id uuid, name text, specialty text, avatar_url text) ...`
+- Validar agenda pública habilitada via `agenda_pro_settings`.
+- Validar serviço com alias `s`:
+  - `IF NOT EXISTS (SELECT 1 FROM public.agenda_pro_services s WHERE s.id = _service_id AND s.law_firm_id = _law_firm_id AND s.is_active = true AND s.is_public = true) THEN RETURN; END IF;`
+- Query principal com aliases:
+  - `FROM public.agenda_pro_professionals p`
+  - `JOIN public.agenda_pro_service_professionals sp ON sp.professional_id = p.id`
+  - `WHERE sp.service_id = _service_id AND p.law_firm_id = _law_firm_id AND p.is_active = true`
+- `GRANT EXECUTE ON FUNCTION public.get_public_professionals_for_booking(uuid, uuid) TO anon;`
+- `GRANT EXECUTE ON FUNCTION public.get_public_professionals_for_booking(uuid, uuid) TO authenticated;`
 
-   Critério de decisão
-   - Se der para garantir leitura pública via view sem expor PII e sem depender de RLS do table base, fazemos Opção A.
-   - Se houver qualquer risco de exposição ou se RLS estiver “forçada” e impedir a view, aplicamos Opção B (mais estável).
+2) Ajustar o frontend para não mascarar erro como “sem profissionais”
+Objetivo: se o RPC falhar, o usuário deve ver “erro ao carregar” (e não “serviço sem profissionais”).
+Ação no `src/pages/PublicBooking.tsx`:
+- Alterar a lógica do clique no serviço para diferenciar:
+  - Caso A: RPC retornou erro -> mostrar uma mensagem de erro (“Não foi possível carregar os profissionais. Tente novamente.”)
+  - Caso B: RPC retornou com sucesso e lista vazia -> mostrar “Este serviço não possui profissionais disponíveis…”
+Opções seguras de implementação:
+- Opção recomendada (mínima e clara):
+  - Fazer `loadProfessionalsForService` retornar um objeto `{ profs, ok }` ou `{ profs, errorMessage }`.
+  - No `onClick`, se `errorMessage` existir, exibir essa mensagem e bloquear avanço.
+- Ajuste adicional recomendado:
+  - Se `professionalsError` estiver preenchido, não mostrar a mensagem de “sem profissionais”; mostrar a mensagem do erro e/ou um botão “Tentar novamente”.
 
-3) Migração
-- Implementar a mudança no backend via migration (sem mexer em schemas reservados).
-- Incluir comentários e manter compatibilidade com o que já está em produção.
+3) Testes e validação (end-to-end, sem quebrar o projeto)
+Backend (validação direta)
+- Executar `SELECT * FROM public.get_public_professionals_for_booking(<law_firm_id>, <service_id>);` e confirmar que retorna os profissionais vinculados.
+- Executar `SELECT * FROM public.get_public_professionals_for_booking(<law_firm_id>, NULL);` e confirmar que retorna os profissionais ativos.
 
-B) Frontend/Fluxo (evitar falha tardia e melhorar UX)
-1) Tratar erro/resultado vazio ao carregar profissionais
-- Em src/pages/PublicBooking.tsx:
-  - Capturar o “error” da query (ou da rpc) de profissionais.
-  - Se falhar:
-    - exibir mensagem clara: “Não foi possível carregar os profissionais para agendamento. Tente novamente em instantes.”
-    - impedir avançar para as próximas etapas (ou manter a tela em estado de erro com botão “Recarregar”).
-  - Se vier vazio:
-    - exibir mensagem clara: “Este serviço não possui profissionais disponíveis no agendamento online. Fale com a empresa.”
+Frontend (fluxo público)
+- Abrir os links públicos (ex.: /agendar/agenda e /agendar/estetica):
+  1. Carrega serviços
+  2. Clicar no serviço “Consulta”
+  3. Deve avançar para seleção de profissional ou direto para data/hora (se 1)
+  4. Selecionar data e horário
+  5. Preencher dados e confirmar agendamento
+  6. Confirmar que o agendamento é criado (sem erro de profissional)
+- Caso negativo: criar/usar um serviço sem profissionais vinculados e confirmar que o sistema bloqueia com mensagem correta.
 
-2) Regras para avançar de etapa (bloqueio preventivo)
-- Ao selecionar serviço:
-  - calcular filteredProfs
-  - se filteredProfs.length === 0:
-    - não permitir seguir para datetime/info
-    - mostrar aviso na própria tela (não só toast), explicando que não há profissionais vinculados/publicados
-- Ao selecionar horário:
-  - validar novamente se existe professionalId resolvível
-  - se não existir, travar avanço e pedir para voltar.
-
-3) Resolver “professional_name” em mensagens
-- Hoje, em alguns pontos (ex.: template de mensagens), o nome do profissional pode cair em “Profissional” se selectedProfessional estiver null.
-- Ajustar para usar:
-  - selectedProfessional?.name || serviceProfessionals[0]?.name || professionals[0]?.name || "Profissional"
-- Isso evita mensagens inconsistentes quando o fluxo auto-seleciona.
-
-4) Instrumentação leve (temporária) para fechar diagnóstico
-- Adicionar logs (console.warn) no público somente quando:
-  - services carregaram, mas professionals vieram 0
-  - e capturar o error message/código quando existir
-- Objetivo: se o problema persistir, fica claro se é permissão/RLS ou dado.
-
-Sequência de implementação (para minimizar risco)
-1) Reproduzir e confirmar a causa exata (na URL pública e também no Preview)
-2) Implementar correção no backend (Opção A; se falhar, Opção B)
-3) Atualizar o frontend para:
-   - usar a fonte correta de profissionais (view ajustada ou rpc)
-   - adicionar validações de avanço e tratamento de erro
-4) Testes end-to-end
-   - Abrir /agendar/agenda
-   - Escolher “Análise”
-   - Ver lista de profissionais (ou auto-seleção se 1)
-   - Escolher data/hora
-   - Preencher dados
-   - Confirmar agendamento sem erro
-   - Confirmar que o registro foi criado com professional_id preenchido
-   - Testar também um serviço sem vínculo (se existir) e validar que o sistema bloqueia corretamente com mensagem amigável
+Risco de regressão e mitigação
+- Risco: baixo, pois a correção principal é local (só qualificação de colunas na função) e não altera regras de negócio nem RLS.
+- Mitigação:
+  - Manter exatamente os mesmos filtros atuais (is_enabled/public_booking_enabled/is_public/is_active).
+  - Alterar apenas o necessário no frontend para melhorar a mensagem e não mudar o fluxo quando estiver tudo ok.
 
 Arquivos/áreas envolvidas
-- Frontend:
-  - src/pages/PublicBooking.tsx (tratamento de erro, validações, e ajuste da origem dos profissionais)
-- Backend (migração):
-  - Ajuste de permissões/segurança para leitura pública de profissionais (via view) OU criação de função segura para consulta pública
+- Backend: nova migration em `supabase/migrations/...sql` corrigindo `get_public_professionals_for_booking`
+- Frontend: `src/pages/PublicBooking.tsx` (melhorar distinção entre “erro de carregamento” vs “lista vazia”)
 
-Riscos e mitigação
-- Risco: liberar leitura pública indevida (PII)
-  - Mitigação: não abrir SELECT na tabela “agenda_pro_professionals” diretamente para público; manter acesso público apenas via view/func retornando campos seguros.
-- Risco: corrigir apenas UI e continuar com lista vazia por permissão
-  - Mitigação: corrigir backend primeiro (ou em conjunto) e adicionar tratamento de erro no frontend para não falhar só no submit.
-- Risco: diferença entre ambientes (preview vs domínio publicado)
-  - Mitigação: validar nos dois, e publicar após confirmar o fix no Preview.
-
-Critério de sucesso
-- O agendamento público permite selecionar serviço e concluir o agendamento com professional_id preenchido quando há profissionais vinculados e ativos.
-- Se não houver profissionais vinculados, o sistema informa claramente e não permite avançar até o submit.
-- Nenhum dado sensível de profissionais é exposto publicamente.
+Resultado esperado
+- Ao selecionar um serviço no agendamento público, os profissionais vinculados passam a aparecer/ser selecionados corretamente.
+- O erro “não possui profissionais” só aparece quando realmente não houver profissionais vinculados/ativos; em caso de falha técnica, a UI mostra um erro correto e permite tentar novamente.
