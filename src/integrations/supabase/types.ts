@@ -1021,9 +1021,15 @@ export type Database = {
           reminder_message_template: string | null
           require_confirmation: boolean | null
           respect_business_hours: boolean | null
+          saturday_enabled: boolean | null
+          saturday_end_time: string | null
+          saturday_start_time: string | null
           send_email_confirmation: boolean | null
           send_sms_confirmation: boolean | null
           send_whatsapp_confirmation: boolean | null
+          sunday_enabled: boolean | null
+          sunday_end_time: string | null
+          sunday_start_time: string | null
           timezone: string | null
           updated_at: string
         }
@@ -1062,9 +1068,15 @@ export type Database = {
           reminder_message_template?: string | null
           require_confirmation?: boolean | null
           respect_business_hours?: boolean | null
+          saturday_enabled?: boolean | null
+          saturday_end_time?: string | null
+          saturday_start_time?: string | null
           send_email_confirmation?: boolean | null
           send_sms_confirmation?: boolean | null
           send_whatsapp_confirmation?: boolean | null
+          sunday_enabled?: boolean | null
+          sunday_end_time?: string | null
+          sunday_start_time?: string | null
           timezone?: string | null
           updated_at?: string
         }
@@ -1103,9 +1115,15 @@ export type Database = {
           reminder_message_template?: string | null
           require_confirmation?: boolean | null
           respect_business_hours?: boolean | null
+          saturday_enabled?: boolean | null
+          saturday_end_time?: string | null
+          saturday_start_time?: string | null
           send_email_confirmation?: boolean | null
           send_sms_confirmation?: boolean | null
           send_whatsapp_confirmation?: boolean | null
+          sunday_enabled?: boolean | null
+          sunday_end_time?: string | null
+          sunday_start_time?: string | null
           timezone?: string | null
           updated_at?: string
         }
