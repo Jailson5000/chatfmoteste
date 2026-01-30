@@ -1,5 +1,4 @@
 import { Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyApproval } from "@/hooks/useCompanyApproval";
 import { useTenant } from "@/hooks/useTenant";
@@ -29,36 +28,14 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, mustChangePassword } = useAuth();
   const { approval_status, rejection_reason, company_subdomain, trial_type, trial_ends_at, trial_expired, plan_name, loading: approvalLoading } = useCompanyApproval();
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
-  const [isRedirectingImpersonation, setIsRedirectingImpersonation] = useState(false);
 
-  // IMPERSONATION CROSS-DOMAIN FIX: Detect when impersonation lands on wrong domain
-  // and redirect to correct subdomain before TenantMismatch blocks access
-  useEffect(() => {
-    if (user && company_subdomain && isMainDomain && !isRedirectingImpersonation) {
-      const searchParams = new URLSearchParams(window.location.search);
-      const isImpersonating = searchParams.get('impersonating') === 'true';
-      
-      if (isImpersonating) {
-        // User authenticated via impersonation but landed on main domain
-        // Supabase Auth may have ignored redirect_to if subdomain not in allowed list
-        // Redirect manually to correct tenant subdomain
-        setIsRedirectingImpersonation(true);
-        const correctUrl = `https://${company_subdomain}.miauchat.com.br${window.location.pathname}${window.location.search}`;
-        console.log('[ProtectedRoute] Impersonation redirect to correct subdomain:', correctUrl);
-        window.location.href = correctUrl;
-      }
-    }
-  }, [user, company_subdomain, isMainDomain, isRedirectingImpersonation]);
-
-  // Show loading while checking auth or redirecting impersonation
-  if (loading || isRedirectingImpersonation) {
+  // Show loading while checking auth
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-muted-foreground">
-            {isRedirectingImpersonation ? "Redirecionando para sua plataforma..." : "Carregando..."}
-          </p>
+          <p className="text-muted-foreground">Carregando...</p>
         </div>
       </div>
     );
