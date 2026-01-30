@@ -3263,6 +3263,42 @@ export type Database = {
           },
         ]
       }
+      impersonation_logs: {
+        Row: {
+          admin_user_id: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          ip_address: string | null
+          started_at: string
+          target_company_id: string | null
+          target_user_id: string
+          user_agent: string | null
+        }
+        Insert: {
+          admin_user_id: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          ip_address?: string | null
+          started_at?: string
+          target_company_id?: string | null
+          target_user_id: string
+          user_agent?: string | null
+        }
+        Update: {
+          admin_user_id?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          ip_address?: string | null
+          started_at?: string
+          target_company_id?: string | null
+          target_user_id?: string
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
       instance_status_history: {
         Row: {
           changed_at: string
