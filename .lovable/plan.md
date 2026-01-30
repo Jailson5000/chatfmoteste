@@ -1,174 +1,244 @@
 
-# Melhoria no Sistema de Reconexão Automática de WhatsApp
 
-## Diagnóstico do Problema
+# Análise e Melhorias do Sistema de Alertas de Instâncias Desconectadas
 
-O sistema atual de auto-reconexão (`auto-reconnect-instances`) possui uma lacuna importante:
+## Situação Atual
 
-**Fluxo Atual:**
+O sistema de alertas está funcional e bem estruturado:
+
+| Componente | Status | Observação |
+|------------|--------|------------|
+| Edge Function `check-instance-alerts` | ✅ OK | Roda via CRON cada 5 minutos |
+| Threshold de alerta | 5 min (disconnected), 10 min (connecting) | Adequado |
+| Flag `alert_sent_for_current_disconnect` | ✅ Implementado | Evita alertas duplicados |
+| Reset da flag no webhook | ✅ Implementado | Linha 3532 do evolution-webhook |
+| Log de alertas | ✅ Implementado | `admin_notification_logs` |
+
+### Dados do Banco
+
 ```
-1. Instância fica "disconnected" no banco
-2. auto-reconnect-instances → chama /instance/restart
-3. Se restart falha → chama /instance/connect
-4. Se retorna QR code → marca como awaiting_qr (para de tentar)
-```
-
-**Problema:**
-O sistema não verifica primeiro se a instância AINDA está conectada na Evolution API. Quando você clicou em "Atualizar Status", ele chamou `/instance/connectionState/` e descobriu que a sessão ainda estava ativa no servidor - apenas o banco de dados estava desatualizado.
-
-**Fluxo Ideal (Proposto):**
-```
-1. Instância fica "disconnected" no banco
-2. auto-reconnect-instances → PRIMEIRO verifica /instance/connectionState
-   - Se retorna "open/connected" → atualiza banco e pronto! (sem QR)
-   - Se retorna outro estado → tenta restart/connect
-3. Menos interrupções para o cliente
+CRON: check-instance-alerts-every-5min → Ativo ✅
+Alertas de desconexão enviados: 0 recentes (histórico vazio recente)
+Instâncias conectadas: 4
+Instâncias desconectadas: 2 (ambas com awaiting_qr=true)
 ```
 
 ---
 
-## Solução Proposta
+## Problemas Identificados
 
-### Modificar `auto-reconnect-instances/index.ts`
+### 1. Alerta NÃO é enviado quando `awaiting_qr=true`
 
-Adicionar uma **verificação de status** antes de tentar restart:
+**Problema:** Instâncias que precisam de QR Code ficam **silenciadas** - o cliente não recebe alerta porque o sistema filtra `awaiting_qr=true`.
 
-| Etapa | Ação | Resultado |
-|-------|------|-----------|
-| 1 | Chamar `/instance/connectionState/{name}` | Verificar se está realmente offline |
-| 2 | Se status = "open" ou "connected" | Atualizar banco para "connected" e PARAR |
-| 3 | Se status ≠ conectado | Seguir fluxo atual (restart → connect) |
+**Exemplo Real:**
+- `inst_s10r2qh8` (FMOADV) está desconectada desde **16/Jan** (14 dias!)
+- Tem `alert_sent_for_current_disconnect: true` mas `awaiting_qr: true`
+- Isso significa que o alerta foi enviado UMA vez, mas nunca mais lembrou o cliente
 
-### Benefícios
+**Impacto:** Cliente pode ficar semanas sem saber que precisa reconectar.
 
-1. **Menos falsos positivos**: Se a Evolution API ainda tem a sessão ativa, não precisa fazer nada
-2. **Cliente não fica OFF**: Reconecta automaticamente sem precisar de QR quando possível
-3. **Reduz alertas desnecessários**: Menos e-mails de "WhatsApp desconectado"
-4. **Mais robusto**: Tenta 3x com verificação de status, não apenas restart cego
+### 2. Falta de Alerta Recorrente (Lembrete)
+
+O sistema envia apenas **UM** alerta por ciclo de desconexão. Se o cliente não viu o e-mail ou esqueceu, ficará offline indefinidamente sem novas notificações.
+
+### 3. Não há Notificação ao Admin Global
+
+Quando uma instância fica desconectada por muito tempo (ex: >24h), o admin global não é notificado. Apenas o cliente recebe o alerta.
+
+### 4. Tipo de Evento Inconsistente
+
+O código salva como `INSTANCE_DISCONNECTION_ALERT` mas a UI procura por `INSTANCE_DISCONNECTED_ALERT` (com "ED" no final). Isso faz com que os alertas não apareçam corretamente na tela de histórico.
 
 ---
 
-## Código da Modificação
+## Melhorias Propostas
 
-### Nova função: `checkConnectionState`
+### Melhoria 1: Alerta Lembrete para Instâncias Offline Prolongado
+
+Enviar um **lembrete** após 24h se a instância ainda estiver desconectada:
 
 ```typescript
-// Check if instance is actually connected on Evolution API before attempting restart
-async function checkConnectionState(instance: InstanceToReconnect): Promise<{
-  isConnected: boolean;
-  state: string;
-}> {
-  const apiUrl = normalizeUrl(instance.api_url);
-  
-  try {
-    console.log(`[Auto-Reconnect] Checking connection state for ${instance.instance_name}...`);
-    
-    const statusResponse = await fetchWithTimeout(
-      `${apiUrl}/instance/connectionState/${encodeURIComponent(instance.instance_name)}`,
-      {
-        method: "GET",
-        headers: {
-          apikey: instance.api_key,
-          "Content-Type": "application/json",
-        },
-      },
-      10000
-    );
+// Nova lógica: Alerta inicial após 5min, lembrete após 24h
+const REMINDER_THRESHOLD_HOURS = 24;
 
-    if (!statusResponse.ok) {
-      console.log(`[Auto-Reconnect] Connection state check returned ${statusResponse.status}`);
-      return { isConnected: false, state: "unknown" };
-    }
-
-    const data = await statusResponse.json();
-    const state = data.state || data.instance?.state || "unknown";
-    const isConnected = state === "open" || state === "connected";
-    
-    console.log(`[Auto-Reconnect] Connection state for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
-    
-    return { isConnected, state };
-  } catch (error: any) {
-    console.log(`[Auto-Reconnect] Connection state check failed for ${instance.instance_name}:`, error.message);
-    return { isConnected: false, state: "error" };
-  }
+// Adicionar condição para re-alertar após 24h mesmo se awaiting_qr=true
+if (instance.awaiting_qr && 
+    instance.last_alert_sent_at && 
+    hoursSinceLastAlert >= REMINDER_THRESHOLD_HOURS) {
+  // Enviar lembrete
 }
 ```
 
-### Modificação no loop principal
+### Melhoria 2: Notificar Admin Global em Desconexões Prolongadas
 
-Antes de chamar `attemptRestart`, adicionar:
+Se uma instância ficar offline por mais de 48h, notificar também o admin global:
 
 ```typescript
-// STEP 1: Check if instance is actually connected in Evolution API
-// This catches cases where the DB is out of sync but session is still active
-const connectionCheck = await checkConnectionState(instance);
+const ADMIN_ESCALATION_HOURS = 48;
 
-if (connectionCheck.isConnected) {
-  console.log(`[Auto-Reconnect] Instance ${instance.instance_name} is actually connected in Evolution API - updating DB only`);
-  
-  // Update database to connected status
-  await supabaseClient
-    .from("whatsapp_instances")
-    .update({
-      status: "connected",
-      disconnected_since: null,
-      reconnect_attempts_count: 0,
-      awaiting_qr: false,
-      manual_disconnect: false,
-      alert_sent_for_current_disconnect: false,
-      updated_at: now.toISOString(),
-    })
-    .eq("id", instance.id);
-  
-  results.push({
-    instance_id: instance.id,
-    instance_name: instance.instance_name,
-    success: true,
-    action: "status_sync",
-    message: "Instance was already connected - database synced",
-  });
-  
-  continue; // Skip to next instance, no restart needed
+// Se offline > 48h, incluir admin global no alerta
+if (hoursDisconnected >= ADMIN_ESCALATION_HOURS) {
+  const adminEmail = Deno.env.get("ADMIN_NOTIFICATION_EMAIL");
+  // Enviar cópia para admin global
 }
+```
 
-// STEP 2: If not connected, proceed with restart attempt
-const result = await attemptRestart(instance);
+### Melhoria 3: Corrigir Tipo de Evento para Consistência
+
+Alterar de `INSTANCE_DISCONNECTION_ALERT` para `INSTANCE_DISCONNECTED_ALERT` para compatibilidade com a UI.
+
+### Melhoria 4: Adicionar Metadados Mais Ricos no Log
+
+Incluir mais informações no log para análise:
+
+```typescript
+metadata: {
+  instances_count: result.instances_count,
+  threshold_minutes: ALERT_THRESHOLD_MINUTES,
+  instance_names: companyInstances.map(i => i.display_name || i.instance_name),
+  hours_disconnected: maxHoursDisconnected,
+  is_reminder: isReminderAlert,
+  awaiting_qr: hasAwaitingQr,
+}
 ```
 
 ---
 
-## Resumo das Alterações
+## Arquivos a Modificar
 
 | Arquivo | Modificação |
 |---------|-------------|
-| `supabase/functions/auto-reconnect-instances/index.ts` | Adicionar verificação de status antes de restart |
+| `supabase/functions/check-instance-alerts/index.ts` | Adicionar lembrete 24h, escalação admin, corrigir event_type |
+| `src/hooks/useNotificationLogs.tsx` | Adicionar contagem de alertas de instância nas stats |
+| `src/pages/global-admin/GlobalAdminAlertHistory.tsx` | Corrigir mapeamento do event_type |
 
 ---
 
-## Fluxo Final Melhorado
+## Código das Modificações
+
+### 1. check-instance-alerts/index.ts - Adicionar Sistema de Lembrete
+
+```typescript
+// Novos thresholds
+const ALERT_THRESHOLD_MINUTES = 5;
+const CONNECTING_ALERT_THRESHOLD_MINUTES = 10;
+const REMINDER_THRESHOLD_HOURS = 24; // Lembrete após 24h
+const ADMIN_ESCALATION_HOURS = 48; // Notificar admin global após 48h
+
+// Modificar filtro para permitir lembretes mesmo com awaiting_qr
+const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
+  if (instance.manual_disconnect === true) {
+    return false;
+  }
+  
+  // Para instâncias que já receberam alerta
+  if (instance.alert_sent_for_current_disconnect === true) {
+    // Verificar se já passou tempo suficiente para lembrete
+    if (instance.last_alert_sent_at) {
+      const hoursSinceAlert = (Date.now() - new Date(instance.last_alert_sent_at).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceAlert >= REMINDER_THRESHOLD_HOURS) {
+        // Marcar como lembrete para diferenciar no e-mail
+        (instance as any).isReminder = true;
+        return true; // Permitir re-alerta como lembrete
+      }
+    }
+    return false;
+  }
+  
+  // Primeiro alerta - não enviar se awaiting_qr (usuário já sabe que precisa escanear)
+  if (instance.awaiting_qr === true) {
+    return false;
+  }
+  
+  return true;
+});
+```
+
+### 2. Modificar Assunto e Conteúdo do E-mail para Lembretes
+
+```typescript
+// Verificar se é lembrete
+const isReminderAlert = (instance as any).isReminder === true;
+
+const alertTitle = isReminderAlert
+  ? '🔔 Lembrete: WhatsApp ainda desconectado'
+  : hasConnectingIssue 
+    ? '⚠️ Alerta: WhatsApp com Problema de Conexão'
+    : '⚠️ Alerta: WhatsApp Desconectado';
+
+const subject = isReminderAlert
+  ? `🔔 Lembrete: WhatsApp desconectado há ${daysDisconnected} dias - ${companyName}`
+  : `⚠️ WhatsApp desconectado - ${companyName}`;
+```
+
+### 3. Adicionar Escalação para Admin Global
+
+```typescript
+// Após enviar para o cliente, verificar se precisa escalar para admin global
+const hoursDisconnected = instance.disconnected_since 
+  ? (Date.now() - new Date(instance.disconnected_since).getTime()) / (1000 * 60 * 60)
+  : 0;
+
+if (hoursDisconnected >= ADMIN_ESCALATION_HOURS && globalAdminEmail) {
+  // Enviar alerta para admin global também
+  await resend.emails.send({
+    from: "MIAUCHAT <onboarding@resend.dev>",
+    to: [globalAdminEmail],
+    subject: `🚨 Instância offline há ${Math.floor(hoursDisconnected)}h - ${companyName}`,
+    html: escalationEmailHtml,
+  });
+}
+```
+
+### 4. Corrigir Event Type na UI
+
+```typescript
+// Em GlobalAdminAlertHistory.tsx - linha 57
+INSTANCE_DISCONNECTION_ALERT: {  // Corrigir para o nome real usado no código
+  label: "Instância Desconectada",
+  icon: <AlertTriangle className="h-4 w-4" />,
+  color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+},
+```
+
+### 5. Atualizar Stats no useNotificationLogs
+
+```typescript
+// Em useNotificationLogs.tsx
+byType: {
+  success: logs.filter(l => l.event_type === 'COMPANY_PROVISIONING_SUCCESS').length,
+  failed: logs.filter(l => l.event_type === 'COMPANY_PROVISIONING_FAILED').length,
+  partial: logs.filter(l => l.event_type === 'COMPANY_PROVISIONING_PARTIAL').length,
+  integrationDown: logs.filter(l => l.event_type === 'INTEGRATION_DOWN').length,
+  instanceDisconnected: logs.filter(l => l.event_type === 'INSTANCE_DISCONNECTION_ALERT').length, // NOVO
+},
+```
+
+---
+
+## Fluxo Final com Melhorias
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  AUTO-RECONNECT MELHORADO                                       │
+│  SISTEMA DE ALERTAS MELHORADO                                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  1. Instância marcada como "disconnected" no banco              │
+│  Instância desconecta                                            │
 │     ↓                                                            │
-│  2. CRON executa auto-reconnect-instances (cada 1 min)          │
+│  [5 min] Primeiro alerta enviado para cliente                   │
 │     ↓                                                            │
-│  3. [NOVO] Verificar /instance/connectionState primeiro         │
+│  Marca: alert_sent_for_current_disconnect = true                │
 │     ↓                                                            │
-│  4a. Se "open/connected":                                        │
-│      → Atualiza banco para "connected"                          │
-│      → Cliente NÃO fica offline ✅                               │
-│      → Sem QR necessário ✅                                      │
+│  [24h depois] Cliente não reconectou?                            │
 │     ↓                                                            │
-│  4b. Se não conectado:                                           │
-│      → Tenta /instance/restart                                   │
-│      → Se falhar, tenta /instance/connect                        │
-│      → Se retornar QR → marca awaiting_qr                        │
-│                                                                  │
-│  Máximo: 3 tentativas em 3 minutos                              │
+│  Envia LEMBRETE: "Ainda desconectado há X dias"                  │
+│     ↓                                                            │
+│  [48h depois] Ainda desconectado?                                │
+│     ↓                                                            │
+│  ESCALA para admin global: "Instância offline há 48h+"           │
+│     ↓                                                            │
+│  Cliente reconecta → Reset das flags → Ciclo reinicia           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -177,8 +247,10 @@ const result = await attemptRestart(instance);
 
 ## Checklist de Validação
 
-- [ ] Verificar status antes de tentar restart
-- [ ] Se já conectado na Evolution → sincronizar banco apenas
-- [ ] Se não conectado → seguir fluxo de restart/connect
-- [ ] Logs claros para depuração
-- [ ] Não quebrar o fluxo existente para casos onde restart é necessário
+- [ ] Primeiro alerta enviado após 5 min de desconexão
+- [ ] Lembrete enviado após 24h se ainda desconectado
+- [ ] Admin global notificado após 48h
+- [ ] Event type consistente entre backend e frontend
+- [ ] Logs com metadados ricos para análise
+- [ ] Instâncias com `awaiting_qr` recebem lembrete após 24h
+
