@@ -224,6 +224,47 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
   }
 }
 
+// Check if instance is actually connected on Evolution API before attempting restart
+// This catches cases where the DB is out of sync but session is still active
+async function checkConnectionState(instance: InstanceToReconnect): Promise<{
+  isConnected: boolean;
+  state: string;
+}> {
+  const apiUrl = normalizeUrl(instance.api_url);
+  
+  try {
+    console.log(`[Auto-Reconnect] Checking connection state for ${instance.instance_name}...`);
+    
+    const statusResponse = await fetchWithTimeout(
+      `${apiUrl}/instance/connectionState/${encodeURIComponent(instance.instance_name)}`,
+      {
+        method: "GET",
+        headers: {
+          apikey: instance.api_key,
+          "Content-Type": "application/json",
+        },
+      },
+      10000
+    );
+
+    if (!statusResponse.ok) {
+      console.log(`[Auto-Reconnect] Connection state check returned ${statusResponse.status}`);
+      return { isConnected: false, state: "unknown" };
+    }
+
+    const data = await statusResponse.json();
+    const state = data.state || data.instance?.state || "unknown";
+    const isConnected = state === "open" || state === "connected";
+    
+    console.log(`[Auto-Reconnect] Connection state for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
+    
+    return { isConnected, state };
+  } catch (error: any) {
+    console.log(`[Auto-Reconnect] Connection state check failed for ${instance.instance_name}:`, error.message);
+    return { isConnected: false, state: "error" };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -346,6 +387,41 @@ serve(async (req) => {
         continue;
       }
 
+      // STEP 1: Check if instance is actually connected in Evolution API
+      // This catches cases where the DB is out of sync but session is still active
+      const connectionCheck = await checkConnectionState(instance);
+
+      if (connectionCheck.isConnected) {
+        console.log(`[Auto-Reconnect] Instance ${instance.instance_name} is actually connected in Evolution API - updating DB only`);
+        
+        // Update database to connected status - no restart needed!
+        await supabaseClient
+          .from("whatsapp_instances")
+          .update({
+            status: "connected",
+            disconnected_since: null,
+            reconnect_attempts_count: 0,
+            awaiting_qr: false,
+            manual_disconnect: false,
+            alert_sent_for_current_disconnect: false,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", instance.id);
+        
+        results.push({
+          instance_id: instance.id,
+          instance_name: instance.instance_name,
+          success: true,
+          action: "status_sync",
+          message: `Instance was already connected (state: ${connectionCheck.state}) - database synced`,
+        });
+        
+        // Small delay between instances
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue; // Skip to next instance, no restart needed
+      }
+
+      // STEP 2: If not connected, proceed with restart attempt
       // Update attempt counter BEFORE trying
       const windowStart = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60 * 1000);
       const lastAttempt = instance.last_reconnect_attempt_at 
@@ -436,9 +512,10 @@ serve(async (req) => {
     const successCount = results.filter(r => r.success).length;
     const failedCount = results.filter(r => !r.success && r.action !== "skipped").length;
     const skippedCount = results.filter(r => r.action === "skipped").length;
+    const statusSyncCount = results.filter(r => r.action === "status_sync").length;
     const qrNeededCount = qrCodesNeeded.length;
 
-    console.log(`[Auto-Reconnect] Summary: ${successCount} successful, ${failedCount} failed, ${skippedCount} skipped, ${qrNeededCount} need QR scan`);
+    console.log(`[Auto-Reconnect] Summary: ${successCount} successful (${statusSyncCount} status syncs), ${failedCount} failed, ${skippedCount} skipped, ${qrNeededCount} need QR scan`);
 
     // Log the action in admin_notification_logs if there were attempts
     if (results.length > 0 && results.some(r => r.action !== "skipped")) {
@@ -449,6 +526,7 @@ serve(async (req) => {
         metadata: {
           total_attempts: results.filter(r => r.action !== "skipped").length,
           successful: successCount,
+          status_syncs: statusSyncCount,
           failed: failedCount,
           qr_needed: qrNeededCount,
           instances: results.map(r => ({
