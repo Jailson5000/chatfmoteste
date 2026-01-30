@@ -1,190 +1,204 @@
 
+# Correção: Mensagens WABA com Templates Não Aparecem no Sistema
 
-# Análise Completa do Sistema MiauChat SaaS - Prontidão para Produção
+## Diagnóstico
 
-## Resumo Executivo
+Mensagens enviadas via API Oficial do WhatsApp (WABA) usando templates de marketing não estão sendo exibidas porque o webhook não extrai o conteúdo deste tipo de mensagem.
 
-O sistema está **operacional** e pronto para escala, com a arquitetura multi-tenant funcionando corretamente. Foram identificados **2 alertas de segurança** (já conhecidos) e **0 bugs críticos bloqueantes**. A remoção do sistema de impersonation foi concluída com sucesso.
+### Evidência do Banco de Dados
 
----
-
-## Status Geral por Área
-
-| Área | Status | Observações |
-|------|--------|-------------|
-| Autenticação | ✅ OK | Login, registro, recuperação de senha funcionando |
-| Multi-Tenant | ✅ OK | Isolamento por subdomain e RLS funcionando |
-| Dashboard | ✅ OK | Métricas e gráficos carregando |
-| Conversas | ✅ OK | Chat, paginação, realtime funcionando |
-| Kanban | ✅ OK | Drag & drop, filtros, agrupamentos |
-| Contatos | ✅ OK | CRUD, import, export |
-| Conexões WhatsApp | ✅ OK | QR Code, status, webhook |
-| Agentes IA | ✅ OK | CRUD, pastas, configuração |
-| Agenda Pro | ✅ OK | Agendamentos, profissionais, clientes |
-| Tarefas | ✅ OK | Kanban, lista, calendário |
-| Suporte | ✅ OK | Tickets, mensagens |
-| Global Admin | ✅ OK | Empresas, planos, monitoramento |
-| Edge Functions | ✅ OK | 50+ funções, sem erros recentes |
-
----
-
-## Alertas de Segurança Identificados
-
-### 1. Leaked Password Protection Desabilitada (WARN)
-**Severidade:** Média  
-**Status:** Pendente (requer Supabase Dashboard)  
-**Descrição:** A proteção contra senhas vazadas não está habilitada. Esta funcionalidade verifica se a senha do usuário foi exposta em vazamentos conhecidos.
-
-**Ação Requerida:**  
-Acessar Supabase Dashboard → Authentication → Settings → Enable "Leaked Password Protection"
-
-### 2. Security Definer Views (ERROR do Linter)
-**Severidade:** Baixa (Falso Positivo)  
-**Status:** OK - Por Design  
-**Descrição:** O linter detecta views com SECURITY DEFINER, mas isso é intencional:
-- `whatsapp_instances_safe` - Oculta api_key
-- `google_calendar_integrations_safe` - Oculta tokens OAuth
-- `company_usage_summary` - Agregação de métricas
-
-Estas views são seguras e seguem o padrão recomendado para ocultar campos sensíveis.
-
----
-
-## Erros Encontrados nos Logs (Investigados)
-
-Os erros SQL encontrados foram:
-```
-column clients.name does not exist
-column conversations.contact_name does not exist
+A mensagem chegou com conteúdo vazio:
+```sql
+content: '' (vazio)
+message_type: 'text'
+whatsapp_message_id: '75CB20B6BA140FA2A6'
 ```
 
-**Investigação:** 
-- Verifiquei o schema e **ambas as colunas existem** nas tabelas (`clients.name` e `conversations.contact_name`)
-- Estes erros são provavelmente de queries antigas ou triggers desatualizados
-- Não há impacto funcional visível no sistema
+### Payload Real Recebido
 
-**Ação Requerida:** Nenhuma ação imediata necessária. Monitorar se erros persistem.
-
----
-
-## Funcionalidades Verificadas
-
-### Páginas Principais
-
-| Página | Arquivo | Status | Notas |
-|--------|---------|--------|-------|
-| Login | `Auth.tsx` | ✅ OK | Validação Zod, timeout de segurança |
-| Registro | `Register.tsx` | ✅ OK | Trial + pagamento, subdomain check |
-| Dashboard | `Dashboard.tsx` | ✅ OK | 780 linhas, gráficos, filtros |
-| Conversas | `Conversations.tsx` | ✅ OK | 4762 linhas, chat completo |
-| Kanban | `Kanban.tsx` | ✅ OK | Drag & drop, agrupamentos |
-| Contatos | `Contacts.tsx` | ✅ OK | CRUD, paginação, export |
-| Conexões | `Connections.tsx` | ✅ OK | QR Code, webhook, status |
-| Agentes IA | `AIAgents.tsx` | ✅ OK | DnD folders, configuração |
-| Base Conhecimento | `KnowledgeBase.tsx` | ✅ OK | Upload, vinculação agentes |
-| Agenda Pro | `AgendaPro.tsx` | ✅ OK | 10 abas, completo |
-| Tarefas | `Tasks.tsx` | ✅ OK | Kanban, lista, calendário |
-| Configurações | `Settings.tsx` | ✅ OK | 7 abas |
-| Suporte | `Support.tsx` | ✅ OK | Tickets, mensagens |
-
-### Global Admin
-
-| Página | Status | Notas |
-|--------|--------|-------|
-| Dashboard | ✅ OK | Métricas, gráficos, alertas |
-| Empresas | ✅ OK | Impersonation removido, CRUD completo |
-| Conexões | ✅ OK | Visão global |
-| Planos | ✅ OK | CRUD |
-| Pagamentos | ✅ OK | Integração ASAAS |
-| Usuários | ✅ OK | Gestão admins |
-| Monitoramento | ✅ OK | Health checks |
-
----
-
-## Segurança Multi-Tenant
-
-### ProtectedRoute - Verificações Ativas
-
-```
-1. ✅ Autenticação obrigatória
-2. ✅ Verificação approval_status (pending/rejected → bloqueado)
-3. ✅ Verificação trial expirado → TrialExpired.tsx
-4. ✅ Validação subdomain (company_subdomain vs currentSubdomain)
-   - Main domain → TenantMismatch
-   - Wrong subdomain → TenantMismatch
-5. ✅ mustChangePassword → /change-password
+O webhook recebeu corretamente:
+```json
+{
+  "message": {
+    "templateMessage": {
+      "templateId": "2198726087325649",
+      "hydratedTemplate": {
+        "hydratedContentText": "Olá, tudo bem? Aqui é da *Assis & Mollerke...",
+        "imageMessage": { "url": "...", "mimetype": "image/jpeg" },
+        "hydratedButtons": [
+          { "quickReplyButton": { "displayText": "Saber mais" } },
+          { "quickReplyButton": { "displayText": "Bloquear Empresa" } },
+          { "quickReplyButton": { "displayText": "Sim, continuar" } }
+        ]
+      }
+    }
+  }
+}
 ```
 
-### RLS (Row Level Security)
+### Problema no Código
 
-- **84 tabelas** com políticas configuradas
-- **210+ políticas** de isolamento por `law_firm_id`
-- Função `get_user_law_firm_id()` usada consistentemente
-- Admins globais têm bypass via `is_admin()`
+O código em `evolution-webhook/index.ts` (linhas 4057-4250) NÃO trata `templateMessage`:
 
----
-
-## Edge Functions - Status
-
-| Função | Status | Notas |
-|--------|--------|-------|
-| ai-chat | ✅ OK | 3544 linhas, prompt injection protection |
-| evolution-webhook | ✅ OK | 4876 linhas, token validation |
-| register-company | ✅ OK | Trial + aprovação |
-| approve-company | ✅ OK | Provisioning |
-| asaas-webhook | ✅ OK | Pagamentos |
-| widget-messages | ✅ OK | Chat web |
-| Outras 45+ | ✅ OK | Sem erros recentes |
-
-**Nota:** A função `impersonate-user` foi deletada conforme solicitado.
+```typescript
+if (data.message?.conversation) {
+  messageContent = data.message.conversation;
+} else if (data.message?.extendedTextMessage?.text) {
+  messageContent = data.message.extendedTextMessage.text;
+} else if (data.message?.imageMessage) { ... }
+// ... outros tipos
+// FALTA: templateMessage!
+```
 
 ---
 
-## Remoção do Impersonation - Confirmado
+## Solução
 
-A funcionalidade "Acessar como Cliente" foi removida completamente:
-
-| Componente | Status |
-|------------|--------|
-| `useImpersonation.tsx` | ✅ DELETADO |
-| `ImpersonationBanner.tsx` | ✅ DELETADO |
-| `impersonate-user/` Edge Function | ✅ DELETADO |
-| Botão em GlobalAdminCompanies | ✅ REMOVIDO |
-| Lógica redirect em ProtectedRoute | ✅ REMOVIDA |
-| Busca por `useImpersonation` | ✅ Zero resultados |
+Adicionar extração de `templateMessage` no webhook, extraindo:
+1. `hydratedContentText` - O texto principal da mensagem
+2. `imageMessage` (opcional) - Se o template tiver imagem, tratar como mídia
+3. `hydratedButtons` - Listar as opções de botões no final do texto
 
 ---
 
-## Checklist Pré-Produção
+## Arquivos a Modificar
 
-### Crítico (Obrigatório)
-
-- [x] Autenticação funcionando
-- [x] Multi-tenant isolado por RLS
-- [x] Subdomain validation ativo
-- [x] Edge Functions sem erros
-- [x] Webhooks com token validation
-- [x] Console sem erros críticos
-
-### Recomendado (Próximas Semanas)
-
-- [ ] Habilitar Leaked Password Protection (Supabase Dashboard)
-- [ ] Configurar wildcard `https://*.miauchat.com.br/**` nas Redirect URLs (para magic links)
-- [ ] Monitorar logs de erros SQL (clients.name, conversations.contact_name)
-- [ ] Implementar rate limiting adicional em webhooks públicos
-
-### Opcional (Melhorias Futuras)
-
-- [ ] Testes E2E automatizados com Playwright
-- [ ] Dashboard de métricas de IA
-- [ ] Exportação de conversas em PDF
-- [ ] Audit trail de alterações de status
+| Arquivo | Modificação |
+|---------|-------------|
+| `supabase/functions/evolution-webhook/index.ts` | Adicionar extração de `templateMessage` |
 
 ---
 
-## Conclusão
+## Código da Correção
 
-O sistema **está pronto para venda em escala**. A arquitetura multi-tenant é robusta, com 84 tabelas protegidas por RLS e validação de subdomain em todas as rotas protegidas. As Edge Functions estão funcionando sem erros e o sistema de impersonation foi removido com sucesso.
+### evolution-webhook/index.ts - Adicionar suporte a templateMessage
 
-**Próximo passo imediato:** Habilitar "Leaked Password Protection" no Supabase Dashboard para aumentar a segurança de senhas.
+Após a linha 4250 (depois do bloco `interactiveResponseMessage`), adicionar:
 
+```typescript
+} else if (data.message?.templateMessage) {
+  // WABA: Template message (marketing/utility templates with text, image, buttons)
+  const template = data.message.templateMessage;
+  const hydrated = template.hydratedTemplate;
+  
+  if (hydrated) {
+    // Extract main text content
+    messageContent = hydrated.hydratedContentText || '';
+    
+    // Check if template has image
+    if (hydrated.imageMessage) {
+      messageType = 'image';
+      mediaUrl = hydrated.imageMessage.url || '';
+      mediaMimeType = hydrated.imageMessage.mimetype || 'image/jpeg';
+    } else if (hydrated.videoMessage) {
+      messageType = 'video';
+      mediaUrl = hydrated.videoMessage.url || '';
+      mediaMimeType = hydrated.videoMessage.mimetype || 'video/mp4';
+    } else if (hydrated.documentMessage) {
+      messageType = 'document';
+      mediaUrl = hydrated.documentMessage.url || '';
+      mediaMimeType = hydrated.documentMessage.mimetype || 'application/octet-stream';
+    }
+    
+    // Append button options to content for context
+    if (hydrated.hydratedButtons && Array.isArray(hydrated.hydratedButtons)) {
+      const buttonTexts = hydrated.hydratedButtons
+        .map((btn: any) => {
+          if (btn.quickReplyButton?.displayText) return btn.quickReplyButton.displayText;
+          if (btn.urlButton?.displayText) return btn.urlButton.displayText;
+          if (btn.callButton?.displayText) return btn.callButton.displayText;
+          return null;
+        })
+        .filter(Boolean);
+      
+      if (buttonTexts.length > 0) {
+        messageContent += '\n\n[Opções: ' + buttonTexts.join(' | ') + ']';
+      }
+    }
+  } else if (template.fourRowTemplate) {
+    // Older template format (fourRowTemplate)
+    messageContent = template.fourRowTemplate.content?.namespace || 
+                     template.fourRowTemplate.hydratedContentText || 
+                     '[Mensagem de template]';
+  } else {
+    messageContent = '[Mensagem de template]';
+  }
+  
+  logDebug('WABA_TEMPLATE', 'Template message processed', { 
+    requestId, 
+    templateId: template.templateId || hydrated?.templateId,
+    hasImage: !!mediaUrl,
+    contentLength: messageContent.length,
+    buttonCount: hydrated?.hydratedButtons?.length || 0
+  });
+}
+```
+
+### Também atualizar a interface MessageData (linha ~713)
+
+Adicionar tipo para templateMessage:
+
+```typescript
+templateMessage?: {
+  templateId?: string;
+  hydratedTemplate?: {
+    templateId?: string;
+    hydratedContentText?: string;
+    imageMessage?: {
+      url?: string;
+      mimetype?: string;
+      caption?: string;
+    };
+    videoMessage?: {
+      url?: string;
+      mimetype?: string;
+      caption?: string;
+    };
+    documentMessage?: {
+      url?: string;
+      mimetype?: string;
+      fileName?: string;
+    };
+    hydratedButtons?: Array<{
+      index?: number;
+      quickReplyButton?: { displayText?: string; id?: string };
+      urlButton?: { displayText?: string; url?: string };
+      callButton?: { displayText?: string; phoneNumber?: string };
+    }>;
+  };
+  fourRowTemplate?: {
+    content?: { namespace?: string };
+    hydratedContentText?: string;
+  };
+};
+```
+
+---
+
+## Resultado Esperado
+
+Após a correção, a mensagem aparecerá como:
+
+**Tipo:** `image` (se tiver imagem) ou `text`  
+**Conteúdo:**
+```
+Olá, tudo bem? Aqui é da *Assis & Mollerke Assessoria*, parceira oficial da *Autêntica Certificadora (ICP-Brasil)*.
+
+Conforme consulta, verificamos que a empresa J NERES RODRIGUES FERREIRA LTDA CNPJ: 64.774.567/0001-06 está apta para *emissão do Certificado Digital A1 100% online*, com validação por videochamada e sem deslocamento.
+
+O processo é rápido, seguro e autorizado pela ICP-Brasil. Podemos seguir com o seu certificado digital?
+
+Posso indicar o seu CNPJ e te mostrar como funciona a conta?
+
+[Opções: Saber mais | Bloquear Empresa | Sim, continuar]
+```
+
+---
+
+## Checklist de Validação
+
+- [ ] Mensagens WABA com templates aparecem no sistema
+- [ ] Texto do template é extraído corretamente
+- [ ] Imagem do template é exibida (se houver)
+- [ ] Botões do template são listados no final
+- [ ] Mensagens normais (QR Code/Baileys) continuam funcionando
