@@ -97,21 +97,54 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 6. Get company name for logging
+    // 6. Get company name AND subdomain for correct redirect
     let companyName = "Unknown";
+    let targetSubdomain: string | null = null;
+
+    // First, get subdomain from target user's law_firm
+    if (targetProfile.law_firm_id) {
+      const { data: targetLawFirm } = await supabaseAdmin
+        .from("law_firms")
+        .select("subdomain, name")
+        .eq("id", targetProfile.law_firm_id)
+        .single();
+
+      if (targetLawFirm?.subdomain) {
+        targetSubdomain = targetLawFirm.subdomain;
+      }
+      companyName = targetLawFirm?.name || "Unknown";
+    }
+
+    // Get company name from companies table if provided (for display)
     if (company_id) {
       const { data: company } = await supabaseAdmin
         .from("companies")
         .select("name")
         .eq("id", company_id)
         .single();
-      companyName = company?.name || "Unknown";
+      if (company?.name) {
+        companyName = company.name;
+      }
     }
 
     // 7. Generate a magic link for the target user
-    // This creates a one-time login link that expires in 1 hour
-    // Use origin from request to build correct redirect URL
-    const appOrigin = origin || "https://chatfmoteste.lovable.app";
+    // CRITICAL: Redirect to the client's subdomain, not the admin's origin
+    let appOrigin: string;
+
+    if (targetSubdomain) {
+      // Production: Use tenant's subdomain for correct ProtectedRoute validation
+      appOrigin = `https://${targetSubdomain}.miauchat.com.br`;
+      console.log("[impersonate-user] Using subdomain:", targetSubdomain);
+    } else if (origin?.includes('lovable.app') || origin?.includes('lovableproject.com') || origin?.includes('localhost')) {
+      // Development/Preview: Use request origin for testing (no subdomain configured)
+      appOrigin = origin;
+      console.log("[impersonate-user] Preview mode, using origin:", origin);
+    } else {
+      // Fallback for production main domain
+      appOrigin = origin || "https://chatfmoteste.lovable.app";
+      console.log("[impersonate-user] Fallback origin:", appOrigin);
+    }
+
     const redirectUrl = new URL("/dashboard", appOrigin);
     redirectUrl.searchParams.set("impersonating", "true");
     redirectUrl.searchParams.set("admin_id", callerUserId);
