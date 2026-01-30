@@ -1,70 +1,202 @@
 
-Objetivo
-- Garantir que as listas de empresas no Dashboard do Global Admin e em /global-admin/companies (aba Aprovadas) exibam todas as empresas e permitam rolagem, sem regressões.
+# Implementação: Monitoramento e Lembretes de Trial
 
-Diagnóstico (causa raiz)
-- O componente compartilhado `src/components/ui/scroll-area.tsx` (Radix ScrollArea) define o Viewport com `h-full`.
-- Em vários pontos (incluindo os dois que estão quebrados), usamos `ScrollArea` apenas com `max-h-[...]` (sem `h-[...]` ou sem estar em um container com altura explícita).
-- Nesse cenário:
-  - O `Root` fica com altura “auto” limitada por `max-height`, e tem `overflow-hidden`.
-  - O `Viewport` (com `h-full`) acaba não ficando efetivamente limitado pela `max-height` do Root (altura vira “auto”/conteúdo), então não cria um container rolável.
-  - Resultado: o conteúdo excedente é cortado pelo `overflow-hidden` do Root e “não tem como rolar” (exatamente o que aparece nas imagens).
+## Visão Geral
 
-Por que isso afeta especificamente Dashboard e Empresas Aprovadas
-- `CompanyUsageTable.tsx` usa `<ScrollArea className="max-h-[calc(100vh-480px)]">` (somente max-h).
-- `GlobalAdminCompanies.tsx` usa `<ScrollArea className="max-h-[calc(100vh-320px)]">` (somente max-h).
-- Sem o Viewport “herdar”/respeitar a altura máxima, o conteúdo é cortado e a rolagem não funciona.
+Implementar 3 funcionalidades relacionadas ao gerenciamento de trials:
 
-Estratégia de correção (mínima e com menor risco de regressão)
-1) Corrigir o comportamento do `ScrollArea` compartilhado para que `max-h-*` funcione como esperado
-- Ajustar `src/components/ui/scroll-area.tsx` para que o `Viewport` respeite a `max-height` do Root quando o Root usar `max-h-*`.
-- Implementação proposta:
-  - Adicionar `max-h-[inherit]` e `min-h-0` no `ScrollAreaPrimitive.Viewport`.
-  - Adicionar `min-h-0 min-w-0` também no `ScrollAreaPrimitive.Root` para melhorar comportamento em containers flex (padrão para scroll estável no Tailwind).
-- Efeito: qualquer `ScrollArea` com `max-h-*` passa a rolar corretamente, evitando ter que “remendar” página a página.
+1. **Indicador visual no Dashboard** - Mostrar empresas com trial expirando em 2 dias
+2. **Email automático de lembrete** - Enviar aviso 2 dias antes do trial expirar
+3. **Verificação do fluxo** - Testar se o bloqueio funciona corretamente
 
-2) Reajustar os cálculos de altura dos dois pontos críticos (opcional, mas recomendado)
-- Mesmo com a rolagem funcionando, hoje o Dashboard pode mostrar poucas linhas visíveis por causa de `calc(100vh-480px)` (mais “apertado” do que o necessário).
-- Ajustes recomendados:
-  - `src/components/global-admin/CompanyUsageTable.tsx`: trocar para algo menos restritivo, ex.: `max-h-[calc(100vh-320px)]` (ou `-360px`), para aumentar área visível e ainda manter scroll interno.
-  - `src/pages/global-admin/GlobalAdminCompanies.tsx`: manter `max-h-[calc(100vh-320px)]` (após o fix do ScrollArea isso já deve funcionar), e só ajustar se ainda ficar apertado em telas menores.
-- Observação: esses números podem ser refinados depois, mas o essencial é: com ScrollArea corrigido, a lista não fica mais “inacessível”.
+---
 
-3) Validar que não existe um segundo bloqueio de scroll por CSS
-- Confirmar que o container principal do Global Admin (`GlobalAdminLayout`) permanece com `main className="flex-1 overflow-auto ..."` (ele está correto).
-- Confirmar que nenhum wrapper adicional está “matando” a rolagem por overflow hidden fora dos lugares necessários.
+## 1. Indicador Visual no Dashboard
 
-Arquivos a alterar
-- `src/components/ui/scroll-area.tsx` (correção estrutural para max-height funcionar)
-- `src/components/global-admin/CompanyUsageTable.tsx` (ajuste fino do max-h para melhorar visibilidade no Dashboard)
-- `src/pages/global-admin/GlobalAdminCompanies.tsx` (ajuste fino do max-h se necessário; a correção principal vem do ScrollArea)
+### Objetivo
+Adicionar um card de alerta destacado no Dashboard do Global Admin mostrando empresas com trial expirando nos próximos 2 dias para acompanhamento proativo.
 
-Plano de testes (para evitar regressão)
-A) Teste end-to-end (obrigatório)
-1. Acessar `/global-admin`:
-   - Verificar que a tabela “Empresas Ativas” permite rolar até a última empresa.
-   - Verificar que nenhuma linha fica “cortada” sem possibilidade de acessar.
-   - Verificar que o scroll do painel não “trava” (wheel/trackpad e arraste da barra).
-2. Acessar `/global-admin/companies` na aba “Aprovadas”:
-   - Verificar que a tabela rola até o final e mostra todas as empresas.
-   - Verificar que o cabeçalho não some de forma estranha ao rolar (se o sticky header não funcionar por causa do wrapper da tabela, isso não impede o acesso às empresas; mas vamos observar).
+### Alterações no `src/hooks/useSystemMetrics.tsx`
 
-B) Checagem de regressão rápida (importante, pois mexe em componente compartilhado)
-- Abrir pelo menos 3 lugares que usam `ScrollArea max-h-*`:
-  - Popovers/filters (ex.: filtros de conversas / filtros de kanban).
-  - Dialogs com listas longas.
-  - Sidebar do Global Admin (que usa `ScrollArea flex-1`).
-- Confirmar que continuam rolando como antes e que não surgiram scrollbars “duplos”.
+Adicionar nova métrica `companiesTrialExpiringSoon` no cálculo:
 
-C) (Opcional) Teste automatizado
-- Criar um teste Playwright simples que:
-  - Abre `/global-admin/companies`,
-  - Encontra o container rolável da lista,
-  - Faz scroll até o final,
-  - Verifica que a última linha fica visível.
-- Isso ajuda a evitar que o problema volte no futuro.
+```typescript
+// Nova métrica a ser calculada
+let companiesTrialExpiringSoon = 0;
 
-Critérios de aceite
-- Dashboard: lista “Empresas Ativas” mostra todas as empresas via rolagem (sem cortes inacessíveis).
-- Empresas Aprovadas: tabela mostra todas as empresas via rolagem (sem cortes inacessíveis).
-- Nenhuma regressão perceptível em scroll/UX em outras áreas que usam `ScrollArea`.
+// No forEach de companiesDetailResult.data
+const trialEndsAt = new Date(company.trial_ends_at);
+const daysRemaining = Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+if (daysRemaining > 0 && daysRemaining <= 2) {
+  companiesTrialExpiringSoon++;
+}
+```
+
+### Alterações no `src/pages/global-admin/GlobalAdminDashboard.tsx`
+
+Adicionar um **card de alerta** abaixo do header (antes dos stats cards) quando houver empresas expirando:
+
+```tsx
+{/* Alerta de Trials Expirando */}
+{dashboardMetrics?.companiesTrialExpiringSoon > 0 && (
+  <div 
+    className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center gap-4 cursor-pointer hover:bg-orange-500/15 transition-colors"
+    onClick={() => navigate("/global-admin/companies?trial=expiring_soon")}
+  >
+    <div className="p-3 rounded-full bg-orange-500/20">
+      <AlertTriangle className="h-6 w-6 text-orange-400" />
+    </div>
+    <div className="flex-1">
+      <p className="text-orange-400 font-semibold">
+        {dashboardMetrics.companiesTrialExpiringSoon} empresa(s) com trial expirando em até 2 dias
+      </p>
+      <p className="text-white/50 text-sm">
+        Clique para ver e tomar ação preventiva
+      </p>
+    </div>
+    <ArrowUpRight className="h-5 w-5 text-orange-400" />
+  </div>
+)}
+```
+
+---
+
+## 2. Email Automático de Lembrete (2 dias antes)
+
+### Objetivo
+Criar uma Edge Function que rode via cron job diariamente e envie emails de lembrete para empresas cujo trial expira em exatamente 2 dias.
+
+### Nova Edge Function: `supabase/functions/process-trial-reminders/index.ts`
+
+```typescript
+// Lógica principal:
+// 1. Buscar empresas com trial_ends_at entre hoje+1.5 dias e hoje+2.5 dias
+// 2. Para cada empresa, verificar se já enviou lembrete (deduplicação)
+// 3. Obter email do admin da empresa via profiles
+// 4. Enviar email personalizado via Resend
+// 5. Registrar log para evitar duplicatas
+```
+
+### Estrutura do Email
+
+| Seção | Conteúdo |
+|-------|----------|
+| **Assunto** | `⏰ Seu período de trial expira em 2 dias - [Nome Empresa]` |
+| **Corpo** | Aviso amigável, data de expiração, CTA para pagar, link de suporte |
+
+### Tabela de Log (deduplicação)
+
+Utilizar a tabela existente `admin_notification_logs` para registrar envios:
+- `event_type`: `'TRIAL_REMINDER_2_DAYS'`
+- `tenant_id`: ID da empresa
+- `event_key`: `'trial_reminder_2d_{company_id}_{trial_ends_at}'`
+
+### Configuração do Cron Job
+
+Adicionar no Supabase via SQL (executa diariamente às 9h horário de Brasília):
+
+```sql
+SELECT cron.schedule(
+  'process-trial-reminders-daily',
+  '0 12 * * *',  -- 12:00 UTC = 9:00 BRT
+  $$
+  SELECT net.http_post(
+    url := 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/process-trial-reminders',
+    headers := '{"Authorization": "Bearer ANON_KEY"}'::jsonb
+  )
+  $$
+);
+```
+
+### Atualização do `supabase/config.toml`
+
+```toml
+[functions.process-trial-reminders]
+verify_jwt = false
+```
+
+---
+
+## 3. Verificação do Fluxo de Trial Expirado
+
+### Teste Manual (Navegação)
+
+1. Acessar `/global-admin/companies`
+2. Localizar empresa em trial (ex: "Miau test" com 4 dias restantes)
+3. Confirmar que badge mostra corretamente dias restantes
+
+### Validação do Bloqueio
+
+O bloqueio está implementado em `src/components/auth/ProtectedRoute.tsx`:
+
+```typescript
+// Linha 59-62 - Lógica de bloqueio
+if (trial_type && trial_type !== 'none' && trial_expired) {
+  console.log('[ProtectedRoute] Blocking: Trial expired at', trial_ends_at);
+  return <TrialExpired trialEndsAt={trial_ends_at} planName={plan_name} />;
+}
+```
+
+Para testar completamente seria necessário:
+- Modificar temporariamente `trial_ends_at` de uma empresa para data no passado
+- Fazer login como usuário dessa empresa
+- Confirmar que é redirecionado para `TrialExpired.tsx`
+
+---
+
+## Arquivos a Modificar/Criar
+
+| Arquivo | Ação |
+|---------|------|
+| `src/hooks/useSystemMetrics.tsx` | Adicionar métrica `companiesTrialExpiringSoon` |
+| `src/pages/global-admin/GlobalAdminDashboard.tsx` | Adicionar card de alerta para trials expirando |
+| `supabase/functions/process-trial-reminders/index.ts` | **Criar** - Edge function para envio de lembretes |
+| `supabase/config.toml` | Adicionar configuração da nova função |
+
+---
+
+## Template do Email de Lembrete
+
+```html
+Assunto: ⏰ Seu período de trial expira em 2 dias - {empresa}
+
+Olá {nome},
+
+Seu período de teste do MiauChat expira em 2 dias ({data_expiracao}).
+
+Após essa data, o acesso ao sistema será bloqueado automaticamente.
+
+Para continuar usando todas as funcionalidades:
+👉 [Botão: Assinar Agora]
+
+Caso tenha dúvidas sobre os planos disponíveis, 
+entre em contato com nosso suporte.
+
+Atenciosamente,
+Equipe MiauChat
+```
+
+---
+
+## Fluxo Completo de Trial
+
+```text
++----------------+      +-------------------+      +------------------+
+| Cadastro       |  →   | Trial Ativo       |  →   | Lembrete Email   |
+| (7 dias trial) |      | (acesso liberado) |      | (2 dias antes)   |
++----------------+      +-------------------+      +------------------+
+                                                          ↓
+                        +-------------------+      +------------------+
+                        | Empresa Paga      |  ←   | Trial Expirado   |
+                        | (acesso liberado) |      | (bloqueado)      |
+                        +-------------------+      +------------------+
+```
+
+---
+
+## Resultado Esperado
+
+1. **Dashboard**: Card laranja visível quando há empresas com trial expirando em 2 dias, clicável para filtrar
+2. **Email**: Enviado automaticamente às 9h (BRT) para admin de empresas com trial expirando
+3. **Bloqueio**: Confirmado que empresas com trial expirado veem tela de pagamento
