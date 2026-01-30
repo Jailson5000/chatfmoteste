@@ -7,11 +7,51 @@ interface ImpersonationState {
   isImpersonating: boolean;
   adminId: string | null;
   companyName: string | null;
-  targetUserId: string | null;
+  targetUserId: null;
 }
 
 const IMPERSONATION_KEY = "miauchat_impersonation";
 
+// Standalone function for starting impersonation (no hooks needed)
+// Use this in GlobalAdmin pages to avoid router hook conflicts
+export async function startImpersonationAction(targetUserId: string, companyId?: string) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session?.access_token) {
+      toast.error("Você precisa estar logado como admin global");
+      return { success: false, error: "Not authenticated" };
+    }
+
+    const response = await supabase.functions.invoke("impersonate-user", {
+      body: { target_user_id: targetUserId, company_id: companyId },
+    });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    if (!response.data?.success) {
+      throw new Error(response.data?.error || "Failed to impersonate");
+    }
+
+    // Open the impersonation URL in a new tab
+    const impersonationUrl = response.data.url;
+    window.open(impersonationUrl, "_blank");
+
+    toast.success(`Abrindo sessão como ${response.data.target_user?.name || "cliente"}`, {
+      description: `Empresa: ${response.data.company_name}`,
+    });
+
+    return { success: true, url: impersonationUrl };
+  } catch (error: any) {
+    console.error("[startImpersonationAction] Error:", error);
+    toast.error(`Erro ao acessar como cliente: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+// Hook for detecting impersonation state (use in client-facing layouts)
 export function useImpersonation() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -75,43 +115,11 @@ export function useImpersonation() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Start impersonation (called from GlobalAdmin)
-  const startImpersonation = useCallback(async (targetUserId: string, companyId?: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        toast.error("Você precisa estar logado como admin global");
-        return { success: false, error: "Not authenticated" };
-      }
-
-      const response = await supabase.functions.invoke("impersonate-user", {
-        body: { target_user_id: targetUserId, company_id: companyId },
-      });
-
-      if (response.error) {
-        throw new Error(response.error.message);
-      }
-
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || "Failed to impersonate");
-      }
-
-      // Open the impersonation URL in a new tab
-      const impersonationUrl = response.data.url;
-      window.open(impersonationUrl, "_blank");
-
-      toast.success(`Abrindo sessão como ${response.data.target_user?.name || "cliente"}`, {
-        description: `Empresa: ${response.data.company_name}`,
-      });
-
-      return { success: true, url: impersonationUrl };
-    } catch (error: any) {
-      console.error("[useImpersonation] Error:", error);
-      toast.error(`Erro ao acessar como cliente: ${error.message}`);
-      return { success: false, error: error.message };
-    }
-  }, []);
+  // Start impersonation (wrapper around standalone function)
+  const startImpersonation = useCallback(
+    (targetUserId: string, companyId?: string) => startImpersonationAction(targetUserId, companyId),
+    []
+  );
 
   // End impersonation (called from banner)
   const endImpersonation = useCallback(async () => {

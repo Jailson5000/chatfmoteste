@@ -57,13 +57,12 @@ import { formatPhone, formatDocument } from "@/lib/inputMasks";
 import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSection";
 import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
-import { useImpersonation } from "@/hooks/useImpersonation";
+import { startImpersonationAction } from "@/hooks/useImpersonation";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
   const { plans } = usePlans();
   const { summary: orphanSummary } = useOrphanLawFirms();
-  const { startImpersonation } = useImpersonation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -1447,7 +1446,7 @@ export default function GlobalAdminCompanies() {
                                       return;
                                     }
                                     setImpersonatingCompany(company.id);
-                                    await startImpersonation(company.admin_user_id, company.id);
+                                    await startImpersonationAction(company.admin_user_id, company.id);
                                     setImpersonatingCompany(null);
                                   }}
                                   disabled={impersonatingCompany === company.id || !company.admin_user_id}
