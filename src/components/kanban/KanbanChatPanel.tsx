@@ -129,6 +129,13 @@ function isEncryptedMedia(url: string): boolean {
   return url.includes(".enc") || url.includes("mmg.whatsapp.net");
 }
 
+// Check if URL is a public storage URL (doesn't need decryption)
+function isPublicStorageUrl(url: string): boolean {
+  if (!url) return false;
+  return url.includes('supabase.co/storage/v1/object/public/') || 
+         url.includes('.supabase.co/storage/v1/object/public/');
+}
+
 // Transcription cache
 const transcriptionCache = new Map<string, string>();
 
@@ -157,8 +164,17 @@ function KanbanAudioPlayer({
   // Transcription state
   const [transcription, setTranscription] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [blobFailed, setBlobFailed] = useState(false);
 
-  const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
+  // Check if URL is already directly playable (blob URL, public URL, or data URL)
+  const isBlobUrl = src?.startsWith('blob:');
+  const isDataUrl = src?.startsWith('data:');
+  const isPublicUrl = isPublicStorageUrl(src || '');
+  const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl;
+
+  // Only try to decrypt encrypted WhatsApp media that isn't already playable
+  // Also decrypt if blob URL failed (e.g., was revoked)
+  const needsDecryption = (blobFailed || !isDirectlyPlayable) && src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
 
   // Decrypt audio on mount if needed
   useEffect(() => {
@@ -232,6 +248,12 @@ function KanbanAudioPlayer({
     const handleDurationChange = () => setDuration(audio.duration);
     const handleEnded = () => setIsPlaying(false);
     const handleError = () => {
+      // If blob URL failed, try to decrypt as fallback
+      if (isBlobUrl && !blobFailed) {
+        console.log("[KanbanAudioPlayer] Blob URL failed, attempting decryption fallback");
+        setBlobFailed(true);
+        return;
+      }
       if (!isDecrypting && audioSrc) setError(true);
     };
 
