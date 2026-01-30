@@ -1,12 +1,16 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import { useMessageNotifications } from "@/hooks/useMessageNotifications";
+import { usePresenceTracking } from "@/hooks/usePresenceTracking";
 import { SystemAlertBanner } from "./SystemAlertBanner";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 
 export function AppLayout() {
   // Enable real-time message notifications
   useMessageNotifications({ enabled: true });
+  
+  // Track user presence and last seen
+  usePresenceTracking();
 
   const location = useLocation();
   const isConversations = location.pathname.startsWith("/conversations");
