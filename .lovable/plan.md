@@ -1,173 +1,185 @@
 
-# Análise das Modificações Recentes: Problemas Identificados
 
-## Resumo Executivo
+# Correção: Sistema de Impersonation com URLs Mal-Formadas
 
-Após análise detalhada de todas as modificações recentes (Impersonation e Presence Tracking), identifiquei **3 problemas críticos** e **2 melhorias recomendadas** que precisam ser corrigidos.
+## Análise do Problema
 
----
+Após análise detalhada dos logs de rede, identifiquei **3 problemas críticos** na Edge Function `impersonate-user`:
 
-## Problema 1: URL de Redirect Incorreta na Edge Function Impersonate-User (CRÍTICO)
+### Problema 1: Encoding Triplo do company_name
 
-### Localização
-`supabase/functions/impersonate-user/index.ts`, linha 117
-
-### Código Problemático
+**Código Atual (linha 118):**
 ```typescript
-redirectTo: `${SUPABASE_URL.replace('.supabase.co', '.lovable.app')}/dashboard?impersonating=true&admin=${callerUserId}&company=${company_id || targetProfile.law_firm_id}`,
-```
-
-### Por que está errado?
-- `SUPABASE_URL` = `https://jiragtersejnarxruqyd.supabase.co`
-- Após substituição: `https://jiragtersejnarxruqyd.lovable.app/dashboard...`
-- URL real do projeto: `https://chatfmoteste.lovable.app` ou preview URL
-
-O magic link redireciona para uma URL que não existe, fazendo o impersonation falhar.
-
-### Solução
-Usar a variável de ambiente correta ou construir a URL a partir do `origin` do request.
-
----
-
-## Problema 2: Parâmetros de URL Inconsistentes (CRÍTICO)
-
-### Edge Function usa:
-- `admin` (linha 117)
-- `company` (linha 117)
-
-### Hook useImpersonation verifica:
-- `admin_id` OU `admin` (linha 44) ✅
-- `company_name` (linha 45)
-- NÃO verifica `company` ❌
-
-### Problema
-O Edge Function envia `company=uuid`, mas o hook procura por `company_name=nome`. O nome da empresa nunca é passado corretamente nos parâmetros.
-
-### Solução
-Alinhar os parâmetros entre Edge Function e Hook.
-
----
-
-## Problema 3: Falta de Variável de Ambiente para URL da Aplicação
-
-### Situação Atual
-Não existe variável `APP_URL` ou similar nas secrets para definir a URL correta da aplicação.
-
-### Solução
-Adicionar secret `PUBLIC_APP_URL` ou usar o header `origin` do request para construir a URL dinamicamente.
-
----
-
-## Melhoria 1: Dependência Potencialmente Problemática no useImpersonation
-
-### Código
-```typescript
-useEffect(() => {
-  // ...
-}, [searchParams, setSearchParams]); // Falta 'state.companyName' na dependência
-```
-
-### Problema
-O `state.companyName` é usado dentro do effect (linha 51) mas não está no array de dependências. Isso pode causar comportamento inesperado.
-
-### Solução
-Adicionar `state.companyName` às dependências ou usar uma referência.
-
----
-
-## Melhoria 2: Verificação de Erros Silenciosos no usePresenceTracking
-
-### Código
-```typescript
-try {
-  await supabase
-    .from("profiles")
-    .update({ last_seen_at: new Date().toISOString() })
-    .eq("id", user.id);
-} catch (error) {
-  console.error("Error updating last_seen_at:", error);
-}
-```
-
-### Problema
-O update não verifica o retorno do Supabase para erros RLS ou outros, apenas catch de exceções.
-
-### Solução
-Verificar também `error` do retorno do Supabase.
-
----
-
-## Arquivos a Corrigir
-
-| Arquivo | Problema | Prioridade |
-|---------|----------|------------|
-| `supabase/functions/impersonate-user/index.ts` | URL incorreta + parâmetros | Alta |
-| `src/hooks/useImpersonation.tsx` | Dependência do effect | Média |
-| `src/hooks/usePresenceTracking.tsx` | Verificação de erro | Baixa |
-
----
-
-## Correções Propostas
-
-### 1. Edge Function - impersonate-user/index.ts
-
-```typescript
-// ANTES (linha 117):
-redirectTo: `${SUPABASE_URL.replace('.supabase.co', '.lovable.app')}/dashboard?...`
-
-// DEPOIS:
-// Usar origin do request para construir URL correta
-const origin = req.headers.get("origin") || "https://chatfmoteste.lovable.app";
-const redirectUrl = new URL("/dashboard", origin);
-redirectUrl.searchParams.set("impersonating", "true");
-redirectUrl.searchParams.set("admin_id", callerUserId);
 redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
 ```
 
-### 2. Hook useImpersonation.tsx
-
-```typescript
-// Adicionar 'state' à lista de dependências como referência estável
-const stateRef = useRef(state);
-stateRef.current = state;
-
-useEffect(() => {
-  // usar stateRef.current.companyName
-}, [searchParams, setSearchParams]);
+**Resultado na URL:**
+```
+company_name%3DPNH%252520IMPORTA%2525C3%252587...
 ```
 
-### 3. Hook usePresenceTracking.tsx
+O `searchParams.set()` **já faz encoding automático**. Usar `encodeURIComponent()` adicionalmente causa encoding duplo/triplo, resultando em:
+- `%252520` ao invés de `%20` (espaço)
+- `%2525C3%252587` ao invés de `%C3%87` (Ç)
 
+### Problema 2: Parâmetros Duplicados na URL Final
+
+**Código Atual (linhas 172-175):**
 ```typescript
-// Adicionar verificação do erro retornado
-const { error } = await supabase
-  .from("profiles")
-  .update({ last_seen_at: new Date().toISOString() })
-  .eq("id", user.id);
+const impersonationUrl = new URL(verificationUrl);
+impersonationUrl.searchParams.set("impersonating", "true");
+impersonationUrl.searchParams.set("admin_id", callerUserId);
+impersonationUrl.searchParams.set("company_name", companyName);
+```
 
-if (error) {
-  console.error("Error updating last_seen_at:", error);
-}
+A URL de verificação já contém `redirect_to` com os parâmetros. Adicionar os mesmos parâmetros **novamente** causa:
+1. Duplicação (parâmetros aparecem 2x)
+2. Confusão no Supabase Auth sobre qual valor usar
+3. A URL final ficou com 650+ caracteres
+
+### Problema 3: O redirect_to já está correto, não precisa modificar
+
+O magic link da Supabase já lida com o `redirect_to` corretamente. Adicionar parâmetros extras na URL de verificação não é necessário e pode quebrar o fluxo.
+
+---
+
+## Evidência do Problema
+
+**URL Retornada pela API:**
+```
+https://jiragtersejnarxruqyd.supabase.co/auth/v1/verify
+  ?token=e2e53c7c...
+  &type=magiclink
+  &redirect_to=https%3A%2F%2Fid-preview--...%2Fdashboard
+    %3Fimpersonating%3Dtrue
+    %26admin_id%3D08103eb3...
+    %26company_name%3DPNH%252520IMPORTA%2525C3%252587...  <- ENCODING ERRADO
+  &impersonating=true                                     <- DUPLICADO
+  &admin_id=08103eb3...                                   <- DUPLICADO  
+  &company_name=PNH+IMPORTA%C3%87%C3%83O...               <- DUPLICADO
 ```
 
 ---
 
-## Impacto das Correções
+## Solução Proposta
 
-| Correção | Sem a Correção | Com a Correção |
-|----------|----------------|----------------|
-| URL Redirect | Impersonation sempre falha | Funciona corretamente |
-| Parâmetros | Nome da empresa não aparece no banner | Exibe nome correto |
-| Dependência Effect | Possível stale closure | Comportamento previsível |
-| Verificação Erro | Erros silenciosos | Logs úteis para debug |
+### Edge Function: impersonate-user/index.ts
+
+**Correção 1: Remover encodeURIComponent() redundante**
+
+```typescript
+// ANTES (linha 118):
+redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+
+// DEPOIS:
+redirectUrl.searchParams.set("company_name", companyName);
+```
+
+**Correção 2: Não adicionar parâmetros extras na URL de verificação**
+
+```typescript
+// ANTES (linhas 167-176):
+const verificationUrl = linkData.properties.action_link;
+const impersonationUrl = new URL(verificationUrl);
+impersonationUrl.searchParams.set("impersonating", "true");
+impersonationUrl.searchParams.set("admin_id", callerUserId);
+impersonationUrl.searchParams.set("company_name", companyName);
+
+// DEPOIS:
+// A URL de verificação já contém o redirect_to correto
+// Não precisamos adicionar parâmetros extras
+const verificationUrl = linkData.properties.action_link;
+```
 
 ---
 
-## Checklist de Validação Pós-Correção
+## Fluxo Correto Após Correção
 
-- [ ] Impersonation abre nova aba na URL correta
-- [ ] Banner de impersonation mostra nome da empresa
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ FLUXO CORRIGIDO                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Edge Function gera redirect_to com parâmetros                          │
+│     → redirect_to = /dashboard?impersonating=true&admin_id=X&company_name=Y │
+│                                                                             │
+│  2. Supabase Auth gera magic link com esse redirect_to                     │
+│     → https://supabase.co/auth/v1/verify?token=...&redirect_to=...         │
+│                                                                             │
+│  3. Usuário clica no link, Supabase autentica                              │
+│                                                                             │
+│  4. Supabase redireciona para redirect_to original                         │
+│     → /dashboard?impersonating=true&admin_id=X&company_name=Y              │
+│                                                                             │
+│  5. useImpersonation detecta os parâmetros, salva estado, limpa URL        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Arquivo a Modificar
+
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/impersonate-user/index.ts` | Remover encoding duplo e parâmetros duplicados |
+
+---
+
+## Código Corrigido
+
+```typescript
+// Linha 118: Remover encodeURIComponent
+redirectUrl.searchParams.set("company_name", companyName);
+
+// Linhas 167-180: Simplificar retorno
+console.log("[impersonate-user] Success - Admin:", callerUserId, "impersonating:", targetProfile.email);
+
+// A URL de verificação (action_link) já contém o redirect_to correto
+// O Supabase Auth vai redirecionar o usuário para lá após verificação
+const verificationUrl = linkData.properties.action_link;
+
+return new Response(
+  JSON.stringify({
+    success: true,
+    url: verificationUrl,  // Usar URL limpa, sem modificações
+    target_user: {
+      id: targetProfile.id,
+      name: targetProfile.full_name,
+      email: targetProfile.email,
+    },
+    company_name: companyName,
+  }),
+  { status: 200, headers: responseHeaders }
+);
+```
+
+---
+
+## Resultado Esperado
+
+**URL Após Correção:**
+```
+https://jiragtersejnarxruqyd.supabase.co/auth/v1/verify
+  ?token=e2e53c7c...
+  &type=magiclink
+  &redirect_to=https%3A%2F%2Fid-preview--...%2Fdashboard
+    %3Fimpersonating%3Dtrue
+    %26admin_id%3D08103eb3...
+    %26company_name%3DPNH%2520IMPORTA%25C3%2587%25C3%2583O...
+```
+
+- Encoding correto (single)
+- Sem parâmetros duplicados
+- URL limpa e funcional
+
+---
+
+## Checklist de Validação
+
+- [ ] Clicar "Acessar como Cliente" abre nova aba
+- [ ] Nova aba redireciona para /dashboard do cliente
+- [ ] Banner de impersonation aparece com nome da empresa correto
 - [ ] Botão "Sair do modo Admin" funciona
-- [ ] Last seen é atualizado corretamente na tabela profiles
-- [ ] Indicador de online aparece em tempo real no CompanyUsersDialog
-- [ ] Console não mostra erros relacionados às correções
+- [ ] URL fica limpa após redirect (sem parâmetros de impersonation)
+
