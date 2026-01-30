@@ -1097,7 +1097,7 @@ export default function GlobalAdminCompanies() {
                   <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                 </div>
               ) : (
-                <ScrollArea className="max-h-[calc(100vh-400px)]">
+                <ScrollArea className="max-h-[calc(100vh-320px)]">
                   <Table>
                     <TableHeader className="sticky top-0 bg-card z-10">
                       <TableRow>
