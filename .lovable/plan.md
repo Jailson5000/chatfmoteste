@@ -1,185 +1,172 @@
 
 
-# Correção: Sistema de Impersonation com URLs Mal-Formadas
+# Correção: Áudio Travado no "Carregando" + Análise de Velocidade de Envio
 
-## Análise do Problema
+## Resumo do Problema
 
-Após análise detalhada dos logs de rede, identifiquei **3 problemas críticos** na Edge Function `impersonate-user`:
+No Kanban, após enviar um áudio para o WhatsApp, a mensagem aparece no chat local com estado "Carregando áudio..." **indefinidamente**, mesmo que o áudio já tenha sido entregue ao destinatário no WhatsApp.
 
-### Problema 1: Encoding Triplo do company_name
+## Problemas Identificados
 
-**Código Atual (linha 118):**
+### Problema 1: AudioPlayer Não Verifica URLs Válidas (CRÍTICO)
+
+**Localização:** `src/components/conversations/MessageBubble.tsx`, linhas 107-108
+
+**Código Problemático:**
 ```typescript
-redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+// Para áudios do WhatsApp sempre forçar descriptografia para evitar problemas de URLs expiradas
+const needsDecryption = !!whatsappMessageId && !!conversationId;
 ```
 
-**Resultado na URL:**
-```
-company_name%3DPNH%252520IMPORTA%2525C3%252587...
-```
+**Por que está errado:**
+- O `AudioPlayer` tenta descriptografar **TODOS** os áudios que possuem `whatsappMessageId` e `conversationId`, independentemente de já ter uma URL válida
+- Após envio, a `media_url` do áudio pode ser:
+  1. Um **blob URL** (`blob:http://...`) - URL local temporária, não descriptografável
+  2. Uma **URL pública do Supabase Storage** - não precisa descriptografar  
+  3. Uma **URL da Evolution API** - URL real do WhatsApp, acessível diretamente
+- Componentes como `ImageViewer`, `VideoPlayer` e `DocumentViewer` já possuem essa verificação:
+  ```typescript
+  const isPublicUrl = isPublicStorageUrl(src);
+  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
+  ```
 
-O `searchParams.set()` **já faz encoding automático**. Usar `encodeURIComponent()` adicionalmente causa encoding duplo/triplo, resultando em:
-- `%252520` ao invés de `%20` (espaço)
-- `%2525C3%252587` ao invés de `%C3%87` (Ç)
+### Problema 2: Blob URLs São Tratadas Como Precisando Descriptografia
 
-### Problema 2: Parâmetros Duplicados na URL Final
+Quando o frontend cria uma mensagem otimista com `media_url = blob:http://...`, o `AudioPlayer`:
+1. Detecta `whatsappMessageId` e `conversationId` presentes
+2. Define `needsDecryption = true`
+3. Ignora o `src` (blob URL) e tenta chamar `get_media` na Evolution API
+4. A Evolution API falha porque o áudio foi **enviado** por nós, não recebido
+5. O componente fica em estado "isDecrypting" indefinidamente ou mostra erro
 
-**Código Atual (linhas 172-175):**
+### Problema 3: Falta de Verificação de Blob URL
+
+O `AudioPlayer` não verifica se o `src` é um blob URL válido antes de tentar descriptografar:
 ```typescript
-const impersonationUrl = new URL(verificationUrl);
-impersonationUrl.searchParams.set("impersonating", "true");
-impersonationUrl.searchParams.set("admin_id", callerUserId);
-impersonationUrl.searchParams.set("company_name", companyName);
+// Falta verificação como:
+const isBlobUrl = src?.startsWith('blob:');
 ```
 
-A URL de verificação já contém `redirect_to` com os parâmetros. Adicionar os mesmos parâmetros **novamente** causa:
-1. Duplicação (parâmetros aparecem 2x)
-2. Confusão no Supabase Auth sobre qual valor usar
-3. A URL final ficou com 650+ caracteres
+## Análise de Velocidade de Envio
 
-### Problema 3: O redirect_to já está correto, não precisa modificar
-
-O magic link da Supabase já lida com o `redirect_to` corretamente. Adicionar parâmetros extras na URL de verificação não é necessário e pode quebrar o fluxo.
-
----
-
-## Evidência do Problema
-
-**URL Retornada pela API:**
-```
-https://jiragtersejnarxruqyd.supabase.co/auth/v1/verify
-  ?token=e2e53c7c...
-  &type=magiclink
-  &redirect_to=https%3A%2F%2Fid-preview--...%2Fdashboard
-    %3Fimpersonating%3Dtrue
-    %26admin_id%3D08103eb3...
-    %26company_name%3DPNH%252520IMPORTA%2525C3%252587...  <- ENCODING ERRADO
-  &impersonating=true                                     <- DUPLICADO
-  &admin_id=08103eb3...                                   <- DUPLICADO  
-  &company_name=PNH+IMPORTA%C3%87%C3%83O...               <- DUPLICADO
-```
-
----
-
-## Solução Proposta
-
-### Edge Function: impersonate-user/index.ts
-
-**Correção 1: Remover encodeURIComponent() redundante**
+Verifiquei o `DELAY_CONFIG` em `supabase/functions/_shared/human-delay.ts`:
 
 ```typescript
-// ANTES (linha 118):
-redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+export const DELAY_CONFIG = {
+  MANUAL_SEND: { min: 0, max: 0 },        // Envios manuais - SEM delay ✓
+  AI_RESPONSE: { min: 1000, max: 3000 },  // IA - 1-3s jitter ✓
+  FOLLOW_UP: { min: 1500, max: 4000 },    // Follow-ups - 1.5-4s ✓
+  PROMOTIONAL: { min: 5000, max: 10000 }, // Promocional - 5-10s ✓
+  REMINDER: { min: 2000, max: 5000 },     // Lembretes - 2-5s ✓
+  SPLIT_MESSAGE: { min: 800, max: 2000 }, // Partes de msg - 0.8-2s ✓
+  AUDIO_CHUNK: { min: 500, max: 1000 },   // Chunks de áudio - 0.5-1s ✓
+};
+```
+
+**Conclusão:** Os delays estão otimizados. Envios manuais têm delay ZERO, o que é correto. A velocidade está adequada.
+
+## Correções Propostas
+
+### Correção 1: Atualizar AudioPlayer com Verificação de URL Válida
+
+```typescript
+// ANTES (linha 107-108):
+const needsDecryption = !!whatsappMessageId && !!conversationId;
 
 // DEPOIS:
-redirectUrl.searchParams.set("company_name", companyName);
+// Check if URL is already playable (blob URL, public URL, or data URL)
+const isBlobUrl = src?.startsWith('blob:');
+const isDataUrl = src?.startsWith('data:');
+const isPublicUrl = isPublicStorageUrl(src || '');
+const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl || (src && !isEncryptedMedia(src));
+
+// Only need decryption for WhatsApp encrypted media that isn't already playable
+const needsDecryption = !isDirectlyPlayable && !!whatsappMessageId && !!conversationId;
 ```
 
-**Correção 2: Não adicionar parâmetros extras na URL de verificação**
+### Correção 2: Adicionar Fallback para Blob URL Expirado
+
+Se um blob URL falhar ao carregar (porque foi revogado), o componente deve tentar descriptografar:
 
 ```typescript
-// ANTES (linhas 167-176):
-const verificationUrl = linkData.properties.action_link;
-const impersonationUrl = new URL(verificationUrl);
-impersonationUrl.searchParams.set("impersonating", "true");
-impersonationUrl.searchParams.set("admin_id", callerUserId);
-impersonationUrl.searchParams.set("company_name", companyName);
+const [blobFailed, setBlobFailed] = useState(false);
+
+// Na lógica de needsDecryption:
+const needsDecryption = 
+  (blobFailed && !!whatsappMessageId && !!conversationId) || 
+  (!isDirectlyPlayable && !!whatsappMessageId && !!conversationId);
+
+// No elemento <audio>:
+onError={() => {
+  if (isBlobUrl && !blobFailed) {
+    setBlobFailed(true); // Tentar descriptografar como fallback
+  } else {
+    setError(true);
+  }
+}}
+```
+
+### Correção 3: Alinhar KanbanAudioPlayer com Mesma Lógica
+
+O `KanbanAudioPlayer` em `KanbanChatPanel.tsx` também precisa da mesma correção (linha 161):
+
+```typescript
+// ANTES:
+const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
 
 // DEPOIS:
-// A URL de verificação já contém o redirect_to correto
-// Não precisamos adicionar parâmetros extras
-const verificationUrl = linkData.properties.action_link;
+const isBlobUrl = src?.startsWith('blob:');
+const isDataUrl = src?.startsWith('data:');
+const isPublicUrl = src && (src.includes('supabase.co/storage/v1/object/public/') || src.includes('.supabase.co/storage/v1/object/public/'));
+const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl;
+
+// Only try to decrypt encrypted WhatsApp media that isn't already playable
+const needsDecryption = !isDirectlyPlayable && src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
 ```
 
----
-
-## Fluxo Correto Após Correção
-
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ FLUXO CORRIGIDO                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. Edge Function gera redirect_to com parâmetros                          │
-│     → redirect_to = /dashboard?impersonating=true&admin_id=X&company_name=Y │
-│                                                                             │
-│  2. Supabase Auth gera magic link com esse redirect_to                     │
-│     → https://supabase.co/auth/v1/verify?token=...&redirect_to=...         │
-│                                                                             │
-│  3. Usuário clica no link, Supabase autentica                              │
-│                                                                             │
-│  4. Supabase redireciona para redirect_to original                         │
-│     → /dashboard?impersonating=true&admin_id=X&company_name=Y              │
-│                                                                             │
-│  5. useImpersonation detecta os parâmetros, salva estado, limpa URL        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Arquivo a Modificar
+## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/impersonate-user/index.ts` | Remover encoding duplo e parâmetros duplicados |
+| `src/components/conversations/MessageBubble.tsx` | Atualizar `AudioPlayer` com verificação de URLs válidas |
+| `src/components/kanban/KanbanChatPanel.tsx` | Atualizar `KanbanAudioPlayer` com mesma lógica |
 
 ---
 
-## Código Corrigido
+## Detalhes Técnicos
 
-```typescript
-// Linha 118: Remover encodeURIComponent
-redirectUrl.searchParams.set("company_name", companyName);
+### Fluxo Atual (Problemático)
 
-// Linhas 167-180: Simplificar retorno
-console.log("[impersonate-user] Success - Admin:", callerUserId, "impersonating:", targetProfile.email);
-
-// A URL de verificação (action_link) já contém o redirect_to correto
-// O Supabase Auth vai redirecionar o usuário para lá após verificação
-const verificationUrl = linkData.properties.action_link;
-
-return new Response(
-  JSON.stringify({
-    success: true,
-    url: verificationUrl,  // Usar URL limpa, sem modificações
-    target_user: {
-      id: targetProfile.id,
-      name: targetProfile.full_name,
-      email: targetProfile.email,
-    },
-    company_name: companyName,
-  }),
-  { status: 200, headers: responseHeaders }
-);
+```text
+1. Usuário clica em gravar áudio
+2. Frontend grava e cria blob URL
+3. Mensagem otimista: { media_url: "blob:http://...", status: "sending" }
+4. API chamada, áudio enviado para WhatsApp
+5. Backend atualiza: { whatsapp_message_id: "ABC123", status: "sent" }
+6. Realtime notifica frontend
+7. AudioPlayer recebe: whatsappMessageId="ABC123", src="blob:http://..."
+8. AudioPlayer: needsDecryption = true (ERRO!)
+9. Tenta chamar get_media → Falha
+10. Fica em "Carregando áudio..." indefinidamente
 ```
 
----
+### Fluxo Corrigido
 
-## Resultado Esperado
-
-**URL Após Correção:**
+```text
+1-6. (igual)
+7. AudioPlayer recebe: whatsappMessageId="ABC123", src="blob:http://..."
+8. AudioPlayer verifica: src é blob URL → isDirectlyPlayable = true
+9. AudioPlayer: needsDecryption = false
+10. Usa blob URL diretamente → Áudio toca normalmente
+11. Se blob expirar → onError detecta → setBlobFailed(true)
+12. Agora needsDecryption = true → Tenta get_media como fallback
 ```
-https://jiragtersejnarxruqyd.supabase.co/auth/v1/verify
-  ?token=e2e53c7c...
-  &type=magiclink
-  &redirect_to=https%3A%2F%2Fid-preview--...%2Fdashboard
-    %3Fimpersonating%3Dtrue
-    %26admin_id%3D08103eb3...
-    %26company_name%3DPNH%2520IMPORTA%25C3%2587%25C3%2583O...
-```
-
-- Encoding correto (single)
-- Sem parâmetros duplicados
-- URL limpa e funcional
-
----
 
 ## Checklist de Validação
 
-- [ ] Clicar "Acessar como Cliente" abre nova aba
-- [ ] Nova aba redireciona para /dashboard do cliente
-- [ ] Banner de impersonation aparece com nome da empresa correto
-- [ ] Botão "Sair do modo Admin" funciona
-- [ ] URL fica limpa após redirect (sem parâmetros de impersonation)
+- [ ] Enviar áudio no Kanban → Deve aparecer imediatamente como player funcional
+- [ ] Áudio deve tocar usando blob URL local
+- [ ] Se atualizar página → Áudio deve descriptografar via get_media
+- [ ] Áudios recebidos de clientes → Devem descriptografar normalmente
+- [ ] Velocidade de envio manual → Deve ser instantânea (sem delay artificial)
 
