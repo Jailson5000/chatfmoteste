@@ -70,6 +70,13 @@ function isEncryptedMedia(url: string): boolean {
   return url.includes(".enc") || url.includes("mmg.whatsapp.net");
 }
 
+// Check if URL is a public storage URL (doesn't need decryption)
+function isPublicStorageUrl(url: string): boolean {
+  if (!url) return false;
+  return url.includes('supabase.co/storage/v1/object/public/') || 
+         url.includes('.supabase.co/storage/v1/object/public/');
+}
+
 // Playback speed options
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -103,9 +110,17 @@ function AudioPlayer({
   const [transcription, setTranscription] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
+  const [blobFailed, setBlobFailed] = useState(false);
 
-  // Para áudios do WhatsApp sempre forçar descriptografia para evitar problemas de URLs expiradas
-  const needsDecryption = !!whatsappMessageId && !!conversationId;
+  // Check if URL is already directly playable (blob URL, public URL, or data URL)
+  const isBlobUrl = src?.startsWith('blob:');
+  const isDataUrl = src?.startsWith('data:');
+  const isPublicUrl = isPublicStorageUrl(src || '');
+  const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl || (src && !isEncryptedMedia(src));
+
+  // Only need decryption for WhatsApp encrypted media that isn't already playable
+  // Also decrypt if blob URL failed (e.g., was revoked)
+  const needsDecryption = (blobFailed || !isDirectlyPlayable) && !!whatsappMessageId && !!conversationId;
 
   // Decrypt audio on mount if needed - check IndexedDB first, then memory cache, then fetch
   useEffect(() => {
@@ -187,6 +202,12 @@ function AudioPlayer({
     const handleDurationChange = () => setDuration(audio.duration);
     const handleEnded = () => setIsPlaying(false);
     const handleError = () => {
+      // If blob URL failed, try to decrypt as fallback
+      if (isBlobUrl && !blobFailed) {
+        console.log("[AudioPlayer] Blob URL failed, attempting decryption fallback");
+        setBlobFailed(true);
+        return;
+      }
       // Only set error if we're not still decrypting
       if (!isDecrypting && audioSrc) {
         setError(true);
@@ -790,11 +811,7 @@ function AIAudioPlayer({
   );
 }
 
-// Helper to check if URL is a public Supabase Storage URL (no decryption needed)
-function isPublicStorageUrl(url: string): boolean {
-  return url.includes('supabase.co/storage/v1/object/public/') || 
-         url.includes('.supabase.co/storage/v1/object/public/');
-}
+// isPublicStorageUrl is now defined at the top of the file
 
 // Custom image component with decryption support
 function ImageViewer({ 
