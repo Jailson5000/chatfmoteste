@@ -45,6 +45,13 @@ export function AgendaProSettings() {
     birthday_coupon_value: 10,
     birthday_coupon_service_id: null as string | null,
     birthday_send_time: "09:00",
+    // Weekend fields
+    saturday_enabled: false,
+    saturday_start_time: "08:00",
+    saturday_end_time: "12:00",
+    sunday_enabled: false,
+    sunday_start_time: "08:00",
+    sunday_end_time: "12:00",
   });
 
   useEffect(() => {
@@ -79,6 +86,13 @@ export function AgendaProSettings() {
         birthday_coupon_value: settings.birthday_coupon_value ?? 10,
         birthday_coupon_service_id: settings.birthday_coupon_service_id ?? null,
         birthday_send_time: settings.birthday_send_time ?? "09:00",
+        // Weekend fields
+        saturday_enabled: settings.saturday_enabled ?? false,
+        saturday_start_time: settings.saturday_start_time ?? "08:00",
+        saturday_end_time: settings.saturday_end_time ?? "12:00",
+        sunday_enabled: settings.sunday_enabled ?? false,
+        sunday_start_time: settings.sunday_start_time ?? "08:00",
+        sunday_end_time: settings.sunday_end_time ?? "12:00",
       });
     }
   }, [settings]);
@@ -116,6 +130,13 @@ export function AgendaProSettings() {
         birthday_coupon_value: formData.birthday_coupon_value,
         birthday_coupon_service_id: formData.birthday_coupon_service_id,
         birthday_send_time: formData.birthday_send_time,
+        // Weekend fields
+        saturday_enabled: formData.saturday_enabled,
+        saturday_start_time: formData.saturday_start_time,
+        saturday_end_time: formData.saturday_end_time,
+        sunday_enabled: formData.sunday_enabled,
+        sunday_start_time: formData.sunday_start_time,
+        sunday_end_time: formData.sunday_end_time,
       });
       toast({ title: "Configurações salvas!" });
     } finally {
@@ -168,25 +189,103 @@ export function AgendaProSettings() {
           <CardTitle>Horário de Funcionamento</CardTitle>
           <CardDescription>Define o horário padrão para novos profissionais</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="start_time">Início</Label>
-              <Input
-                id="start_time"
-                type="time"
-                value={formData.default_start_time}
-                onChange={(e) => setFormData({ ...formData, default_start_time: e.target.value })}
-              />
+        <CardContent className="grid gap-6">
+          {/* Weekdays */}
+          <div className="space-y-3">
+            <Label className="font-medium">Dias Úteis (Segunda a Sexta)</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="start_time" className="text-sm text-muted-foreground">Início</Label>
+                <Input
+                  id="start_time"
+                  type="time"
+                  value={formData.default_start_time}
+                  onChange={(e) => setFormData({ ...formData, default_start_time: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="end_time" className="text-sm text-muted-foreground">Término</Label>
+                <Input
+                  id="end_time"
+                  type="time"
+                  value={formData.default_end_time}
+                  onChange={(e) => setFormData({ ...formData, default_end_time: e.target.value })}
+                />
+              </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="end_time">Término</Label>
-              <Input
-                id="end_time"
-                type="time"
-                value={formData.default_end_time}
-                onChange={(e) => setFormData({ ...formData, default_end_time: e.target.value })}
-              />
+          </div>
+
+          <div className="border-t pt-4 space-y-4">
+            {/* Saturday */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium">Trabalha aos Sábados</Label>
+                  <p className="text-xs text-muted-foreground">Habilitar atendimento aos sábados</p>
+                </div>
+                <Switch
+                  checked={formData.saturday_enabled}
+                  onCheckedChange={(checked) => setFormData({ ...formData, saturday_enabled: checked })}
+                />
+              </div>
+              {formData.saturday_enabled && (
+                <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-primary/20">
+                  <div className="grid gap-2">
+                    <Label htmlFor="saturday_start" className="text-sm text-muted-foreground">Início</Label>
+                    <Input
+                      id="saturday_start"
+                      type="time"
+                      value={formData.saturday_start_time}
+                      onChange={(e) => setFormData({ ...formData, saturday_start_time: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="saturday_end" className="text-sm text-muted-foreground">Término</Label>
+                    <Input
+                      id="saturday_end"
+                      type="time"
+                      value={formData.saturday_end_time}
+                      onChange={(e) => setFormData({ ...formData, saturday_end_time: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Sunday */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium">Trabalha aos Domingos</Label>
+                  <p className="text-xs text-muted-foreground">Habilitar atendimento aos domingos</p>
+                </div>
+                <Switch
+                  checked={formData.sunday_enabled}
+                  onCheckedChange={(checked) => setFormData({ ...formData, sunday_enabled: checked })}
+                />
+              </div>
+              {formData.sunday_enabled && (
+                <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-primary/20">
+                  <div className="grid gap-2">
+                    <Label htmlFor="sunday_start" className="text-sm text-muted-foreground">Início</Label>
+                    <Input
+                      id="sunday_start"
+                      type="time"
+                      value={formData.sunday_start_time}
+                      onChange={(e) => setFormData({ ...formData, sunday_start_time: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="sunday_end" className="text-sm text-muted-foreground">Término</Label>
+                    <Input
+                      id="sunday_end"
+                      type="time"
+                      value={formData.sunday_end_time}
+                      onChange={(e) => setFormData({ ...formData, sunday_end_time: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

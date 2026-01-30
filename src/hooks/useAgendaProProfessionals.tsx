@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useAgendaPro } from "@/hooks/useAgendaPro";
 
 export interface AgendaProProfessional {
   id: string;
@@ -69,6 +70,7 @@ export function useAgendaProProfessionals() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  const { settings: agendaSettings } = useAgendaPro();
 
   // Fetch professionals
   const { data: professionals = [], isLoading } = useQuery({
@@ -130,14 +132,36 @@ export function useAgendaProProfessionals() {
 
       if (error) throw error;
 
-      // Create default working hours
+      // Create default working hours using agenda settings
       const defaultHours = [1, 2, 3, 4, 5].map((day) => ({
         professional_id: professional.id,
         day_of_week: day,
-        start_time: "08:00",
-        end_time: "18:00",
+        start_time: agendaSettings?.default_start_time || "08:00",
+        end_time: agendaSettings?.default_end_time || "18:00",
         is_enabled: true,
       }));
+
+      // Add Saturday if enabled in settings
+      if (agendaSettings?.saturday_enabled) {
+        defaultHours.push({
+          professional_id: professional.id,
+          day_of_week: 6,
+          start_time: agendaSettings.saturday_start_time || "08:00",
+          end_time: agendaSettings.saturday_end_time || "12:00",
+          is_enabled: true,
+        });
+      }
+
+      // Add Sunday if enabled in settings
+      if (agendaSettings?.sunday_enabled) {
+        defaultHours.push({
+          professional_id: professional.id,
+          day_of_week: 0,
+          start_time: agendaSettings.sunday_start_time || "08:00",
+          end_time: agendaSettings.sunday_end_time || "12:00",
+          is_enabled: true,
+        });
+      }
 
       await supabase.from("agenda_pro_working_hours").insert(defaultHours);
 

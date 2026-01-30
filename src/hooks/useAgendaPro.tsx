@@ -44,6 +44,13 @@ export interface AgendaProSettings {
   birthday_coupon_value: number;
   birthday_coupon_service_id: string | null;
   birthday_send_time: string;
+  // Weekend fields
+  saturday_enabled: boolean;
+  saturday_start_time: string;
+  saturday_end_time: string;
+  sunday_enabled: boolean;
+  sunday_start_time: string;
+  sunday_end_time: string;
   created_at: string;
   updated_at: string;
 }
