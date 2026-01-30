@@ -53,6 +53,10 @@ export function useNotificationStats() {
           failed: logs.filter(l => l.event_type === 'COMPANY_PROVISIONING_FAILED').length,
           partial: logs.filter(l => l.event_type === 'COMPANY_PROVISIONING_PARTIAL').length,
           integrationDown: logs.filter(l => l.event_type === 'INTEGRATION_DOWN').length,
+          instanceDisconnected: logs.filter(l => 
+            l.event_type === 'INSTANCE_DISCONNECTION_ALERT' || 
+            l.event_type === 'INSTANCE_DISCONNECTION_REMINDER'
+          ).length,
         },
       };
     },

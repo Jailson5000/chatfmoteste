@@ -7,12 +7,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Configuration - alert after 5 minutes of disconnection
-const ALERT_THRESHOLD_MINUTES = 5;
-// Threshold for "connecting" status - alert if stuck connecting
-const CONNECTING_ALERT_THRESHOLD_MINUTES = 10;
-// NO COOLDOWN - We only send ONE alert per disconnection cycle
-// The alert_sent_for_current_disconnect flag is reset when instance reconnects
+// Configuration
+const ALERT_THRESHOLD_MINUTES = 5; // First alert after 5 min
+const CONNECTING_ALERT_THRESHOLD_MINUTES = 10; // Alert if stuck connecting for 10 min
+const REMINDER_THRESHOLD_HOURS = 24; // Send reminder after 24h if still disconnected
+const ADMIN_ESCALATION_HOURS = 48; // Escalate to global admin after 48h
 
 interface DisconnectedInstance {
   id: string;
@@ -27,6 +26,7 @@ interface DisconnectedInstance {
   manual_disconnect: boolean | null;
   awaiting_qr: boolean | null;
   updated_at: string;
+  isReminder?: boolean; // Added for reminder tracking
 }
 
 interface CompanyInfo {
@@ -71,16 +71,9 @@ serve(async (req) => {
     const connectingThresholdTime = new Date(Date.now() - CONNECTING_ALERT_THRESHOLD_MINUTES * 60 * 1000).toISOString();
 
     console.log("[Check Instance Alerts] Checking for disconnected instances...");
-    console.log(`[Check Instance Alerts] Threshold: ${ALERT_THRESHOLD_MINUTES} min (disconnected), ${CONNECTING_ALERT_THRESHOLD_MINUTES} min (connecting)`);
+    console.log(`[Check Instance Alerts] Thresholds: ${ALERT_THRESHOLD_MINUTES}min (first alert), ${REMINDER_THRESHOLD_HOURS}h (reminder), ${ADMIN_ESCALATION_HOURS}h (escalation)`);
 
-    // Find instances that:
-    // 1. Are disconnected/error status for more than ALERT_THRESHOLD_MINUTES
-    // 2. OR are stuck in "connecting" status for more than CONNECTING_ALERT_THRESHOLD_MINUTES
-    // 3. Were NOT manually disconnected
-    // 4. Are NOT awaiting QR scan
-    // 5. Have NOT already received an alert for THIS disconnection cycle
-    
-    // First, get disconnected/error instances
+    // Find disconnected/error instances
     const { data: disconnectedInstances, error: fetchError1 } = await supabaseClient
       .from("whatsapp_instances")
       .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr, updated_at")
@@ -88,7 +81,7 @@ serve(async (req) => {
       .not("disconnected_since", "is", null)
       .lt("disconnected_since", thresholdTime);
 
-    // Also get instances stuck in "connecting" status for too long
+    // Also get instances stuck in "connecting" status
     const { data: connectingInstances, error: fetchError2 } = await supabaseClient
       .from("whatsapp_instances")
       .select("id, instance_name, display_name, status, phone_number, disconnected_since, last_alert_sent_at, alert_sent_for_current_disconnect, law_firm_id, manual_disconnect, awaiting_qr, updated_at")
@@ -100,26 +93,37 @@ serve(async (req) => {
       throw fetchError1 || fetchError2;
     }
 
-    // Combine and deduplicate
     const rawInstances = [...(disconnectedInstances || []), ...(connectingInstances || [])];
 
-    // Filter out manually disconnected, awaiting QR, or already alerted instances
+    // Filter instances - improved logic with reminder support
     const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
       // Skip if manually disconnected
       if (instance.manual_disconnect === true) {
         console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: manual_disconnect=true`);
         return false;
       }
-      // Skip if awaiting QR scan
-      if (instance.awaiting_qr === true) {
-        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: awaiting_qr=true`);
-        return false;
-      }
-      // Skip if already sent alert for THIS disconnection cycle
+
+      // For instances that already received first alert
       if (instance.alert_sent_for_current_disconnect === true) {
-        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: alert already sent for this disconnect`);
+        // Check if enough time has passed for a reminder
+        if (instance.last_alert_sent_at) {
+          const hoursSinceAlert = (Date.now() - new Date(instance.last_alert_sent_at).getTime()) / (1000 * 60 * 60);
+          if (hoursSinceAlert >= REMINDER_THRESHOLD_HOURS) {
+            console.log(`[Check Instance Alerts] ${instance.instance_name}: Eligible for 24h reminder (${hoursSinceAlert.toFixed(1)}h since last alert)`);
+            (instance as DisconnectedInstance).isReminder = true;
+            return true; // Allow reminder even if awaiting_qr
+          }
+        }
+        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: alert already sent, waiting for reminder threshold`);
         return false;
       }
+
+      // First alert - skip if awaiting QR (user already knows they need to scan)
+      if (instance.awaiting_qr === true) {
+        console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: awaiting_qr=true (first alert)`);
+        return false;
+      }
+
       return true;
     });
 
@@ -145,7 +149,7 @@ serve(async (req) => {
       .select("id, name, email, law_firm_id, admin_user_id")
       .in("law_firm_id", lawFirmIds);
 
-    // Get admin profiles for companies that have admin_user_id
+    // Get admin profiles
     const adminUserIds = (companies || [])
       .filter((c: CompanyInfo) => c.admin_user_id)
       .map((c: CompanyInfo) => c.admin_user_id);
@@ -159,7 +163,7 @@ serve(async (req) => {
       adminProfiles = profiles || [];
     }
 
-    // Also get profiles with admin role as fallback
+    // Get profiles with admin role as fallback
     const { data: adminRoleProfiles } = await supabaseClient
       .from("profiles")
       .select("id, email, full_name, law_firm_id")
@@ -173,7 +177,7 @@ serve(async (req) => {
 
     const adminRoleUserIds = new Set((adminRoles || []).map((r: { user_id: string }) => r.user_id));
 
-    // Group instances by company/law_firm for sending individual emails
+    // Group instances by company/law_firm
     const instancesByLawFirm = new Map<string, DisconnectedInstance[]>();
     for (const instance of instances) {
       const existing = instancesByLawFirm.get(instance.law_firm_id) || [];
@@ -181,18 +185,23 @@ serve(async (req) => {
       instancesByLawFirm.set(instance.law_firm_id, existing);
     }
 
-    const results: { law_firm_id: string; company_name: string; email: string; instances_count: number; success: boolean }[] = [];
+    const results: { 
+      law_firm_id: string; 
+      company_name: string; 
+      email: string; 
+      instances_count: number; 
+      success: boolean;
+      is_reminder: boolean;
+      max_hours_disconnected: number;
+      escalated_to_admin: boolean;
+    }[] = [];
     const notifiedInstanceIds: string[] = [];
 
     // Send email to each company's admin
     for (const [lawFirmId, companyInstances] of instancesByLawFirm) {
       const company = (companies || []).find((c: CompanyInfo) => c.law_firm_id === lawFirmId);
       
-      // Find admin email - priority:
-      // 1. Profile of company's admin_user_id
-      // 2. Company email field
-      // 3. Any profile with admin role in this law_firm
-      // 4. Global admin email (fallback)
+      // Find admin email
       let adminEmail: string | null = null;
       let adminName = "Administrador";
 
@@ -209,7 +218,6 @@ serve(async (req) => {
       }
 
       if (!adminEmail) {
-        // Find any admin in this law_firm
         const lawFirmAdmin = (adminRoleProfiles || []).find(
           (p: AdminProfile) => p.law_firm_id === lawFirmId && adminRoleUserIds.has(p.id)
         );
@@ -220,7 +228,6 @@ serve(async (req) => {
       }
 
       if (!adminEmail) {
-        // Fallback to global admin
         adminEmail = globalAdminEmail || null;
       }
 
@@ -233,24 +240,43 @@ serve(async (req) => {
 
       // Calculate duration for each instance
       const instancesWithDuration = companyInstances.map((instance: DisconnectedInstance) => {
-        // Use disconnected_since if available, otherwise use updated_at (for "connecting" status)
         const disconnectedAt = new Date(instance.disconnected_since || instance.updated_at);
         const durationMs = Date.now() - disconnectedAt.getTime();
         const durationMinutes = Math.floor(durationMs / 60000);
-        const durationHours = Math.floor(durationMinutes / 60);
+        const durationHours = durationMinutes / 60;
+        const wholeDays = Math.floor(durationHours / 24);
+        const wholeHours = Math.floor(durationHours % 24);
         const remainingMinutes = durationMinutes % 60;
+        
+        let durationText: string;
+        if (wholeDays > 0) {
+          durationText = `${wholeDays}d ${wholeHours}h`;
+        } else if (wholeHours > 0) {
+          durationText = `${wholeHours}h ${remainingMinutes}min`;
+        } else {
+          durationText = `${remainingMinutes} minutos`;
+        }
         
         return {
           ...instance,
-          duration: durationHours > 0 
-            ? `${durationHours}h ${remainingMinutes}min`
-            : `${durationMinutes} minutos`,
+          duration: durationText,
           durationMinutes,
+          durationHours,
         };
       });
 
       // Sort by duration (longest first)
       instancesWithDuration.sort((a, b) => b.durationMinutes - a.durationMinutes);
+
+      // Determine if this is a reminder alert
+      const isReminderAlert = companyInstances.some((i: DisconnectedInstance) => i.isReminder === true);
+      
+      // Calculate max hours disconnected for escalation check
+      const maxHoursDisconnected = Math.max(...instancesWithDuration.map(i => i.durationHours));
+      const shouldEscalateToAdmin = maxHoursDisconnected >= ADMIN_ESCALATION_HOURS && globalAdminEmail;
+
+      // Get instance names for logging
+      const instanceNames = instancesWithDuration.map(i => i.display_name || i.instance_name);
 
       // Helper to get status display
       const getStatusDisplay = (status: string) => {
@@ -280,12 +306,35 @@ serve(async (req) => {
 
       // Check if any instances are stuck in "connecting"
       const hasConnectingIssue = instancesWithDuration.some(i => i.status === 'connecting');
-      const alertTitle = hasConnectingIssue 
-        ? '⚠️ Alerta: WhatsApp com Problema de Conexão'
-        : '⚠️ Alerta: WhatsApp Desconectado';
-      const alertDescription = hasConnectingIssue
-        ? `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está com problema' : 'algumas de suas conexões WhatsApp estão com problema'}`
-        : `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está desconectada' : 'algumas de suas conexões WhatsApp estão desconectadas'}`;
+      
+      // Dynamic alert title and description based on type
+      let alertTitle: string;
+      let alertDescription: string;
+      let emailSubject: string;
+
+      if (isReminderAlert) {
+        const daysOffline = Math.floor(maxHoursDisconnected / 24);
+        alertTitle = '🔔 Lembrete: WhatsApp ainda desconectado';
+        alertDescription = `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp continua desconectada' : 'suas conexões WhatsApp continuam desconectadas'} há ${daysOffline > 0 ? `${daysOffline} dia(s)` : `${Math.floor(maxHoursDisconnected)}h`}`;
+        emailSubject = `🔔 Lembrete: WhatsApp desconectado há ${daysOffline > 0 ? `${daysOffline} dias` : `${Math.floor(maxHoursDisconnected)}h`} - ${companyName}`;
+      } else if (hasConnectingIssue) {
+        alertTitle = '⚠️ Alerta: WhatsApp com Problema de Conexão';
+        alertDescription = `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está com problema' : 'algumas de suas conexões WhatsApp estão com problema'}`;
+        emailSubject = `⚠️ WhatsApp com problema de conexão - ${companyName}`;
+      } else {
+        alertTitle = '⚠️ Alerta: WhatsApp Desconectado';
+        alertDescription = `${instancesWithDuration.length === 1 ? 'sua conexão WhatsApp está desconectada' : 'algumas de suas conexões WhatsApp estão desconectadas'}`;
+        emailSubject = `⚠️ WhatsApp desconectado - ${companyName}`;
+      }
+
+      // Determine header color
+      const headerColor = isReminderAlert 
+        ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' // Orange for reminder
+        : 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'; // Red for alert
+
+      const footerMessage = isReminderAlert
+        ? 'Este é um lembrete automático. Você receberá novos lembretes a cada 24h enquanto a conexão permanecer offline.'
+        : 'Este alerta é enviado uma única vez por desconexão. Você receberá um lembrete em 24h se não reconectar.';
 
       const emailHtml = `
         <!DOCTYPE html>
@@ -297,7 +346,7 @@ serve(async (req) => {
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; background: #f9fafb;">
           <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
             
-            <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 24px;">
+            <div style="background: ${headerColor}; color: white; padding: 24px;">
               <h1 style="margin: 0; font-size: 22px;">${alertTitle}</h1>
               <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 14px;">${companyName}</p>
             </div>
@@ -339,8 +388,7 @@ serve(async (req) => {
             
             <div style="background: #f3f4f6; padding: 16px 24px; border-top: 1px solid #e5e7eb;">
               <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                Este alerta é enviado uma única vez por desconexão.<br>
-                Você receberá um novo alerta somente se reconectar e a conexão cair novamente.
+                ${footerMessage}
               </p>
             </div>
           </div>
@@ -349,12 +397,12 @@ serve(async (req) => {
       `;
 
       try {
-        console.log(`[Check Instance Alerts] Sending email to ${adminEmail} for ${companyName}`);
+        console.log(`[Check Instance Alerts] Sending ${isReminderAlert ? 'reminder' : 'alert'} email to ${adminEmail} for ${companyName}`);
         
         const { error: emailError } = await resend.emails.send({
           from: "MIAUCHAT <onboarding@resend.dev>",
           to: [adminEmail],
-          subject: `⚠️ WhatsApp desconectado - ${companyName}`,
+          subject: emailSubject,
           html: emailHtml,
         });
 
@@ -366,22 +414,84 @@ serve(async (req) => {
             email: adminEmail,
             instances_count: instancesWithDuration.length,
             success: false,
+            is_reminder: isReminderAlert,
+            max_hours_disconnected: maxHoursDisconnected,
+            escalated_to_admin: false,
           });
         } else {
           console.log(`[Check Instance Alerts] Email sent to ${adminEmail}`);
+          
+          // Track notified instances
+          notifiedInstanceIds.push(...instancesWithDuration.map(i => i.id));
+
+          // Check if we need to escalate to global admin
+          let escalatedToAdmin = false;
+          if (shouldEscalateToAdmin && adminEmail !== globalAdminEmail) {
+            console.log(`[Check Instance Alerts] Escalating to global admin: ${globalAdminEmail} (offline for ${maxHoursDisconnected.toFixed(1)}h)`);
+            
+            const escalationHtml = `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta charset="utf-8">
+                <title>Escalação: Instância Offline Prolongada</title>
+              </head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; background: #f9fafb;">
+                <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                  
+                  <div style="background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; padding: 24px;">
+                    <h1 style="margin: 0; font-size: 22px;">🚨 Escalação: Cliente Offline há ${Math.floor(maxHoursDisconnected)}h</h1>
+                    <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 14px;">${companyName}</p>
+                  </div>
+                  
+                  <div style="padding: 24px;">
+                    <p style="margin: 0 0 16px 0;">
+                      <strong>Atenção:</strong> O cliente <strong>${companyName}</strong> está com instância(s) WhatsApp offline há mais de ${ADMIN_ESCALATION_HOURS} horas.
+                    </p>
+                    
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin: 16px 0;">
+                      <p style="margin: 0; color: #92400e; font-size: 14px;">
+                        <strong>Instâncias afetadas:</strong> ${instanceNames.join(', ')}<br>
+                        <strong>Tempo offline:</strong> ${Math.floor(maxHoursDisconnected / 24)}d ${Math.floor(maxHoursDisconnected % 24)}h<br>
+                        <strong>E-mail do cliente:</strong> ${adminEmail}
+                      </p>
+                    </div>
+                    
+                    <p style="margin: 16px 0 0 0; color: #6b7280; font-size: 13px;">
+                      Considere entrar em contato com o cliente para verificar se há algum problema.
+                    </p>
+                  </div>
+                </div>
+              </body>
+              </html>
+            `;
+
+            try {
+              await resend.emails.send({
+                from: "MIAUCHAT <onboarding@resend.dev>",
+                to: [globalAdminEmail!],
+                subject: `🚨 Escalação: ${companyName} offline há ${Math.floor(maxHoursDisconnected)}h`,
+                html: escalationHtml,
+              });
+              escalatedToAdmin = true;
+              console.log(`[Check Instance Alerts] Escalation email sent to ${globalAdminEmail}`);
+            } catch (escError) {
+              console.error(`[Check Instance Alerts] Escalation email error:`, escError);
+            }
+          }
+
           results.push({
             law_firm_id: lawFirmId,
             company_name: companyName,
             email: adminEmail,
             instances_count: instancesWithDuration.length,
             success: true,
+            is_reminder: isReminderAlert,
+            max_hours_disconnected: maxHoursDisconnected,
+            escalated_to_admin: escalatedToAdmin,
           });
-          
-          // Track notified instances
-          notifiedInstanceIds.push(...instancesWithDuration.map(i => i.id));
         }
       } catch (emailErr: unknown) {
-        const errorMessage = emailErr instanceof Error ? emailErr.message : "Unknown error";
         console.error(`[Check Instance Alerts] Email exception for ${companyName}:`, emailErr);
         results.push({
           law_firm_id: lawFirmId,
@@ -389,18 +499,20 @@ serve(async (req) => {
           email: adminEmail,
           instances_count: instancesWithDuration.length,
           success: false,
+          is_reminder: isReminderAlert,
+          max_hours_disconnected: maxHoursDisconnected,
+          escalated_to_admin: false,
         });
       }
     }
 
-    // Mark instances as alerted for THIS disconnection cycle
-    // This flag is reset when the instance reconnects (via webhook)
+    // Mark instances as alerted
     if (notifiedInstanceIds.length > 0) {
       const { error: updateError } = await supabaseClient
         .from("whatsapp_instances")
         .update({ 
           last_alert_sent_at: new Date().toISOString(),
-          alert_sent_for_current_disconnect: true // Prevents duplicate alerts until reconnection
+          alert_sent_for_current_disconnect: true
         })
         .in("id", notifiedInstanceIds);
 
@@ -411,12 +523,14 @@ serve(async (req) => {
 
     // Log summary
     const successCount = results.filter(r => r.success).length;
-    console.log(`[Check Instance Alerts] Summary: ${successCount}/${results.length} emails sent`);
+    const reminderCount = results.filter(r => r.success && r.is_reminder).length;
+    const escalationCount = results.filter(r => r.escalated_to_admin).length;
+    console.log(`[Check Instance Alerts] Summary: ${successCount}/${results.length} emails sent (${reminderCount} reminders, ${escalationCount} escalations)`);
 
-    // Log to admin_notification_logs
+    // Log to admin_notification_logs with enriched metadata
     for (const result of results.filter(r => r.success)) {
       await supabaseClient.from("admin_notification_logs").insert({
-        event_type: "INSTANCE_DISCONNECTION_ALERT",
+        event_type: result.is_reminder ? "INSTANCE_DISCONNECTION_REMINDER" : "INSTANCE_DISCONNECTION_ALERT",
         event_key: `instance_alert_${result.law_firm_id}_${new Date().toISOString().slice(0, 13)}`,
         email_sent_to: result.email,
         tenant_id: result.law_firm_id,
@@ -424,6 +538,9 @@ serve(async (req) => {
         metadata: {
           instances_count: result.instances_count,
           threshold_minutes: ALERT_THRESHOLD_MINUTES,
+          is_reminder: result.is_reminder,
+          hours_disconnected: Math.round(result.max_hours_disconnected * 10) / 10,
+          escalated_to_admin: result.escalated_to_admin,
         },
       });
     }
@@ -431,7 +548,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Alerts sent to ${successCount} companies`,
+        message: `Alerts sent to ${successCount} companies (${reminderCount} reminders, ${escalationCount} escalations)`,
         results,
         checked_at: new Date().toISOString(),
       }),

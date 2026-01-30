@@ -54,10 +54,15 @@ const eventTypeConfig: Record<string, { label: string; icon: React.ReactNode; co
     icon: <AlertTriangle className="h-4 w-4" />,
     color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   },
-  INSTANCE_DISCONNECTED_ALERT: {
+  INSTANCE_DISCONNECTION_ALERT: {
     label: "Instância Desconectada",
     icon: <AlertTriangle className="h-4 w-4" />,
     color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  },
+  INSTANCE_DISCONNECTION_REMINDER: {
+    label: "Lembrete (24h+)",
+    icon: <Bell className="h-4 w-4" />,
+    color: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
   },
 };
 
