@@ -5703,6 +5703,15 @@ export type Database = {
         Args: { _subdomain: string }
         Returns: string
       }
+      get_public_professionals_for_booking: {
+        Args: { _law_firm_id: string; _service_id?: string }
+        Returns: {
+          avatar_url: string
+          id: string
+          name: string
+          specialty: string
+        }[]
+      }
       get_user_law_firm_id: { Args: { _user_id: string }; Returns: string }
       get_widget_config: {
         Args: { p_widget_key: string }
