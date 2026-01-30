@@ -227,6 +227,27 @@ export default function GlobalAdminDashboard() {
         </div>
       </div>
 
+      {/* Alerta de Trials Expirando em 2 dias */}
+      {dashboardMetrics?.companiesTrialExpiringSoon !== undefined && dashboardMetrics.companiesTrialExpiringSoon > 0 && (
+        <div 
+          className="p-4 rounded-xl bg-warning/10 border border-warning/30 flex items-center gap-4 cursor-pointer hover:bg-warning/15 transition-colors"
+          onClick={() => navigate("/global-admin/companies?trial=expiring_soon")}
+        >
+          <div className="p-3 rounded-full bg-warning/20">
+            <AlertTriangle className="h-6 w-6 text-warning" />
+          </div>
+          <div className="flex-1">
+            <p className="text-warning font-semibold">
+              {dashboardMetrics.companiesTrialExpiringSoon} empresa(s) com trial expirando em até 2 dias
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Clique para ver e tomar ação preventiva
+            </p>
+          </div>
+          <ArrowUpRight className="h-5 w-5 text-warning" />
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statCards.map((stat, index) => (

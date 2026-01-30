@@ -27,6 +27,7 @@ interface DashboardMetrics {
   companiesInTrial: number;
   companiesTrialExpired: number;
   companiesRejected: number;
+  companiesTrialExpiringSoon: number;
 }
 
 export function useSystemMetrics() {
@@ -101,6 +102,7 @@ export function useSystemMetrics() {
       let companiesInTrial = 0;
       let companiesTrialExpired = 0;
       let companiesRejected = 0;
+      let companiesTrialExpiringSoon = 0;
 
       companiesDetailResult.data?.forEach((company: any) => {
         if (company.approval_status === 'pending_approval') {
@@ -108,8 +110,15 @@ export function useSystemMetrics() {
         } else if (company.approval_status === 'rejected') {
           companiesRejected++;
         } else if (company.trial_type && company.trial_type !== 'none' && company.trial_ends_at) {
-          if (new Date(company.trial_ends_at) > now) {
+          const trialEndsAt = new Date(company.trial_ends_at);
+          const daysRemaining = Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysRemaining > 0) {
             companiesInTrial++;
+            // Count trials expiring in 2 days or less
+            if (daysRemaining <= 2) {
+              companiesTrialExpiringSoon++;
+            }
           } else {
             companiesTrialExpired++;
           }
@@ -145,6 +154,7 @@ export function useSystemMetrics() {
         companiesInTrial,
         companiesTrialExpired,
         companiesRejected,
+        companiesTrialExpiringSoon,
       } as DashboardMetrics;
     },
   });
