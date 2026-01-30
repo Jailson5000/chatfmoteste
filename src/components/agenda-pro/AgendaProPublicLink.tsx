@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Copy, Check, ExternalLink, Link2, Globe, Loader2 } from "lucide-react";
+import { Copy, Check, ExternalLink, Link2, Globe, Loader2, AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -138,26 +139,40 @@ export function AgendaProPublicLink() {
           </div>
 
           {settings?.public_slug && (
-            <div className="p-4 rounded-lg border bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Link de agendamento:</span>
+            <div className="space-y-3">
+              <div className="p-4 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Link de agendamento:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-sm bg-background rounded px-3 py-2 truncate">
+                    {publicUrl}
+                  </code>
+                  <Button variant="outline" size="sm" onClick={handleCopy}>
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(publicUrl, "_blank")}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-sm bg-background rounded px-3 py-2 truncate">
-                  {publicUrl}
-                </code>
-                <Button variant="outline" size="sm" onClick={handleCopy}>
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => window.open(publicUrl, "_blank")}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-              </div>
+
+              {/* Alerta quando slug existe mas link está desativado */}
+              {!settings?.public_booking_enabled && (
+                <Alert variant="destructive" className="bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <AlertDescription className="text-amber-800 dark:text-amber-300">
+                    <strong>Link inativo!</strong> Ative o "Agendamento Online" acima para que 
+                    seus clientes possam acessar este link. Atualmente, o link mostrará 
+                    "Agenda não encontrada".
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           )}
         </CardContent>
