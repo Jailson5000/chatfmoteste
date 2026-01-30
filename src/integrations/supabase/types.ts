@@ -4008,6 +4008,7 @@ export type Database = {
           id: string
           is_active: boolean
           job_title: string | null
+          last_seen_at: string | null
           law_firm_id: string | null
           must_change_password: boolean
           notification_browser_enabled: boolean
@@ -4024,6 +4025,7 @@ export type Database = {
           id: string
           is_active?: boolean
           job_title?: string | null
+          last_seen_at?: string | null
           law_firm_id?: string | null
           must_change_password?: boolean
           notification_browser_enabled?: boolean
@@ -4040,6 +4042,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           job_title?: string | null
+          last_seen_at?: string | null
           law_firm_id?: string | null
           must_change_password?: boolean
           notification_browser_enabled?: boolean
