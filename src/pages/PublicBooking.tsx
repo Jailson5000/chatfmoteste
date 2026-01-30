@@ -21,6 +21,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+interface ServiceProfessionalLink {
+  professional_id: string;
+}
+
 interface PublicService {
   id: string;
   name: string;
@@ -28,6 +32,7 @@ interface PublicService {
   duration_minutes: number;
   price: number | null;
   color: string | null;
+  agenda_pro_service_professionals?: ServiceProfessionalLink[];
 }
 
 interface PublicProfessional {
@@ -61,6 +66,7 @@ export default function PublicBooking() {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [services, setServices] = useState<PublicService[]>([]);
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
+  const [serviceProfessionals, setServiceProfessionals] = useState<PublicProfessional[]>([]);
   const [lawFirmId, setLawFirmId] = useState<string | null>(null);
   
   const [step, setStep] = useState<BookingStep>("service");
@@ -111,16 +117,19 @@ export default function PublicBooking() {
           timezone: settingsData.timezone,
         });
         
-        // Load public services
+        // Load public services with professional links
         const { data: servicesData } = await supabase
           .from("agenda_pro_services")
-          .select("id, name, description, duration_minutes, price, color")
+          .select(`
+            id, name, description, duration_minutes, price, color,
+            agenda_pro_service_professionals(professional_id)
+          `)
           .eq("law_firm_id", firmId)
           .eq("is_active", true)
           .eq("is_public", true)
           .order("name");
         
-        setServices(servicesData || []);
+        setServices((servicesData as unknown as PublicService[]) || []);
         
         // Load active professionals from safe view (excludes PII like email/phone)
         const { data: professionalsData } = await supabase
@@ -253,7 +262,8 @@ export default function PublicBooking() {
       const endDateTime = addMinutes(startDateTime, selectedService.duration_minutes);
       
       // Ensure we have a valid professional_id - this is required
-      const professionalId = selectedProfessional?.id || professionals[0]?.id;
+      // First try selected, then filtered by service, then fallback to all
+      const professionalId = selectedProfessional?.id || serviceProfessionals[0]?.id || professionals[0]?.id;
       if (!professionalId) {
         toast.error("Nenhum profissional disponível para este serviço.");
         return;
@@ -530,9 +540,24 @@ export default function PublicBooking() {
                     key={service.id}
                     onClick={() => {
                       setSelectedService(service);
-                      setStep(professionals.length > 1 ? "professional" : "datetime");
-                      if (professionals.length === 1) {
-                        setSelectedProfessional(professionals[0]);
+                      
+                      // Filter professionals by service links
+                      const linkedProfIds = service.agenda_pro_service_professionals?.map(l => l.professional_id) || [];
+                      const filteredProfs = linkedProfIds.length > 0 
+                        ? professionals.filter(p => linkedProfIds.includes(p.id))
+                        : professionals; // fallback to all if no links
+                      
+                      setServiceProfessionals(filteredProfs);
+                      
+                      if (filteredProfs.length === 0) {
+                        // No professionals linked - skip to datetime (will use fallback)
+                        setSelectedProfessional(null);
+                        setStep("datetime");
+                      } else if (filteredProfs.length === 1) {
+                        setSelectedProfessional(filteredProfs[0]);
+                        setStep("datetime");
+                      } else {
+                        setStep("professional");
                       }
                     }}
                     className={cn(
@@ -626,7 +651,7 @@ export default function PublicBooking() {
                 </div>
               </button>
               
-              {professionals.map((professional) => (
+              {serviceProfessionals.map((professional) => (
                 <button
                   key={professional.id}
                   onClick={() => {
@@ -674,7 +699,7 @@ export default function PublicBooking() {
                 <Button 
                   variant="ghost" 
                   size="icon"
-                  onClick={() => setStep(professionals.length > 1 ? "professional" : "service")}
+                  onClick={() => setStep(serviceProfessionals.length > 1 ? "professional" : "service")}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
