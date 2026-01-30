@@ -368,7 +368,7 @@ export default function GlobalAdminDashboard() {
       </div>
 
       {/* Companies Usage Table */}
-      <div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+      <div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] overflow-hidden">
         <CompanyUsageTable 
           initialFilter={filterByAlerts ? "critical" : undefined}
           onFilterChange={(filter) => setFilterByAlerts(filter === "critical" || filter === "warning")}

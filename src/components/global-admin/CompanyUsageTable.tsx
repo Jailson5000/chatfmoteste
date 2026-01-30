@@ -751,7 +751,7 @@ export function CompanyUsageTable({ initialFilter, onFilterChange }: CompanyUsag
 
       {/* Table */}
       <div className="rounded-xl border border-white/10 overflow-hidden">
-        <ScrollArea className="max-h-[calc(100vh-200px)]">
+        <ScrollArea className="max-h-[calc(100vh-480px)]">
           <Table>
             <TableHeader className="bg-white/5 sticky top-0">
               <TableRow className="border-white/10 hover:bg-transparent">
