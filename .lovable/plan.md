@@ -1,172 +1,236 @@
 
 
-# Correção: Áudio Travado no "Carregando" + Análise de Velocidade de Envio
+# Correção: Superadmin Desconectado ao Fazer Impersonation
 
-## Resumo do Problema
-
-No Kanban, após enviar um áudio para o WhatsApp, a mensagem aparece no chat local com estado "Carregando áudio..." **indefinidamente**, mesmo que o áudio já tenha sido entregue ao destinatário no WhatsApp.
-
-## Problemas Identificados
-
-### Problema 1: AudioPlayer Não Verifica URLs Válidas (CRÍTICO)
-
-**Localização:** `src/components/conversations/MessageBubble.tsx`, linhas 107-108
-
-**Código Problemático:**
-```typescript
-// Para áudios do WhatsApp sempre forçar descriptografia para evitar problemas de URLs expiradas
-const needsDecryption = !!whatsappMessageId && !!conversationId;
-```
-
-**Por que está errado:**
-- O `AudioPlayer` tenta descriptografar **TODOS** os áudios que possuem `whatsappMessageId` e `conversationId`, independentemente de já ter uma URL válida
-- Após envio, a `media_url` do áudio pode ser:
-  1. Um **blob URL** (`blob:http://...`) - URL local temporária, não descriptografável
-  2. Uma **URL pública do Supabase Storage** - não precisa descriptografar  
-  3. Uma **URL da Evolution API** - URL real do WhatsApp, acessível diretamente
-- Componentes como `ImageViewer`, `VideoPlayer` e `DocumentViewer` já possuem essa verificação:
-  ```typescript
-  const isPublicUrl = isPublicStorageUrl(src);
-  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
-  ```
-
-### Problema 2: Blob URLs São Tratadas Como Precisando Descriptografia
-
-Quando o frontend cria uma mensagem otimista com `media_url = blob:http://...`, o `AudioPlayer`:
-1. Detecta `whatsappMessageId` e `conversationId` presentes
-2. Define `needsDecryption = true`
-3. Ignora o `src` (blob URL) e tenta chamar `get_media` na Evolution API
-4. A Evolution API falha porque o áudio foi **enviado** por nós, não recebido
-5. O componente fica em estado "isDecrypting" indefinidamente ou mostra erro
-
-### Problema 3: Falta de Verificação de Blob URL
-
-O `AudioPlayer` não verifica se o `src` é um blob URL válido antes de tentar descriptografar:
-```typescript
-// Falta verificação como:
-const isBlobUrl = src?.startsWith('blob:');
-```
-
-## Análise de Velocidade de Envio
-
-Verifiquei o `DELAY_CONFIG` em `supabase/functions/_shared/human-delay.ts`:
-
-```typescript
-export const DELAY_CONFIG = {
-  MANUAL_SEND: { min: 0, max: 0 },        // Envios manuais - SEM delay ✓
-  AI_RESPONSE: { min: 1000, max: 3000 },  // IA - 1-3s jitter ✓
-  FOLLOW_UP: { min: 1500, max: 4000 },    // Follow-ups - 1.5-4s ✓
-  PROMOTIONAL: { min: 5000, max: 10000 }, // Promocional - 5-10s ✓
-  REMINDER: { min: 2000, max: 5000 },     // Lembretes - 2-5s ✓
-  SPLIT_MESSAGE: { min: 800, max: 2000 }, // Partes de msg - 0.8-2s ✓
-  AUDIO_CHUNK: { min: 500, max: 1000 },   // Chunks de áudio - 0.5-1s ✓
-};
-```
-
-**Conclusão:** Os delays estão otimizados. Envios manuais têm delay ZERO, o que é correto. A velocidade está adequada.
-
-## Correções Propostas
-
-### Correção 1: Atualizar AudioPlayer com Verificação de URL Válida
-
-```typescript
-// ANTES (linha 107-108):
-const needsDecryption = !!whatsappMessageId && !!conversationId;
-
-// DEPOIS:
-// Check if URL is already playable (blob URL, public URL, or data URL)
-const isBlobUrl = src?.startsWith('blob:');
-const isDataUrl = src?.startsWith('data:');
-const isPublicUrl = isPublicStorageUrl(src || '');
-const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl || (src && !isEncryptedMedia(src));
-
-// Only need decryption for WhatsApp encrypted media that isn't already playable
-const needsDecryption = !isDirectlyPlayable && !!whatsappMessageId && !!conversationId;
-```
-
-### Correção 2: Adicionar Fallback para Blob URL Expirado
-
-Se um blob URL falhar ao carregar (porque foi revogado), o componente deve tentar descriptografar:
-
-```typescript
-const [blobFailed, setBlobFailed] = useState(false);
-
-// Na lógica de needsDecryption:
-const needsDecryption = 
-  (blobFailed && !!whatsappMessageId && !!conversationId) || 
-  (!isDirectlyPlayable && !!whatsappMessageId && !!conversationId);
-
-// No elemento <audio>:
-onError={() => {
-  if (isBlobUrl && !blobFailed) {
-    setBlobFailed(true); // Tentar descriptografar como fallback
-  } else {
-    setError(true);
-  }
-}}
-```
-
-### Correção 3: Alinhar KanbanAudioPlayer com Mesma Lógica
-
-O `KanbanAudioPlayer` em `KanbanChatPanel.tsx` também precisa da mesma correção (linha 161):
-
-```typescript
-// ANTES:
-const needsDecryption = src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
-
-// DEPOIS:
-const isBlobUrl = src?.startsWith('blob:');
-const isDataUrl = src?.startsWith('data:');
-const isPublicUrl = src && (src.includes('supabase.co/storage/v1/object/public/') || src.includes('.supabase.co/storage/v1/object/public/'));
-const isDirectlyPlayable = isBlobUrl || isDataUrl || isPublicUrl;
-
-// Only try to decrypt encrypted WhatsApp media that isn't already playable
-const needsDecryption = !isDirectlyPlayable && src && isEncryptedMedia(src) && whatsappMessageId && conversationId;
-```
-
-## Arquivos a Modificar
-
-| Arquivo | Mudança |
-|---------|---------|
-| `src/components/conversations/MessageBubble.tsx` | Atualizar `AudioPlayer` com verificação de URLs válidas |
-| `src/components/kanban/KanbanChatPanel.tsx` | Atualizar `KanbanAudioPlayer` com mesma lógica |
-
----
-
-## Detalhes Técnicos
+## Diagnóstico do Problema
 
 ### Fluxo Atual (Problemático)
 
 ```text
-1. Usuário clica em gravar áudio
-2. Frontend grava e cria blob URL
-3. Mensagem otimista: { media_url: "blob:http://...", status: "sending" }
-4. API chamada, áudio enviado para WhatsApp
-5. Backend atualiza: { whatsapp_message_id: "ABC123", status: "sent" }
-6. Realtime notifica frontend
-7. AudioPlayer recebe: whatsappMessageId="ABC123", src="blob:http://..."
-8. AudioPlayer: needsDecryption = true (ERRO!)
-9. Tenta chamar get_media → Falha
-10. Fica em "Carregando áudio..." indefinidamente
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│  FLUXO ATUAL - PROBLEMA                                                                  │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│  1. Admin está em: id-preview--39ee3e91...lovable.app/global-admin/companies            │
+│                                                                                          │
+│  2. Clica "Acessar como Cliente" → Edge Function usa origin do request                  │
+│     → redirect_to = id-preview--39ee3e91...lovable.app/dashboard                        │
+│                                                                                          │
+│  3. Magic link abre nova aba, autentica como cliente                                    │
+│                                                                                          │
+│  4. Redireciona para id-preview--39ee3e91...lovable.app/dashboard                       │
+│                                                                                          │
+│  5. ProtectedRoute verifica:                                                            │
+│     - company_subdomain = "pndistribuidora" (do banco)                                  │
+│     - currentSubdomain = null (está na preview URL, não no subdomain)                   │
+│                                                                                          │
+│  6. BLOQUEADO! → TenantMismatch: "Você deve acessar via pndistribuidora.miauchat..."   │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Fluxo Corrigido
+### Evidência do Problema
+
+**Dados do banco:**
+- Empresa: `PNH IMPORTAÇÃO DISTRIBUIÇÃO E COMERCIO LTDA`
+- Subdomain: `pndistribuidora`
+
+**URL gerada pela Edge Function:**
+```
+redirect_to = https://id-preview--39ee3e91...lovable.app/dashboard
+```
+
+**URL que deveria ser gerada:**
+```
+redirect_to = https://pndistribuidora.miauchat.com.br/dashboard
+```
+
+### Causa Raiz
+
+A Edge Function `impersonate-user` usa o `origin` do request do admin para gerar o redirect. Isso está errado porque:
+
+- Em produção, o admin pode acessar de qualquer URL (global-admin, preview, etc.)
+- O cliente precisa ser redirecionado para **seu próprio subdomain**
+- O `ProtectedRoute` valida corretamente que cada usuário só pode acessar seu subdomain
+
+---
+
+## Solução
+
+### Opção Escolhida: Gerar URL com Subdomain da Empresa
+
+A Edge Function deve buscar o `subdomain` da empresa do target user e construir a URL correta.
+
+### Modificação na Edge Function
+
+**Arquivo:** `supabase/functions/impersonate-user/index.ts`
+
+**Lógica Atual (linhas 100-118):**
+```typescript
+// 6. Get company name for logging
+let companyName = "Unknown";
+if (company_id) {
+  const { data: company } = await supabaseAdmin
+    .from("companies")
+    .select("name")
+    .eq("id", company_id)
+    .single();
+  companyName = company?.name || "Unknown";
+}
+
+// 7. Generate a magic link for the target user
+const appOrigin = origin || "https://chatfmoteste.lovable.app";
+const redirectUrl = new URL("/dashboard", appOrigin);
+```
+
+**Lógica Corrigida:**
+```typescript
+// 6. Get company name AND subdomain for correct redirect
+let companyName = "Unknown";
+let targetSubdomain: string | null = null;
+
+// First, try to get subdomain from target user's law_firm
+const { data: targetLawFirm } = await supabaseAdmin
+  .from("law_firms")
+  .select("subdomain, name")
+  .eq("id", targetProfile.law_firm_id)
+  .single();
+
+if (targetLawFirm?.subdomain) {
+  targetSubdomain = targetLawFirm.subdomain;
+}
+
+// Get company name for logging/display
+if (company_id) {
+  const { data: company } = await supabaseAdmin
+    .from("companies")
+    .select("name")
+    .eq("id", company_id)
+    .single();
+  companyName = company?.name || targetLawFirm?.name || "Unknown";
+} else {
+  companyName = targetLawFirm?.name || "Unknown";
+}
+
+// 7. Generate a magic link for the target user
+// Use the correct tenant subdomain if available
+let appOrigin: string;
+
+if (targetSubdomain) {
+  // Production/Staging: Use tenant's subdomain
+  appOrigin = `https://${targetSubdomain}.miauchat.com.br`;
+} else if (origin?.includes('lovable.app') || origin?.includes('lovableproject.com')) {
+  // Development/Preview: Use the request origin (for testing)
+  appOrigin = origin;
+} else {
+  // Fallback for production main domain
+  appOrigin = origin || "https://chatfmoteste.lovable.app";
+}
+
+const redirectUrl = new URL("/dashboard", appOrigin);
+```
+
+---
+
+## Fluxo Corrigido
 
 ```text
-1-6. (igual)
-7. AudioPlayer recebe: whatsappMessageId="ABC123", src="blob:http://..."
-8. AudioPlayer verifica: src é blob URL → isDirectlyPlayable = true
-9. AudioPlayer: needsDecryption = false
-10. Usa blob URL diretamente → Áudio toca normalmente
-11. Se blob expirar → onError detecta → setBlobFailed(true)
-12. Agora needsDecryption = true → Tenta get_media como fallback
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│  FLUXO CORRIGIDO                                                                         │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│  1. Admin está em: id-preview--39ee3e91...lovable.app/global-admin/companies            │
+│                                                                                          │
+│  2. Clica "Acessar como Cliente"                                                        │
+│     → Edge Function busca subdomain: "pndistribuidora"                                  │
+│     → redirect_to = https://pndistribuidora.miauchat.com.br/dashboard                   │
+│                                                                                          │
+│  3. Magic link abre nova aba, autentica como cliente                                    │
+│                                                                                          │
+│  4. Redireciona para https://pndistribuidora.miauchat.com.br/dashboard                  │
+│                                                                                          │
+│  5. ProtectedRoute verifica:                                                            │
+│     - company_subdomain = "pndistribuidora"                                             │
+│     - currentSubdomain = "pndistribuidora" ✅ MATCH!                                    │
+│                                                                                          │
+│  6. PERMITIDO! → Dashboard carrega normalmente com banner de impersonation              │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Consideração para Ambiente de Preview
+
+Para que funcione em ambiente de preview (Lovable development), precisamos de lógica especial:
+
+```typescript
+// Check if we're in development/preview environment
+const isPreviewEnv = origin?.includes('lovable.app') || 
+                     origin?.includes('lovableproject.com') ||
+                     origin?.includes('localhost');
+
+if (isPreviewEnv && !targetSubdomain) {
+  // In preview without subdomain: use origin as fallback
+  appOrigin = origin;
+} else if (targetSubdomain) {
+  // Has subdomain: always use production domain
+  appOrigin = `https://${targetSubdomain}.miauchat.com.br`;
+} else {
+  // Fallback
+  appOrigin = origin || "https://chatfmoteste.lovable.app";
+}
+```
+
+---
+
+## Arquivo a Modificar
+
+| Arquivo | Modificação |
+|---------|-------------|
+| `supabase/functions/impersonate-user/index.ts` | Buscar subdomain e gerar URL correta |
+
+---
+
+## Seção Técnica
+
+### Query para Buscar Subdomain
+
+```sql
+SELECT subdomain, name 
+FROM law_firms 
+WHERE id = targetProfile.law_firm_id
+```
+
+### Lógica de Decisão de URL
+
+```typescript
+// Prioridade:
+// 1. Se tem subdomain → usar subdomain.miauchat.com.br
+// 2. Se está em preview sem subdomain → usar origin (para testes)
+// 3. Fallback → domínio principal
+
+function getTargetUrl(subdomain: string | null, origin: string | null): string {
+  if (subdomain) {
+    return `https://${subdomain}.miauchat.com.br`;
+  }
+  
+  if (origin?.includes('lovable') || origin?.includes('localhost')) {
+    return origin;
+  }
+  
+  return 'https://chatfmoteste.lovable.app';
+}
+```
+
+---
 
 ## Checklist de Validação
 
-- [ ] Enviar áudio no Kanban → Deve aparecer imediatamente como player funcional
-- [ ] Áudio deve tocar usando blob URL local
-- [ ] Se atualizar página → Áudio deve descriptografar via get_media
-- [ ] Áudios recebidos de clientes → Devem descriptografar normalmente
-- [ ] Velocidade de envio manual → Deve ser instantânea (sem delay artificial)
+- [ ] Em produção: Admin clica "Acessar como Cliente"
+- [ ] Nova aba abre em `https://[subdomain].miauchat.com.br/dashboard`
+- [ ] Banner de impersonation aparece
+- [ ] ProtectedRoute não bloqueia (subdomain correto)
+- [ ] Em preview: Se empresa não tem subdomain, usa URL de preview
+- [ ] Botão "Sair do modo Admin" funciona normalmente
 
