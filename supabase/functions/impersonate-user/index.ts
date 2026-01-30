@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
     const redirectUrl = new URL("/dashboard", appOrigin);
     redirectUrl.searchParams.set("impersonating", "true");
     redirectUrl.searchParams.set("admin_id", callerUserId);
-    redirectUrl.searchParams.set("company_name", encodeURIComponent(companyName));
+    redirectUrl.searchParams.set("company_name", companyName);
     
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
@@ -164,20 +164,15 @@ Deno.serve(async (req) => {
 
     console.log("[impersonate-user] Success - Admin:", callerUserId, "impersonating:", targetProfile.email);
 
-    // 9. Build the impersonation URL
-    // The magic link action_link contains the full verification URL
+    // 9. Return the verification URL
+    // The action_link already contains the redirect_to with our custom parameters
+    // No need to add parameters again - they're already in redirect_to
     const verificationUrl = linkData.properties.action_link;
-    
-    // Add our custom parameters to track impersonation state
-    const impersonationUrl = new URL(verificationUrl);
-    impersonationUrl.searchParams.set("impersonating", "true");
-    impersonationUrl.searchParams.set("admin_id", callerUserId);
-    impersonationUrl.searchParams.set("company_name", companyName);
 
     return new Response(
       JSON.stringify({
         success: true,
-        url: impersonationUrl.toString(),
+        url: verificationUrl,
         target_user: {
           id: targetProfile.id,
           name: targetProfile.full_name,
