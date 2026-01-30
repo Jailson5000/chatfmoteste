@@ -1,111 +1,70 @@
 
-# Correção: Scroll nas Tabelas de Empresas (Dashboard e Companies)
+Objetivo
+- Garantir que as listas de empresas no Dashboard do Global Admin e em /global-admin/companies (aba Aprovadas) exibam todas as empresas e permitam rolagem, sem regressões.
 
-## Problema Identificado
+Diagnóstico (causa raiz)
+- O componente compartilhado `src/components/ui/scroll-area.tsx` (Radix ScrollArea) define o Viewport com `h-full`.
+- Em vários pontos (incluindo os dois que estão quebrados), usamos `ScrollArea` apenas com `max-h-[...]` (sem `h-[...]` ou sem estar em um container com altura explícita).
+- Nesse cenário:
+  - O `Root` fica com altura “auto” limitada por `max-height`, e tem `overflow-hidden`.
+  - O `Viewport` (com `h-full`) acaba não ficando efetivamente limitado pela `max-height` do Root (altura vira “auto”/conteúdo), então não cria um container rolável.
+  - Resultado: o conteúdo excedente é cortado pelo `overflow-hidden` do Root e “não tem como rolar” (exatamente o que aparece nas imagens).
 
-Duas páginas com problemas de scroll que cortam a visualização das empresas:
+Por que isso afeta especificamente Dashboard e Empresas Aprovadas
+- `CompanyUsageTable.tsx` usa `<ScrollArea className="max-h-[calc(100vh-480px)]">` (somente max-h).
+- `GlobalAdminCompanies.tsx` usa `<ScrollArea className="max-h-[calc(100vh-320px)]">` (somente max-h).
+- Sem o Viewport “herdar”/respeitar a altura máxima, o conteúdo é cortado e a rolagem não funciona.
 
-1. **Dashboard (`/global-admin`)** - A tabela `CompanyUsageTable` não mostra todas as empresas
-2. **Empresas Aprovadas (`/global-admin/companies`)** - Tabela cortada após a correção anterior
+Estratégia de correção (mínima e com menor risco de regressão)
+1) Corrigir o comportamento do `ScrollArea` compartilhado para que `max-h-*` funcione como esperado
+- Ajustar `src/components/ui/scroll-area.tsx` para que o `Viewport` respeite a `max-height` do Root quando o Root usar `max-h-*`.
+- Implementação proposta:
+  - Adicionar `max-h-[inherit]` e `min-h-0` no `ScrollAreaPrimitive.Viewport`.
+  - Adicionar `min-h-0 min-w-0` também no `ScrollAreaPrimitive.Root` para melhorar comportamento em containers flex (padrão para scroll estável no Tailwind).
+- Efeito: qualquer `ScrollArea` com `max-h-*` passa a rolar corretamente, evitando ter que “remendar” página a página.
 
-### Causa Raiz
+2) Reajustar os cálculos de altura dos dois pontos críticos (opcional, mas recomendado)
+- Mesmo com a rolagem funcionando, hoje o Dashboard pode mostrar poucas linhas visíveis por causa de `calc(100vh-480px)` (mais “apertado” do que o necessário).
+- Ajustes recomendados:
+  - `src/components/global-admin/CompanyUsageTable.tsx`: trocar para algo menos restritivo, ex.: `max-h-[calc(100vh-320px)]` (ou `-360px`), para aumentar área visível e ainda manter scroll interno.
+  - `src/pages/global-admin/GlobalAdminCompanies.tsx`: manter `max-h-[calc(100vh-320px)]` (após o fix do ScrollArea isso já deve funcionar), e só ajustar se ainda ficar apertado em telas menores.
+- Observação: esses números podem ser refinados depois, mas o essencial é: com ScrollArea corrigido, a lista não fica mais “inacessível”.
 
-O problema está na altura calculada do ScrollArea ser muito restritiva, especialmente quando há muitos elementos acima (header, filtros, tabs, cards). O valor `calc(100vh-400px)` pode resultar em uma área muito pequena.
+3) Validar que não existe um segundo bloqueio de scroll por CSS
+- Confirmar que o container principal do Global Admin (`GlobalAdminLayout`) permanece com `main className="flex-1 overflow-auto ..."` (ele está correto).
+- Confirmar que nenhum wrapper adicional está “matando” a rolagem por overflow hidden fora dos lugares necessários.
 
----
+Arquivos a alterar
+- `src/components/ui/scroll-area.tsx` (correção estrutural para max-height funcionar)
+- `src/components/global-admin/CompanyUsageTable.tsx` (ajuste fino do max-h para melhorar visibilidade no Dashboard)
+- `src/pages/global-admin/GlobalAdminCompanies.tsx` (ajuste fino do max-h se necessário; a correção principal vem do ScrollArea)
 
-## Solução
+Plano de testes (para evitar regressão)
+A) Teste end-to-end (obrigatório)
+1. Acessar `/global-admin`:
+   - Verificar que a tabela “Empresas Ativas” permite rolar até a última empresa.
+   - Verificar que nenhuma linha fica “cortada” sem possibilidade de acessar.
+   - Verificar que o scroll do painel não “trava” (wheel/trackpad e arraste da barra).
+2. Acessar `/global-admin/companies` na aba “Aprovadas”:
+   - Verificar que a tabela rola até o final e mostra todas as empresas.
+   - Verificar que o cabeçalho não some de forma estranha ao rolar (se o sticky header não funcionar por causa do wrapper da tabela, isso não impede o acesso às empresas; mas vamos observar).
 
-### 1) GlobalAdminDashboard.tsx
+B) Checagem de regressão rápida (importante, pois mexe em componente compartilhado)
+- Abrir pelo menos 3 lugares que usam `ScrollArea max-h-*`:
+  - Popovers/filters (ex.: filtros de conversas / filtros de kanban).
+  - Dialogs com listas longas.
+  - Sidebar do Global Admin (que usa `ScrollArea flex-1`).
+- Confirmar que continuam rolando como antes e que não surgiram scrollbars “duplos”.
 
-O container que envolve o `CompanyUsageTable` não precisa de altura fixa. O componente já tem seu próprio ScrollArea interno. Porém, pode haver conflito de overflow. Vamos:
+C) (Opcional) Teste automatizado
+- Criar um teste Playwright simples que:
+  - Abre `/global-admin/companies`,
+  - Encontra o container rolável da lista,
+  - Faz scroll até o final,
+  - Verifica que a última linha fica visível.
+- Isso ajuda a evitar que o problema volte no futuro.
 
-- Adicionar `overflow-hidden` no container pai para evitar conflitos
-- O `CompanyUsageTable` já gerencia seu próprio scroll
-
-### 2) GlobalAdminCompanies.tsx  
-
-Ajustar a altura do ScrollArea de `calc(100vh-400px)` para um valor mais generoso `calc(100vh-320px)` e garantir que o container permita o scroll funcionar corretamente.
-
-### 3) Verificar o container do CompanyUsageTable.tsx
-
-O valor atual `max-h-[calc(100vh-200px)]` pode estar sendo limitado pelo container pai que tem padding. Ajustar para considerar o layout completo.
-
----
-
-## Alterações Propostas
-
-### Arquivo 1: `src/pages/global-admin/GlobalAdminDashboard.tsx`
-
-Alterar o container do `CompanyUsageTable` para permitir o scroll interno funcionar:
-
-```tsx
-// Antes (linha 371)
-<div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-
-// Depois
-<div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] overflow-hidden">
-```
-
-### Arquivo 2: `src/pages/global-admin/GlobalAdminCompanies.tsx`
-
-Aumentar a altura disponível para o ScrollArea:
-
-```tsx
-// Antes (linha 1100)
-<ScrollArea className="max-h-[calc(100vh-400px)]">
-
-// Depois  
-<ScrollArea className="max-h-[calc(100vh-320px)]">
-```
-
-### Arquivo 3: `src/components/global-admin/CompanyUsageTable.tsx`
-
-Ajustar a altura para considerar todos os elementos do dashboard:
-
-```tsx
-// Antes (linha 754)
-<ScrollArea className="max-h-[calc(100vh-200px)]">
-
-// Depois - mais conservador considerando header do dashboard
-<ScrollArea className="max-h-[calc(100vh-480px)]">
-```
-
----
-
-## Cálculo das Alturas
-
-### Dashboard (CompanyUsageTable)
-- Header do layout: ~64px
-- Título + botões export: ~60px
-- Grid de stats: ~120px
-- Grid de charts: ~400px (mas com flex pode comprimir)
-- Padding + gaps: ~36px
-- **Total acima da tabela: ~680px** (mas charts/stats comprimem)
-- Valor seguro: `calc(100vh-480px)` permite ~520px em tela 1080p
-
-### Empresas Aprovadas
-- Header do layout: ~64px
-- Breadcrumb + título: ~80px
-- Tabs: ~50px
-- Card header: ~60px
-- Filtros/date: ~60px
-- **Total: ~314px**
-- Valor: `calc(100vh-320px)` permite ~760px em tela 1080p
-
----
-
-## Resultado Esperado
-
-| Página | Antes | Depois |
-|--------|-------|--------|
-| Dashboard | Tabela cortada | Scroll funcional, todas as empresas acessíveis |
-| Empresas Aprovadas | Tabela cortada | Scroll funcional, header sticky visível |
-
----
-
-## Arquivos a Modificar
-
-1. `src/pages/global-admin/GlobalAdminDashboard.tsx` - Container overflow
-2. `src/pages/global-admin/GlobalAdminCompanies.tsx` - Altura do ScrollArea
-3. `src/components/global-admin/CompanyUsageTable.tsx` - Altura do ScrollArea
+Critérios de aceite
+- Dashboard: lista “Empresas Ativas” mostra todas as empresas via rolagem (sem cortes inacessíveis).
+- Empresas Aprovadas: tabela mostra todas as empresas via rolagem (sem cortes inacessíveis).
+- Nenhuma regressão perceptível em scroll/UX em outras áreas que usam `ScrollArea`.
