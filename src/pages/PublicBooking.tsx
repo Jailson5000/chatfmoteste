@@ -67,6 +67,8 @@ export default function PublicBooking() {
   const [services, setServices] = useState<PublicService[]>([]);
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
   const [serviceProfessionals, setServiceProfessionals] = useState<PublicProfessional[]>([]);
+  const [loadingServiceProfs, setLoadingServiceProfs] = useState(false);
+  const [professionalsError, setProfessionalsError] = useState<string | null>(null);
   const [lawFirmId, setLawFirmId] = useState<string | null>(null);
   
   const [step, setStep] = useState<BookingStep>("service");
@@ -84,6 +86,43 @@ export default function PublicBooking() {
   const [submitting, setSubmitting] = useState(false);
   
   const [weekStart, setWeekStart] = useState<Date>(startOfDay(new Date()));
+
+  // Function to load professionals for a service using secure RPC
+  const loadProfessionalsForService = async (serviceId: string, firmId: string) => {
+    setLoadingServiceProfs(true);
+    setProfessionalsError(null);
+    
+    try {
+      const { data, error } = await supabase.rpc('get_public_professionals_for_booking', {
+        _law_firm_id: firmId,
+        _service_id: serviceId
+      });
+      
+      if (error) {
+        console.error("Error loading service professionals:", error);
+        setProfessionalsError("Não foi possível carregar os profissionais. Tente novamente.");
+        setServiceProfessionals([]);
+        return [];
+      }
+      
+      const profs = (data as PublicProfessional[]) || [];
+      setServiceProfessionals(profs);
+      
+      // Warn if services loaded but no professionals
+      if (profs.length === 0) {
+        console.warn("[PublicBooking] Service has no linked professionals:", serviceId);
+      }
+      
+      return profs;
+    } catch (err) {
+      console.error("Exception loading professionals:", err);
+      setProfessionalsError("Erro ao carregar profissionais. Tente novamente.");
+      setServiceProfessionals([]);
+      return [];
+    } finally {
+      setLoadingServiceProfs(false);
+    }
+  };
 
   // Load business data
   useEffect(() => {
@@ -131,15 +170,18 @@ export default function PublicBooking() {
         
         setServices((servicesData as unknown as PublicService[]) || []);
         
-        // Load active professionals from safe view (excludes PII like email/phone)
-        const { data: professionalsData } = await supabase
-          .from("agenda_pro_professionals_public" as any)
-          .select("id, name, specialty, avatar_url")
-          .eq("law_firm_id", firmId)
-          .eq("is_active", true)
-          .order("name");
+        // Load active professionals using secure RPC (no direct view access)
+        const { data: professionalsData, error: profError } = await supabase.rpc(
+          'get_public_professionals_for_booking',
+          { _law_firm_id: firmId }
+        );
         
-        setProfessionals((professionalsData as unknown as PublicProfessional[] | null) || []);
+        if (profError) {
+          console.error("Error loading professionals:", profError);
+          // Don't block - will fall back to loading per service
+        }
+        
+        setProfessionals((professionalsData as PublicProfessional[]) || []);
         
       } catch (error) {
         console.error("Error loading business data:", error);
@@ -262,10 +304,13 @@ export default function PublicBooking() {
       const endDateTime = addMinutes(startDateTime, selectedService.duration_minutes);
       
       // Ensure we have a valid professional_id - this is required
-      // First try selected, then filtered by service, then fallback to all
+      // Priority: selected > first from service list > first from all professionals
       const professionalId = selectedProfessional?.id || serviceProfessionals[0]?.id || professionals[0]?.id;
+      const professionalName = selectedProfessional?.name || serviceProfessionals[0]?.name || professionals[0]?.name || "Profissional";
+      
       if (!professionalId) {
-        toast.error("Nenhum profissional disponível para este serviço.");
+        toast.error("Nenhum profissional disponível para este serviço. Por favor, volte e selecione outro serviço.");
+        setStep("service");
         return;
       }
       
@@ -329,7 +374,7 @@ export default function PublicBooking() {
           return template
             .replace(/{client_name}/g, clientName)
             .replace(/{service_name}/g, selectedService.name)
-            .replace(/{professional_name}/g, selectedProfessional?.name || "Profissional")
+            .replace(/{professional_name}/g, professionalName)
             .replace(/{date}/g, dateStr)
             .replace(/{time}/g, timeStr)
             .replace(/{business_name}/g, reminderSettings?.business_name || settings?.business_name || "");
@@ -538,25 +583,24 @@ export default function PublicBooking() {
                 services.map((service) => (
                   <button
                     key={service.id}
-                    onClick={() => {
+                    disabled={loadingServiceProfs}
+                    onClick={async () => {
                       setSelectedService(service);
                       
-                      // Filter professionals by service links
-                      const linkedProfIds = service.agenda_pro_service_professionals?.map(l => l.professional_id) || [];
-                      const filteredProfs = linkedProfIds.length > 0 
-                        ? professionals.filter(p => linkedProfIds.includes(p.id))
-                        : professionals; // fallback to all if no links
+                      // Load professionals using secure RPC
+                      if (!lawFirmId) return;
                       
-                      setServiceProfessionals(filteredProfs);
+                      const profs = await loadProfessionalsForService(service.id, lawFirmId);
                       
-                      if (filteredProfs.length === 0) {
-                        // No professionals linked - skip to datetime (will use fallback)
-                        setSelectedProfessional(null);
-                        setStep("datetime");
-                      } else if (filteredProfs.length === 1) {
-                        setSelectedProfessional(filteredProfs[0]);
+                      if (profs.length === 0) {
+                        // Show error - cannot proceed without professionals
+                        toast.error("Este serviço não possui profissionais disponíveis para agendamento online.");
+                        return;
+                      } else if (profs.length === 1) {
+                        setSelectedProfessional(profs[0]);
                         setStep("datetime");
                       } else {
+                        setSelectedProfessional(null);
                         setStep("professional");
                       }
                     }}
