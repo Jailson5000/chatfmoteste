@@ -592,9 +592,18 @@ export default function PublicBooking() {
                       
                       const profs = await loadProfessionalsForService(service.id, lawFirmId);
                       
+                      // Check if there was an error during loading (professionalsError is set)
+                      // We need to check the state after the async call completes
                       if (profs.length === 0) {
-                        // Show error - cannot proceed without professionals
-                        toast.error("Este serviço não possui profissionais disponíveis para agendamento online.");
+                        // The loadProfessionalsForService function already sets professionalsError
+                        // if an error occurred. If professionalsError exists, show error message.
+                        // Otherwise, it's a genuine empty list.
+                        // Note: We check for the error state in the UI below. Here we just block.
+                        // The toast is already shown by the function if there was an error.
+                        // If no error but empty list, show the "no professionals" message.
+                        if (!professionalsError) {
+                          toast.error("Este serviço não possui profissionais disponíveis para agendamento online.");
+                        }
                         return;
                       } else if (profs.length === 1) {
                         setSelectedProfessional(profs[0]);
