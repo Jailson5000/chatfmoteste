@@ -1,89 +1,128 @@
 
-Contexto (o que está acontecendo)
-- No agendamento público (/agendar/:slug), ao escolher um serviço, aparece “Este serviço não possui profissionais disponíveis…”, mesmo existindo profissionais ativos e vinculados ao serviço.
-- Isso está acontecendo em todos os links/empresas que você testou, no ambiente publicado, e você já publicou as mudanças.
+Contexto e diagnóstico (com base no que já foi observado)
+- O erro agora acontece ao clicar em “Confirmar agendamento” (tela “Seus dados”). O toast exibido é genérico (“Erro ao realizar agendamento. Tente novamente.”), o que indica que o erro real está sendo lançado como objeto (não como Error), e o frontend está descartando `error.message`.
+- No banco, a busca de profissionais vinculados por serviço está correta (há vínculos e o RPC de profissionais retorna dados quando testado diretamente).
+- Ainda assim, o agendamento falha na criação do registro em `agenda_pro_appointments` no fluxo público.
 
-Reformulando o problema real
-- O sistema NÃO está encontrando profissionais para o serviço no agendamento público porque a chamada que busca “profissionais do serviço” está falhando no backend (erro de função), e o frontend está tratando esse erro como “lista vazia”, exibindo a mensagem errada (“não possui profissionais”).
+Hipóteses mais prováveis (e por que)
+1) Token inválido no insert (uuid)
+- O frontend gera `confirmation_token` manualmente e envia no insert.
+- Se `crypto.randomUUID` não estiver disponível em algum navegador/contexto, o fallback atual gera uma string que NÃO é UUID, e o insert falha com “invalid input syntax for type uuid”.
+- Como esse erro vem como objeto (PostgrestError), o catch atual mostra a mensagem genérica (bate exatamente com o que você está vendo).
+- Solução segura: NÃO enviar `confirmation_token` no insert e deixar o backend gerar via default `gen_random_uuid()`.
 
-Do I know what the issue is?
-- Sim.
-- Identifiquei um erro específico e reproduzível no backend: a função `public.get_public_professionals_for_booking(_law_firm_id, _service_id)` quebra com:
-  - `ERROR: column reference "id" is ambiguous`
-- Causa técnica: a função retorna `RETURNS TABLE (id uuid, ...)`, e em PL/pgSQL isso cria variáveis OUT com nomes iguais às colunas. Dentro da validação do serviço existe um `WHERE id = _service_id` sem alias, e o Postgres fica em dúvida entre:
-  - `id` (variável de retorno da função)
-  - `agenda_pro_services.id` (coluna da tabela)
-- Resultado: o RPC falha quando `_service_id` é enviado, então o frontend recebe `error` e acaba mostrando “sem profissionais” (mensagem incorreta).
+2) Insert público sendo bloqueado por política/validação implícita (multi-tenant / consistência)
+- Mesmo com política “Public can insert appointments”, ainda é mais robusto centralizar o insert em um RPC “SECURITY DEFINER” que:
+  - resolve o tenant pelo `slug`,
+  - valida que o serviço é público/ativo e pertence ao mesmo tenant,
+  - valida que o profissional está ativo e vinculado ao serviço,
+  - insere o agendamento com `source='public_booking'`,
+  - retorna `id` e `confirmation_token`.
+- Isso também fortalece as regras de tenant/IDOR e evita discrepâncias entre domínios/subdomínios.
 
-Evidências (confirmadas no backend)
-- A função funciona quando chamada sem `_service_id` (retorna profissionais do escritório).
-- A função falha quando chamada com `_service_id`, gerando o erro “id is ambiguous”.
-- Existem vínculos válidos em `agenda_pro_service_professionals` (ex.: 2 profissionais vinculados ao serviço), então não é problema de configuração.
+Objetivo do patch
+- Fazer o agendamento público funcionar em:
+  - https://miau-test-h99u.miauchat.com.br/agendar/agenda
+  - https://suporte.miauchat.com.br/agendar/estetica
+- Corrigir sem regressão (não quebrar Agenda Pro interna, nem outros módulos), e reforçar isolamento por tenant no fluxo público.
 
-Plano de correção (sem regressões)
+Plano de implementação (sequência com risco mínimo)
 
-1) Corrigir definitivamente a função do backend (migração)
-Objetivo: fazer o RPC funcionar quando `_service_id` for informado.
-Ação:
-- Criar uma nova migration que faça `CREATE OR REPLACE FUNCTION public.get_public_professionals_for_booking(...)` corrigindo as referências ambíguas.
-- Trocar todas as referências não qualificadas `id` dentro da função por referências qualificadas com alias.
-  Exemplo (ponto do bug):
-  - Antes: `WHERE id = _service_id`
-  - Depois: `FROM public.agenda_pro_services s WHERE s.id = _service_id`
-- Revisar também qualquer outro ponto com risco de conflito de nomes (boas práticas: sempre usar aliases: `s.`, `p.`, `sp.`).
-- Reaplicar `GRANT EXECUTE` para `anon` e `authenticated` na assinatura correta (por segurança, mesmo que já exista).
-- Manter a função retornando apenas campos “públicos” (id, name, specialty, avatar_url) para não expor PII.
+Fase 1 — Tornar o erro visível e corrigir a causa mais provável (rápido e seguro)
+1) Frontend: melhorar a mensagem de erro do “Confirmar agendamento”
+- Ajustar o catch do `handleSubmitBooking` para extrair mensagens de erros “não-Error”:
+  - `code`, `message`, `details`, `hint`
+- Mostrar ao usuário uma mensagem amigável, mas registrar no console um objeto completo para diagnóstico.
+- Resultado: se ainda houver falha, você verá exatamente “por quê” (ex.: uuid inválido, RLS, FK, etc.), sem depender de tentativa e erro.
 
-Checklist SQL (o que a migration deve conter)
-- `CREATE OR REPLACE FUNCTION ... RETURNS TABLE (id uuid, name text, specialty text, avatar_url text) ...`
-- Validar agenda pública habilitada via `agenda_pro_settings`.
-- Validar serviço com alias `s`:
-  - `IF NOT EXISTS (SELECT 1 FROM public.agenda_pro_services s WHERE s.id = _service_id AND s.law_firm_id = _law_firm_id AND s.is_active = true AND s.is_public = true) THEN RETURN; END IF;`
-- Query principal com aliases:
-  - `FROM public.agenda_pro_professionals p`
-  - `JOIN public.agenda_pro_service_professionals sp ON sp.professional_id = p.id`
-  - `WHERE sp.service_id = _service_id AND p.law_firm_id = _law_firm_id AND p.is_active = true`
-- `GRANT EXECUTE ON FUNCTION public.get_public_professionals_for_booking(uuid, uuid) TO anon;`
-- `GRANT EXECUTE ON FUNCTION public.get_public_professionals_for_booking(uuid, uuid) TO authenticated;`
+2) Frontend: parar de enviar `confirmation_token`
+- Remover a geração do token no frontend e NÃO enviar `confirmation_token` no insert.
+- Alterar `.select("id")` para `.select("id, confirmation_token")` (ou pelo menos `id`) e usar o token gerado pelo backend quando precisar criar links/templates.
+- Isso elimina a classe inteira de falhas por UUID inválido e reduz superfície de bugs.
 
-2) Ajustar o frontend para não mascarar erro como “sem profissionais”
-Objetivo: se o RPC falhar, o usuário deve ver “erro ao carregar” (e não “serviço sem profissionais”).
-Ação no `src/pages/PublicBooking.tsx`:
-- Alterar a lógica do clique no serviço para diferenciar:
-  - Caso A: RPC retornou erro -> mostrar uma mensagem de erro (“Não foi possível carregar os profissionais. Tente novamente.”)
-  - Caso B: RPC retornou com sucesso e lista vazia -> mostrar “Este serviço não possui profissionais disponíveis…”
-Opções seguras de implementação:
-- Opção recomendada (mínima e clara):
-  - Fazer `loadProfessionalsForService` retornar um objeto `{ profs, ok }` ou `{ profs, errorMessage }`.
-  - No `onClick`, se `errorMessage` existir, exibir essa mensagem e bloquear avanço.
-- Ajuste adicional recomendado:
-  - Se `professionalsError` estiver preenchido, não mostrar a mensagem de “sem profissionais”; mostrar a mensagem do erro e/ou um botão “Tentar novamente”.
+3) Frontend: corrigir o “stale state” na checagem `professionalsError`
+- Hoje a checagem `if (!professionalsError)` logo após o `await loadProfessionalsForService()` pode usar um estado antigo (React state é assíncrono).
+- Alterar `loadProfessionalsForService` para retornar `{ profs, errorMessage }` e tomar decisões com base no retorno (não no estado).
+- Isso evita avançar/bloquear fluxo por motivo errado e melhora previsibilidade.
 
-3) Testes e validação (end-to-end, sem quebrar o projeto)
-Backend (validação direta)
-- Executar `SELECT * FROM public.get_public_professionals_for_booking(<law_firm_id>, <service_id>);` e confirmar que retorna os profissionais vinculados.
-- Executar `SELECT * FROM public.get_public_professionals_for_booking(<law_firm_id>, NULL);` e confirmar que retorna os profissionais ativos.
+Fase 2 — Fix definitivo com regras de tenant e sem depender de INSERT direto (robusto)
+4) Backend (migration): criar RPC de criação do agendamento público (SECURITY DEFINER)
+Criar `public.create_public_booking_appointment(...)` com parâmetros mínimos:
+- `public_slug text`
+- `service_id uuid`
+- `professional_id uuid default null`
+- `start_time timestamptz`
+- `client_name text`
+- `client_phone text`
+- `client_email text default null`
+- `notes text default null`
 
-Frontend (fluxo público)
-- Abrir os links públicos (ex.: /agendar/agenda e /agendar/estetica):
-  1. Carrega serviços
-  2. Clicar no serviço “Consulta”
-  3. Deve avançar para seleção de profissional ou direto para data/hora (se 1)
-  4. Selecionar data e horário
-  5. Preencher dados e confirmar agendamento
-  6. Confirmar que o agendamento é criado (sem erro de profissional)
-- Caso negativo: criar/usar um serviço sem profissionais vinculados e confirmar que o sistema bloqueia com mensagem correta.
+Regras dentro do RPC:
+- Resolver `law_firm_id` a partir de `agenda_pro_settings.public_slug = public_slug` e exigir:
+  - `is_enabled = true`
+  - `public_booking_enabled = true`
+- Validar serviço:
+  - pertence ao `law_firm_id`
+  - `is_active = true` e `is_public = true`
+- Validar profissional:
+  - se `professional_id` vier:
+    - pertence ao `law_firm_id`, `is_active = true`,
+    - e está vinculado ao serviço em `agenda_pro_service_professionals`
+  - se `professional_id` não vier:
+    - escolher determinísticamente um profissional vinculado ativo (ex.: menor `position`/`name`)
+- Inserir em `agenda_pro_appointments`:
+  - `source = 'public_booking'`
+  - `status = 'scheduled'`
+  - `confirmation_token` sem enviar (deixa default)
+- Retornar `appointment_id` e `confirmation_token` (e opcionalmente `professional_id` efetivo).
+- Conceder `EXECUTE` para `anon`/`authenticated`.
 
-Risco de regressão e mitigação
-- Risco: baixo, pois a correção principal é local (só qualificação de colunas na função) e não altera regras de negócio nem RLS.
-- Mitigação:
-  - Manter exatamente os mesmos filtros atuais (is_enabled/public_booking_enabled/is_public/is_active).
-  - Alterar apenas o necessário no frontend para melhorar a mensagem e não mudar o fluxo quando estiver tudo ok.
+Por que isso reduz regressão e melhora tenant:
+- O insert público deixa de depender de “insert direto” do client (que é sensível a RLS e inconsistências).
+- Toda validação de consistência e isolamento fica centralizada no backend.
+- Evita que alguém injete um `service_id` de outro tenant ou um `professional_id` não vinculado.
 
-Arquivos/áreas envolvidas
-- Backend: nova migration em `supabase/migrations/...sql` corrigindo `get_public_professionals_for_booking`
-- Frontend: `src/pages/PublicBooking.tsx` (melhorar distinção entre “erro de carregamento” vs “lista vazia”)
+5) Frontend: usar o RPC para criar o agendamento (substituir insert direto)
+- No `handleSubmitBooking`, trocar:
+  - `.from("agenda_pro_appointments").insert(...)`
+  por:
+  - `supabase.rpc("create_public_booking_appointment", {...})`
+- Passar `slug` em vez de `lawFirmId` (isso reforça a regra de tenant e simplifica).
+- Usar `professional_id` selecionado, ou null quando “Sem preferência”.
+- A partir do retorno, seguir com:
+  - criação de mensagens agendadas (se continuar no client) ou manter como está.
+  - chamada de notificação (`agenda-pro-notification`) com `appointment_id`.
 
-Resultado esperado
-- Ao selecionar um serviço no agendamento público, os profissionais vinculados passam a aparecer/ser selecionados corretamente.
-- O erro “não possui profissionais” só aparece quando realmente não houver profissionais vinculados/ativos; em caso de falha técnica, a UI mostra um erro correto e permite tentar novamente.
+Fase 3 — Validação end-to-end (obrigatória por ser mudança crítica)
+6) Testes manuais guiados (publicado e preview)
+- Em cada URL:
+  1. Selecionar “Análise” e “Consulta”
+  2. Selecionar um profissional específico e também “Sem preferência”
+  3. Selecionar data/hora
+  4. Preencher dados e confirmar
+  5. Confirmar que:
+     - o agendamento é criado
+     - `professional_id` não fica vazio quando deveria existir
+     - o toast final é sucesso
+- Verificar que não houve regressão no painel interno (criação manual de agendamento ainda funciona).
+
+7) (Opcional, mas recomendado) Teste automatizado Playwright
+- Criar um teste E2E simples para `/agendar/:slug` que percorra o fluxo e confirme que a confirmação acontece (sem precisar validar envio de mensagens).
+
+Notas importantes de segurança / tenant
+- O RPC de criação via `public_slug` evita IDOR por `law_firm_id` conhecido.
+- Validações internas garantem consistência: profissional ativo + vinculado ao serviço + tenant correto.
+- Não expor PII em RPCs públicos (só dados mínimos necessários).
+
+Arquivos/áreas que serão alteradas quando você pedir para executar
+- `src/pages/PublicBooking.tsx`
+  - melhorar erro, remover envio de `confirmation_token`, corrigir stale state, usar novo RPC de criação
+- `supabase/migrations/<nova_migration>.sql` (backend)
+  - criar/ajustar RPC `create_public_booking_appointment`
+  - grants de execução
+- (Se necessário) pequenos ajustes em templates/links usando `confirmation_token` retornado.
+
+Critério de sucesso
+- Agendamentos públicos confirmam com sucesso nos dois slugs.
+- Sem regressões no fluxo interno.
+- Mensagens de erro passam a revelar a causa real (se algum outro bloqueio existir), facilitando manutenção rápida futura.
