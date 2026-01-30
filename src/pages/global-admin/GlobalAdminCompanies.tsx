@@ -57,6 +57,7 @@ import { formatPhone, formatDocument } from "@/lib/inputMasks";
 import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSection";
 import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
@@ -1090,27 +1091,28 @@ export default function GlobalAdminCompanies() {
                 Empresas Aprovadas
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {isLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Empresa</TableHead>
-                      <TableHead>Subdomínio</TableHead>
-                      <TableHead>Plano</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Provisionamento</TableHead>
-                      <TableHead>Email Acesso</TableHead>
-                      <TableHead>Usuários</TableHead>
-                      <TableHead>Conexões</TableHead>
-                      <TableHead>Criada em</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <ScrollArea className="max-h-[calc(100vh-400px)]">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-card z-10">
+                      <TableRow>
+                        <TableHead>Empresa</TableHead>
+                        <TableHead>Subdomínio</TableHead>
+                        <TableHead>Plano</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Provisionamento</TableHead>
+                        <TableHead>Email Acesso</TableHead>
+                        <TableHead>Usuários</TableHead>
+                        <TableHead>Conexões</TableHead>
+                        <TableHead>Criada em</TableHead>
+                        <TableHead className="w-[50px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
                   <TableBody>
                     {filteredCompanies.filter(c => c.approval_status !== 'pending_approval' && c.approval_status !== 'rejected').length === 0 ? (
                       <TableRow>
@@ -1461,8 +1463,9 @@ export default function GlobalAdminCompanies() {
                         </TableRow>
                       ))
                     )}
-                  </TableBody>
-                </Table>
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
