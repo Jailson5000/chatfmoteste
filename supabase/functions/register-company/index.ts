@@ -290,7 +290,8 @@ serve(async (req) => {
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       : null;
 
-    // Create company
+    // Create company with proper trial fields
+    const now = new Date().toISOString();
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .insert({
@@ -302,6 +303,9 @@ serve(async (req) => {
         plan_id: plan_id || null,
         approval_status: shouldAutoApprove ? 'approved' : 'pending_approval',
         status: 'active',
+        // Trial fields - correctly set for auto-approved trials
+        trial_type: shouldAutoApprove ? 'auto_plan' : 'none',
+        trial_started_at: shouldAutoApprove ? now : null,
         trial_ends_at: trialEndsAt,
         client_app_status: shouldAutoApprove ? 'pending' : 'pending',
         n8n_workflow_status: 'pending',
