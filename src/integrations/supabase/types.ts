@@ -5637,6 +5637,19 @@ export type Database = {
         Args: { _law_firm_id: string }
         Returns: undefined
       }
+      create_public_booking_appointment: {
+        Args: {
+          _client_email?: string
+          _client_name: string
+          _client_phone: string
+          _notes?: string
+          _professional_id?: string
+          _public_slug: string
+          _service_id: string
+          _start_time: string
+        }
+        Returns: Json
+      }
       get_admin_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["admin_role"]

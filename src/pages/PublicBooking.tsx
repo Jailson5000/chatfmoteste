@@ -287,7 +287,7 @@ export default function PublicBooking() {
   }, [selectedDate, selectedService, selectedProfessional, lawFirmId, settings]);
 
   const handleSubmitBooking = async () => {
-    if (!selectedService || !selectedDate || !selectedTime || !lawFirmId) return;
+    if (!selectedService || !selectedDate || !selectedTime || !slug) return;
     
     if (!clientName || !clientPhone) {
       toast.error("Por favor, preencha nome e telefone");
@@ -298,54 +298,56 @@ export default function PublicBooking() {
     try {
       const cleanPhone = clientPhone.replace(/\D/g, "");
       
-      // Create appointment
+      // Create appointment start time
       const [hour, min] = selectedTime.split(":").map(Number);
       const startDateTime = setMinutes(setHours(selectedDate, hour), min);
-      const endDateTime = addMinutes(startDateTime, selectedService.duration_minutes);
       
-      // Ensure we have a valid professional_id - this is required
-      // Priority: selected > first from service list > first from all professionals
-      const professionalId = selectedProfessional?.id || serviceProfessionals[0]?.id || professionals[0]?.id;
-      const professionalName = selectedProfessional?.name || serviceProfessionals[0]?.name || professionals[0]?.name || "Profissional";
+      // Use secure RPC that validates tenant via slug
+      // professional_id is optional - if null, RPC will select first available
+      const professionalId = selectedProfessional?.id || null;
       
-      if (!professionalId) {
-        toast.error("Nenhum profissional disponível para este serviço. Por favor, volte e selecione outro serviço.");
-        setStep("service");
-        return;
+      const { data: rpcResult, error: rpcError } = await supabase.rpc(
+        'create_public_booking_appointment',
+        {
+          _public_slug: slug,
+          _service_id: selectedService.id,
+          _start_time: startDateTime.toISOString(),
+          _client_name: clientName,
+          _client_phone: cleanPhone,
+          _professional_id: professionalId,
+          _client_email: clientEmail || null,
+          _notes: notes || null,
+        }
+      );
+      
+      if (rpcError) {
+        console.error("RPC error:", rpcError);
+        // Extract detailed error message
+        const errorDetail = rpcError.message || rpcError.details || rpcError.hint || "Erro desconhecido";
+        throw new Error(errorDetail);
       }
       
-      // Generate confirmation token
-      const confirmationToken =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      // RPC returns jsonb with success boolean and data
+      const result = rpcResult as { 
+        success: boolean; 
+        error?: string;
+        appointment_id?: string;
+        confirmation_token?: string;
+        professional_id?: string;
+        professional_name?: string;
+        service_name?: string;
+        start_time?: string;
+        end_time?: string;
+      };
       
-      const { data: newAppointment, error: appointmentError } = await supabase
-        .from("agenda_pro_appointments")
-        .insert({
-          law_firm_id: lawFirmId,
-          client_id: null,
-          client_name: clientName,
-          client_phone: cleanPhone,
-          client_email: clientEmail || null,
-          service_id: selectedService.id,
-          professional_id: professionalId,
-          start_time: startDateTime.toISOString(),
-          end_time: endDateTime.toISOString(),
-          duration_minutes: selectedService.duration_minutes,
-          status: "scheduled",
-          notes: notes || null,
-          // Required by backend policy for public booking inserts
-          source: "public_booking",
-          confirmation_token: confirmationToken,
-        })
-        .select("id")
-        .single();
-      
-      if (appointmentError) {
-        console.error("Appointment insert error:", appointmentError);
-        throw appointmentError;
+      if (!result.success || !result.appointment_id) {
+        console.error("RPC returned failure:", result);
+        throw new Error(result.error || "Erro ao criar agendamento");
       }
+      
+      const appointmentId = result.appointment_id;
+      const professionalName = result.professional_name || selectedProfessional?.name || "Profissional";
+      const endDateTime = result.end_time ? parseISO(result.end_time) : addMinutes(startDateTime, selectedService.duration_minutes);
       
       // Create scheduled reminder messages based on settings
       try {
@@ -355,7 +357,7 @@ export default function PublicBooking() {
         const { data: reminderSettings } = await supabase
           .from("agenda_pro_settings")
           .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit, reminder_message_template, business_name")
-          .eq("law_firm_id", lawFirmId)
+          .eq("public_slug", slug)
           .single();
         
         // Get service details for pre-message
@@ -383,76 +385,90 @@ export default function PublicBooking() {
         // Default reminder message template
         const defaultReminderTemplate = "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!";
         
-        const scheduledMessages: {
-          law_firm_id: string;
-          appointment_id: string;
-          client_id: string | null;
-          message_type: string;
-          message_content: string;
-          scheduled_at: string;
-          channel: string;
-          status: string;
-        }[] = [];
+        // We need the law_firm_id for scheduled messages insert
+        // Get it from reminderSettings query result or from state
+        const { data: settingsForLawFirm } = await supabase
+          .from("agenda_pro_settings")
+          .select("law_firm_id")
+          .eq("public_slug", slug)
+          .single();
         
-        // First reminder (configurable, default 24h)
-        const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
-        const reminderTime = new Date(startDateTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+        const lawFirmIdForMessages = settingsForLawFirm?.law_firm_id || lawFirmId;
         
-        if (reminderTime > now) {
-          scheduledMessages.push({
-            law_firm_id: lawFirmId,
-            appointment_id: newAppointment.id,
-            client_id: null,
-            message_type: "reminder",
-            message_content: formatMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
-            scheduled_at: reminderTime.toISOString(),
-            channel: "whatsapp",
-            status: "pending",
-          });
-        }
-
-        // Second reminder (configurable)
-        if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
-          const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
-            ? reminderSettings.reminder_2_value * 60 
-            : reminderSettings.reminder_2_value;
-          const reminder2Time = new Date(startDateTime.getTime() - reminder2Minutes * 60 * 1000);
+        if (!lawFirmIdForMessages) {
+          console.warn("Could not determine law_firm_id for scheduled messages");
+        } else {
+          const scheduledMessages: {
+            law_firm_id: string;
+            appointment_id: string;
+            client_id: string | null;
+            message_type: string;
+            message_content: string;
+            scheduled_at: string;
+            channel: string;
+            status: string;
+          }[] = [];
           
-          if (reminder2Time > now) {
+          // First reminder (configurable, default 24h)
+          const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
+          const reminderTime = new Date(startDateTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+          
+          if (reminderTime > now) {
             scheduledMessages.push({
-              law_firm_id: lawFirmId,
-              appointment_id: newAppointment.id,
+              law_firm_id: lawFirmIdForMessages,
+              appointment_id: appointmentId,
               client_id: null,
-              message_type: "reminder_2",
+              message_type: "reminder",
               message_content: formatMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
-              scheduled_at: reminder2Time.toISOString(),
+              scheduled_at: reminderTime.toISOString(),
               channel: "whatsapp",
               status: "pending",
             });
           }
-        }
 
-        // Create pre-message if service has it enabled
-        if (serviceDetails?.pre_message_enabled && serviceDetails?.pre_message_hours_before) {
-          const preMessageTime = new Date(startDateTime.getTime() - (serviceDetails.pre_message_hours_before * 60 * 60 * 1000));
-          
-          if (preMessageTime > now) {
-            scheduledMessages.push({
-              law_firm_id: lawFirmId,
-              appointment_id: newAppointment.id,
-              client_id: null,
-              message_type: "pre_message",
-              message_content: formatMessage(serviceDetails.pre_message_text, "Mensagem pré-atendimento"),
-              scheduled_at: preMessageTime.toISOString(),
-              channel: "whatsapp",
-              status: "pending",
-            });
+          // Second reminder (configurable)
+          if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
+            const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
+              ? reminderSettings.reminder_2_value * 60 
+              : reminderSettings.reminder_2_value;
+            const reminder2Time = new Date(startDateTime.getTime() - reminder2Minutes * 60 * 1000);
+            
+            if (reminder2Time > now) {
+              scheduledMessages.push({
+                law_firm_id: lawFirmIdForMessages,
+                appointment_id: appointmentId,
+                client_id: null,
+                message_type: "reminder_2",
+                message_content: formatMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
+                scheduled_at: reminder2Time.toISOString(),
+                channel: "whatsapp",
+                status: "pending",
+              });
+            }
           }
-        }
 
-        // Insert all scheduled messages at once
-        if (scheduledMessages.length > 0) {
-          await supabase.from("agenda_pro_scheduled_messages").insert(scheduledMessages);
+          // Create pre-message if service has it enabled
+          if (serviceDetails?.pre_message_enabled && serviceDetails?.pre_message_hours_before) {
+            const preMessageTime = new Date(startDateTime.getTime() - (serviceDetails.pre_message_hours_before * 60 * 60 * 1000));
+            
+            if (preMessageTime > now) {
+              scheduledMessages.push({
+                law_firm_id: lawFirmIdForMessages,
+                appointment_id: appointmentId,
+                client_id: null,
+                message_type: "pre_message",
+                message_content: formatMessage(serviceDetails.pre_message_text, "Mensagem pré-atendimento"),
+                scheduled_at: preMessageTime.toISOString(),
+                channel: "whatsapp",
+                status: "pending",
+              });
+            }
+          }
+
+          // Insert all scheduled messages at once
+          if (scheduledMessages.length > 0) {
+            await supabase.from("agenda_pro_scheduled_messages").insert(scheduledMessages);
+          }
         }
       } catch (msgError) {
         console.error("Error creating scheduled messages:", msgError);
@@ -462,7 +478,7 @@ export default function PublicBooking() {
       try {
         await supabase.functions.invoke("agenda-pro-notification", {
           body: { 
-            appointment_id: newAppointment.id,
+            appointment_id: appointmentId,
             type: "created",
           }
         });
@@ -475,8 +491,15 @@ export default function PublicBooking() {
       
     } catch (error) {
       console.error("Booking error:", error);
-      const msg = error instanceof Error ? error.message : "Erro ao realizar agendamento.";
-      toast.error(`${msg} Tente novamente.`);
+      // Extract detailed error message from various error types
+      let errorMessage = "Erro ao realizar agendamento";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === "object" && error !== null) {
+        const anyError = error as { message?: string; details?: string; hint?: string; code?: string };
+        errorMessage = anyError.message || anyError.details || anyError.hint || anyError.code || errorMessage;
+      }
+      toast.error(`${errorMessage}. Tente novamente.`);
     } finally {
       setSubmitting(false);
     }
