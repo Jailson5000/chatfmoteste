@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle, LogIn } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
@@ -57,7 +57,6 @@ import { formatPhone, formatDocument } from "@/lib/inputMasks";
 import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSection";
 import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
-import { startImpersonationAction } from "@/hooks/useImpersonation";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
@@ -79,7 +78,6 @@ export default function GlobalAdminCompanies() {
   const [billingCompany, setBillingCompany] = useState<typeof companies[0] | null>(null);
   const [billingType, setBillingType] = useState<"monthly" | "yearly">("monthly");
   const [isGeneratingBilling, setIsGeneratingBilling] = useState(false);
-  const [impersonatingCompany, setImpersonatingCompany] = useState<string | null>(null);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -1439,23 +1437,7 @@ export default function GlobalAdminCompanies() {
                                   {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem 
-                                  onClick={async () => {
-                                    if (!company.admin_user_id) {
-                                      toast.error("Esta empresa não possui um administrador configurado");
-                                      return;
-                                    }
-                                    setImpersonatingCompany(company.id);
-                                    await startImpersonationAction(company.admin_user_id, company.id);
-                                    setImpersonatingCompany(null);
-                                  }}
-                                  disabled={impersonatingCompany === company.id || !company.admin_user_id}
-                                  className="text-primary focus:text-primary"
-                                >
-                                  <LogIn className="mr-2 h-4 w-4" />
-                                  {impersonatingCompany === company.id ? "Abrindo..." : "Acessar como Cliente"}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem 
+                                <DropdownMenuItem
                                   onClick={() => {
                                     setBillingCompany(company);
                                     setBillingType("monthly");

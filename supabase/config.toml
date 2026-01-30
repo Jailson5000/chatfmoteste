@@ -38,6 +38,3 @@ verify_jwt = false
 
 [functions.cleanup-orphan-lawfirm]
 verify_jwt = false
-
-[functions.impersonate-user]
-verify_jwt = false

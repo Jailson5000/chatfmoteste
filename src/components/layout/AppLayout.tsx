@@ -3,7 +3,6 @@ import { AppSidebar } from "./AppSidebar";
 import { useMessageNotifications } from "@/hooks/useMessageNotifications";
 import { usePresenceTracking } from "@/hooks/usePresenceTracking";
 import { SystemAlertBanner } from "./SystemAlertBanner";
-import { ImpersonationBanner } from "./ImpersonationBanner";
 
 export function AppLayout() {
   // Enable real-time message notifications
@@ -17,7 +16,6 @@ export function AppLayout() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
-      <ImpersonationBanner />
       <SystemAlertBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <AppSidebar />
