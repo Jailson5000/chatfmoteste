@@ -762,7 +762,7 @@ interface MessageData {
       mimetype?: string;
       contextInfo?: ContextInfo;
     };
-    // WABA Interactive message types (button replies, list selections, template responses)
+  // WABA Interactive message types (button replies, list selections, template responses)
     buttonsResponseMessage?: {
       selectedButtonId?: string;
       selectedDisplayText?: string;
@@ -788,6 +788,39 @@ interface MessageData {
         paramsJson?: string;
       };
       contextInfo?: ContextInfo;
+    };
+    // WABA: Template messages (marketing/utility templates sent via official API)
+    templateMessage?: {
+      templateId?: string;
+      hydratedTemplate?: {
+        templateId?: string;
+        hydratedContentText?: string;
+        imageMessage?: {
+          url?: string;
+          mimetype?: string;
+          caption?: string;
+        };
+        videoMessage?: {
+          url?: string;
+          mimetype?: string;
+          caption?: string;
+        };
+        documentMessage?: {
+          url?: string;
+          mimetype?: string;
+          fileName?: string;
+        };
+        hydratedButtons?: Array<{
+          index?: number;
+          quickReplyButton?: { displayText?: string; id?: string };
+          urlButton?: { displayText?: string; url?: string };
+          callButton?: { displayText?: string; phoneNumber?: string };
+        }>;
+      };
+      fourRowTemplate?: {
+        content?: { namespace?: string };
+        hydratedContentText?: string;
+      };
     };
   };
   messageType?: string;
@@ -4247,9 +4280,76 @@ serve(async (req) => {
             messageContent = '[Resposta interativa]';
           }
           logDebug('WABA_INTERACTIVE', 'Interactive response received', { requestId, content: messageContent });
+        } else if (data.message?.templateMessage) {
+          // WABA: Template message (marketing/utility templates sent via official API)
+          const template = data.message.templateMessage;
+          const hydrated = template.hydratedTemplate;
+          
+          if (hydrated) {
+            // Extract main text content from hydrated template
+            messageContent = hydrated.hydratedContentText || '';
+            
+            // Check if template has media attached
+            if (hydrated.imageMessage) {
+              messageType = 'image';
+              mediaUrl = hydrated.imageMessage.url || '';
+              mediaMimeType = hydrated.imageMessage.mimetype || 'image/jpeg';
+              // If template has both image and text, keep text as content
+              if (!messageContent && hydrated.imageMessage.caption) {
+                messageContent = hydrated.imageMessage.caption;
+              }
+            } else if (hydrated.videoMessage) {
+              messageType = 'video';
+              mediaUrl = hydrated.videoMessage.url || '';
+              mediaMimeType = hydrated.videoMessage.mimetype || 'video/mp4';
+              if (!messageContent && hydrated.videoMessage.caption) {
+                messageContent = hydrated.videoMessage.caption;
+              }
+            } else if (hydrated.documentMessage) {
+              messageType = 'document';
+              mediaUrl = hydrated.documentMessage.url || '';
+              mediaMimeType = hydrated.documentMessage.mimetype || 'application/octet-stream';
+              if (!messageContent) {
+                messageContent = hydrated.documentMessage.fileName || '';
+              }
+            }
+            
+            // Append button options to content for context (helps users and AI understand available actions)
+            if (hydrated.hydratedButtons && Array.isArray(hydrated.hydratedButtons) && hydrated.hydratedButtons.length > 0) {
+              const buttonTexts = hydrated.hydratedButtons
+                .map((btn) => {
+                  if (btn.quickReplyButton?.displayText) return btn.quickReplyButton.displayText;
+                  if (btn.urlButton?.displayText) return btn.urlButton.displayText;
+                  if (btn.callButton?.displayText) return btn.callButton.displayText;
+                  return null;
+                })
+                .filter(Boolean);
+              
+              if (buttonTexts.length > 0) {
+                messageContent += '\n\n[Opções: ' + buttonTexts.join(' | ') + ']';
+              }
+            }
+          } else if (template.fourRowTemplate) {
+            // Older template format (fourRowTemplate) - less common but still supported
+            messageContent = template.fourRowTemplate.hydratedContentText || 
+                             template.fourRowTemplate.content?.namespace || 
+                             '[Mensagem de template]';
+          } else {
+            // Fallback for unknown template structure
+            messageContent = '[Mensagem de template]';
+          }
+          
+          logDebug('WABA_TEMPLATE', 'Template message processed', { 
+            requestId, 
+            templateId: template.templateId || hydrated?.templateId,
+            hasMedia: !!mediaUrl,
+            mediaType: messageType,
+            contentLength: messageContent.length,
+            buttonCount: hydrated?.hydratedButtons?.length || 0
+          });
         }
 
-        logDebug('MESSAGE', `Message content extracted`, { 
+        logDebug('MESSAGE', `Message content extracted`, {
           requestId, 
           contentLength: messageContent.length,
           contentPreview: messageContent.substring(0, 100),
