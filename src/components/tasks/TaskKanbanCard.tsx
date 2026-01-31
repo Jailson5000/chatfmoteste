@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   ArrowRight,
   Trash2,
+  CheckCircle2,
 } from "lucide-react";
 import { Task, TaskPriority, TaskStatus, useTasks } from "@/hooks/useTasks";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -87,10 +88,11 @@ export function TaskKanbanCard({
   };
 
   const priorityStyle = priorityStyles[task.priority];
+  const isDone = task.status === "done";
   const isOverdue =
     task.due_date &&
     isPast(new Date(task.due_date)) &&
-    task.status !== "done";
+    !isDone;
   const isDueToday = task.due_date && isToday(new Date(task.due_date));
 
   const handleStatusChange = (status: TaskStatus) => {
@@ -114,7 +116,8 @@ export function TaskKanbanCard({
         className={cn(
           "bg-card border rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow group",
           (isDragging || isSortableDragging) && "opacity-50 shadow-lg",
-          isOverdue && "border-red-300 dark:border-red-700"
+          isOverdue && "border-red-300 dark:border-red-700",
+          isDone && "opacity-70 bg-muted/40 border-green-300 dark:border-green-800"
         )}
         onClick={onClick}
       >
@@ -129,17 +132,28 @@ export function TaskKanbanCard({
             >
               <GripVertical className="h-4 w-4 text-muted-foreground" />
             </div>
-            <h4 className="font-medium text-sm line-clamp-2 flex-1">
+            <h4 className={cn(
+              "font-medium text-sm line-clamp-2 flex-1",
+              isDone && "line-through text-muted-foreground"
+            )}>
               {task.title}
             </h4>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <Badge
-              variant="secondary"
-              className={cn("text-[10px]", priorityStyle.bg, priorityStyle.text)}
-            >
-              {priorityStyle.label}
-            </Badge>
+            {isDone && (
+              <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Concluído
+              </Badge>
+            )}
+            {!isDone && (
+              <Badge
+                variant="secondary"
+                className={cn("text-[10px]", priorityStyle.bg, priorityStyle.text)}
+              >
+                {priorityStyle.label}
+              </Badge>
+            )}
             {/* Quick Actions Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

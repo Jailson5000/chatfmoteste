@@ -3372,6 +3372,7 @@ export type Database = {
           law_firm_id: string
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
+          send_due_alert: boolean
           status: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at: string
@@ -3388,6 +3389,7 @@ export type Database = {
           law_firm_id: string
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          send_due_alert?: boolean
           status?: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at?: string
@@ -3404,6 +3406,7 @@ export type Database = {
           law_firm_id?: string
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          send_due_alert?: boolean
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
           updated_at?: string
@@ -3551,6 +3554,10 @@ export type Database = {
           openai_api_key: string | null
           openai_last_test_at: string | null
           openai_last_test_status: string | null
+          task_alert_business_hours_only: boolean
+          task_alert_channels: Json
+          task_alert_enabled: boolean
+          task_alert_hours_before: number
           updated_at: string
         }
         Insert: {
@@ -3573,6 +3580,10 @@ export type Database = {
           openai_api_key?: string | null
           openai_last_test_at?: string | null
           openai_last_test_status?: string | null
+          task_alert_business_hours_only?: boolean
+          task_alert_channels?: Json
+          task_alert_enabled?: boolean
+          task_alert_hours_before?: number
           updated_at?: string
         }
         Update: {
@@ -3595,6 +3606,10 @@ export type Database = {
           openai_api_key?: string | null
           openai_last_test_at?: string | null
           openai_last_test_status?: string | null
+          task_alert_business_hours_only?: boolean
+          task_alert_channels?: Json
+          task_alert_enabled?: boolean
+          task_alert_hours_before?: number
           updated_at?: string
         }
         Relationships: [
@@ -4500,6 +4515,58 @@ export type Database = {
           },
           {
             foreignKeyName: "task_activity_log_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      task_alert_logs: {
+        Row: {
+          channel: string
+          created_at: string
+          id: string
+          law_firm_id: string
+          sent_at: string
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          sent_at?: string
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          sent_at?: string
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_alert_logs_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_alert_logs_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "internal_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_alert_logs_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
