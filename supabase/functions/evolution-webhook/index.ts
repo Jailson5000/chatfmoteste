@@ -284,6 +284,78 @@ async function logAITransfer(
 }
 
 /**
+ * Fetch WhatsApp profile picture for a client and update their avatar_url.
+ * This runs in the background and doesn't block the webhook flow.
+ * If the user has privacy settings blocking profile picture, it silently fails.
+ */
+async function fetchAndUpdateProfilePicture(
+  supabaseClient: any,
+  instance: { api_url: string; api_key: string | null; instance_name: string },
+  phoneNumber: string,
+  clientId: string
+): Promise<void> {
+  try {
+    // Normalize API URL (remove trailing slashes and /manager suffix)
+    const apiUrl = instance.api_url.replace(/\/+$/, '').replace(/\/manager$/i, '');
+    
+    // Call Evolution API to fetch profile picture
+    const response = await fetch(
+      `${apiUrl}/chat/fetchProfilePictureUrl/${instance.instance_name}`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': instance.api_key || '',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ number: phoneNumber }),
+      }
+    );
+
+    if (!response.ok) {
+      logDebug('AVATAR', 'Evolution API returned non-OK status', { 
+        status: response.status, 
+        clientId,
+        phone: phoneNumber.slice(-4) // Only log last 4 digits for privacy
+      });
+      return;
+    }
+
+    const result = await response.json();
+    
+    // Evolution API may return different field names depending on version
+    const profilePicUrl = result?.profilePictureUrl || result?.picture || result?.url || result?.pictureUrl;
+
+    if (profilePicUrl && typeof profilePicUrl === 'string' && profilePicUrl.startsWith('http')) {
+      const { error } = await supabaseClient
+        .from('clients')
+        .update({ avatar_url: profilePicUrl })
+        .eq('id', clientId);
+      
+      if (error) {
+        logDebug('AVATAR', 'Failed to update client avatar_url', { clientId, error: error.message });
+      } else {
+        logDebug('AVATAR', 'Profile picture updated successfully', { 
+          clientId, 
+          hasUrl: true,
+          urlPreview: profilePicUrl.substring(0, 50) + '...'
+        });
+      }
+    } else {
+      logDebug('AVATAR', 'No profile picture available (user may have privacy enabled)', { 
+        clientId,
+        responseKeys: Object.keys(result || {}).join(',')
+      });
+    }
+  } catch (error) {
+    // Don't throw - this is a background task that shouldn't affect main flow
+    logDebug('AVATAR', 'Error fetching profile picture', { 
+      clientId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+/**
  * Resolve which automation to use for a conversation.
  * Priority order:
  * 1. Conversation's current_automation_id (highest - transfer or previous assignment)
@@ -3973,6 +4045,17 @@ serve(async (req) => {
                 .from('conversations')
                 .update({ client_id: newClient.id })
                 .eq('id', conversation.id);
+              
+              // Fetch WhatsApp profile picture in background (non-blocking)
+              // Fire and forget - errors are logged but don't affect main flow
+              fetchAndUpdateProfilePicture(
+                supabaseClient,
+                instance,
+                phoneNumber,
+                newClient.id
+              ).catch(err => 
+                logDebug('AVATAR', 'Background profile picture fetch failed', { error: String(err) })
+              );
             }
           }
         } else if (convError) {
@@ -4039,6 +4122,16 @@ serve(async (req) => {
                   conversationId: conversation.id,
                   instanceId: instance.id
                 });
+                
+                // Fetch WhatsApp profile picture in background (non-blocking)
+                fetchAndUpdateProfilePicture(
+                  supabaseClient,
+                  instance,
+                  phoneNumber,
+                  newClient.id
+                ).catch(err => 
+                  logDebug('AVATAR', 'Background profile picture fetch failed', { error: String(err) })
+                );
               }
             }
           }
