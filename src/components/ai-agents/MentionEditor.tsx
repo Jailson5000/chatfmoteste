@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MentionPicker } from "./MentionPicker";
 import { cn } from "@/lib/utils";
+import { Bold, Italic, List, HelpCircle, AtSign } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface MentionEditorProps {
   value: string;
@@ -759,6 +767,42 @@ export function MentionEditor({
     [closePicker, syncValueUp]
   );
 
+  // Format text functions
+  const applyFormat = useCallback((command: string) => {
+    document.execCommand(command, false);
+    inputRef.current?.focus();
+    syncValueUp();
+  }, [syncValueUp]);
+
+  const insertList = useCallback(() => {
+    document.execCommand('insertUnorderedList', false);
+    inputRef.current?.focus();
+    syncValueUp();
+  }, [syncValueUp]);
+
+  const openMentionHelper = useCallback(() => {
+    if (!inputRef.current) return;
+    inputRef.current.focus();
+    
+    // Insert @ at cursor position
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const textNode = document.createTextNode("@");
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    
+    // Trigger input handling
+    setTimeout(() => {
+      updatePickerFromCaret();
+    }, 0);
+  }, [updatePickerFromCaret]);
+
   // Sync external value only when not focused (prevents caret jump while typing)
   useEffect(() => {
     if (!inputRef.current) return;
@@ -795,6 +839,119 @@ export function MentionEditor({
 
   return (
     <div ref={editorRef} className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
+      {/* Formatting Toolbar */}
+      <div className="flex items-center gap-1 p-2 border-b border-border bg-muted/30 dark:bg-slate-800/50 rounded-t-lg shrink-0">
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => applyFormat('bold')}
+              >
+                <Bold className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Negrito (Ctrl+B)</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => applyFormat('italic')}
+              >
+                <Italic className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Itálico (Ctrl+I)</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={insertList}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Lista</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <div className="w-px h-5 bg-border mx-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 gap-1.5"
+                onClick={openMentionHelper}
+              >
+                <AtSign className="h-4 w-4" />
+                <span className="text-xs">Menção</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Inserir menção (@)</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <div className="flex-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-muted-foreground"
+                onClick={() => {
+                  // Could open a help modal in the future
+                }}
+              >
+                <HelpCircle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <p className="font-medium mb-1">Dicas de uso:</p>
+              <ul className="text-xs space-y-0.5">
+                <li>• Digite @ para inserir menções</li>
+                <li>• Use Ctrl+B para negrito</li>
+                <li>• Use Ctrl+I para itálico</li>
+                <li>• Clique em uma menção para editá-la</li>
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+
+          {maxLength && (
+            <div className={cn(
+              "text-xs font-medium px-2",
+              value.length > maxLength * 0.9 ? "text-destructive" : "text-muted-foreground"
+            )}>
+              {value.length.toLocaleString()}/{maxLength.toLocaleString()}
+            </div>
+          )}
+        </TooltipProvider>
+      </div>
+
+      {/* Editor Content */}
       <div
         ref={inputRef}
         contentEditable
@@ -819,8 +976,13 @@ export function MentionEditor({
         }}
         data-placeholder={placeholder}
         className={cn(
-          "flex-1 min-h-0 w-full overflow-y-auto overscroll-contain p-4 bg-background font-mono text-sm leading-relaxed rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground",
-          "[&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-muted-foreground [&:empty]:before:pointer-events-none",
+          "flex-1 min-h-0 w-full overflow-y-auto overscroll-contain p-4",
+          "bg-background dark:bg-slate-900/50",
+          "font-mono text-sm leading-relaxed",
+          "rounded-b-lg border border-t-0 border-input dark:border-slate-700",
+          "focus:outline-none focus:ring-2 focus:ring-primary/20",
+          "text-foreground dark:text-slate-100",
+          "[&:empty]:before:content-[attr(data-placeholder)] [&:empty]:before:text-muted-foreground dark:[&:empty]:before:text-slate-500 [&:empty]:before:pointer-events-none",
           className
         )}
         style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
@@ -829,7 +991,7 @@ export function MentionEditor({
       {showMentionPicker && (
         <div
           ref={mentionPickerRef}
-          className="absolute z-50 top-12 left-4"
+          className="absolute z-50 top-20 left-4"
           // Prevent focus leaving the editor when clicking an option
           onMouseDown={(e) => e.preventDefault()}
         >

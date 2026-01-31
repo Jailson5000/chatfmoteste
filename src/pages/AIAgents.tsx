@@ -284,7 +284,6 @@ export default function AIAgents() {
   const [prompt, setPrompt] = useState("");
 
   const [responseDelay, setResponseDelay] = useState(10);
-  const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>([]);
   const [keywords, setKeywords] = useState("");
   const [channelType, setChannelType] = useState<ChannelType>("all");
   const [selectedInstance, setSelectedInstance] = useState<string>("");
@@ -327,7 +326,6 @@ export default function AIAgents() {
       setChannelType(loadedChannelType === "instance" || loadedChannelType === "department" ? loadedChannelType : "all");
       setSelectedInstance((config?.selected_instance as string) || "");
       setSelectedDepartment((config?.selected_department as string) || "");
-      setSelectedKnowledge((config?.knowledge_base_ids as string[]) || []);
       
       // Load voice settings
       setVoiceEnabled(Boolean(config?.voice_enabled));
@@ -720,7 +718,6 @@ export default function AIAgents() {
         channel_type: channelType,
         selected_instance: channelType === "instance" ? selectedInstance : null,
         selected_department: channelType === "department" ? selectedDepartment : null,
-        knowledge_base_ids: selectedKnowledge,
         voice_enabled: voiceEnabled,
         voice_id: voiceId,
       };
@@ -1649,56 +1646,6 @@ Regras:
 
           <ScrollArea className="flex-1">
             <div className="p-4 space-y-6">
-              {/* Knowledge Base */}
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Database className="h-4 w-4" />
-                  Base de Conhecimento
-                </Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between">
-                      <span className="flex items-center gap-2">
-                        <Database className="h-4 w-4 text-muted-foreground" />
-                        {selectedKnowledge.length > 0 
-                          ? `${selectedKnowledge.length} base(s) selecionada(s)`
-                          : "Selecionar bases"
-                        }
-                      </span>
-                      <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72" align="start">
-                    <div className="space-y-2">
-                      {knowledgeItems.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-4">
-                          Nenhuma base cadastrada
-                        </p>
-                      ) : (
-                        knowledgeItems.map((item) => (
-                          <div key={item.id} className="flex items-center space-x-2">
-                            <Checkbox
-                              checked={selectedKnowledge.includes(item.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedKnowledge([...selectedKnowledge, item.id]);
-                                } else {
-                                  setSelectedKnowledge(selectedKnowledge.filter(id => id !== item.id));
-                                }
-                                setHasChanges(true);
-                              }}
-                            />
-                            <label className="text-sm flex-1 cursor-pointer">
-                              {item.title}
-                            </label>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
               {/* Response Delay */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
