@@ -1,74 +1,122 @@
 
 
-# Ajuste: Reduzir Tamanho do Banner de Conversa Arquivada
+# Correção: Sincronização Automática do Valor da Assinatura ASAAS ao Aprovar Adicionais
 
 ## Problema Identificado
 
-O banner de "Conversa arquivada" está ocupando muito espaço na tela com:
-- Padding grande (`p-3`)
-- Fontes com tamanho padrão (`text-sm`)
-- Ícone de 16px (`h-4 w-4`)
-- Margens extras (`mx-4 my-2`)
+Existe uma **desconexão** entre o "Resumo Mensal" calculado no frontend e as faturas reais no ASAAS:
+
+| Local | Valor | Fonte |
+|-------|-------|-------|
+| Resumo Mensal (frontend) | R$ 1.756,80 | Calculado localmente (plano + adicionais) |
+| Faturas ASAAS (modal) | R$ 1.697,00 | API do ASAAS (valor da assinatura) |
+
+**Causa**: Quando os adicionais (+2 usuários) foram aprovados, a assinatura no ASAAS NÃO foi atualizada automaticamente para incluir o valor dos adicionais (R$ 59,80).
+
+---
+
+## Fluxo Atual (COM PROBLEMA)
+
+```text
+Admin Global aprova addon request
+        ↓
+Função approve_addon_request() (SQL)
+        ↓
+Atualiza max_users/max_instances na tabela companies
+        ↓
+✗ NÃO atualiza valor no ASAAS!
+        ↓
+Faturas continuam com valor antigo
+```
+
+---
 
 ## Solução
 
-Reduzir todos os elementos do banner para uma versão mais compacta:
+### Opção A: Correção Manual Imediata (Este Caso Específico)
 
-| Elemento | Atual | Novo |
-|----------|-------|------|
-| Padding | `p-3` | `p-2` |
-| Margens | `mx-4 my-2` | `mx-3 my-1.5` |
-| Ícone | `h-4 w-4` | `h-3 w-3` |
-| Título | `font-medium` (14px) | `text-xs font-medium` |
-| Textos | `text-sm` | `text-xs` |
-| Espaçamento interno | `mt-1` | `mt-0.5` |
+O Admin Global pode acessar o painel Global Admin > Empresas > FMO ADV e clicar em "Sincronizar Cobrança" para atualizar o valor da assinatura no ASAAS para R$ 1.756,80.
 
-## Código Atualizado
+### Opção B: Correção Sistêmica (Recomendada)
 
-```tsx
-{/* Archived Conversation Banner - Compact version */}
-{selectedConversation.archived_at && (
-  <div className="bg-orange-100 dark:bg-orange-900/30 border-l-4 border-orange-500 p-2 mx-3 my-1.5 rounded">
-    <div className="flex items-center gap-1.5">
-      <Archive className="h-3 w-3 text-orange-600 dark:text-orange-400" />
-      <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
-        Conversa arquivada
-      </span>
-    </div>
-    <div className="text-xs text-orange-700 dark:text-orange-300 mt-0.5">
-      {(selectedConversation as any).archived_by_name && 
-        `Por: ${(selectedConversation as any).archived_by_name} • `}
-      Em: {new Date(selectedConversation.archived_at).toLocaleString('pt-BR', { 
-        day: '2-digit', 
-        month: '2-digit', 
-        year: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })}
-    </div>
-    {selectedConversation.archived_reason && (
-      <div className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
-        Motivo: {selectedConversation.archived_reason}
-      </div>
-    )}
-  </div>
-)}
+Modificar o fluxo de aprovação de adicionais para:
+
+1. **Alterar a edge function `invite-team-member` ou criar nova edge function `approve-addon`** que:
+   - Aprova o addon request no banco
+   - Calcula o novo valor total (plano + adicionais)
+   - Chama `update-asaas-subscription` automaticamente
+
+2. **Ou modificar a função SQL `approve_addon_request`** para registrar que a sincronização ASAAS é necessária, e criar um job que processa essas atualizações pendentes.
+
+---
+
+## Alterações Técnicas Propostas
+
+### 1. Nova Edge Function `approve-addon-request`
+
+Substituir a chamada direta à função SQL por uma edge function que:
+
+```typescript
+// 1. Aprovar no banco (via RPC)
+await supabase.rpc('approve_addon_request', { _request_id: requestId });
+
+// 2. Buscar empresa e calcular novo valor
+const company = await getCompanyWithPlan(companyId);
+const newValue = company.plan.price + calculateAdditionalCosts(...);
+
+// 3. Atualizar assinatura no ASAAS
+await supabase.functions.invoke('update-asaas-subscription', {
+  body: { 
+    company_id: companyId, 
+    new_value: newValue,
+    reason: 'Addon request approved' 
+  }
+});
 ```
 
-## Comparação Visual
+### 2. Atualizar Frontend (GlobalAdminCompanies ou componente de addons)
 
-### Antes
-- Altura estimada: ~70-80px
-- Fonte maior, mais espaçamento
+Quando o Admin Global aprova um addon:
 
-### Depois
-- Altura estimada: ~45-50px
-- Fonte menor (`text-xs` = 12px), espaçamento reduzido
-- Mais compacto sem perder legibilidade
+```typescript
+// Em vez de chamar apenas o RPC
+await supabase.rpc('approve_addon_request', { _request_id: requestId });
 
-## Arquivo Afetado
+// Chamar a nova edge function que faz tudo
+await supabase.functions.invoke('approve-addon-request', {
+  body: { request_id: requestId }
+});
+```
+
+---
+
+## Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Conversations.tsx` | Linhas 3944-3969: reduzir padding, fonte e ícone |
+| `supabase/functions/approve-addon-request/index.ts` | **NOVO** - Edge function que aprova + sincroniza ASAAS |
+| `src/hooks/useAddonRequests.tsx` | Chamar edge function em vez de RPC direto |
+| `src/components/global-admin/AddonRequestsSection.tsx` | Atualizar handlers para usar nova edge function |
+
+---
+
+## Correção Imediata para FMO ADV
+
+Para resolver o caso específico do cliente FMO ADV agora:
+
+1. Acessar **Global Admin > Empresas**
+2. Encontrar **FMO ADV**
+3. Clicar em **Editar** ou **Sincronizar Cobrança**
+4. O sistema chamará `update-asaas-subscription` com o valor correto (R$ 1.756,80)
+5. Próximas faturas serão geradas com o valor correto
+
+---
+
+## Notas Importantes
+
+1. **Faturas já geradas**: As faturas que já existem com R$ 1.697,00 NÃO serão alteradas automaticamente. O ASAAS permite definir `updatePendingPayments: true` na API, o que atualiza faturas pendentes.
+
+2. **Recálculo automático**: O `update-asaas-subscription` já usa `updatePendingPayments: true`, então faturas PENDENTES serão atualizadas quando o valor for sincronizado.
+
+3. **Consistência**: Após a correção, o valor das faturas pendentes passará de R$ 1.697,00 para R$ 1.756,80, ficando consistente com o Resumo Mensal.
 
