@@ -1,67 +1,71 @@
 
-# Plano: Adicionar Foto do Contato no Header Central de Conversas
+# Plano: Adicionar Foto do Contato no Header do Painel de Chat do Kanban
 
 ## Situação Atual
 
-O header central da página de Conversas (área do chat) mostra apenas as **iniciais do contato** em um círculo colorido:
+O header do `KanbanChatPanel` exibe um avatar gerado pelo **Dicebear** baseado nas iniciais do nome:
 
 ```tsx
-// Linha 3556-3565 - Código atual
-<div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-  <span className="text-sm font-semibold text-primary">
-    {(selectedConversation.contact_name || ...).slice(0, 2).toUpperCase()}
-  </span>
-</div>
+// Linhas 2703-2710 - Código atual
+<Avatar className="h-10 w-10">
+  <AvatarImage
+    src={`https://api.dicebear.com/7.x/initials/svg?seed=${contactName || contactPhone}`}
+  />
+  <AvatarFallback>
+    {contactName?.charAt(0)?.toUpperCase() || "?"}
+  </AvatarFallback>
+</Avatar>
 ```
 
-O `avatar_url` **já está disponível** via `selectedConversation.client?.avatar_url` (confirmado na linha 4499).
+O `avatar_url` **já está disponível** via `selectedConversation.client?.avatar_url` no Kanban.tsx (linha 605), mas não é passado para o componente.
 
 ---
 
 ## Alterações Necessárias
 
-### 1. Adicionar Importação do Avatar
+### 1. `KanbanChatPanel.tsx` - Adicionar Prop
 
-Adicionar após a linha 61:
-
+**Interface (linhas 1007-1032):**
 ```typescript
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+interface KanbanChatPanelProps {
+  // ... existing props ...
+  avatarUrl?: string | null;  // NEW
+}
 ```
 
-### 2. Substituir Div por Avatar no Header (linhas 3556-3565)
-
-**De:**
-```tsx
-<div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-  <span className="text-sm font-semibold text-primary">
-    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase()}
-  </span>
-</div>
+**Destruturação (linha 1034-1055):**
+```typescript
+export function KanbanChatPanel({
+  // ... existing props ...
+  avatarUrl,  // NEW
+}: KanbanChatPanelProps) {
 ```
 
-**Para:**
+### 2. `KanbanChatPanel.tsx` - Usar Foto Real no Avatar
+
+**Header (linhas 2703-2710):**
 ```tsx
-<Avatar className="h-10 w-10 flex-shrink-0 border border-primary/20">
-  {(selectedConversation as any).client?.avatar_url ? (
+<Avatar className="h-10 w-10 border border-primary/20">
+  {avatarUrl ? (
     <AvatarImage 
-      src={(selectedConversation as any).client.avatar_url} 
-      alt={selectedConversation.contact_name || "Avatar"} 
+      src={avatarUrl} 
+      alt={contactName || "Avatar"} 
     />
   ) : null}
-  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase()}
+  <AvatarFallback className="bg-primary/10 text-primary">
+    {contactName?.charAt(0)?.toUpperCase() || "?"}
   </AvatarFallback>
 </Avatar>
+```
+
+### 3. `Kanban.tsx` - Passar Avatar URL
+
+**Linha 594-618 (onde KanbanChatPanel é chamado):**
+```tsx
+<KanbanChatPanel
+  // ... existing props ...
+  avatarUrl={selectedConversation.client?.avatar_url}
+/>
 ```
 
 ---
@@ -70,21 +74,23 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Conversations.tsx` | Adicionar import do Avatar + substituir div por Avatar no header |
+| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar prop `avatarUrl` + usar no Avatar do header |
+| `src/pages/Kanban.tsx` | Passar `client?.avatar_url` para KanbanChatPanel |
 
 ---
 
 ## Resultado Esperado
 
-- **Com foto**: Exibe a foto do WhatsApp do contato
-- **Sem foto**: Fallback para iniciais (mesmo visual atual)
-- **Estilo**: Mantém tamanho 10x10 (40px), borda sutil para harmonizar
+- **Com foto**: Exibe a foto do WhatsApp do contato no header
+- **Sem foto**: Fallback para a inicial do nome (mesmo visual atual, sem Dicebear)
+- **Estilo**: Mantém tamanho 10x10 (40px), adiciona borda sutil para harmonizar
 
 ---
 
 ## Garantias de Segurança
 
-- ✅ **Sem regressões**: O fallback para iniciais mantém o comportamento atual
-- ✅ **Retrocompatível**: O campo `avatar_url` é opcional
-- ✅ **Dados já disponíveis**: O hook `useConversations` já retorna `client.avatar_url`
-- ✅ **Sem alteração de lógica**: Apenas mudança visual no header
+- **Sem regressões**: O fallback para iniciais mantém o comportamento visual atual
+- **Retrocompatível**: O campo `avatarUrl` é opcional na interface
+- **Dados já disponíveis**: `useConversations` já retorna `client.avatar_url`
+- **Sem alteração de lógica**: Apenas mudança visual no header
+- **Remove dependência externa**: Não usa mais Dicebear API (avatar gerado localmente)
