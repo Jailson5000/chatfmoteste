@@ -115,6 +115,7 @@ import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useScheduledFollowUps } from "@/hooks/useScheduledFollowUps";
+import { useUserDepartments } from "@/hooks/useUserDepartments";
 import { ScheduledFollowUpIndicator } from "@/components/conversations/ScheduledFollowUpIndicator";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -207,6 +208,10 @@ export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { lawFirm } = useLawFirm();
   const { followUpsByConversation } = useScheduledFollowUps();
+  const { canAccessArchived, hasFullAccess } = useUserDepartments();
+  
+  // Determine if user can view archived conversations
+  const canViewArchived = hasFullAccess || canAccessArchived;
   
   // Message queue to ensure messages are sent in strict order
   const { enqueue: enqueueMessage, clearQueue: clearMessageQueue } = useMessageQueue();
@@ -2713,19 +2718,21 @@ export default function Conversations() {
               </TabsList>
             </Tabs>
 
-          {/* Archived button below tabs (mobile) */}
-          <Button
-            variant={activeTab === "archived" ? "secondary" : "ghost"}
-            size="sm"
-            className="w-full justify-start gap-1 h-6 text-[8px]"
-            onClick={() => setActiveTab("archived")}
-          >
-            <Archive className="h-2 w-2" />
-            Arquivados
-            <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
-              {getTabCount("archived")}
-            </Badge>
-          </Button>
+          {/* Archived button below tabs (mobile) - only show if user has permission */}
+          {canViewArchived && (
+            <Button
+              variant={activeTab === "archived" ? "secondary" : "ghost"}
+              size="sm"
+              className="w-full justify-start gap-1 h-6 text-[8px]"
+              onClick={() => setActiveTab("archived")}
+            >
+              <Archive className="h-2 w-2" />
+              Arquivados
+              <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
+                {getTabCount("archived")}
+              </Badge>
+            </Button>
+          )}
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -3214,19 +3221,21 @@ export default function Conversations() {
             </TabsList>
           </Tabs>
 
-          {/* Archived button below tabs */}
-          <Button
-            variant={activeTab === "archived" ? "secondary" : "ghost"}
-            size="sm"
-            className="w-full justify-start gap-1 h-6 text-[8px]"
-            onClick={() => setActiveTab("archived")}
-          >
-            <Archive className="h-2 w-2" />
-            Arquivados
-            <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
-              {getTabCount("archived")}
-            </Badge>
-          </Button>
+          {/* Archived button below tabs - only show if user has permission */}
+          {canViewArchived && (
+            <Button
+              variant={activeTab === "archived" ? "secondary" : "ghost"}
+              size="sm"
+              className="w-full justify-start gap-1 h-6 text-[8px]"
+              onClick={() => setActiveTab("archived")}
+            >
+              <Archive className="h-2 w-2" />
+              Arquivados
+              <Badge variant="secondary" className="h-3 px-1 text-[8px] ml-auto">
+                {getTabCount("archived")}
+              </Badge>
+            </Button>
+          )}
 
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
