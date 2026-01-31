@@ -607,6 +607,9 @@ export default function Kanban() {
             departmentId={selectedConversation.department_id}
             origin={selectedConversation.origin}
             avatarUrl={selectedConversation.client?.avatar_url}
+            archivedAt={(selectedConversation as any).archived_at}
+            archivedReason={(selectedConversation as any).archived_reason}
+            archivedByName={(selectedConversation as any).archived_by_name}
             customStatuses={customStatuses}
             tags={tags}
             departments={departments}
