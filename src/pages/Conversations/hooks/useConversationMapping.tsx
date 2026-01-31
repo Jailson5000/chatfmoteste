@@ -97,6 +97,8 @@ export function useConversationMapping({
         handler: effectiveHandler,
         status: conv.status,
         archivedAt: (conv as any).archived_at || null,
+        archivedReason: (conv as any).archived_reason || null,
+        archivedByName: (conv as any).archived_by_name || null,
         tags: (conv as any).client_tags || [],
         assignedTo: conv.assigned_profile?.full_name || null,
         assignedUserId: (conv as any).assigned_to || null,

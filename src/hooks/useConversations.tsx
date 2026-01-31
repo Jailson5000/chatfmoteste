@@ -47,6 +47,8 @@ interface ConversationWithLastMessage extends Conversation {
     name: string;
     color: string;
   }>;
+  // Extend with archived_by_name from RPC (not in base Conversation type)
+  archived_by_name?: string | null;
 }
 
 const CONVERSATIONS_BATCH_SIZE = 30;
@@ -83,6 +85,8 @@ function mapRpcRowToConversation(row: any): ConversationWithLastMessage {
     archived_reason: row.archived_reason,
     archived_next_responsible_id: row.archived_next_responsible_id,
     archived_next_responsible_type: row.archived_next_responsible_type,
+    archived_by: row.archived_by,
+    archived_by_name: row.archived_by_name,
     origin: row.origin,
     origin_metadata: row.origin_metadata,
     last_summarized_at: row.last_summarized_at,

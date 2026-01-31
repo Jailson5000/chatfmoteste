@@ -2597,6 +2597,7 @@ export type Database = {
           ai_audio_last_enabled_at: string | null
           ai_summary: string | null
           archived_at: string | null
+          archived_by: string | null
           archived_next_responsible_id: string | null
           archived_next_responsible_type: string | null
           archived_reason: string | null
@@ -2633,6 +2634,7 @@ export type Database = {
           ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
           archived_at?: string | null
+          archived_by?: string | null
           archived_next_responsible_id?: string | null
           archived_next_responsible_type?: string | null
           archived_reason?: string | null
@@ -2669,6 +2671,7 @@ export type Database = {
           ai_audio_last_enabled_at?: string | null
           ai_summary?: string | null
           archived_at?: string | null
+          archived_by?: string | null
           archived_next_responsible_id?: string | null
           archived_next_responsible_type?: string | null
           archived_reason?: string | null
@@ -5794,6 +5797,8 @@ export type Database = {
               ai_audio_last_enabled_at: string
               ai_summary: string
               archived_at: string
+              archived_by: string
+              archived_by_name: string
               archived_next_responsible_id: string
               archived_next_responsible_type: string
               archived_reason: string

@@ -2421,11 +2421,15 @@ export function KanbanChatPanel({
         ? archiveCustomReason.trim()
         : ARCHIVE_REASONS.find((r) => r.value === archiveReason)?.label || archiveReason;
 
+      // Get current user for tracking
+      const { data: userData } = await supabase.auth.getUser();
+      
       // Build the update payload - use archived_at column
       const updatePayload: any = {
         id: conversationId,
         archived_at: new Date().toISOString(),
         archived_reason: reasonText,
+        archived_by: userData.user?.id, // Track who archived
       };
 
       // If next responsible is set

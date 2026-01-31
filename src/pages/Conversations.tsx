@@ -2595,6 +2595,7 @@ export default function Conversations() {
         id: selectedConversation.id,
         archived_at: new Date().toISOString(),
         archived_reason: reasonText,
+        archived_by: user?.id, // Track who archived
         internal_notes: selectedConversation.internal_notes
           ? `${selectedConversation.internal_notes}\n\n[Arquivado: ${reasonText}]`
           : `[Arquivado: ${reasonText}]`,
@@ -3940,6 +3941,32 @@ export default function Conversations() {
               }}
             />
 
+            {/* Archived Conversation Banner */}
+            {selectedConversation.archived_at && (
+              <div className="bg-orange-100 dark:bg-orange-900/30 border-l-4 border-orange-500 p-3 mx-4 my-2 rounded">
+                <div className="flex items-center gap-2">
+                  <Archive className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                  <span className="font-medium text-orange-800 dark:text-orange-200">
+                    Conversa arquivada
+                  </span>
+                </div>
+                <div className="text-sm text-orange-700 dark:text-orange-300 mt-1">
+                  {(selectedConversation as any).archived_by_name && `Por: ${(selectedConversation as any).archived_by_name} • `}
+                  Em: {new Date(selectedConversation.archived_at).toLocaleString('pt-BR', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </div>
+                {selectedConversation.archived_reason && (
+                  <div className="text-sm text-orange-600 dark:text-orange-400 mt-1">
+                    Motivo: {selectedConversation.archived_reason}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Messages */}
             <div className="relative flex-1 min-h-0 min-w-0 overflow-x-hidden">
