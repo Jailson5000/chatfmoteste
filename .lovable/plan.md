@@ -1,30 +1,69 @@
 
-# Correção de Planos Desatualizados
+# Sincronização de Planos: Global Admin → Landing Page
 
-## Problemas Encontrados
+## Problema Principal
 
-### 1. Banco de Dados - Features dos Planos Incorretas
-A coluna `features` (lista de recursos exibidos na Landing Page) está desatualizada:
-
-| Plano | Problema |
-|-------|----------|
-| PROFESSIONAL | Falta "400 conversas com IA" na lista |
-| ENTERPRISE | Mostra "600 conversas com IA" mas deveria ser "1000 conversas com IA" |
-
-### 2. GlobalAdminCompanies - Defaults Hardcoded
-Os valores padrão do formulário estão fixos em valores antigos (5 usuários, 2 conexões), quando deveriam refletir os limites do plano.
+A Landing Page exibe apenas a lista `features` dos planos do banco de dados, mas essa lista **não inclui o número de usuários** de cada plano. Além disso, há valores de fallback desatualizados no código.
 
 ---
 
-## Alterações Necessárias
+## Diagnóstico Detalhado
+
+### 1. Features do Banco vs. O Que Deveria Aparecer
+
+| Plano | Features Atuais (Banco) | Informação Faltando |
+|-------|-------------------------|---------------------|
+| BASIC | 200 conversas, 10 min áudio, 1 WA, 1 agente... | **2 usuários** |
+| STARTER | 300 conversas, 25 min áudio, 2 WA, 2 agentes... | **3 usuários** |
+| PROFESSIONAL | 400 conversas, 40 min áudio, 4 WA, 4 agentes... | **4 usuários** |
+| ENTERPRISE | 1000 conversas, 60 min áudio, 6 WA, 10 agentes... | **8 usuários** |
+
+### 2. GlobalAdminCompanies - Fallbacks Incorretos
+
+**Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`  
+**Linhas 257-258:**
+
+| Campo | Fallback Atual | Fallback Correto (BASIC) |
+|-------|----------------|--------------------------|
+| max_ai_conversations | 250 | **200** |
+| max_tts_minutes | 40 | **10** |
+
+---
+
+## Solução Proposta
 
 ### Correção 1: Atualizar Features no Banco de Dados
 
-**Executar SQL para atualizar a coluna `features`:**
+Adicionar o número de usuários como primeiro item de cada lista `features`:
 
-**PROFESSIONAL** - Adicionar "400 conversas com IA":
 ```sql
+-- BASIC: Adicionar "2 usuários"
 UPDATE plans SET features = ARRAY[
+  '2 usuários',
+  '200 conversas com IA',
+  '10 minutos de áudio',
+  '1 WhatsApp conectado',
+  '1 agente de IA',
+  'Automação essencial',
+  'Mensagens rápidas',
+  'Respostas automáticas'
+] WHERE UPPER(name) = 'BASIC';
+
+-- STARTER: Adicionar "3 usuários"
+UPDATE plans SET features = ARRAY[
+  '3 usuários',
+  '300 conversas com IA',
+  '25 minutos de áudio',
+  '2 WhatsApps conectados',
+  '2 agentes de IA',
+  'Tudo do plano Basic',
+  'Transcrição de áudio e imagens',
+  'Mensagens agendadas'
+] WHERE UPPER(name) = 'STARTER';
+
+-- PROFESSIONAL: Adicionar "4 usuários"
+UPDATE plans SET features = ARRAY[
+  '4 usuários',
   '400 conversas com IA',
   '40 minutos de áudio',
   '4 WhatsApps conectados',
@@ -33,11 +72,10 @@ UPDATE plans SET features = ARRAY[
   'IA avançada para conversação',
   'Maior capacidade operacional'
 ] WHERE UPPER(name) = 'PROFESSIONAL';
-```
 
-**ENTERPRISE** - Corrigir de 600 para 1000:
-```sql
+-- ENTERPRISE: Adicionar "8 usuários"
 UPDATE plans SET features = ARRAY[
+  '8 usuários',
   '1000 conversas com IA',
   '60 minutos de áudio',
   '6 WhatsApps conectados',
@@ -50,47 +88,65 @@ UPDATE plans SET features = ARRAY[
 
 ---
 
-### Correção 2: GlobalAdminCompanies.tsx
+### Correção 2: Atualizar Fallbacks no GlobalAdminCompanies
 
 **Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
 
-**Problema:** Os valores padrão em `resetFormData()` e estado inicial usam valores hardcoded antigos.
+**Linha 257-258 - Função handlePlanSelect:**
 
-**Solução:** Ajustar os defaults para valores mínimos seguros (serão sobrescritos pelo plano selecionado):
+```typescript
+// ANTES
+max_ai_conversations: selectedPlan.max_ai_conversations ?? 250,
+max_tts_minutes: selectedPlan.max_tts_minutes ?? 40,
 
-| Campo | Antes | Depois |
-|-------|-------|--------|
-| max_users | 5 | 2 (mínimo BASIC) |
-| max_instances | 2 | 1 (mínimo BASIC) |
-| max_ai_conversations | 250 | 200 (mínimo BASIC) |
-| max_tts_minutes | 40 | 10 (mínimo BASIC) |
-
-**Linhas afetadas:**
-- Linhas 233-238: Estado inicial `formData`
-- Linhas 312-325: Função `resetFormData()`
+// DEPOIS
+max_ai_conversations: selectedPlan.max_ai_conversations ?? 200,
+max_tts_minutes: selectedPlan.max_tts_minutes ?? 10,
+```
 
 ---
 
 ## Resumo das Alterações
 
-| Local | Tipo | Ação |
-|-------|------|------|
-| Banco `plans` (PROFESSIONAL) | SQL | Adicionar "400 conversas com IA" às features |
-| Banco `plans` (ENTERPRISE) | SQL | Corrigir "600" para "1000 conversas com IA" |
-| `GlobalAdminCompanies.tsx` | Frontend | Ajustar defaults para valores BASIC |
+| Local | Tipo | Alteração |
+|-------|------|-----------|
+| Banco `plans` (BASIC) | SQL | Adicionar "2 usuários" às features |
+| Banco `plans` (STARTER) | SQL | Adicionar "3 usuários" às features |
+| Banco `plans` (PROFESSIONAL) | SQL | Adicionar "4 usuários" às features |
+| Banco `plans` (ENTERPRISE) | SQL | Adicionar "8 usuários" às features |
+| `GlobalAdminCompanies.tsx` | Frontend | Corrigir fallbacks para valores BASIC |
 
 ---
 
-## Fluxo Após Correções
+## Resultado Esperado
+
+### Landing Page - Antes vs Depois
+
+**Antes (PROFESSIONAL):**
+- 400 conversas com IA
+- 40 minutos de áudio
+- 4 WhatsApps conectados
+- 4 agentes de IA
+- ...
+
+**Depois (PROFESSIONAL):**
+- **4 usuários** ← NOVO
+- 400 conversas com IA
+- 40 minutos de áudio
+- 4 WhatsApps conectados
+- 4 agentes de IA
+- ...
+
+---
+
+## Fluxo de Dados
 
 ```text
-Landing Page → Busca plans.features do banco → Exibe lista atualizada
-     ↓
- ✓ PROFESSIONAL mostra "400 conversas com IA"
- ✓ ENTERPRISE mostra "1000 conversas com IA"
-
-Admin Empresas → Seleciona plano → Limites preenchidos do plano
-     ↓
- ✓ PROFESSIONAL preenche: 4 usuários, 4 conexões, 400 conversas
- ✓ Defaults seguros caso nenhum plano selecionado
+Global Admin Plans → Salva no banco "plans" 
+                         ↓
+                    features: ["X usuários", "Y conversas", ...]
+                         ↓
+Landing Page → Busca plans via Supabase → Exibe features[]
+                         ↓
+                    ✓ Mostra todos os limites incluindo usuários
 ```
