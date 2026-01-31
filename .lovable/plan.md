@@ -1,145 +1,176 @@
 
-# Plano: Remover Botão de Criar Departamento do Kanban
+# Plano: Criar Templates de Agentes de IA para Clientes
 
-## Situação Atual
+## Diagnóstico do Problema
 
-Quando um usuário novo acessa o **Kanban** sem departamentos criados, aparece uma tela vazia com um botão "Criar Departamento":
+Você salvou um template no **Template Base** (`ai_template_base`), que é usado para configurar novas empresas no momento do provisioning. Isso funciona corretamente para o propósito de setup inicial.
 
-```
-+----------------------------------+
-|           📁                     |
-|  Nenhum departamento criado      |
-|                                  |
-|  [  Criar Departamento  ]        |  ← Botão problemático
-+----------------------------------+
-```
+Porém, os **templates que os clientes veem** na aba "Templates" (dentro de Agentes de IA) vêm de outra tabela: **`agent_templates`**.
 
-Esse botão usa o componente `CreateDepartmentDialog`, que também existe em **Configurações > Classes > Departamento**.
+Atualmente existe apenas 1 template nessa tabela:
+- "Agente de Agendamento" (já cadastrado, ativo e em destaque)
 
 ---
 
-## Problema
+## O Que Será Feito
 
-- Ter dois lugares para criar departamento confunde os usuários
-- O Kanban não é o lugar ideal para configurar departamentos
-- Centralizar em Configurações mantém a lógica de configuração organizada
+### 1. Criar 2 Novos Templates de Agentes
 
----
+Inserir na tabela `agent_templates` os seguintes templates:
 
-## Solução Proposta
+#### Template 1: Agente Simples de Atendimento
 
-Trocar o botão "Criar Departamento" por um botão que **redireciona para Configurações**:
+| Campo | Valor |
+|-------|-------|
+| Nome | Agente de Atendimento |
+| Descrição | Agente para triagem inicial de leads e clientes. Identifica se é cliente ou novo contato e direciona para o departamento correto. |
+| Categoria | atendimento |
+| Ícone | headphones |
+| Destaque | Sim |
+| Prompt | Template com etiquetas substituíveis |
 
-```
-+----------------------------------+
-|           📁                     |
-|  Nenhum departamento criado      |
-|  Crie departamentos em           |
-|  Configurações para organizar    |
-|  suas conversas.                 |
-|                                  |
-|  [  Ir para Configurações  ]     |  ← Novo botão
-+----------------------------------+
-```
+**Prompt proposto:**
+```text
+Você é um agente inteligente de atendimento da @empresa, responsável pela triagem dos leads e clientes que enviam mensagem no WhatsApp.
 
----
+## 👋 Início do Atendimento
 
-## Alterações Necessárias
+1. Cumprimente o cliente de forma cordial
+2. Pergunte: "Você já é nosso cliente ou está buscando saber mais sobre nossos serviços?"
 
-### Arquivo: `src/pages/Kanban.tsx`
+### Se já é cliente:
+- Altere o status para @status [NOME_DO_STATUS_SUPORTE]
+- Altere o departamento para @departamento [NOME_DO_DEPARTAMENTO_SUPORTE]
+- Peça o CPF ou identificação para localizar o cadastro
+- Mensagem: "Ótimo! Me confirme seu CPF que um de nossos especialistas já irá lhe atender."
 
-| Linha | Alteração |
-|-------|-----------|
-| 21 | Remover import do `CreateDepartmentDialog` |
-| 314-344 | Modificar tela vazia para redirecionar para Configurações |
+### Se não é cliente (novo lead):
+- Altere o status para @status [NOME_DO_STATUS_NOVO]
+- Altere o departamento para @departamento [NOME_DO_DEPARTAMENTO_VENDAS]
+- Pergunte sobre o interesse: "Perfeito! Sobre qual assunto gostaria de mais informações?"
 
-#### Código Atual (linhas 314-344):
-```tsx
-if (activeDepartments.length === 0) {
-  return (
-    <div className="h-screen flex flex-col animate-fade-in">
-      {/* ... header ... */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto p-8">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-            <FolderPlus className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
-          <p className="text-muted-foreground mb-6">
-            Crie departamentos para organizar suas conversas no Kanban.
-          </p>
-          <CreateDepartmentDialog     ← REMOVER
-            trigger={
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Criar Departamento
-              </Button>
-            }
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-```
+## Diretrizes Gerais
+- Seja sempre educado e profissional
+- Responda de forma clara e objetiva
+- Use emojis com moderação para humanizar a conversa
+- Se não souber responder, informe que vai encaminhar para um atendente humano
 
-#### Código Novo:
-```tsx
-if (activeDepartments.length === 0) {
-  return (
-    <div className="h-screen flex flex-col animate-fade-in">
-      {/* ... header (mantido) ... */}
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto p-8">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-            <FolderPlus className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
-          <p className="text-muted-foreground mb-6">
-            Crie departamentos em Configurações → Classes → Departamento 
-            para organizar suas conversas no Kanban.
-          </p>
-          <Button onClick={() => navigate("/settings?tab=classes")}>
-            <Settings className="h-4 w-4 mr-2" />
-            Ir para Configurações
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
+## Variáveis Disponíveis
+- @nome - Nome do contato
+- @empresa - Nome da empresa
+- @status [nome] - Altera o status do cliente
+- @departamento [nome] - Altera o departamento
 ```
 
 ---
 
-## Arquivos Afetados
+#### Template 2: Agente de Agendamento (Atualizado)
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Kanban.tsx` | Substituir `CreateDepartmentDialog` por botão de navegação |
+O template existente será mantido, mas vou verificar se precisa de ajustes para incluir etiquetas substituíveis.
 
 ---
 
-## O que pode ser removido
+### 2. Adicionar Link para Admin Global > Templates de Agentes
 
-| Arquivo | Decisão |
-|---------|---------|
-| `src/components/kanban/CreateDepartmentDialog.tsx` | **Manter** - Pode ser útil para outros fluxos futuros |
+Garantir que a navegação no menu global admin tenha fácil acesso a essa página.
 
 ---
 
-## Garantias de Segurança
+## Arquivos que Serão Modificados
 
-- ✅ **Sem regressão**: Apenas troca visual de botão
-- ✅ **Funcionalidade mantida**: Criação de departamentos continua disponível em Configurações
-- ✅ **Import removido**: `CreateDepartmentDialog` não será mais importado no Kanban
-- ✅ **Navegação clara**: URL com query param `?tab=classes` abre direto na aba correta
+| Arquivo | Ação |
+|---------|------|
+| **Banco de Dados** | INSERT em `agent_templates` via SQL |
+
+## Dados SQL a Serem Inseridos
+
+```sql
+INSERT INTO agent_templates (
+  name,
+  description,
+  icon,
+  ai_prompt,
+  ai_temperature,
+  response_delay_seconds,
+  trigger_type,
+  trigger_config,
+  voice_enabled,
+  category,
+  tags,
+  is_active,
+  is_featured,
+  display_order
+) VALUES (
+  'Agente de Atendimento',
+  'Agente para triagem inicial de leads e clientes. Identifica se é cliente ou novo contato e direciona para o departamento correto.',
+  'headphones',
+  'Você é um agente inteligente de atendimento da @empresa...',
+  0.7,
+  2,
+  'message_received',
+  '{"keywords": ["olá", "oi", "bom dia", "boa tarde", "boa noite"]}',
+  false,
+  'atendimento',
+  '{}',
+  true,
+  true,
+  0
+);
+```
+
+---
+
+## Fluxo de Onde os Templates Aparecem
+
+```text
++---------------------------+
+| Admin Global              |
+| Templates de Agentes      |  ← Você gerencia aqui
++---------------------------+
+           |
+           v
++---------------------------+
+| Tabela: agent_templates   |
+| (is_active = true)        |
++---------------------------+
+           |
+           v
++---------------------------+
+| Cliente: Agentes de IA    |
+| Aba "Templates"           |  ← Clientes veem aqui
++---------------------------+
+```
+
+---
+
+## Diferença Entre as Duas Tabelas
+
+| Tabela | Propósito | Quem Usa |
+|--------|-----------|----------|
+| `ai_template_base` | Configurações padrão para NOVAS empresas (departamentos, status, prompt inicial) | Sistema de provisioning |
+| `agent_templates` | Templates prontos para clientes CLONAREM e criar agentes | Clientes na aba Templates |
 
 ---
 
 ## Resultado Esperado
 
-Quando um usuário acessar o Kanban sem departamentos:
-1. Verá mensagem orientando a criar departamentos em Configurações
-2. Ao clicar no botão, será redirecionado para `Configurações > Classes`
-3. Poderá criar departamentos na aba "Departamento"
+1. Clientes verão **3 templates** na aba "Templates":
+   - Agente de Atendimento (novo)
+   - Agente de Agendamento (existente)
+   
+2. Cada template terá **etiquetas substituíveis** como:
+   - `@empresa` - Nome da empresa
+   - `@status [nome]` - Para alterar status
+   - `@departamento [nome]` - Para alterar departamento
+   - `@nome` - Nome do contato
+
+3. Templates serão marcados como **destaque** para aparecerem no topo
+
+---
+
+## Segurança
+
+- ✅ Sem alteração em código existente
+- ✅ Apenas inserção de dados no banco
+- ✅ Sem risco de regressão
+- ✅ RLS da tabela `agent_templates` já está configurada (sem `law_firm_id`, é global)
