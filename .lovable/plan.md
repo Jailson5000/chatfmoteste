@@ -1,122 +1,118 @@
 
+# Plano: Adicionar Fotos de Contatos no Kanban e Conversas
 
-# Correção: Sincronização Automática do Valor da Assinatura ASAAS ao Aprovar Adicionais
+## Situação Atual
 
-## Problema Identificado
+### ✅ Conversas (Lista Lateral) - JÁ FUNCIONA!
+- O `ConversationSidebarCard` **já exibe** a foto do contato (`avatarUrl`)
+- O `useConversationMapping.tsx` **já passa** o `client.avatar_url`
+- Nenhuma alteração necessária aqui!
 
-Existe uma **desconexão** entre o "Resumo Mensal" calculado no frontend e as faturas reais no ASAAS:
-
-| Local | Valor | Fonte |
-|-------|-------|-------|
-| Resumo Mensal (frontend) | R$ 1.756,80 | Calculado localmente (plano + adicionais) |
-| Faturas ASAAS (modal) | R$ 1.697,00 | API do ASAAS (valor da assinatura) |
-
-**Causa**: Quando os adicionais (+2 usuários) foram aprovados, a assinatura no ASAAS NÃO foi atualizada automaticamente para incluir o valor dos adicionais (R$ 59,80).
+### ❌ Kanban - PRECISA DE AJUSTE
+- O `KanbanCard` usa **Dicebear** (avatar gerado) em vez da foto real
+- A interface não inclui `avatar_url` do cliente
+- O hook `useConversations` **já retorna** `client.avatar_url`, mas não é passado para o componente
 
 ---
 
-## Fluxo Atual (COM PROBLEMA)
+## Arquitetura de Dados
+
+O fluxo de dados do avatar já existe:
 
 ```text
-Admin Global aprova addon request
+Database (clients.avatar_url)
         ↓
-Função approve_addon_request() (SQL)
+useConversations hook (client.avatar_url ✓)
         ↓
-Atualiza max_users/max_instances na tabela companies
+Kanban.tsx passa conversations para KanbanColumn
         ↓
-✗ NÃO atualiza valor no ASAAS!
+KanbanColumn passa para KanbanCard
         ↓
-Faturas continuam com valor antigo
+❌ KanbanCard ignora avatar_url e usa Dicebear
 ```
 
 ---
 
-## Solução
+## Alterações Necessárias
 
-### Opção A: Correção Manual Imediata (Este Caso Específico)
+### 1. `KanbanColumn.tsx` - Atualizar Interface
 
-O Admin Global pode acessar o painel Global Admin > Empresas > FMO ADV e clicar em "Sincronizar Cobrança" para atualizar o valor da assinatura no ASAAS para R$ 1.756,80.
-
-### Opção B: Correção Sistêmica (Recomendada)
-
-Modificar o fluxo de aprovação de adicionais para:
-
-1. **Alterar a edge function `invite-team-member` ou criar nova edge function `approve-addon`** que:
-   - Aprova o addon request no banco
-   - Calcula o novo valor total (plano + adicionais)
-   - Chama `update-asaas-subscription` automaticamente
-
-2. **Ou modificar a função SQL `approve_addon_request`** para registrar que a sincronização ASAAS é necessária, e criar um job que processa essas atualizações pendentes.
-
----
-
-## Alterações Técnicas Propostas
-
-### 1. Nova Edge Function `approve-addon-request`
-
-Substituir a chamada direta à função SQL por uma edge function que:
+Adicionar `avatar_url` à interface `Conversation.client`:
 
 ```typescript
-// 1. Aprovar no banco (via RPC)
-await supabase.rpc('approve_addon_request', { _request_id: requestId });
-
-// 2. Buscar empresa e calcular novo valor
-const company = await getCompanyWithPlan(companyId);
-const newValue = company.plan.price + calculateAdditionalCosts(...);
-
-// 3. Atualizar assinatura no ASAAS
-await supabase.functions.invoke('update-asaas-subscription', {
-  body: { 
-    company_id: companyId, 
-    new_value: newValue,
-    reason: 'Addon request approved' 
-  }
-});
+interface Conversation {
+  // ... existing fields ...
+  client?: { 
+    custom_status_id?: string | null;
+    avatar_url?: string | null;  // NEW
+  } | null;
+  // ...
+}
 ```
 
-### 2. Atualizar Frontend (GlobalAdminCompanies ou componente de addons)
+### 2. `KanbanCard.tsx` - Usar Avatar Real
 
-Quando o Admin Global aprova um addon:
-
+**Atualizar interface:**
 ```typescript
-// Em vez de chamar apenas o RPC
-await supabase.rpc('approve_addon_request', { _request_id: requestId });
+interface KanbanCardProps {
+  conversation: {
+    // ... existing fields ...
+    client?: { 
+      custom_status_id?: string | null;
+      avatar_url?: string | null;  // NEW
+    } | null;
+    // ...
+  };
+}
+```
 
-// Chamar a nova edge function que faz tudo
-await supabase.functions.invoke('approve-addon-request', {
-  body: { request_id: requestId }
-});
+**Atualizar renderização do Avatar (linha 237-242):**
+```tsx
+<Avatar className="h-8 w-8 border border-success/30">
+  {conversation.client?.avatar_url ? (
+    <AvatarImage 
+      src={conversation.client.avatar_url} 
+      alt={conversation.contact_name || "Avatar"} 
+    />
+  ) : null}
+  <AvatarFallback className="bg-muted text-muted-foreground text-xs font-medium">
+    {getInitials(conversation.contact_name)}
+  </AvatarFallback>
+</Avatar>
 ```
 
 ---
 
-## Arquivos a Modificar
+## Arquivos Afetados
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `supabase/functions/approve-addon-request/index.ts` | **NOVO** - Edge function que aprova + sincroniza ASAAS |
-| `src/hooks/useAddonRequests.tsx` | Chamar edge function em vez de RPC direto |
-| `src/components/global-admin/AddonRequestsSection.tsx` | Atualizar handlers para usar nova edge function |
+| `src/components/kanban/KanbanColumn.tsx` | Adicionar `avatar_url` na interface `Conversation.client` |
+| `src/components/kanban/KanbanCard.tsx` | Adicionar `avatar_url` na interface + usar no Avatar |
 
 ---
 
-## Correção Imediata para FMO ADV
+## Resultado Esperado
 
-Para resolver o caso específico do cliente FMO ADV agora:
+### Antes (Kanban)
+- Avatar mostra iniciais geradas pelo Dicebear (ex: "JF", "GM")
+- Todos os avatares são iguais se o nome for igual
 
-1. Acessar **Global Admin > Empresas**
-2. Encontrar **FMO ADV**
-3. Clicar em **Editar** ou **Sincronizar Cobrança**
-4. O sistema chamará `update-asaas-subscription` com o valor correto (R$ 1.756,80)
-5. Próximas faturas serão geradas com o valor correto
+### Depois (Kanban)
+- Avatar mostra foto do WhatsApp quando disponível
+- Fallback para iniciais quando foto não existe
+- Mesmo comportamento visual que a lista de Conversas
 
 ---
 
-## Notas Importantes
+## Impacto em Outros Componentes
 
-1. **Faturas já geradas**: As faturas que já existem com R$ 1.697,00 NÃO serão alteradas automaticamente. O ASAAS permite definir `updatePendingPayments: true` na API, o que atualiza faturas pendentes.
+- ✅ **Nenhum** - Os dados já são passados corretamente pelo `useConversations`
+- ✅ **Retrocompatível** - O campo `avatar_url` é opcional, fallback para iniciais
+- ✅ **Sem regressões** - Apenas adicionamos uso de um campo existente
 
-2. **Recálculo automático**: O `update-asaas-subscription` já usa `updatePendingPayments: true`, então faturas PENDENTES serão atualizadas quando o valor for sincronizado.
+---
 
-3. **Consistência**: Após a correção, o valor das faturas pendentes passará de R$ 1.697,00 para R$ 1.756,80, ficando consistente com o Resumo Mensal.
+## Nota Técnica
 
+O `useConversations` hook já retorna `client.avatar_url` (linha 101-102 do hook), e o Kanban já recebe as conversas completas. A única alteração necessária é atualizar as interfaces TypeScript e usar o campo no componente de renderização.
