@@ -10,6 +10,7 @@ import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import { TenantProvider } from "@/hooks/useTenant";
 import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
+import { TabSessionProvider } from "@/contexts/TabSessionContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
@@ -66,10 +67,11 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TenantProvider>
-      <RealtimeSyncProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
+      <TabSessionProvider>
+        <RealtimeSyncProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
           <BrowserRouter>
             <Routes>
           {/* Public routes */}
@@ -326,8 +328,9 @@ const App = () => (
           </BrowserRouter>
         </TooltipProvider>
       </RealtimeSyncProvider>
-    </TenantProvider>
-  </QueryClientProvider>
+    </TabSessionProvider>
+  </TenantProvider>
+</QueryClientProvider>
 );
 
 export default App;

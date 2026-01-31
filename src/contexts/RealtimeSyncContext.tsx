@@ -24,6 +24,9 @@ interface RealtimeSyncContextType {
   // Callbacks for special handling
   registerMessageCallback: (callback: MessageCallback) => () => void;
   registerConversationCallback: (callback: ConversationCallback) => () => void;
+  
+  // Disconnect all channels (for tab session management)
+  disconnectAll: () => void;
 }
 
 type MessageCallback = (payload: RealtimePostgresChangesPayload<any>) => void;
@@ -383,6 +386,28 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
     };
   }, []);
 
+  // Disconnect all channels (for tab session management)
+  const disconnectAll = useCallback(() => {
+    // Clear all debounce timers
+    invalidationTimersRef.current.forEach(timer => clearTimeout(timer));
+    invalidationTimersRef.current.clear();
+    
+    // Remove all channels
+    [coreChannelRef, messagesChannelRef, agendaChannelRef, conversationChannelRef].forEach(ref => {
+      if (ref.current) {
+        supabase.removeChannel(ref.current);
+        ref.current = null;
+      }
+    });
+    
+    setIsConnected(false);
+    setChannelCount(0);
+    setActiveConversationId(null);
+    activeClientIdRef.current = null;
+    
+    console.log("[RealtimeSync] All channels disconnected");
+  }, []);
+
   const value: RealtimeSyncContextType = {
     isConnected,
     channelCount,
@@ -391,6 +416,7 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
     activeConversationId,
     registerMessageCallback,
     registerConversationCallback,
+    disconnectAll,
   };
 
   return (
