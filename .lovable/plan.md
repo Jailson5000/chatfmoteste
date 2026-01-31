@@ -1,125 +1,148 @@
 
-# Plano: Adicionar Banner de Arquivamento no Painel de Chat do Kanban
+# Plano: Detecção de Abas Duplicadas com BroadcastChannel API
 
-## Situação Atual
+## Objetivo
 
-O painel de chat em **Conversas** já exibe um banner compacto para conversas arquivadas mostrando:
-- Ícone de arquivo + texto "Conversa arquivada"
-- Quem arquivou (Por: Nome)
-- Data/hora do arquivamento
-- Motivo do arquivamento
+Implementar detecção de abas duplicadas que:
+1. Quando uma **nova aba** abre, avisa o usuário que já existe outra aba ativa
+2. Se o usuário confirmar, a **aba antiga é desconectada** (WebSockets fechados + sessão encerrada)
+3. A **nova aba assume** como sessão principal
 
-O **KanbanChatPanel** não exibe essa informação, mesmo quando a conversa selecionada está arquivada.
+## Arquitetura Proposta
 
----
+```
++----------------+     BroadcastChannel      +----------------+
+|   ABA ANTIGA   |  <----- "TAKEOVER" ----   |   ABA NOVA     |
+|  (será fechada)|                           | (assume sessão)|
++----------------+                           +----------------+
+       |                                            |
+       v                                            |
+ Desconecta Realtime                                |
+ Mostra "Sessão encerrada"                          |
+                                                    v
+                                             Continua normal
+```
 
-## Dados Disponíveis
+## Fluxo de Funcionamento
 
-O hook `useConversations` já retorna todos os campos necessários:
+1. **Nova aba abre** -> Envia mensagem `PING` pelo BroadcastChannel
+2. **Aba antiga responde** -> `PONG` confirmando que existe
+3. **Nova aba exibe dialog** -> "Já existe outra aba aberta. Continuar aqui?"
+4. **Usuário confirma** -> Nova aba envia `TAKEOVER`
+5. **Aba antiga recebe** -> Desconecta Realtime, mostra overlay "Sessão encerrada nesta aba"
 
-| Campo | Descrição |
-|-------|-----------|
-| `archived_at` | Data/hora do arquivamento |
-| `archived_reason` | Motivo do arquivamento |
-| `archived_by` | ID do usuário que arquivou |
-| `archived_by_name` | Nome do usuário que arquivou |
+## Arquivos a Criar/Modificar
 
----
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/contexts/TabSessionContext.tsx` | **Criar** | Context para gerenciar sessão de aba |
+| `src/components/session/DuplicateTabDialog.tsx` | **Criar** | Dialog avisando sobre aba duplicada |
+| `src/components/session/SessionTerminatedOverlay.tsx` | **Criar** | Overlay quando aba é desconectada |
+| `src/App.tsx` | **Modificar** | Adicionar TabSessionProvider |
+| `src/contexts/RealtimeSyncContext.tsx` | **Modificar** | Expor método para desconectar canais |
 
-## Alterações Necessárias
+## Implementação Detalhada
 
-### 1. `KanbanChatPanel.tsx` - Adicionar Props na Interface
+### 1. TabSessionContext.tsx (Novo)
 
 ```typescript
-interface KanbanChatPanelProps {
-  // ... existing props ...
-  archivedAt?: string | null;
-  archivedReason?: string | null;
-  archivedByName?: string | null;
+// Gerencia:
+// - ID único da aba (gerado com crypto.randomUUID)
+// - BroadcastChannel para comunicação inter-abas
+// - Estados: isPrimaryTab, showDuplicateDialog, isTerminated
+// - Métodos: takeoverSession, terminateSession
+
+const CHANNEL_NAME = "miauchat-tab-session";
+
+interface TabMessage {
+  type: "PING" | "PONG" | "TAKEOVER";
+  tabId: string;
+  userId?: string;
 }
 ```
 
-### 2. `KanbanChatPanel.tsx` - Adicionar Destruturação
+**Lógica principal:**
+- Ao montar, gera `tabId` único e envia `PING`
+- Se receber `PONG` de outra aba (mesmo userId), mostra dialog
+- Se usuário confirmar, envia `TAKEOVER`
+- Aba que recebe `TAKEOVER` desconecta e mostra overlay
 
+### 2. DuplicateTabDialog.tsx (Novo)
+
+```tsx
+// AlertDialog com:
+// - Título: "Aba duplicada detectada"
+// - Mensagem: "O MiauChat já está aberto em outra aba..."
+// - Botão "Continuar aqui" -> dispara takeover
+// - Botão "Cancelar" -> fecha dialog, não faz nada
+```
+
+### 3. SessionTerminatedOverlay.tsx (Novo)
+
+```tsx
+// Overlay fullscreen com:
+// - Ícone de alerta
+// - "Esta sessão foi encerrada"
+// - "O MiauChat está ativo em outra aba"
+// - Botão "Recarregar esta aba" -> window.location.reload()
+```
+
+### 4. Modificar RealtimeSyncContext.tsx
+
+Adicionar método `disconnectAll()`:
 ```typescript
-export function KanbanChatPanel({
-  // ... existing props ...
-  archivedAt,
-  archivedReason,
-  archivedByName,
-}: KanbanChatPanelProps) {
+interface RealtimeSyncContextType {
+  // ... existing ...
+  disconnectAll: () => void;
+}
+
+const disconnectAll = useCallback(() => {
+  [coreChannelRef, messagesChannelRef, agendaChannelRef, conversationChannelRef]
+    .forEach(ref => {
+      if (ref.current) {
+        supabase.removeChannel(ref.current);
+        ref.current = null;
+      }
+    });
+  setIsConnected(false);
+  setChannelCount(0);
+}, []);
 ```
 
-### 3. `KanbanChatPanel.tsx` - Adicionar Banner no Header
-
-Adicionar após o header e antes das mensagens (aproximadamente linha 2900, após o header):
+### 5. Modificar App.tsx
 
 ```tsx
-{/* Archived Conversation Banner - Compact version */}
-{archivedAt && (
-  <div className="bg-orange-100 dark:bg-orange-900/30 border-l-4 border-orange-500 p-2 mx-3 my-1.5 rounded">
-    <div className="flex items-center gap-1.5">
-      <Archive className="h-3 w-3 text-orange-600 dark:text-orange-400" />
-      <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
-        Conversa arquivada
-      </span>
-    </div>
-    <div className="text-xs text-orange-700 dark:text-orange-300 mt-0.5">
-      {archivedByName && `Por: ${archivedByName} • `}
-      Em: {new Date(archivedAt).toLocaleString('pt-BR', { 
-        day: '2-digit', 
-        month: '2-digit', 
-        year: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      })}
-    </div>
-    {archivedReason && (
-      <div className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
-        Motivo: {archivedReason}
-      </div>
-    )}
-  </div>
-)}
+<QueryClientProvider client={queryClient}>
+  <TenantProvider>
+    <TabSessionProvider>  {/* NOVO */}
+      <RealtimeSyncProvider>
+        {/* ... rest */}
+      </RealtimeSyncProvider>
+    </TabSessionProvider>
+  </TenantProvider>
+</QueryClientProvider>
 ```
 
-### 4. `Kanban.tsx` - Passar Props para KanbanChatPanel
+## Análise de Risco
 
-```tsx
-<KanbanChatPanel
-  // ... existing props ...
-  archivedAt={(selectedConversation as any).archived_at}
-  archivedReason={(selectedConversation as any).archived_reason}
-  archivedByName={(selectedConversation as any).archived_by_name}
-/>
-```
+| Risco | Mitigação |
+|-------|-----------|
+| BroadcastChannel não suportado | Fallback: não faz nada (navegadores antigos) |
+| Múltiplos usuários no mesmo browser | Mensagens incluem `userId` para filtrar |
+| Aba fecha antes de responder | Timeout de 500ms no PING, se não receber PONG, continua normal |
+| Race condition entre abas | Cada aba tem ID único, última a enviar TAKEOVER ganha |
 
----
+## Compatibilidade
 
-## Arquivos Afetados
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar props + banner de arquivamento |
-| `src/pages/Kanban.tsx` | Passar props de arquivamento |
-
----
-
-## Resultado Esperado
-
-Quando uma conversa arquivada for aberta no Kanban, o usuário verá:
-
-- Banner laranja compacto abaixo do header
-- "Conversa arquivada"
-- "Por: [Nome] • Em: 31/01/2026 14:30"
-- "Motivo: [Razão do arquivamento]"
-
----
+- **Chrome/Edge**: 54+ (2016)
+- **Firefox**: 38+ (2015)
+- **Safari**: 15.4+ (2022)
+- **Fallback**: Se `BroadcastChannel` não existir, não implementa a feature (graceful degradation)
 
 ## Garantias de Segurança
 
-- **Sem regressões**: O banner só aparece quando `archivedAt` existe
-- **Retrocompatível**: Todas as novas props são opcionais
-- **Dados já disponíveis**: O hook já retorna os campos
-- **Mesmo visual**: Idêntico ao banner de Conversas
-- **Sem alteração de lógica**: Apenas adição de componente visual
+- **Sem regressões**: Funcionalidade é aditiva, não altera fluxos existentes
+- **Sem banco de dados**: Tudo acontece localmente via BroadcastChannel
+- **Isolado por usuário**: Mensagens filtradas por userId
+- **Graceful degradation**: Navegadores sem suporte continuam funcionando normalmente
+- **Sem quebrar Realtime existente**: Apenas adiciona método `disconnectAll`
