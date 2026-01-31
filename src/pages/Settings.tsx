@@ -700,7 +700,15 @@ export default function Settings() {
               {/* Dialog de edição de membro - FORA do loop para evitar múltiplos overlays */}
               {(() => {
                 const memberBeingEdited = teamMembers.find(m => m.id === editingMember);
-                const activeDepartments = departments?.filter(d => d.is_active) || [];
+                const activeDepartments = departments?.filter(d => {
+                  if (!d.is_active) return false;
+                  // Exclude "Arquivado/Finalizado" department - now controlled by special permission checkbox
+                  const nameLower = d.name.toLowerCase();
+                  if (nameLower.includes('arquivado') || nameLower.includes('finalizado')) {
+                    return false;
+                  }
+                  return true;
+                }) || [];
                 
                 return (
                   <Dialog 
