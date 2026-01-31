@@ -14,6 +14,7 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useClients } from "@/hooks/useClients";
+import { useUserDepartments } from "@/hooks/useUserDepartments";
 import { FilterBar } from "@/components/filters/FilterBar";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
@@ -46,6 +47,7 @@ export default function Kanban() {
   const { members } = useTeamMembers();
   const { automations } = useAutomations();
   const { updateClientStatus } = useClients();
+  const { canAccessArchived, hasFullAccess } = useUserDepartments();
   const { toast } = useToast();
   
   const [draggedConversation, setDraggedConversation] = useState<string | null>(null);
@@ -118,10 +120,14 @@ export default function Kanban() {
 
   // Real-time subscription removed - now handled by centralized useRealtimeSync
 
-  // Separate archived conversations
+  // Determine if user can view archived column
+  const canViewArchived = hasFullAccess || canAccessArchived;
+
+  // Separate archived conversations (only if user can view them)
   const archivedConversations = useMemo(() => {
+    if (!canViewArchived) return [];
     return conversations.filter(conv => (conv as any).archived_at);
-  }, [conversations]);
+  }, [conversations, canViewArchived]);
 
   // Apply all filters (exclude archived - they go in their own column)
   const filteredConversations = useMemo(() => {
@@ -474,22 +480,24 @@ export default function Kanban() {
                 );
               })}
 
-              {/* Archived column - always shown at the end */}
-              <KanbanColumn
-                id="archived"
-                name="Arquivado / Finalizado"
-                color="#dc2626"
-                conversations={archivedConversations}
-                customStatuses={customStatuses}
-                tags={tags}
-                automations={automations}
-                isDragging={false}
-                draggedConversation={draggedConversation}
-                isArchiveColumn={true}
-                onDrop={() => setDraggedConversation(null)}
-                onConversationDragStart={(id) => setDraggedConversation(id)}
-                onConversationClick={handleConversationClick}
-              />
+              {/* Archived column - only shown if user has permission */}
+              {canViewArchived && (
+                <KanbanColumn
+                  id="archived"
+                  name="Arquivado / Finalizado"
+                  color="#dc2626"
+                  conversations={archivedConversations}
+                  customStatuses={customStatuses}
+                  tags={tags}
+                  automations={automations}
+                  isDragging={false}
+                  draggedConversation={draggedConversation}
+                  isArchiveColumn={true}
+                  onDrop={() => setDraggedConversation(null)}
+                  onConversationDragStart={(id) => setDraggedConversation(id)}
+                  onConversationClick={handleConversationClick}
+                />
+              )}
             </>
           ) : (
             <>
@@ -546,23 +554,25 @@ export default function Kanban() {
                 );
               })}
 
-              {/* Archived column - always shown at the end */}
-              <KanbanColumn
-                id="archived"
-                name="Arquivado / Finalizado"
-                color="#dc2626"
-                conversations={archivedConversations}
-                customStatuses={customStatuses}
-                tags={tags}
-                automations={automations}
-                isDragging={false}
-                draggedConversation={draggedConversation}
-                groupByStatus={true}
-                isArchiveColumn={true}
-                onDrop={() => setDraggedConversation(null)}
-                onConversationDragStart={(id) => setDraggedConversation(id)}
-                onConversationClick={handleConversationClick}
-              />
+              {/* Archived column - only shown if user has permission */}
+              {canViewArchived && (
+                <KanbanColumn
+                  id="archived"
+                  name="Arquivado / Finalizado"
+                  color="#dc2626"
+                  conversations={archivedConversations}
+                  customStatuses={customStatuses}
+                  tags={tags}
+                  automations={automations}
+                  isDragging={false}
+                  draggedConversation={draggedConversation}
+                  groupByStatus={true}
+                  isArchiveColumn={true}
+                  onDrop={() => setDraggedConversation(null)}
+                  onConversationDragStart={(id) => setDraggedConversation(id)}
+                  onConversationClick={handleConversationClick}
+                />
+              )}
             </>
           )}
 

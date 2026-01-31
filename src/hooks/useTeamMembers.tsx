@@ -20,6 +20,7 @@ export interface TeamMember {
   role: AppRole;
   department_ids: string[];
   can_access_no_department: boolean;
+  can_access_archived: boolean;
 }
 
 export interface MemberDepartment {
@@ -74,24 +75,24 @@ export function useTeamMembers() {
         memberDepts = [];
       }
 
-      // Get member no-department access
-      let memberNoDeptAccess: Array<{ member_id: string; can_access_no_department: boolean }> = [];
+      // Get member access flags (no-department and archived)
+      let memberAccessFlags: Array<{ member_id: string; can_access_no_department: boolean; can_access_archived: boolean }> = [];
       try {
         const { data } = await supabase
           .from("member_department_access")
-          .select("member_id, can_access_no_department");
-        memberNoDeptAccess = data || [];
+          .select("member_id, can_access_no_department, can_access_archived");
+        memberAccessFlags = data || [];
       } catch (e) {
-        memberNoDeptAccess = [];
+        memberAccessFlags = [];
       }
 
-      // Map profiles with their roles, departments, and no-dept access
+      // Map profiles with their roles, departments, and access flags
       return profiles.map((p) => {
         const userRole = roles.find((r) => r.user_id === p.id);
         const deptIds = (memberDepts || [])
           .filter((md: any) => md.member_id === p.id)
           .map((md: any) => md.department_id);
-        const noDeptAccess = memberNoDeptAccess.find((a: any) => a.member_id === p.id);
+        const accessFlags = memberAccessFlags.find((a: any) => a.member_id === p.id);
 
         return {
           id: p.id,
@@ -103,7 +104,8 @@ export function useTeamMembers() {
           is_active: p.is_active,
           role: (userRole?.role || "atendente") as AppRole,
           department_ids: deptIds,
-          can_access_no_department: noDeptAccess?.can_access_no_department || false,
+          can_access_no_department: accessFlags?.can_access_no_department || false,
+          can_access_archived: accessFlags?.can_access_archived || false,
         };
       });
     },
@@ -176,7 +178,44 @@ export function useTeamMembers() {
     },
   });
 
-  // Update member "No Department" access flag
+  // Update member access flags (No Department and Archived)
+  const updateMemberAccessFlags = useMutation({
+    mutationFn: async ({ 
+      memberId, 
+      canAccessNoDepartment, 
+      canAccessArchived 
+    }: { 
+      memberId: string; 
+      canAccessNoDepartment: boolean;
+      canAccessArchived: boolean;
+    }) => {
+      const { error } = await supabase
+        .from("member_department_access" as any)
+        .upsert({
+          member_id: memberId,
+          can_access_no_department: canAccessNoDepartment,
+          can_access_archived: canAccessArchived,
+        }, {
+          onConflict: "member_id",
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team-members"] });
+      queryClient.invalidateQueries({ queryKey: ["user-no-dept-access"] });
+      queryClient.invalidateQueries({ queryKey: ["user-archived-access"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao atualizar acesso",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Keep legacy mutation for backward compatibility
   const updateMemberNoDepartmentAccess = useMutation({
     mutationFn: async ({ memberId, canAccessNoDepartment }: { memberId: string; canAccessNoDepartment: boolean }) => {
       const { error } = await supabase
@@ -301,6 +340,7 @@ export function useTeamMembers() {
     updateMemberRole,
     updateMemberDepartments,
     updateMemberNoDepartmentAccess,
+    updateMemberAccessFlags,
     inviteMember,
     removeMember,
   };

@@ -17,6 +17,7 @@ interface UserDepartmentsData {
   hasFullAccess: boolean;
   isLoading: boolean;
   userId: string | null;
+  canAccessArchived: boolean;
 }
 
 async function fetchUserRole(userId: string): Promise<AppRole | null> {
@@ -63,6 +64,20 @@ async function fetchMemberNoDepartmentAccess(userId: string): Promise<boolean> {
   return data === true;
 }
 
+async function fetchMemberArchivedAccess(userId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc(
+    "get_member_archived_access_for_user" as any,
+    { _user_id: userId }
+  );
+
+  if (error) {
+    console.error("Error fetching archived access:", error);
+    return false;
+  }
+
+  return data === true;
+}
+
 export function useUserDepartments(): UserDepartmentsData {
   const { user, loading: authLoading } = useAuth();
   const { lawFirm } = useLawFirm();
@@ -94,6 +109,14 @@ export function useUserDepartments(): UserDepartmentsData {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Fetch "archived" access flag for restricted roles
+  const { data: canAccessArchivedFlag = false, isLoading: archivedLoading } = useQuery<boolean>({
+    queryKey: ["user-archived-access", user?.id, lawFirm?.id],
+    queryFn: () => fetchMemberArchivedAccess(user!.id),
+    enabled: !!user?.id && !!lawFirm?.id && !hasFullAccess,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Compose final departmentIds array including special NO_DEPARTMENT_ID if allowed
   const departmentIds = hasFullAccess
     ? [] // Full access roles don't need department filtering
@@ -102,11 +125,15 @@ export function useUserDepartments(): UserDepartmentsData {
         ...(canAccessNoDepartment ? [NO_DEPARTMENT_ID] : []),
       ];
 
+  // Full access roles can always see archived, restricted roles need explicit permission
+  const canAccessArchived = hasFullAccess || canAccessArchivedFlag;
+
   return {
     role,
     departmentIds,
     hasFullAccess,
-    isLoading: authLoading || roleLoading || (!hasFullAccess && (deptLoading || noDeptLoading)),
+    isLoading: authLoading || roleLoading || (!hasFullAccess && (deptLoading || noDeptLoading || archivedLoading)),
     userId: user?.id || null,
+    canAccessArchived,
   };
 }

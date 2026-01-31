@@ -3703,6 +3703,7 @@ export type Database = {
       }
       member_department_access: {
         Row: {
+          can_access_archived: boolean
           can_access_no_department: boolean
           created_at: string
           id: string
@@ -3710,6 +3711,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          can_access_archived?: boolean
           can_access_no_department?: boolean
           created_at?: string
           id?: string
@@ -3717,6 +3719,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          can_access_archived?: boolean
           can_access_no_department?: boolean
           created_at?: string
           id?: string
@@ -5832,6 +5835,10 @@ export type Database = {
       get_law_firm_by_subdomain: {
         Args: { _subdomain: string }
         Returns: string
+      }
+      get_member_archived_access_for_user: {
+        Args: { _user_id: string }
+        Returns: boolean
       }
       get_member_department_ids_for_user: {
         Args: { _user_id: string }

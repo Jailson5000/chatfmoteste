@@ -126,11 +126,12 @@ export default function Settings() {
   const templateMediaInputRef = useRef<HTMLInputElement>(null);
 
   // Team management
-  const { members: teamMembers, isLoading: teamLoading, inviteMember, updateMemberRole, updateMemberDepartments, updateMemberNoDepartmentAccess, removeMember } = useTeamMembers();
+  const { members: teamMembers, isLoading: teamLoading, inviteMember, updateMemberRole, updateMemberDepartments, updateMemberAccessFlags, removeMember } = useTeamMembers();
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [editMemberRole, setEditMemberRole] = useState<AppRole>("atendente");
   const [editMemberDepts, setEditMemberDepts] = useState<string[]>([]);
+  const [editMemberCanAccessArchived, setEditMemberCanAccessArchived] = useState(false);
   const [savingMember, setSavingMember] = useState(false);
   
   // Special ID for "No Department" option in UI (NOT a real UUID)
@@ -648,6 +649,11 @@ export default function Settings() {
                                   Sem Departamento
                                 </Badge>
                               )}
+                              {member.can_access_archived && (
+                                <Badge variant="outline" className="text-xs border-red-500/50 text-red-500">
+                                  Arquivados
+                                </Badge>
+                              )}
                               {member.department_ids.length > 0 ? (
                                 member.department_ids.map(deptId => {
                                   const dept = departments.find(d => d.id === deptId);
@@ -658,8 +664,8 @@ export default function Settings() {
                                   ) : null;
                                 })
                               ) : (
-                                !member.can_access_no_department && (
-                                  <span className="text-xs text-muted-foreground">Sem departamentos</span>
+                                !member.can_access_no_department && !member.can_access_archived && (
+                                  <span className="text-xs text-muted-foreground">Sem permissões</span>
                                 )
                               )}
                             </div>
@@ -678,6 +684,7 @@ export default function Settings() {
                                 ...(member.can_access_no_department ? [NO_DEPARTMENT_ID] : []),
                               ];
                               setEditMemberDepts(initialDepts);
+                              setEditMemberCanAccessArchived(member.can_access_archived || false);
                             }}
                           >
                             <Pencil className="h-3 w-3 mr-1" />
@@ -732,7 +739,7 @@ export default function Settings() {
                             <div className="space-y-2 border rounded-lg p-3 max-h-[200px] overflow-y-auto">
                               {/* Special "Sem Departamento" option */}
                               <div 
-                                className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50 border-b pb-2 mb-2"
+                                className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const NO_DEPT = "__no_department__";
@@ -763,6 +770,27 @@ export default function Settings() {
                                 />
                                 <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
                                 <span className="text-sm font-medium">Sem Departamento</span>
+                              </div>
+                              
+                              {/* Special "Arquivados/Finalizados" option */}
+                              <div 
+                                className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50 border-b pb-2 mb-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditMemberCanAccessArchived(prev => !prev);
+                                }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                              >
+                                <Checkbox 
+                                  checked={editMemberCanAccessArchived}
+                                  onCheckedChange={(checked) => {
+                                    setEditMemberCanAccessArchived(checked === true);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                />
+                                <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                                <span className="text-sm font-medium">Arquivados / Finalizados</span>
                               </div>
                               
                               {/* Regular departments */}
@@ -825,7 +853,7 @@ export default function Settings() {
                                     role: editMemberRole 
                                   });
                                 }
-                                // Update departments if atendente
+                                // Update departments and access flags if atendente
                                 if (editMemberRole === "atendente") {
                                   // Split: real UUIDs vs special "no department" flag
                                   const canAccessNoDepartment = editMemberDepts.includes(NO_DEPARTMENT_ID);
@@ -837,10 +865,11 @@ export default function Settings() {
                                     departmentIds: realDepartmentIds,
                                   });
                                   
-                                  // Update "no department" access flag separately
-                                  await updateMemberNoDepartmentAccess.mutateAsync({
+                                  // Update access flags (no-department and archived) together
+                                  await updateMemberAccessFlags.mutateAsync({
                                     memberId: memberBeingEdited.id,
                                     canAccessNoDepartment,
+                                    canAccessArchived: editMemberCanAccessArchived,
                                   });
                                 }
                                 setEditingMember(null);

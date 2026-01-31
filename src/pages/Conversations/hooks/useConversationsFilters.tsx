@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { ConversationFilters, MappedConversation, ConversationTab } from "../types";
+import { useUserDepartments } from "@/hooks/useUserDepartments";
 
 interface UseConversationsFiltersProps {
   mappedConversations: MappedConversation[];
@@ -19,6 +20,9 @@ export function useConversationsFilters({ mappedConversations, userId }: UseConv
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ConversationTab>("queue");
   const [filters, setFilters] = useState<ConversationFilters>(initialFilters);
+  
+  // Get user permissions for archived access
+  const { canAccessArchived, hasFullAccess } = useUserDepartments();
 
   // Toggle functions
   const toggleStatusFilter = useCallback((statusId: string) => {
@@ -69,6 +73,9 @@ export function useConversationsFilters({ mappedConversations, userId }: UseConv
     filters.departments.length,
     [filters]
   );
+
+  // Determine if user can view archived tab
+  const canViewArchivedTab = hasFullAccess || canAccessArchived;
 
   // Filter conversations by tab and filters
   const filteredConversations = useMemo(() => {
@@ -122,13 +129,14 @@ export function useConversationsFilters({ mappedConversations, userId }: UseConv
           // "Todos": Show all non-archived conversations
           return !isArchived;
         case "archived":
-          // Only show archived conversations
+          // Only show archived if user has permission
+          if (!canViewArchivedTab) return false;
           return isArchived;
         default:
           return true;
       }
     });
-  }, [mappedConversations, filters, searchQuery, activeTab, userId]);
+  }, [mappedConversations, filters, searchQuery, activeTab, userId, canViewArchivedTab]);
 
   return {
     searchQuery,
@@ -144,5 +152,6 @@ export function useConversationsFilters({ mappedConversations, userId }: UseConv
     clearAllFilters,
     activeFiltersCount,
     filteredConversations,
+    canViewArchivedTab,
   };
 }
