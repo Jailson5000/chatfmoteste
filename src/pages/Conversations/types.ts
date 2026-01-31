@@ -81,6 +81,8 @@ export interface MappedConversation {
   handler: "ai" | "human" | "unassigned";
   status: string | null;
   archivedAt: string | null;
+  archivedReason: string | null;
+  archivedByName: string | null;
   tags: Array<{ name: string; color: string }>;
   assignedTo: string | null;
   assignedUserId: string | null;
