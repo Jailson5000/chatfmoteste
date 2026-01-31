@@ -27,13 +27,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { 
-  Phone, 
-  Mail, 
-  MapPin, 
-  Tag, 
-  Folder, 
-  User, 
+import {
+  Phone,
+  Mail,
+  MapPin,
+  Tag,
+  Folder,
+  User,
   Bot,
   Clock,
   MessageSquare,
@@ -57,6 +57,8 @@ import {
   Heart,
   Video,
   StickyNote,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -120,9 +122,10 @@ interface ContactDetailsPanelProps {
       document?: string | null;
       notes?: string | null;
       custom_status_id?: string | null;
+      avatar_url?: string | null;
     } | null;
     assigned_profile?: { full_name: string } | null;
-    whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
+    whatsapp_instance?: { id?: string; instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
   } | null;
   // Removed: departments, tags, statuses - now using hooks directly
   members: Array<{ id: string; full_name: string }>;
@@ -179,6 +182,9 @@ export function ContactDetailsPanel({
   // Inline name editing state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
+  
+  // Avatar refresh state
+  const [isRefreshingAvatar, setIsRefreshingAvatar] = useState(false);
   
   // Sub-tabs
   const [favoritesSubTab, setFavoritesSubTab] = useState<"favorites" | "notes">("favorites");
@@ -505,6 +511,52 @@ export function ContactDetailsPanel({
     setDepartmentOpen(false);
   };
 
+  // Handle refresh avatar
+  const handleRefreshAvatar = async () => {
+    if (!conversation?.client?.id || !conversation?.contact_phone || !conversation?.whatsapp_instance?.id) {
+      toast({
+        title: "Não é possível atualizar",
+        description: "Informações de cliente ou instância não disponíveis",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsRefreshingAvatar(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "fetch_profile_picture",
+          instanceId: conversation.whatsapp_instance.id,
+          phoneNumber: conversation.contact_phone.replace(/\D/g, ""),
+          clientId: conversation.client.id,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast({ title: "Foto atualizada!" });
+        queryClient.invalidateQueries({ queryKey: ["clients"] });
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      } else {
+        toast({
+          title: "Foto não disponível",
+          description: data?.message || "O usuário pode ter privacidade ativada",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Erro ao atualizar foto",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefreshingAvatar(false);
+    }
+  };
+
   const handleCopyPhone = () => {
     if (conversation.contact_phone) {
       navigator.clipboard.writeText(conversation.contact_phone);
@@ -633,14 +685,35 @@ export function ContactDetailsPanel({
           <div className="p-4 space-y-4">
             {/* Contact Card */}
             <div className="text-center space-y-3">
-              <Avatar className="h-20 w-20 mx-auto">
-                <AvatarImage 
-                  src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} 
-                />
-                <AvatarFallback className="bg-primary/10 text-primary text-xl font-medium">
-                  {getInitials(conversation.contact_name)}
-                </AvatarFallback>
-              </Avatar>
+              <div className="relative inline-block mx-auto">
+                <Avatar className="h-20 w-20">
+                  {conversation.client?.avatar_url ? (
+                    <AvatarImage 
+                      src={conversation.client.avatar_url} 
+                      alt={conversation.contact_name || "Avatar"}
+                    />
+                  ) : null}
+                  <AvatarFallback className="bg-primary/10 text-primary text-xl font-medium">
+                    {getInitials(conversation.contact_name)}
+                  </AvatarFallback>
+                </Avatar>
+                
+                {/* Refresh Avatar Button */}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-background border shadow-sm hover:bg-muted"
+                  onClick={handleRefreshAvatar}
+                  disabled={isRefreshingAvatar || !conversation?.client?.id || !conversation?.whatsapp_instance?.id}
+                  title="Atualizar foto de perfil do WhatsApp"
+                >
+                  {isRefreshingAvatar ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
               
               <div>
                 {isEditingName ? (
