@@ -1,148 +1,145 @@
 
-# Plano: Detecção de Abas Duplicadas com BroadcastChannel API
+# Plano: Remover Botão de Criar Departamento do Kanban
 
-## Objetivo
+## Situação Atual
 
-Implementar detecção de abas duplicadas que:
-1. Quando uma **nova aba** abre, avisa o usuário que já existe outra aba ativa
-2. Se o usuário confirmar, a **aba antiga é desconectada** (WebSockets fechados + sessão encerrada)
-3. A **nova aba assume** como sessão principal
-
-## Arquitetura Proposta
+Quando um usuário novo acessa o **Kanban** sem departamentos criados, aparece uma tela vazia com um botão "Criar Departamento":
 
 ```
-+----------------+     BroadcastChannel      +----------------+
-|   ABA ANTIGA   |  <----- "TAKEOVER" ----   |   ABA NOVA     |
-|  (será fechada)|                           | (assume sessão)|
-+----------------+                           +----------------+
-       |                                            |
-       v                                            |
- Desconecta Realtime                                |
- Mostra "Sessão encerrada"                          |
-                                                    v
-                                             Continua normal
++----------------------------------+
+|           📁                     |
+|  Nenhum departamento criado      |
+|                                  |
+|  [  Criar Departamento  ]        |  ← Botão problemático
++----------------------------------+
 ```
 
-## Fluxo de Funcionamento
+Esse botão usa o componente `CreateDepartmentDialog`, que também existe em **Configurações > Classes > Departamento**.
 
-1. **Nova aba abre** -> Envia mensagem `PING` pelo BroadcastChannel
-2. **Aba antiga responde** -> `PONG` confirmando que existe
-3. **Nova aba exibe dialog** -> "Já existe outra aba aberta. Continuar aqui?"
-4. **Usuário confirma** -> Nova aba envia `TAKEOVER`
-5. **Aba antiga recebe** -> Desconecta Realtime, mostra overlay "Sessão encerrada nesta aba"
+---
 
-## Arquivos a Criar/Modificar
+## Problema
 
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `src/contexts/TabSessionContext.tsx` | **Criar** | Context para gerenciar sessão de aba |
-| `src/components/session/DuplicateTabDialog.tsx` | **Criar** | Dialog avisando sobre aba duplicada |
-| `src/components/session/SessionTerminatedOverlay.tsx` | **Criar** | Overlay quando aba é desconectada |
-| `src/App.tsx` | **Modificar** | Adicionar TabSessionProvider |
-| `src/contexts/RealtimeSyncContext.tsx` | **Modificar** | Expor método para desconectar canais |
+- Ter dois lugares para criar departamento confunde os usuários
+- O Kanban não é o lugar ideal para configurar departamentos
+- Centralizar em Configurações mantém a lógica de configuração organizada
 
-## Implementação Detalhada
+---
 
-### 1. TabSessionContext.tsx (Novo)
+## Solução Proposta
 
-```typescript
-// Gerencia:
-// - ID único da aba (gerado com crypto.randomUUID)
-// - BroadcastChannel para comunicação inter-abas
-// - Estados: isPrimaryTab, showDuplicateDialog, isTerminated
-// - Métodos: takeoverSession, terminateSession
+Trocar o botão "Criar Departamento" por um botão que **redireciona para Configurações**:
 
-const CHANNEL_NAME = "miauchat-tab-session";
-
-interface TabMessage {
-  type: "PING" | "PONG" | "TAKEOVER";
-  tabId: string;
-  userId?: string;
-}
+```
++----------------------------------+
+|           📁                     |
+|  Nenhum departamento criado      |
+|  Crie departamentos em           |
+|  Configurações para organizar    |
+|  suas conversas.                 |
+|                                  |
+|  [  Ir para Configurações  ]     |  ← Novo botão
++----------------------------------+
 ```
 
-**Lógica principal:**
-- Ao montar, gera `tabId` único e envia `PING`
-- Se receber `PONG` de outra aba (mesmo userId), mostra dialog
-- Se usuário confirmar, envia `TAKEOVER`
-- Aba que recebe `TAKEOVER` desconecta e mostra overlay
+---
 
-### 2. DuplicateTabDialog.tsx (Novo)
+## Alterações Necessárias
 
-```tsx
-// AlertDialog com:
-// - Título: "Aba duplicada detectada"
-// - Mensagem: "O MiauChat já está aberto em outra aba..."
-// - Botão "Continuar aqui" -> dispara takeover
-// - Botão "Cancelar" -> fecha dialog, não faz nada
-```
+### Arquivo: `src/pages/Kanban.tsx`
 
-### 3. SessionTerminatedOverlay.tsx (Novo)
-
-```tsx
-// Overlay fullscreen com:
-// - Ícone de alerta
-// - "Esta sessão foi encerrada"
-// - "O MiauChat está ativo em outra aba"
-// - Botão "Recarregar esta aba" -> window.location.reload()
-```
-
-### 4. Modificar RealtimeSyncContext.tsx
-
-Adicionar método `disconnectAll()`:
-```typescript
-interface RealtimeSyncContextType {
-  // ... existing ...
-  disconnectAll: () => void;
-}
-
-const disconnectAll = useCallback(() => {
-  [coreChannelRef, messagesChannelRef, agendaChannelRef, conversationChannelRef]
-    .forEach(ref => {
-      if (ref.current) {
-        supabase.removeChannel(ref.current);
-        ref.current = null;
-      }
-    });
-  setIsConnected(false);
-  setChannelCount(0);
-}, []);
-```
-
-### 5. Modificar App.tsx
-
-```tsx
-<QueryClientProvider client={queryClient}>
-  <TenantProvider>
-    <TabSessionProvider>  {/* NOVO */}
-      <RealtimeSyncProvider>
-        {/* ... rest */}
-      </RealtimeSyncProvider>
-    </TabSessionProvider>
-  </TenantProvider>
-</QueryClientProvider>
-```
-
-## Análise de Risco
-
-| Risco | Mitigação |
+| Linha | Alteração |
 |-------|-----------|
-| BroadcastChannel não suportado | Fallback: não faz nada (navegadores antigos) |
-| Múltiplos usuários no mesmo browser | Mensagens incluem `userId` para filtrar |
-| Aba fecha antes de responder | Timeout de 500ms no PING, se não receber PONG, continua normal |
-| Race condition entre abas | Cada aba tem ID único, última a enviar TAKEOVER ganha |
+| 21 | Remover import do `CreateDepartmentDialog` |
+| 314-344 | Modificar tela vazia para redirecionar para Configurações |
 
-## Compatibilidade
+#### Código Atual (linhas 314-344):
+```tsx
+if (activeDepartments.length === 0) {
+  return (
+    <div className="h-screen flex flex-col animate-fade-in">
+      {/* ... header ... */}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+            <FolderPlus className="h-8 w-8 text-muted-foreground" />
+          </div>
+          <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
+          <p className="text-muted-foreground mb-6">
+            Crie departamentos para organizar suas conversas no Kanban.
+          </p>
+          <CreateDepartmentDialog     ← REMOVER
+            trigger={
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Criar Departamento
+              </Button>
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+```
 
-- **Chrome/Edge**: 54+ (2016)
-- **Firefox**: 38+ (2015)
-- **Safari**: 15.4+ (2022)
-- **Fallback**: Se `BroadcastChannel` não existir, não implementa a feature (graceful degradation)
+#### Código Novo:
+```tsx
+if (activeDepartments.length === 0) {
+  return (
+    <div className="h-screen flex flex-col animate-fade-in">
+      {/* ... header (mantido) ... */}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+            <FolderPlus className="h-8 w-8 text-muted-foreground" />
+          </div>
+          <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
+          <p className="text-muted-foreground mb-6">
+            Crie departamentos em Configurações → Classes → Departamento 
+            para organizar suas conversas no Kanban.
+          </p>
+          <Button onClick={() => navigate("/settings?tab=classes")}>
+            <Settings className="h-4 w-4 mr-2" />
+            Ir para Configurações
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## Arquivos Afetados
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/Kanban.tsx` | Substituir `CreateDepartmentDialog` por botão de navegação |
+
+---
+
+## O que pode ser removido
+
+| Arquivo | Decisão |
+|---------|---------|
+| `src/components/kanban/CreateDepartmentDialog.tsx` | **Manter** - Pode ser útil para outros fluxos futuros |
+
+---
 
 ## Garantias de Segurança
 
-- **Sem regressões**: Funcionalidade é aditiva, não altera fluxos existentes
-- **Sem banco de dados**: Tudo acontece localmente via BroadcastChannel
-- **Isolado por usuário**: Mensagens filtradas por userId
-- **Graceful degradation**: Navegadores sem suporte continuam funcionando normalmente
-- **Sem quebrar Realtime existente**: Apenas adiciona método `disconnectAll`
+- ✅ **Sem regressão**: Apenas troca visual de botão
+- ✅ **Funcionalidade mantida**: Criação de departamentos continua disponível em Configurações
+- ✅ **Import removido**: `CreateDepartmentDialog` não será mais importado no Kanban
+- ✅ **Navegação clara**: URL com query param `?tab=classes` abre direto na aba correta
+
+---
+
+## Resultado Esperado
+
+Quando um usuário acessar o Kanban sem departamentos:
+1. Verá mensagem orientando a criar departamentos em Configurações
+2. Ao clicar no botão, será redirecionado para `Configurações > Classes`
+3. Poderá criar departamentos na aba "Departamento"
