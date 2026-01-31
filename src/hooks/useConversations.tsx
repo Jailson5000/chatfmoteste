@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
 import { useLawFirm } from "@/hooks/useLawFirm";
-import { useUserDepartments } from "@/hooks/useUserDepartments";
+import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 
 type Conversation = Tables<"conversations">;
@@ -243,15 +243,21 @@ export function useConversations() {
   const conversations = useMemo(() => {
     if (hasFullAccess) return allConversations;
     
+    // Check if user has explicit permission to see "No Department" items
+    const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
+    
     // Atendente sees:
     // 1. Conversations in their assigned departments
     // 2. Conversations assigned directly to them
-    // 3. Conversations without a department (to not block initial workflow)
-    return allConversations.filter(conv => 
-      !conv.department_id ||
-      userDeptIds.includes(conv.department_id) ||
-      conv.assigned_to === userId
-    );
+    // 3. Conversations without department ONLY if they have explicit NO_DEPARTMENT_ID permission
+    return allConversations.filter(conv => {
+      // Conversation without department: requires explicit permission or direct assignment
+      if (!conv.department_id) {
+        return canSeeNoDepartment || conv.assigned_to === userId;
+      }
+      // Conversation with department: must have access to that department or be assigned
+      return userDeptIds.includes(conv.department_id) || conv.assigned_to === userId;
+    });
   }, [allConversations, hasFullAccess, userDeptIds, userId]);
 
   const isLoading = dataLoading || permissionsLoading;

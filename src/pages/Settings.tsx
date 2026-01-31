@@ -715,6 +715,42 @@ export default function Settings() {
                               Atendente não pode: modificar configurações, conexões ou automações.
                             </p>
                             <div className="space-y-2 border rounded-lg p-3 max-h-[200px] overflow-y-auto">
+                              {/* Special "Sem Departamento" option */}
+                              <div 
+                                className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50 border-b pb-2 mb-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const NO_DEPT = "__no_department__";
+                                  setEditMemberDepts(prev => 
+                                    prev.includes(NO_DEPT) 
+                                      ? prev.filter(id => id !== NO_DEPT)
+                                      : [...prev, NO_DEPT]
+                                  );
+                                }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                              >
+                                <Checkbox 
+                                  checked={editMemberDepts.includes("__no_department__")}
+                                  onCheckedChange={(checked) => {
+                                    const NO_DEPT = "__no_department__";
+                                    if (checked === true) {
+                                      if (!editMemberDepts.includes(NO_DEPT)) {
+                                        setEditMemberDepts(prev => [...prev, NO_DEPT]);
+                                      }
+                                    } else {
+                                      if (editMemberDepts.includes(NO_DEPT)) {
+                                        setEditMemberDepts(prev => prev.filter(id => id !== NO_DEPT));
+                                      }
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                />
+                                <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
+                                <span className="text-sm font-medium">Sem Departamento</span>
+                              </div>
+                              
+                              {/* Regular departments */}
                               {activeDepartments.length > 0 ? (
                                 activeDepartments.map(dept => (
                                   <div 

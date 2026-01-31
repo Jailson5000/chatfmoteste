@@ -8,6 +8,8 @@ export type AppRole = "admin" | "gerente" | "advogado" | "estagiario" | "atenden
 // Roles that have full access to all departments
 const FULL_ACCESS_ROLES: AppRole[] = ["admin", "gerente", "advogado", "estagiario"];
 
+// Special ID for "No Department" permission - used in member_departments table
+export const NO_DEPARTMENT_ID = "__no_department__";
 interface UserDepartmentsData {
   role: AppRole | null;
   departmentIds: string[];
