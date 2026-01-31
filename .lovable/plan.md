@@ -1,143 +1,214 @@
 
-# Correções e Melhorias no Módulo de Agentes de IA
 
-## Resumo dos Problemas Identificados
+# Correção: Atendente com Acesso a Todos os Departamentos
 
-Após análise detalhada do código, identifiquei os seguintes pontos que precisam de atenção:
+## Problema Identificado
 
-| Item | Status | Descrição |
-|------|--------|-----------|
-| Menções (@) | ✅ OK | Sistema funcionando corretamente |
-| Palavras-chave | ✅ OK | Campo funcional e salvando corretamente |
-| Tempo de Delay | ✅ OK | Configuração funcionando |
-| Canal de Atendimento | ✅ OK | Opções implementadas corretamente |
-| Agenda Pro | ✅ OK | Toggle funcionando |
-| Base de Conhecimento | ⚠️ Problema | Possível dessincronização entre fontes |
-| Avisar Cliente | ⚠️ Verificar | Toggle existe, mas precisa validar uso no backend |
-| Campo do Prompt (UX) | ⚠️ Melhorar | Falta formatação rica e tema escuro ruim |
+A usuária **Gabrielle** (gabbenm00@gmail.com) está configurada corretamente no banco:
+- **Role:** `atendente`
+- **Departamento permitido:** `CLIENTES FMO`
+
+Porém, ela consegue ver **todos os departamentos** porque o sistema **não aplica filtragem** com base nos departamentos atribuídos a usuários com role `atendente`.
+
+### Causa Raiz
+
+Os hooks de dados (`useConversations`, `useClients`, `useDepartments`) buscam **todos os dados** do `law_firm_id` sem considerar a role do usuário ou os departamentos aos quais ele tem acesso via tabela `member_departments`.
 
 ---
 
-## Problema 1: Base de Conhecimento - Dessincronização
+## Solução Proposta
 
-### Descrição do Problema
-Existem **duas fontes de dados** para o conhecimento vinculado a um agente:
+### Arquitetura da Correção
 
-1. **Tabela `agent_knowledge`**: Usada pelo `AgentKnowledgeSection.tsx` e pela página `KnowledgeBase.tsx` (vincular/desvincular agentes)
-
-2. **Campo `trigger_config.knowledge_base_ids`**: Array salvo junto com as outras configurações do agente em `AIAgents.tsx`
-
-Isso significa que quando você desvincula uma base de conhecimento na página "Base de Conhecimento > Vincular Agentes", essa ação **não atualiza** o campo `trigger_config.knowledge_base_ids`, causando a dessincronização observada.
-
-### Solução Proposta
-**Opção A (Recomendada)**: Remover `knowledge_base_ids` do `trigger_config` e usar apenas a tabela `agent_knowledge` como fonte única de verdade.
-
-Alterações necessárias:
-- `AIAgents.tsx`: Remover o estado `selectedKnowledge` e a seção de checkboxes de base de conhecimento
-- O `AgentKnowledgeSection.tsx` já cuida dessa funcionalidade corretamente
-- `AIAgentEdit.tsx`: Já usa `AgentKnowledgeSection` como fonte única
-
----
-
-## Problema 2: Campo do Prompt - UX Melhorada
-
-### Descrição do Problema
-O campo de prompt atual (`MentionEditor`) é uma div contenteditable básica que:
-- Não oferece formatação rica (negrito, itálico, listas)
-- No tema escuro, o contraste pode ser insuficiente
-- Não tem toolbar de formatação
-
-### Solução Proposta
-Melhorar o `MentionEditor` com:
-
-1. **Toolbar de Formatação Básica**:
-   - Botão de negrito (**B**)
-   - Botão de itálico (*I*)
-   - Botão de lista
-   
-2. **Melhorias de Estilo para Tema Escuro**:
-   - Adicionar classe `dark:bg-slate-900` ao container
-   - Garantir contraste do placeholder
-   - Melhorar a borda e foco
-
-3. **Melhorias Visuais Gerais**:
-   - Adicionar contador de caracteres mais visível
-   - Melhorar padding e espaçamento
-
-### Arquivos a Modificar
-- `src/components/ai-agents/MentionEditor.tsx`
-
----
-
-## Problema 3: Avisar Cliente ao Transferir - Validação
-
-### Descrição do Problema
-O toggle "Avisar ao transferir" existe na interface e salva o campo `notify_on_transfer` no banco. Precisamos verificar se:
-1. O backend realmente usa esse campo
-2. A mensagem de notificação está sendo enviada
-
-### Ação
-- Verificar o fluxo no N8N/backend que processa transferências
-- Se não estiver implementado, está funcionando como "desativado" mesmo quando ativo (sem efeito)
-
-O campo está corretamente implementado no frontend. A implementação no backend depende do workflow N8N configurado pela empresa.
-
----
-
-## Arquivos que Precisam de Alteração
-
-| Arquivo | Tipo de Mudança |
-|---------|-----------------|
-| `src/pages/AIAgents.tsx` | Remover seção duplicada de base de conhecimento para evitar dessincronização |
-| `src/components/ai-agents/MentionEditor.tsx` | Adicionar toolbar de formatação e melhorar tema escuro |
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                   NOVO HOOK: useUserDepartments                 │
+├─────────────────────────────────────────────────────────────────┤
+│  • Busca role do usuário logado (user_roles)                    │
+│  • Busca departamentos atribuídos (member_departments)          │
+│  • Retorna: { role, departmentIds, hasFullAccess, isLoading }   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               HOOKS MODIFICADOS (filtragem aplicada)            │
+├─────────────────────────────────────────────────────────────────┤
+│  useConversations  → filtra por department_id ou assigned_to    │
+│  useClients        → filtra por department_id                   │
+│  useDepartments    → retorna apenas departamentos acessíveis    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Mudanças Detalhadas
 
-### 1. AIAgents.tsx - Remover Conhecimento Duplicado
+### 1. Criar Hook `useUserDepartments`
 
-**Remover** (linhas ~1630-1693 aproximadamente):
-- A seção inteira de "Base de Conhecimento" que usa checkboxes
-- O estado `selectedKnowledge` (linha 287)
-- A referência a `knowledge_base_ids` no `handleSave` (linha ~724)
+**Novo arquivo:** `src/hooks/useUserDepartments.tsx`
 
-**Por quê**: O `AgentKnowledgeSection` dentro do `AIAgentEdit.tsx` já gerencia isso corretamente usando a tabela `agent_knowledge`. Manter duas formas de vincular conhecimento causa confusão e dessincronização.
-
-### 2. MentionEditor.tsx - Melhorias Visuais
-
-Adicionar toolbar com botões de formatação:
-
-```text
-┌─────────────────────────────────────────────────┐
-│ [B] [I] [Lista] [Ajuda @]           📝 2340/10000 │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  Área do Prompt com contenteditable            │
-│  (menções em badges coloridos)                  │
-│                                                 │
-│                                                 │
-└─────────────────────────────────────────────────┘
+```typescript
+// Retorna:
+interface UserDepartmentsData {
+  role: AppRole | null;
+  departmentIds: string[];      // IDs dos departamentos que o usuário pode acessar
+  hasFullAccess: boolean;       // true para admin/gerente
+  isLoading: boolean;
+}
 ```
 
-Melhorias no container:
-- `bg-background dark:bg-slate-900/50` para melhor contraste
-- `border-input dark:border-slate-700` para borda visível
-- `placeholder:text-muted-foreground` para texto de ajuda legível
+**Lógica:**
+- Se role é `admin` ou `gerente`: `hasFullAccess = true`, não aplica filtro
+- Se role é `atendente`: busca `member_departments` e retorna apenas os IDs atribuídos
+- Se não tem departamentos atribuídos: não vê nada (lista vazia)
 
 ---
 
-## Resumo das Garantias
+### 2. Modificar `useDepartments.tsx`
 
-1. **Sem Regressões**: Todas as alterações são isoladas aos arquivos de agentes de IA
-2. **Compatibilidade**: O código existente continua funcionando
-3. **Fonte Única de Verdade**: Base de conhecimento agora tem uma única fonte (`agent_knowledge`)
-4. **UX Melhorada**: Prompt mais fácil de editar em ambos os temas
+Atualmente retorna **todos** os departamentos da empresa. Modificar para:
+
+```typescript
+// Antes
+const { data: departments = [] } = useQuery({
+  queryFn: async () => {
+    // Busca TODOS os departamentos da law_firm
+  }
+});
+
+// Depois  
+const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
+
+const filteredDepartments = useMemo(() => {
+  if (hasFullAccess) return departments;
+  return departments.filter(d => userDeptIds.includes(d.id));
+}, [departments, hasFullAccess, userDeptIds]);
+```
 
 ---
 
-## Sequência de Implementação
+### 3. Modificar `useConversations.tsx`
 
-1. **Fase 1**: Remover a seção duplicada de base de conhecimento em `AIAgents.tsx`
-2. **Fase 2**: Melhorar visual do `MentionEditor.tsx` (tema escuro + toolbar básica)
-3. **Fase 3**: Testar o fluxo completo para garantir que funciona
+Aplicar filtro após fetch das conversas:
+
+```typescript
+const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
+
+// Filtrar conversas no cliente (mais simples que modificar RPC)
+const filteredConversations = useMemo(() => {
+  if (hasFullAccess) return allConversations;
+  
+  // Atendente vê:
+  // 1. Conversas nos departamentos atribuídos
+  // 2. Conversas atribuídas diretamente a ele (assigned_to)
+  // 3. Conversas sem departamento (para não bloquear fluxo)
+  return allConversations.filter(conv => 
+    !conv.department_id ||                       // Sem departamento
+    userDeptIds.includes(conv.department_id) ||  // Departamento permitido
+    conv.assigned_to === user?.id                // Atribuída ao usuário
+  );
+}, [allConversations, hasFullAccess, userDeptIds, user?.id]);
+```
+
+---
+
+### 4. Modificar `useClients.tsx`
+
+Aplicar mesmo padrão de filtro:
+
+```typescript
+const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
+
+const filteredClients = useMemo(() => {
+  if (hasFullAccess) return clients;
+  
+  return clients.filter(client => 
+    !client.department_id ||
+    userDeptIds.includes(client.department_id) ||
+    client.assigned_to === user?.id
+  );
+}, [clients, hasFullAccess, userDeptIds, user?.id]);
+```
+
+---
+
+### 5. Atualizar Páginas que usam esses hooks
+
+Os componentes que usam esses hooks **não precisam mudar** pois a filtragem ocorre internamente. Porém, precisamos garantir que:
+
+- `Kanban.tsx` - Já usa `useDepartments()` e `useConversations()`
+- `Conversations.tsx` - Já usa `useDepartments()` e `useConversations()`  
+- `Contacts.tsx` - Já usa `useClients()`
+
+---
+
+## Arquivos a Criar/Modificar
+
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/hooks/useUserDepartments.tsx` | **Criar** | Hook que retorna role e departamentos do usuário |
+| `src/hooks/useDepartments.tsx` | Modificar | Filtrar departamentos baseado em acesso |
+| `src/hooks/useConversations.tsx` | Modificar | Filtrar conversas baseado em departamentos |
+| `src/hooks/useClients.tsx` | Modificar | Filtrar clientes baseado em departamentos |
+
+---
+
+## Regras de Acesso
+
+| Role | Acesso |
+|------|--------|
+| `admin` | Todos os departamentos e conversas |
+| `gerente` | Todos os departamentos e conversas |
+| `advogado` | Todos os departamentos e conversas |
+| `estagiario` | Todos os departamentos e conversas |
+| `atendente` | Apenas departamentos em `member_departments` + conversas atribuídas diretamente |
+
+---
+
+## Comportamento Esperado Após Correção
+
+**Gabrielle (atendente com acesso a "CLIENTES FMO"):**
+- ✅ Vê apenas o departamento "CLIENTES FMO" no Kanban
+- ✅ Vê apenas conversas do departamento "CLIENTES FMO"
+- ✅ Vê conversas atribuídas diretamente a ela (assigned_to)
+- ✅ Vê conversas sem departamento (para não bloquear fluxo inicial)
+- ❌ Não vê outros departamentos como "Financeiro", "Comercial", etc.
+
+**Jailson (admin):**
+- ✅ Continua vendo tudo normalmente
+
+---
+
+## Garantias de Não-Regressão
+
+1. **Compatibilidade:** Admin/Gerente continua com acesso total
+2. **Sem mudança de banco:** Apenas filtragem no frontend
+3. **Performance:** Filtro em memória após fetch (mínimo impacto)
+4. **Fallback seguro:** Se role não encontrada, assume mais restritivo
+
+---
+
+## Fluxo Visual
+
+```text
+Usuário loga → useUserDepartments busca role + departamentos
+                           │
+                           ▼
+              ┌────────────────────────┐
+              │  role === 'admin' ou   │
+              │  role === 'gerente'?   │
+              └────────────────────────┘
+                    │           │
+                   Sim         Não
+                    │           │
+                    ▼           ▼
+            hasFullAccess   Busca member_departments
+            = true          para o user_id
+                                │
+                                ▼
+                        departmentIds = [...]
+                                │
+                                ▼
+            Hooks aplicam filtro baseado em departmentIds
+```
+
