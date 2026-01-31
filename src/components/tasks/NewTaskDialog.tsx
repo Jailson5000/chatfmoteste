@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { useTasks, TaskPriority, TaskStatus } from "@/hooks/useTasks";
 import { TaskCategory } from "@/hooks/useTaskCategories";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ const formSchema = z.object({
   category_id: z.string().optional(),
   due_date: z.date().optional(),
   assignee_ids: z.array(z.string()).default([]),
+  send_due_alert: z.boolean().default(true),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -85,6 +87,7 @@ export function NewTaskDialog({
       category_id: undefined,
       due_date: undefined,
       assignee_ids: [],
+      send_due_alert: true,
     },
   });
 
@@ -97,6 +100,7 @@ export function NewTaskDialog({
       category_id: data.category_id,
       due_date: data.due_date?.toISOString(),
       assignee_ids: data.assignee_ids,
+      send_due_alert: data.send_due_alert,
     });
 
     form.reset();
@@ -286,6 +290,27 @@ export function NewTaskDialog({
                       </p>
                     )}
                   </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="send_due_alert"
+              render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-sm">Enviar alerta de vencimento</FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      Notificar responsáveis antes do vencimento
+                    </p>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
                 </FormItem>
               )}
             />

@@ -25,6 +25,7 @@ import {
   Filter,
   X,
   Settings,
+  Bell,
 } from "lucide-react";
 import { useTasks, TaskStatus, TaskPriority } from "@/hooks/useTasks";
 import { useTaskCategories } from "@/hooks/useTaskCategories";
@@ -36,6 +37,7 @@ import { TaskDashboard } from "@/components/tasks/TaskDashboard";
 import { NewTaskDialog } from "@/components/tasks/NewTaskDialog";
 import { TaskDetailSheet } from "@/components/tasks/TaskDetailSheet";
 import { TaskCategoriesDialog } from "@/components/tasks/TaskCategoriesDialog";
+import { TaskAlertsSettingsDialog } from "@/components/tasks/TaskAlertsSettingsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -50,6 +52,7 @@ export default function Tasks() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
   const { tasks, isLoading } = useTasks();
   const { categories, initializeDefaultCategories } = useTaskCategories();
@@ -143,6 +146,20 @@ export default function Tasks() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsAlertsOpen(true)}
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Configurar Alertas</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -329,6 +346,12 @@ export default function Tasks() {
       <TaskCategoriesDialog
         open={isCategoriesOpen}
         onOpenChange={setIsCategoriesOpen}
+      />
+
+      {/* Alerts Settings Dialog */}
+      <TaskAlertsSettingsDialog
+        open={isAlertsOpen}
+        onOpenChange={setIsAlertsOpen}
       />
     </div>
   );

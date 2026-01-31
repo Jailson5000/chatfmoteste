@@ -57,6 +57,7 @@ export interface CreateTaskInput {
   category_id?: string;
   due_date?: string;
   assignee_ids?: string[];
+  send_due_alert?: boolean;
 }
 
 export interface UpdateTaskInput {
@@ -159,6 +160,7 @@ export function useTasks() {
           due_date: input.due_date || null,
           created_by: user.id,
           position: nextPosition,
+          send_due_alert: input.send_due_alert ?? true,
         })
         .select()
         .single();
