@@ -1025,6 +1025,10 @@ interface KanbanChatPanelProps {
   origin?: string | null;
   /** Avatar URL from client's WhatsApp profile */
   avatarUrl?: string | null;
+  /** Archive metadata for archived conversations */
+  archivedAt?: string | null;
+  archivedReason?: string | null;
+  archivedByName?: string | null;
   customStatuses: CustomStatus[];
   tags: TagItem[];
   departments: Department[];
@@ -1049,6 +1053,9 @@ export function KanbanChatPanel({
   departmentId,
   origin,
   avatarUrl,
+  archivedAt,
+  archivedReason,
+  archivedByName,
   customStatuses,
   tags,
   departments,
@@ -3029,6 +3036,33 @@ export function KanbanChatPanel({
           </Popover>
         </div>
       </div>
+
+      {/* Archived Conversation Banner - Compact version */}
+      {archivedAt && (
+        <div className="bg-orange-100 dark:bg-orange-900/30 border-l-4 border-orange-500 p-2 mx-3 my-1.5 rounded">
+          <div className="flex items-center gap-1.5">
+            <Archive className="h-3 w-3 text-orange-600 dark:text-orange-400" />
+            <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
+              Conversa arquivada
+            </span>
+          </div>
+          <div className="text-xs text-orange-700 dark:text-orange-300 mt-0.5">
+            {archivedByName && `Por: ${archivedByName} • `}
+            Em: {new Date(archivedAt).toLocaleString('pt-BR', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric', 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            })}
+          </div>
+          {archivedReason && (
+            <div className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
+              Motivo: {archivedReason}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea 
