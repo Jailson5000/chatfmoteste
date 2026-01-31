@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "./useLawFirm";
+import { useUserDepartments } from "./useUserDepartments";
+import { useMemo } from "react";
 
 export interface Department {
   id: string;
@@ -19,8 +21,9 @@ export function useDepartments() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  const { hasFullAccess, departmentIds: userDeptIds, isLoading: permissionsLoading } = useUserDepartments();
 
-  const { data: departments = [], isLoading } = useQuery({
+  const { data: allDepartments = [], isLoading: departmentsLoading } = useQuery({
     queryKey: ["departments", lawFirm?.id],
     queryFn: async () => {
       if (!lawFirm?.id) return [];
@@ -37,6 +40,13 @@ export function useDepartments() {
     enabled: !!lawFirm?.id,
   });
 
+  // Filter departments based on user access
+  const departments = useMemo(() => {
+    if (hasFullAccess) return allDepartments;
+    return allDepartments.filter(d => userDeptIds.includes(d.id));
+  }, [allDepartments, hasFullAccess, userDeptIds]);
+
+  const isLoading = departmentsLoading || permissionsLoading;
   // Real-time subscription removed - now handled by centralized useRealtimeSync
 
   const createDepartment = useMutation({

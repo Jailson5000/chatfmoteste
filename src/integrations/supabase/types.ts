@@ -5801,6 +5801,10 @@ export type Database = {
         Args: { _subdomain: string }
         Returns: string
       }
+      get_member_department_ids_for_user: {
+        Args: { _user_id: string }
+        Returns: string[]
+      }
       get_public_professionals_for_booking: {
         Args: { _law_firm_id: string; _service_id?: string }
         Returns: {
