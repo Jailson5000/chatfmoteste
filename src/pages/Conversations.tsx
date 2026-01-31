@@ -59,6 +59,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -3553,16 +3554,22 @@ export default function Conversations() {
                   >
                     <ArrowLeft className="h-5 w-5" />
                   </Button>
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-semibold text-primary">
+                  <Avatar className="h-10 w-10 flex-shrink-0 border border-primary/20">
+                    {(selectedConversation as any).client?.avatar_url ? (
+                      <AvatarImage 
+                        src={(selectedConversation as any).client.avatar_url} 
+                        alt={selectedConversation.contact_name || "Avatar"} 
+                      />
+                    ) : null}
+                    <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
                       {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
                         .split(" ")
                         .map((n) => n[0])
                         .join("")
                         .slice(0, 2)
                         .toUpperCase()}
-                    </span>
-                  </div>
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
                       {isEditingNameInline ? (
