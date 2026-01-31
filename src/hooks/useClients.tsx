@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
-import { useUserDepartments } from "./useUserDepartments";
+import { useUserDepartments, NO_DEPARTMENT_ID } from "./useUserDepartments";
 import { useMemo } from "react";
 
 export interface Client {
@@ -86,15 +86,21 @@ export function useClients() {
   const clients = useMemo(() => {
     if (hasFullAccess) return allClients;
     
+    // Check if user has explicit permission to see "No Department" items
+    const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
+    
     // Atendente sees:
     // 1. Clients in their assigned departments
     // 2. Clients assigned directly to them
-    // 3. Clients without a department (to not block workflow)
-    return allClients.filter(client => 
-      !client.department_id ||
-      userDeptIds.includes(client.department_id) ||
-      client.assigned_to === userId
-    );
+    // 3. Clients without department ONLY if they have explicit NO_DEPARTMENT_ID permission
+    return allClients.filter(client => {
+      // Client without department: requires explicit permission or direct assignment
+      if (!client.department_id) {
+        return canSeeNoDepartment || client.assigned_to === userId;
+      }
+      // Client with department: must have access to that department or be assigned
+      return userDeptIds.includes(client.department_id) || client.assigned_to === userId;
+    });
   }, [allClients, hasFullAccess, userDeptIds, userId]);
 
   const isLoading = clientsLoading || permissionsLoading;
