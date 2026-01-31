@@ -1,202 +1,257 @@
 
-# Implementação: Monitoramento e Lembretes de Trial
 
-## Visão Geral
+# Plano: Alertas de Tarefas e Identificação Visual de Concluídas
 
-Implementar 3 funcionalidades relacionadas ao gerenciamento de trials:
+## Resumo das Solicitações
 
-1. **Indicador visual no Dashboard** - Mostrar empresas com trial expirando em 2 dias
-2. **Email automático de lembrete** - Enviar aviso 2 dias antes do trial expirar
-3. **Verificação do fluxo** - Testar se o bloqueio funciona corretamente
+1. **Configurações de Alertas de Tarefas** - Botão de configurações ao lado do Dashboard para configurar alertas 24h antes do vencimento, enviados via email/WhatsApp, dentro do horário comercial, com opção de ativar/desativar por tarefa
+2. **Identificação Visual de Tarefas Concluídas no Kanban** - Cards na coluna "Concluído" devem ter visual diferenciado (cor mais clara, badge verde, etc.)
 
 ---
 
-## 1. Indicador Visual no Dashboard
+## Parte 1: Identificação Visual de Tarefas Concluídas
 
 ### Objetivo
-Adicionar um card de alerta destacado no Dashboard do Global Admin mostrando empresas com trial expirando nos próximos 2 dias para acompanhamento proativo.
+Destacar visualmente os cards de tarefas quando estão na coluna "Concluído", tornando mais fácil identificar que foram finalizadas.
 
-### Alterações no `src/hooks/useSystemMetrics.tsx`
+### Alterações no `TaskKanbanCard.tsx`
 
-Adicionar nova métrica `companiesTrialExpiringSoon` no cálculo:
+Adicionar estilos condicionais para quando `task.status === "done"`:
 
-```typescript
-// Nova métrica a ser calculada
-let companiesTrialExpiringSoon = 0;
-
-// No forEach de companiesDetailResult.data
-const trialEndsAt = new Date(company.trial_ends_at);
-const daysRemaining = Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-if (daysRemaining > 0 && daysRemaining <= 2) {
-  companiesTrialExpiringSoon++;
-}
-```
-
-### Alterações no `src/pages/global-admin/GlobalAdminDashboard.tsx`
-
-Adicionar um **card de alerta** abaixo do header (antes dos stats cards) quando houver empresas expirando:
+- **Fundo mais claro/esmaecido**: `bg-muted/50` ou `opacity-75`
+- **Badge verde "Concluído"** ao lado da prioridade
+- **Texto com riscado** no título (como já existe na lista)
+- **Borda verde sutil**
 
 ```tsx
-{/* Alerta de Trials Expirando */}
-{dashboardMetrics?.companiesTrialExpiringSoon > 0 && (
-  <div 
-    className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center gap-4 cursor-pointer hover:bg-orange-500/15 transition-colors"
-    onClick={() => navigate("/global-admin/companies?trial=expiring_soon")}
-  >
-    <div className="p-3 rounded-full bg-orange-500/20">
-      <AlertTriangle className="h-6 w-6 text-orange-400" />
-    </div>
-    <div className="flex-1">
-      <p className="text-orange-400 font-semibold">
-        {dashboardMetrics.companiesTrialExpiringSoon} empresa(s) com trial expirando em até 2 dias
-      </p>
-      <p className="text-white/50 text-sm">
-        Clique para ver e tomar ação preventiva
-      </p>
-    </div>
-    <ArrowUpRight className="h-5 w-5 text-orange-400" />
-  </div>
+// Exemplo de estilos condicionais
+const isDone = task.status === "done";
+
+className={cn(
+  "bg-card border rounded-lg p-3 cursor-pointer ...",
+  isDone && "opacity-75 bg-muted/40 border-green-200 dark:border-green-800"
 )}
+
+// Badge de concluído
+{isDone && (
+  <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px]">
+    ✓ Concluído
+  </Badge>
+)}
+
+// Título com riscado
+<h4 className={cn("font-medium text-sm", isDone && "line-through text-muted-foreground")}>
+```
+
+### Arquivos Modificados
+- `src/components/tasks/TaskKanbanCard.tsx`
+
+---
+
+## Parte 2: Configurações e Alertas de Tarefas
+
+### Arquitetura da Solução
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    FRONTEND (React)                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  Tasks.tsx                                                          │
+│    └─► Botão "Alertas" (ao lado do Dashboard)                       │
+│         └─► TaskAlertsSettingsDialog.tsx (modal de configurações)   │
+│                                                                     │
+│  NewTaskDialog.tsx / TaskDetailSheet.tsx                            │
+│    └─► Toggle "Enviar alerta de vencimento" (por tarefa)            │
+├─────────────────────────────────────────────────────────────────────┤
+│                    BACKEND (Supabase)                               │
+├─────────────────────────────────────────────────────────────────────┤
+│  law_firm_settings (adicionar colunas)                              │
+│    └─► task_alert_enabled: boolean                                  │
+│    └─► task_alert_hours_before: integer (padrão 24)                 │
+│    └─► task_alert_channels: jsonb (["email", "whatsapp"])           │
+│                                                                     │
+│  internal_tasks (adicionar coluna)                                  │
+│    └─► send_due_alert: boolean (padrão true)                        │
+│                                                                     │
+│  task_alert_logs (nova tabela para evitar duplicatas)               │
+│    └─► task_id, sent_at, channel, user_id                           │
+├─────────────────────────────────────────────────────────────────────┤
+│  Edge Function: process-task-due-alerts                             │
+│    └─► Cron job rodando a cada hora                                 │
+│    └─► Verifica tarefas com due_date nas próximas 24h               │
+│    └─► Respeita horário comercial (8h-18h por padrão)               │
+│    └─► Envia email via Resend                                       │
+│    └─► Envia WhatsApp via Evolution API                             │
+│    └─► Registra log para evitar duplicatas                          │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Email Automático de Lembrete (2 dias antes)
-
-### Objetivo
-Criar uma Edge Function que rode via cron job diariamente e envie emails de lembrete para empresas cujo trial expira em exatamente 2 dias.
-
-### Nova Edge Function: `supabase/functions/process-trial-reminders/index.ts`
-
-```typescript
-// Lógica principal:
-// 1. Buscar empresas com trial_ends_at entre hoje+1.5 dias e hoje+2.5 dias
-// 2. Para cada empresa, verificar se já enviou lembrete (deduplicação)
-// 3. Obter email do admin da empresa via profiles
-// 4. Enviar email personalizado via Resend
-// 5. Registrar log para evitar duplicatas
-```
-
-### Estrutura do Email
-
-| Seção | Conteúdo |
-|-------|----------|
-| **Assunto** | `⏰ Seu período de trial expira em 2 dias - [Nome Empresa]` |
-| **Corpo** | Aviso amigável, data de expiração, CTA para pagar, link de suporte |
-
-### Tabela de Log (deduplicação)
-
-Utilizar a tabela existente `admin_notification_logs` para registrar envios:
-- `event_type`: `'TRIAL_REMINDER_2_DAYS'`
-- `tenant_id`: ID da empresa
-- `event_key`: `'trial_reminder_2d_{company_id}_{trial_ends_at}'`
-
-### Configuração do Cron Job
-
-Adicionar no Supabase via SQL (executa diariamente às 9h horário de Brasília):
+### 2.1 Nova Tabela: `task_alert_logs`
 
 ```sql
-SELECT cron.schedule(
-  'process-trial-reminders-daily',
-  '0 12 * * *',  -- 12:00 UTC = 9:00 BRT
-  $$
-  SELECT net.http_post(
-    url := 'https://jiragtersejnarxruqyd.supabase.co/functions/v1/process-trial-reminders',
-    headers := '{"Authorization": "Bearer ANON_KEY"}'::jsonb
-  )
-  $$
+CREATE TABLE task_alert_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id uuid NOT NULL REFERENCES internal_tasks(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES profiles(id),
+  channel text NOT NULL, -- 'email' ou 'whatsapp'
+  sent_at timestamptz NOT NULL DEFAULT now(),
+  law_firm_id uuid NOT NULL REFERENCES law_firms(id) ON DELETE CASCADE,
+  UNIQUE(task_id, user_id, channel) -- evita duplicatas
 );
 ```
 
-### Atualização do `supabase/config.toml`
+### 2.2 Alteração na Tabela `internal_tasks`
 
-```toml
-[functions.process-trial-reminders]
-verify_jwt = false
+```sql
+ALTER TABLE internal_tasks 
+ADD COLUMN send_due_alert boolean NOT NULL DEFAULT true;
+```
+
+### 2.3 Alteração na Tabela `law_firm_settings`
+
+```sql
+ALTER TABLE law_firm_settings
+ADD COLUMN task_alert_enabled boolean NOT NULL DEFAULT false,
+ADD COLUMN task_alert_hours_before integer NOT NULL DEFAULT 24,
+ADD COLUMN task_alert_channels jsonb NOT NULL DEFAULT '["email"]';
 ```
 
 ---
 
-## 3. Verificação do Fluxo de Trial Expirado
+### 2.4 Interface: `TaskAlertsSettingsDialog.tsx`
 
-### Teste Manual (Navegação)
+Novo componente de configurações com:
 
-1. Acessar `/global-admin/companies`
-2. Localizar empresa em trial (ex: "Miau test" com 4 dias restantes)
-3. Confirmar que badge mostra corretamente dias restantes
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| Alertas ativos | Switch | Habilita/desabilita globalmente |
+| Horas antes | Select | 12h, 24h, 48h |
+| Canais | Checkboxes | Email, WhatsApp |
+| Respeitar horário comercial | Switch | Só envia entre 8h-18h |
 
-### Validação do Bloqueio
+---
 
-O bloqueio está implementado em `src/components/auth/ProtectedRoute.tsx`:
+### 2.5 Toggle por Tarefa
 
-```typescript
-// Linha 59-62 - Lógica de bloqueio
-if (trial_type && trial_type !== 'none' && trial_expired) {
-  console.log('[ProtectedRoute] Blocking: Trial expired at', trial_ends_at);
-  return <TrialExpired trialEndsAt={trial_ends_at} planName={plan_name} />;
-}
+Adicionar nos formulários `NewTaskDialog.tsx` e `TaskDetailSheet.tsx`:
+
+```tsx
+<FormField
+  name="send_due_alert"
+  render={({ field }) => (
+    <FormItem className="flex items-center gap-3">
+      <FormControl>
+        <Switch checked={field.value} onCheckedChange={field.onChange} />
+      </FormControl>
+      <FormLabel>Enviar alerta de vencimento</FormLabel>
+    </FormItem>
+  )}
+/>
 ```
 
-Para testar completamente seria necessário:
-- Modificar temporariamente `trial_ends_at` de uma empresa para data no passado
-- Fazer login como usuário dessa empresa
-- Confirmar que é redirecionado para `TrialExpired.tsx`
+---
+
+### 2.6 Edge Function: `process-task-due-alerts`
+
+**Lógica principal:**
+
+1. Buscar empresas com `task_alert_enabled = true`
+2. Para cada empresa, buscar tarefas:
+   - `status != 'done'`
+   - `due_date` entre agora e `+24h` (ou configurado)
+   - `send_due_alert = true`
+3. Para cada tarefa, buscar responsáveis (`task_assignees`)
+4. Verificar se já enviou alerta (consultar `task_alert_logs`)
+5. Verificar horário comercial (se configurado)
+6. Enviar notificação:
+   - **Email**: via Resend
+   - **WhatsApp**: via Evolution API (se o usuário tem `phone`)
+7. Registrar em `task_alert_logs`
+
+**Cron job**: Executar a cada hora (para respeitar horário comercial)
+
+```sql
+SELECT cron.schedule(
+  'process-task-due-alerts',
+  '0 * * * *',  -- A cada hora
+  $$...$$ 
+);
+```
 
 ---
 
-## Arquivos a Modificar/Criar
+### 2.7 Template do Alerta
 
-| Arquivo | Ação |
-|---------|------|
-| `src/hooks/useSystemMetrics.tsx` | Adicionar métrica `companiesTrialExpiringSoon` |
-| `src/pages/global-admin/GlobalAdminDashboard.tsx` | Adicionar card de alerta para trials expirando |
-| `supabase/functions/process-trial-reminders/index.ts` | **Criar** - Edge function para envio de lembretes |
-| `supabase/config.toml` | Adicionar configuração da nova função |
-
----
-
-## Template do Email de Lembrete
-
-```html
-Assunto: ⏰ Seu período de trial expira em 2 dias - {empresa}
+**Email:**
+```
+Assunto: ⏰ Tarefa vence em 24h: {título}
 
 Olá {nome},
 
-Seu período de teste do MiauChat expira em 2 dias ({data_expiracao}).
+A tarefa "{título}" está programada para vencer em breve:
+📅 Vencimento: {data_vencimento}
+📂 Categoria: {categoria}
+🔴 Prioridade: {prioridade}
 
-Após essa data, o acesso ao sistema será bloqueado automaticamente.
+Acesse o sistema para mais detalhes.
+```
 
-Para continuar usando todas as funcionalidades:
-👉 [Botão: Assinar Agora]
+**WhatsApp:**
+```
+⏰ *Alerta de Tarefa*
 
-Caso tenha dúvidas sobre os planos disponíveis, 
-entre em contato com nosso suporte.
+A tarefa *{título}* vence em 24h!
+📅 Vencimento: {data_vencimento}
 
-Atenciosamente,
-Equipe MiauChat
+Acesse o sistema para ver mais detalhes.
 ```
 
 ---
 
-## Fluxo Completo de Trial
+## Arquivos a Criar/Modificar
 
-```text
-+----------------+      +-------------------+      +------------------+
-| Cadastro       |  →   | Trial Ativo       |  →   | Lembrete Email   |
-| (7 dias trial) |      | (acesso liberado) |      | (2 dias antes)   |
-+----------------+      +-------------------+      +------------------+
-                                                          ↓
-                        +-------------------+      +------------------+
-                        | Empresa Paga      |  ←   | Trial Expirado   |
-                        | (acesso liberado) |      | (bloqueado)      |
-                        +-------------------+      +------------------+
-```
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/components/tasks/TaskKanbanCard.tsx` | Modificar | Adicionar estilos visuais para tarefas concluídas |
+| `src/pages/Tasks.tsx` | Modificar | Adicionar botão "Alertas" e dialog |
+| `src/components/tasks/TaskAlertsSettingsDialog.tsx` | **Criar** | Modal de configurações de alertas |
+| `src/components/tasks/NewTaskDialog.tsx` | Modificar | Adicionar toggle de alerta |
+| `src/components/tasks/TaskDetailSheet.tsx` | Modificar | Adicionar toggle de alerta |
+| `src/hooks/useTasks.tsx` | Modificar | Adicionar campo `send_due_alert` |
+| `src/hooks/useTaskAlertSettings.tsx` | **Criar** | Hook para configurações de alertas |
+| `supabase/functions/process-task-due-alerts/index.ts` | **Criar** | Edge function para processar e enviar alertas |
+| `supabase/config.toml` | Modificar | Adicionar configuração da nova função |
 
 ---
 
-## Resultado Esperado
+## Sequência de Implementação
 
-1. **Dashboard**: Card laranja visível quando há empresas com trial expirando em 2 dias, clicável para filtrar
-2. **Email**: Enviado automaticamente às 9h (BRT) para admin de empresas com trial expirando
-3. **Bloqueio**: Confirmado que empresas com trial expirado veem tela de pagamento
+1. **Fase 1: Visual de Concluídas** (rápido, sem banco)
+   - Modificar `TaskKanbanCard.tsx` com estilos condicionais
+
+2. **Fase 2: Banco de Dados**
+   - Criar migração SQL para novas colunas e tabela
+
+3. **Fase 3: Frontend de Configurações**
+   - Criar `TaskAlertsSettingsDialog.tsx`
+   - Adicionar botão em `Tasks.tsx`
+   - Criar hook `useTaskAlertSettings.tsx`
+
+4. **Fase 4: Toggle por Tarefa**
+   - Modificar formulários de criação/edição
+
+5. **Fase 5: Edge Function**
+   - Criar `process-task-due-alerts`
+   - Configurar cron job
+
+---
+
+## Garantias de Não-Regressão
+
+- Todas as alterações são **aditivas** (novas colunas com defaults, novos componentes)
+- O módulo de tarefas continua funcionando exatamente igual se alertas não forem ativados
+- Campos novos no banco têm valores default, não quebrando queries existentes
+- Nenhuma alteração em outras áreas do sistema (conversas, kanban de clientes, agenda, etc.)
+
