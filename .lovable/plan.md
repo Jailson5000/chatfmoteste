@@ -1,214 +1,161 @@
 
+# Correções: Departamentos e Alertas de Tarefas
 
-# Correção: Atendente com Acesso a Todos os Departamentos
+## Análise Detalhada dos Problemas
 
-## Problema Identificado
+### Problema 1: Falta opção "Sem Departamento" na configuração de Atendente
 
-A usuária **Gabrielle** (gabbenm00@gmail.com) está configurada corretamente no banco:
-- **Role:** `atendente`
-- **Departamento permitido:** `CLIENTES FMO`
+**Localização:** `src/pages/Settings.tsx` (linhas 711-759)
 
-Porém, ela consegue ver **todos os departamentos** porque o sistema **não aplica filtragem** com base nos departamentos atribuídos a usuários com role `atendente`.
+**Situação Atual:**
+Na tela de edição de permissões de um membro atendente, só aparecem os departamentos **ativos** da empresa. Não existe a opção de marcar "Sem departamento" como área de acesso.
 
-### Causa Raiz
+**Impacto:**
+Quando um atendente é configurado sem nenhum departamento selecionado, a lógica atual em `useConversations` e `useClients` **automaticamente** dá acesso a conversas/clientes "Sem departamento" (pois `!conv.department_id` retorna `true`).
 
-Os hooks de dados (`useConversations`, `useClients`, `useDepartments`) buscam **todos os dados** do `law_firm_id` sem considerar a role do usuário ou os departamentos aos quais ele tem acesso via tabela `member_departments`.
+Isso significa:
+- Se o atendente tem `departmentIds = []` (nenhum marcado), ele vê todas as conversas sem departamento
+- Mas o admin não pode **controlar explicitamente** se o atendente pode ou não ver "Sem departamento"
+
+**Solução:**
+Adicionar um checkbox especial "Sem Departamento" na lista de departamentos ao editar um atendente. Esse checkbox controla se o atendente pode ver conversas/clientes que não estão em nenhum departamento.
+
+Para isso, precisamos:
+1. Usar um ID especial (ex: `"__no_department__"`) para representar "Sem departamento"
+2. Salvar esse ID junto com os outros na tabela `member_departments`
+3. Atualizar a lógica de filtragem para verificar se o atendente tem esse ID especial
 
 ---
 
-## Solução Proposta
+### Problema 2: Confirmação sobre Tarefas Concluídas e Alertas
 
-### Arquitetura da Correção
+**Localização:** `supabase/functions/process-task-due-alerts/index.ts` (linha 108)
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                   NOVO HOOK: useUserDepartments                 │
-├─────────────────────────────────────────────────────────────────┤
-│  • Busca role do usuário logado (user_roles)                    │
-│  • Busca departamentos atribuídos (member_departments)          │
-│  • Retorna: { role, departmentIds, hasFullAccess, isLoading }   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│               HOOKS MODIFICADOS (filtragem aplicada)            │
-├─────────────────────────────────────────────────────────────────┤
-│  useConversations  → filtra por department_id ou assigned_to    │
-│  useClients        → filtra por department_id                   │
-│  useDepartments    → retorna apenas departamentos acessíveis    │
-└─────────────────────────────────────────────────────────────────┘
+**Status: ✅ CORRETO - Não precisa de correção**
+
+A query na Edge Function já inclui o filtro:
+```sql
+.neq("status", "done")
 ```
 
+Isso significa que tarefas com status `"done"` (concluídas) **não são selecionadas** e, portanto, **não recebem alertas de vencimento**.
+
+O fluxo está correto:
+1. A Edge Function busca apenas tarefas onde `status != 'done'`
+2. Tarefas concluídas são ignoradas automaticamente
+3. Não há necessidade de correção
+
 ---
 
-## Mudanças Detalhadas
+## Mudanças Necessárias
 
-### 1. Criar Hook `useUserDepartments`
+### Arquivo: `src/pages/Settings.tsx`
 
-**Novo arquivo:** `src/hooks/useUserDepartments.tsx`
+**Adicionar opção "Sem Departamento" no dialog de edição:**
 
-```typescript
-// Retorna:
-interface UserDepartmentsData {
-  role: AppRole | null;
-  departmentIds: string[];      // IDs dos departamentos que o usuário pode acessar
-  hasFullAccess: boolean;       // true para admin/gerente
-  isLoading: boolean;
-}
+Na seção onde os departamentos são listados (aproximadamente linhas 717-758), adicionar um checkbox especial antes dos departamentos ativos:
+
+```tsx
+// Antes dos departamentos ativos, adicionar:
+<div 
+  className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50 border-b pb-2 mb-2"
+  onClick={() => {
+    const NO_DEPT = "__no_department__";
+    setEditMemberDepts(prev => 
+      prev.includes(NO_DEPT) 
+        ? prev.filter(id => id !== NO_DEPT)
+        : [...prev, NO_DEPT]
+    );
+  }}
+>
+  <Checkbox checked={editMemberDepts.includes("__no_department__")} />
+  <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
+  <span className="text-sm font-medium">Sem Departamento</span>
+</div>
 ```
 
-**Lógica:**
-- Se role é `admin` ou `gerente`: `hasFullAccess = true`, não aplica filtro
-- Se role é `atendente`: busca `member_departments` e retorna apenas os IDs atribuídos
-- Se não tem departamentos atribuídos: não vê nada (lista vazia)
+### Arquivo: `src/hooks/useUserDepartments.tsx`
 
----
+**Exportar constante e ajustar retorno:**
 
-### 2. Modificar `useDepartments.tsx`
+```tsx
+// Constante pública para "Sem departamento"
+export const NO_DEPARTMENT_ID = "__no_department__";
+```
 
-Atualmente retorna **todos** os departamentos da empresa. Modificar para:
+### Arquivo: `src/hooks/useConversations.tsx`
 
-```typescript
-// Antes
-const { data: departments = [] } = useQuery({
-  queryFn: async () => {
-    // Busca TODOS os departamentos da law_firm
+**Atualizar lógica de filtragem para considerar permissão explícita:**
+
+```tsx
+// Importar constante
+import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
+
+// Na filtragem (linha ~250):
+const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
+
+return allConversations.filter(conv => {
+  // Conversa sem departamento: só vê se tem permissão explícita
+  if (!conv.department_id) {
+    return canSeeNoDepartment || conv.assigned_to === userId;
   }
+  // Conversa com departamento: precisa ter acesso ao dept ou ser assigned
+  return userDeptIds.includes(conv.department_id) || conv.assigned_to === userId;
 });
+```
 
-// Depois  
-const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
+### Arquivo: `src/hooks/useClients.tsx`
 
-const filteredDepartments = useMemo(() => {
-  if (hasFullAccess) return departments;
-  return departments.filter(d => userDeptIds.includes(d.id));
-}, [departments, hasFullAccess, userDeptIds]);
+**Aplicar a mesma lógica:**
+
+```tsx
+import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
+
+const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
+
+return allClients.filter(client => {
+  if (!client.department_id) {
+    return canSeeNoDepartment || client.assigned_to === userId;
+  }
+  return userDeptIds.includes(client.department_id) || client.assigned_to === userId;
+});
 ```
 
 ---
 
-### 3. Modificar `useConversations.tsx`
+## Arquivos a Modificar
 
-Aplicar filtro após fetch das conversas:
-
-```typescript
-const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
-
-// Filtrar conversas no cliente (mais simples que modificar RPC)
-const filteredConversations = useMemo(() => {
-  if (hasFullAccess) return allConversations;
-  
-  // Atendente vê:
-  // 1. Conversas nos departamentos atribuídos
-  // 2. Conversas atribuídas diretamente a ele (assigned_to)
-  // 3. Conversas sem departamento (para não bloquear fluxo)
-  return allConversations.filter(conv => 
-    !conv.department_id ||                       // Sem departamento
-    userDeptIds.includes(conv.department_id) ||  // Departamento permitido
-    conv.assigned_to === user?.id                // Atribuída ao usuário
-  );
-}, [allConversations, hasFullAccess, userDeptIds, user?.id]);
-```
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/Settings.tsx` | Adicionar checkbox "Sem Departamento" no dialog de edição de membro |
+| `src/hooks/useUserDepartments.tsx` | Exportar constante `NO_DEPARTMENT_ID` |
+| `src/hooks/useConversations.tsx` | Ajustar filtro para verificar permissão explícita de "Sem departamento" |
+| `src/hooks/useClients.tsx` | Mesma correção do filtro |
 
 ---
 
-### 4. Modificar `useClients.tsx`
+## Comportamento Após Correção
 
-Aplicar mesmo padrão de filtro:
+**Cenário: Gabrielle (atendente)**
 
-```typescript
-const { hasFullAccess, departmentIds: userDeptIds } = useUserDepartments();
-
-const filteredClients = useMemo(() => {
-  if (hasFullAccess) return clients;
-  
-  return clients.filter(client => 
-    !client.department_id ||
-    userDeptIds.includes(client.department_id) ||
-    client.assigned_to === user?.id
-  );
-}, [clients, hasFullAccess, userDeptIds, user?.id]);
-```
+| Configuração | Comportamento Esperado |
+|--------------|------------------------|
+| Apenas "CLIENTES FMO" marcado | Vê apenas conversas/clientes em "CLIENTES FMO" + atribuídas a ela |
+| "CLIENTES FMO" + "Sem Departamento" marcados | Vê conversas/clientes em "CLIENTES FMO" + sem departamento + atribuídas a ela |
+| Nenhum marcado | Vê apenas conversas/clientes atribuídas diretamente a ela |
+| Apenas "Sem Departamento" marcado | Vê apenas conversas/clientes sem departamento + atribuídas a ela |
 
 ---
 
-### 5. Atualizar Páginas que usam esses hooks
+## Sobre Tarefas Concluídas
 
-Os componentes que usam esses hooks **não precisam mudar** pois a filtragem ocorre internamente. Porém, precisamos garantir que:
-
-- `Kanban.tsx` - Já usa `useDepartments()` e `useConversations()`
-- `Conversations.tsx` - Já usa `useDepartments()` e `useConversations()`  
-- `Contacts.tsx` - Já usa `useClients()`
-
----
-
-## Arquivos a Criar/Modificar
-
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `src/hooks/useUserDepartments.tsx` | **Criar** | Hook que retorna role e departamentos do usuário |
-| `src/hooks/useDepartments.tsx` | Modificar | Filtrar departamentos baseado em acesso |
-| `src/hooks/useConversations.tsx` | Modificar | Filtrar conversas baseado em departamentos |
-| `src/hooks/useClients.tsx` | Modificar | Filtrar clientes baseado em departamentos |
-
----
-
-## Regras de Acesso
-
-| Role | Acesso |
-|------|--------|
-| `admin` | Todos os departamentos e conversas |
-| `gerente` | Todos os departamentos e conversas |
-| `advogado` | Todos os departamentos e conversas |
-| `estagiario` | Todos os departamentos e conversas |
-| `atendente` | Apenas departamentos em `member_departments` + conversas atribuídas diretamente |
-
----
-
-## Comportamento Esperado Após Correção
-
-**Gabrielle (atendente com acesso a "CLIENTES FMO"):**
-- ✅ Vê apenas o departamento "CLIENTES FMO" no Kanban
-- ✅ Vê apenas conversas do departamento "CLIENTES FMO"
-- ✅ Vê conversas atribuídas diretamente a ela (assigned_to)
-- ✅ Vê conversas sem departamento (para não bloquear fluxo inicial)
-- ❌ Não vê outros departamentos como "Financeiro", "Comercial", etc.
-
-**Jailson (admin):**
-- ✅ Continua vendo tudo normalmente
+**Confirmado:** Tarefas com `status === "done"` **não recebem alertas**. A Edge Function já tem o filtro `.neq("status", "done")` na linha 108, garantindo que tarefas concluídas são excluídas da lista de alertas.
 
 ---
 
 ## Garantias de Não-Regressão
 
-1. **Compatibilidade:** Admin/Gerente continua com acesso total
-2. **Sem mudança de banco:** Apenas filtragem no frontend
-3. **Performance:** Filtro em memória após fetch (mínimo impacto)
-4. **Fallback seguro:** Se role não encontrada, assume mais restritivo
-
----
-
-## Fluxo Visual
-
-```text
-Usuário loga → useUserDepartments busca role + departamentos
-                           │
-                           ▼
-              ┌────────────────────────┐
-              │  role === 'admin' ou   │
-              │  role === 'gerente'?   │
-              └────────────────────────┘
-                    │           │
-                   Sim         Não
-                    │           │
-                    ▼           ▼
-            hasFullAccess   Busca member_departments
-            = true          para o user_id
-                                │
-                                ▼
-                        departmentIds = [...]
-                                │
-                                ▼
-            Hooks aplicam filtro baseado em departmentIds
-```
-
+1. **Compatibilidade retroativa**: Atendentes existentes sem o ID especial continuarão a não ver conversas sem departamento (comportamento mais restritivo)
+2. **Admin/Gerente**: Continuam com acesso total, sem mudanças
+3. **Tarefas**: Sistema de alertas continua funcionando normalmente
+4. **Outras áreas**: Nenhuma modificação em chat, agenda, agentes de IA, etc.
