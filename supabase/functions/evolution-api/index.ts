@@ -57,6 +57,7 @@ type EvolutionAction =
   | "get_media"
   | "delete_message" // Delete message for everyone on WhatsApp
   | "send_reaction" // Send emoji reaction to a message
+  | "fetch_profile_picture" // Fetch WhatsApp profile picture and update client avatar
   // Tenant-level instance management
   | "logout_instance" // Disconnect without deleting
   | "restart_instance" // Restart connection
@@ -103,6 +104,9 @@ interface EvolutionRequest {
   isFromMe?: boolean; // Whether the message being reacted to was sent by us
   // For send_media_async - client-generated message ID for ID unification
   clientMessageId?: string;
+  // For fetch_profile_picture
+  phoneNumber?: string;
+  clientId?: string;
 }
 
 // Helper to normalize URL (remove trailing slashes and /manager suffix)
@@ -3669,6 +3673,93 @@ serve(async (req) => {
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+
+      case "fetch_profile_picture": {
+        // Fetch WhatsApp profile picture and update client avatar
+        if (!body.instanceId) {
+          throw new Error("instanceId is required for fetch_profile_picture");
+        }
+        if (!body.phoneNumber || !body.clientId) {
+          throw new Error("phoneNumber and clientId are required for fetch_profile_picture");
+        }
+
+        console.log(`[Evolution API] Fetching profile picture for phone: ${body.phoneNumber.slice(0, 4)}***`);
+
+        // Get instance
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        // Call Evolution API to fetch profile picture
+        const profileResponse = await fetchWithTimeout(
+          `${apiUrl}/chat/fetchProfilePictureUrl/${instance.instance_name}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: instance.api_key || "",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ number: body.phoneNumber }),
+          },
+          DEFAULT_TIMEOUT_MS
+        );
+
+        if (!profileResponse.ok) {
+          const errorText = await safeReadResponseText(profileResponse);
+          console.error("[fetch_profile_picture] Evolution API error:", profileResponse.status, errorText);
+          
+          // Don't throw - just return that photo is not available
+          return new Response(
+            JSON.stringify({
+              success: false,
+              message: "Foto não disponível (usuário pode ter privacidade ativada)",
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const profileData = await profileResponse.json();
+        console.log("[fetch_profile_picture] Response:", JSON.stringify(profileData));
+
+        // Extract profile picture URL from various response formats
+        const profilePicUrl = 
+          profileData?.profilePictureUrl || 
+          profileData?.picture || 
+          profileData?.url || 
+          profileData?.pictureUrl ||
+          profileData?.profilePicture;
+
+        if (profilePicUrl && typeof profilePicUrl === "string" && profilePicUrl.startsWith("http")) {
+          // Update client avatar in database
+          const { error: updateError } = await supabaseClient
+            .from("clients")
+            .update({ avatar_url: profilePicUrl })
+            .eq("id", body.clientId);
+
+          if (updateError) {
+            console.error("[fetch_profile_picture] Database update error:", updateError);
+            throw new Error(`Failed to update avatar: ${updateError.message}`);
+          }
+
+          console.log("[fetch_profile_picture] Avatar updated for client:", body.clientId);
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              avatarUrl: profilePicUrl,
+              message: "Foto de perfil atualizada com sucesso",
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        } else {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              message: "Foto não disponível (usuário pode ter privacidade ativada)",
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
 
       default:

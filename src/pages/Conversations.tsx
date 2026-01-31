@@ -4496,6 +4496,13 @@ export default function Conversations() {
                   client: selectedConversation.client_id ? {
                     id: selectedConversation.client_id,
                     custom_status_id: (selectedConversation as any).client?.custom_status_id,
+                    avatar_url: (selectedConversation as any).client?.avatar_url,
+                  } : null,
+                  whatsapp_instance: selectedConversation.whatsapp_instance_id ? {
+                    id: selectedConversation.whatsapp_instance_id,
+                    instance_name: (selectedConversation as any).whatsapp_instance?.instance_name || '',
+                    display_name: (selectedConversation as any).whatsapp_instance?.display_name,
+                    phone_number: (selectedConversation as any).whatsapp_instance?.phone_number,
                   } : null,
                 }}
                 members={teamMembers.map(m => ({ id: m.id, full_name: m.full_name }))}
