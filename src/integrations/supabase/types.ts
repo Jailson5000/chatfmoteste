@@ -3701,6 +3701,38 @@ export type Database = {
         }
         Relationships: []
       }
+      member_department_access: {
+        Row: {
+          can_access_no_department: boolean
+          created_at: string
+          id: string
+          member_id: string
+          updated_at: string
+        }
+        Insert: {
+          can_access_no_department?: boolean
+          created_at?: string
+          id?: string
+          member_id: string
+          updated_at?: string
+        }
+        Update: {
+          can_access_no_department?: boolean
+          created_at?: string
+          id?: string
+          member_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_department_access_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       member_departments: {
         Row: {
           created_at: string
@@ -5804,6 +5836,10 @@ export type Database = {
       get_member_department_ids_for_user: {
         Args: { _user_id: string }
         Returns: string[]
+      }
+      get_member_no_department_access_for_user: {
+        Args: { _user_id: string }
+        Returns: boolean
       }
       get_public_professionals_for_booking: {
         Args: { _law_firm_id: string; _service_id?: string }

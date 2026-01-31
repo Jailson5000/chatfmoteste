@@ -8,8 +8,9 @@ export type AppRole = "admin" | "gerente" | "advogado" | "estagiario" | "atenden
 // Roles that have full access to all departments
 const FULL_ACCESS_ROLES: AppRole[] = ["admin", "gerente", "advogado", "estagiario"];
 
-// Special ID for "No Department" permission - used in member_departments table
+// Special ID for "No Department" permission - used in UI and filtering, NOT stored as UUID
 export const NO_DEPARTMENT_ID = "__no_department__";
+
 interface UserDepartmentsData {
   role: AppRole | null;
   departmentIds: string[];
@@ -48,6 +49,20 @@ async function fetchMemberDepartmentIds(userId: string): Promise<string[]> {
   return (data || []) as string[];
 }
 
+async function fetchMemberNoDepartmentAccess(userId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc(
+    "get_member_no_department_access_for_user" as any,
+    { _user_id: userId }
+  );
+
+  if (error) {
+    console.error("Error fetching no-department access:", error);
+    return false;
+  }
+
+  return data === true;
+}
+
 export function useUserDepartments(): UserDepartmentsData {
   const { user, loading: authLoading } = useAuth();
   const { lawFirm } = useLawFirm();
@@ -64,18 +79,34 @@ export function useUserDepartments(): UserDepartmentsData {
   const hasFullAccess = FULL_ACCESS_ROLES.includes(role);
 
   // Fetch assigned departments for restricted roles (atendente)
-  const { data: departmentIds = [], isLoading: deptLoading } = useQuery<string[]>({
+  const { data: uuidDepartmentIds = [], isLoading: deptLoading } = useQuery<string[]>({
     queryKey: ["user-departments", user?.id, lawFirm?.id],
     queryFn: () => fetchMemberDepartmentIds(user!.id),
     enabled: !!user?.id && !!lawFirm?.id && !hasFullAccess,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
+  // Fetch "no department" access flag for restricted roles
+  const { data: canAccessNoDepartment = false, isLoading: noDeptLoading } = useQuery<boolean>({
+    queryKey: ["user-no-dept-access", user?.id, lawFirm?.id],
+    queryFn: () => fetchMemberNoDepartmentAccess(user!.id),
+    enabled: !!user?.id && !!lawFirm?.id && !hasFullAccess,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Compose final departmentIds array including special NO_DEPARTMENT_ID if allowed
+  const departmentIds = hasFullAccess
+    ? [] // Full access roles don't need department filtering
+    : [
+        ...uuidDepartmentIds,
+        ...(canAccessNoDepartment ? [NO_DEPARTMENT_ID] : []),
+      ];
+
   return {
     role,
     departmentIds,
     hasFullAccess,
-    isLoading: authLoading || roleLoading || (!hasFullAccess && deptLoading),
+    isLoading: authLoading || roleLoading || (!hasFullAccess && (deptLoading || noDeptLoading)),
     userId: user?.id || null,
   };
 }
