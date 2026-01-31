@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MentionPicker } from "./MentionPicker";
 import { cn } from "@/lib/utils";
-import { Bold, Italic, List, HelpCircle, AtSign } from "lucide-react";
+import { Bold, Italic, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -873,43 +873,6 @@ export function MentionEditor({
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p>Itálico (Ctrl+I)</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={insertList}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>Lista</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <div className="w-px h-5 bg-border mx-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 gap-1.5"
-                onClick={openMentionHelper}
-              >
-                <AtSign className="h-4 w-4" />
-                <span className="text-xs">Menção</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <p>Inserir menção (@)</p>
             </TooltipContent>
           </Tooltip>
 
