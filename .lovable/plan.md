@@ -1,102 +1,51 @@
 
 
-# Remover Duplicação: "Arquivado / Finalizado"
+# Remover Botões "Lista" e "Menção" do Editor
 
-## Problema Identificado
+## Objetivo
 
-Na tela de **Editar Permissões** de um membro atendente, existe uma duplicação:
-
-1. ✅ **Checkbox especial** "Arquivados / Finalizados" (linha 775-794 do Settings.tsx) - correto
-2. ❌ **Departamento real** "Arquivado / Finalizado" vindo da lista `activeDepartments` - duplicado
-
-A causa é que existe um departamento real no banco de dados com esse nome (ID: `1a077748-d2b8-4bb5-9e36-97322a0e5b8f`), que foi criado antes da implementação da permissão especial.
+Remover apenas os botões "Lista" e "Menção" da barra de ferramentas do editor de prompts, mantendo todo o resto funcionando normalmente.
 
 ---
 
-## Solução
+## Alterações
 
-Filtrar da lista de departamentos qualquer departamento cujo nome contenha "arquivado" ou "finalizado" (case insensitive), já que a permissão de acesso a arquivados agora é controlada pelo checkbox especial.
+### Arquivo: `src/components/ai-agents/MentionEditor.tsx`
 
-### Alteração em `src/pages/Settings.tsx`
+| Linha | Alteração |
+|-------|-----------|
+| 4 | Remover `List` e `AtSign` das importações de lucide-react |
+| 879-894 | Remover botão "Lista" (ícone List + Tooltip) |
+| 896 | Remover separador vertical (`<div className="w-px h-5..."/>`) |
+| 898-914 | Remover botão "Menção" (ícone AtSign + texto + Tooltip) |
 
-Na linha 703, onde definimos `activeDepartments`:
-
-**Antes:**
+### Importações (antes)
 ```tsx
-const activeDepartments = departments?.filter(d => d.is_active) || [];
+import { Bold, Italic, List, HelpCircle, AtSign } from "lucide-react";
 ```
 
-**Depois:**
+### Importações (depois)
 ```tsx
-const activeDepartments = departments?.filter(d => {
-  if (!d.is_active) return false;
-  // Exclude "Arquivado/Finalizado" department - now controlled by special permission
-  const nameLower = d.name.toLowerCase();
-  if (nameLower.includes('arquivado') || nameLower.includes('finalizado')) {
-    return false;
-  }
-  return true;
-}) || [];
+import { Bold, Italic, HelpCircle } from "lucide-react";
 ```
 
 ---
 
-## Análise das Modificações Anteriores
+## O Que Permanece Inalterado
 
-### ✅ Banco de Dados
-- Tabela `member_department_access` criada corretamente
-- Colunas `can_access_no_department` e `can_access_archived` funcionando
-- RPCs `get_member_no_department_access_for_user` e `get_member_archived_access_for_user` criadas
-
-### ✅ Hook `useUserDepartments.tsx`
-- Retorna `canAccessArchived` corretamente
-- Compõe `departmentIds` incluindo `NO_DEPARTMENT_ID` quando permitido
-- Roles com acesso total (admin/gerente/advogado/estagiario) sempre podem ver arquivados
-
-### ✅ Hook `useTeamMembers.tsx`
-- Tipo `TeamMember` inclui `can_access_no_department` e `can_access_archived`
-- Mutation `updateMemberAccessFlags` salva ambas as permissões
-- Filtra `NO_DEPARTMENT_ID` antes de inserir em `member_departments`
-
-### ✅ Página `Conversations.tsx`
-- Botão de arquivados escondido para quem não tem permissão
-
-### ✅ Página `Kanban.tsx`
-- Coluna "Arquivado / Finalizado" escondida para quem não tem permissão
-
-### ✅ Página `Settings.tsx`
-- Checkboxes "Sem Departamento" e "Arquivados / Finalizados" funcionando
-- Salvamento das permissões especiais funcionando
-- **⚠️ Único problema**: Lista de departamentos inclui o departamento real "Arquivado / Finalizado"
+- ✅ Botão Negrito (B)
+- ✅ Botão Itálico (I)  
+- ✅ Botão Ajuda (?)
+- ✅ Contador de caracteres
+- ✅ Funcionalidade de menções via digitação de "@"
+- ✅ Toda lógica de parsing e validação de menções
+- ✅ Formatação e estilização das badges de menção
 
 ---
 
-## Arquivos a Modificar
+## Garantias
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Settings.tsx` | Filtrar departamentos com nome contendo "arquivado" ou "finalizado" |
-
----
-
-## Resultado Esperado
-
-O dialog de permissões mostrará:
-1. ☐ **Sem Departamento** (permissão especial)
-2. ☐ **Arquivados / Finalizados** (permissão especial)
-3. ☐ Atendimento
-4. ☐ Documentação Recebida
-5. ☐ Analisando
-6. ☐ Jurídico - Protocolo
-7. ☐ CLIENTES FMO
-8. ❌ ~~Arquivado / Finalizado~~ (removido da lista)
-
----
-
-## Garantias de Não-Regressão
-
-1. **Filtro aplicado apenas no dialog de permissões**: Não afeta outras áreas do sistema
-2. **Departamento continua existindo**: Apenas não aparece na lista de seleção
-3. **Conversas já atribuídas**: Continuam visíveis normalmente no Kanban pela lógica de arquivados
-4. **Outras empresas**: Não afetadas (cada uma tem seus próprios departamentos)
+1. **Não há regressão**: Apenas remoção de elementos de UI
+2. **Menções continuam funcionando**: Usuário digita "@" para abrir o picker
+3. **Listas ainda podem ser criadas**: Manualmente pelo usuário digitando "- " ou "• "
 
