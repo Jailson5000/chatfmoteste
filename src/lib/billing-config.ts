@@ -5,13 +5,13 @@
 
 export const ADDITIONAL_PRICING = {
   // Preço por WhatsApp adicional (mensal)
-  whatsappInstance: 79.90,
+  whatsappInstance: 57.90,
   // Preço por atendente/usuário adicional (mensal)
-  user: 47.90,
+  user: 29.90,
   // Preço por conversa IA adicional
-  aiConversation: 0.47,
+  aiConversation: 0.27,
   // Preço por minuto adicional de áudio TTS
-  ttsMinute: 1.47,
+  ttsMinute: 0.97,
 } as const;
 
 export interface PlanLimits {

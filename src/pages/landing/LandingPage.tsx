@@ -138,10 +138,10 @@ export function LandingPage() {
   }, [dbPlans]);
 
   const additionalPricing = [
-    { item: "Conversa adicional com IA", price: "R$ 0,47 / conversa" },
-    { item: "Minuto adicional de áudio", price: "R$ 1,47 / minuto" },
-    { item: "WhatsApp adicional", price: "R$ 79,90 / mês" },
-    { item: "Atendente adicional", price: "R$ 47,90 / mês" },
+    { item: "Conversa adicional com IA", price: "R$ 0,27 / conversa" },
+    { item: "Minuto adicional de áudio", price: "R$ 0,97 / minuto" },
+    { item: "WhatsApp adicional", price: "R$ 57,90 / mês" },
+    { item: "Atendente adicional", price: "R$ 29,90 / mês" },
   ];
 
   const faqs = [

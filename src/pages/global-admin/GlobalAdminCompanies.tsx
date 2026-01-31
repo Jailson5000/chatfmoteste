@@ -350,7 +350,7 @@ export default function GlobalAdminCompanies() {
     if (formData.use_custom_limits && selectedPlan) {
       const additionalUsers = Math.max(0, formData.max_users - selectedPlan.max_users);
       const additionalInstances = Math.max(0, formData.max_instances - selectedPlan.max_instances);
-      newMonthlyValue += (additionalUsers * 47.90) + (additionalInstances * 79.90);
+      newMonthlyValue += (additionalUsers * 29.90) + (additionalInstances * 57.90);
     }
     
     // Only send fields that exist in the companies table

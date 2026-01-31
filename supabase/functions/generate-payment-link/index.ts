@@ -176,8 +176,8 @@ serve(async (req) => {
 
     // ============ CALCULATE PRICE WITH ADD-ONS ============
     // Pricing constants (must match src/lib/billing-config.ts)
-    const PRICING_USER = 47.90;
-    const PRICING_INSTANCE = 79.90;
+    const PRICING_USER = 29.90;
+    const PRICING_INSTANCE = 57.90;
     
     // Plan limits (base)
     const planLimits = {
