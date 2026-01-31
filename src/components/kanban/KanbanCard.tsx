@@ -27,7 +27,7 @@ interface KanbanCardProps {
     whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
     assigned_profile?: { full_name: string } | null;
     unread_count?: number;
-    client?: { custom_status_id?: string | null } | null;
+    client?: { custom_status_id?: string | null; avatar_url?: string | null } | null;
     origin?: string | null;
   };
   customStatus?: { name: string; color: string } | null;
@@ -235,7 +235,12 @@ export function KanbanCard({
       {/* Header: Avatar, Name, Phone, Time */}
       <div className="flex items-start gap-2">
         <Avatar className="h-8 w-8 border border-success/30">
-          <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${conversation.contact_name || conversation.contact_phone}`} />
+          {conversation.client?.avatar_url ? (
+            <AvatarImage 
+              src={conversation.client.avatar_url} 
+              alt={conversation.contact_name || "Avatar"} 
+            />
+          ) : null}
           <AvatarFallback className="bg-muted text-muted-foreground text-xs font-medium">
             {getInitials(conversation.contact_name)}
           </AvatarFallback>

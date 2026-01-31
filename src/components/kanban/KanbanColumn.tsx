@@ -23,7 +23,7 @@ interface Conversation {
   } | null;
   whatsapp_instance?: { instance_name: string; display_name?: string | null; phone_number?: string | null } | null;
   assigned_profile?: { full_name: string } | null;
-  client?: { custom_status_id?: string | null } | null;
+  client?: { custom_status_id?: string | null; avatar_url?: string | null } | null;
   unread_count?: number;
 }
 
