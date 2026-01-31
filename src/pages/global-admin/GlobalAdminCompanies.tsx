@@ -254,8 +254,8 @@ export default function GlobalAdminCompanies() {
         max_instances: selectedPlan.max_instances,
         max_agents: selectedPlan.max_agents ?? 1,
         max_workspaces: selectedPlan.max_workspaces ?? 1,
-        max_ai_conversations: selectedPlan.max_ai_conversations ?? 250,
-        max_tts_minutes: selectedPlan.max_tts_minutes ?? 40,
+        max_ai_conversations: selectedPlan.max_ai_conversations ?? 200,
+        max_tts_minutes: selectedPlan.max_tts_minutes ?? 10,
       });
     } else {
       setFormData({ ...formData, plan_id: planId });
