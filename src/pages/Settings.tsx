@@ -126,12 +126,15 @@ export default function Settings() {
   const templateMediaInputRef = useRef<HTMLInputElement>(null);
 
   // Team management
-  const { members: teamMembers, isLoading: teamLoading, inviteMember, updateMemberRole, updateMemberDepartments, removeMember } = useTeamMembers();
+  const { members: teamMembers, isLoading: teamLoading, inviteMember, updateMemberRole, updateMemberDepartments, updateMemberNoDepartmentAccess, removeMember } = useTeamMembers();
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<string | null>(null);
   const [editMemberRole, setEditMemberRole] = useState<AppRole>("atendente");
   const [editMemberDepts, setEditMemberDepts] = useState<string[]>([]);
   const [savingMember, setSavingMember] = useState(false);
+  
+  // Special ID for "No Department" option in UI (NOT a real UUID)
+  const NO_DEPARTMENT_ID = "__no_department__";
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -640,6 +643,11 @@ export default function Settings() {
                           )}
                           {member.role === "atendente" && (
                             <div className="flex flex-wrap gap-1">
+                              {member.can_access_no_department && (
+                                <Badge variant="outline" className="text-xs border-muted-foreground/50 text-muted-foreground">
+                                  Sem Departamento
+                                </Badge>
+                              )}
                               {member.department_ids.length > 0 ? (
                                 member.department_ids.map(deptId => {
                                   const dept = departments.find(d => d.id === deptId);
@@ -650,7 +658,9 @@ export default function Settings() {
                                   ) : null;
                                 })
                               ) : (
-                                <span className="text-xs text-muted-foreground">Sem departamentos</span>
+                                !member.can_access_no_department && (
+                                  <span className="text-xs text-muted-foreground">Sem departamentos</span>
+                                )
                               )}
                             </div>
                           )}
@@ -662,7 +672,12 @@ export default function Settings() {
                             onClick={() => {
                               setEditingMember(member.id);
                               setEditMemberRole(member.role);
-                              setEditMemberDepts(member.department_ids || []);
+                              // Initialize with real department UUIDs + NO_DEPARTMENT_ID if flag is true
+                              const initialDepts = [
+                                ...(member.department_ids || []),
+                                ...(member.can_access_no_department ? [NO_DEPARTMENT_ID] : []),
+                              ];
+                              setEditMemberDepts(initialDepts);
                             }}
                           >
                             <Pencil className="h-3 w-3 mr-1" />
@@ -812,9 +827,20 @@ export default function Settings() {
                                 }
                                 // Update departments if atendente
                                 if (editMemberRole === "atendente") {
+                                  // Split: real UUIDs vs special "no department" flag
+                                  const canAccessNoDepartment = editMemberDepts.includes(NO_DEPARTMENT_ID);
+                                  const realDepartmentIds = editMemberDepts.filter(id => id !== NO_DEPARTMENT_ID);
+                                  
+                                  // Update real departments (UUIDs only)
                                   await updateMemberDepartments.mutateAsync({
                                     memberId: memberBeingEdited.id,
-                                    departmentIds: editMemberDepts,
+                                    departmentIds: realDepartmentIds,
+                                  });
+                                  
+                                  // Update "no department" access flag separately
+                                  await updateMemberNoDepartmentAccess.mutateAsync({
+                                    memberId: memberBeingEdited.id,
+                                    canAccessNoDepartment,
                                   });
                                 }
                                 setEditingMember(null);

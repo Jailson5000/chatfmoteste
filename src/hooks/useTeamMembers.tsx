@@ -6,6 +6,9 @@ import { useAuth } from "./useAuth";
 import { useCompanyLimits } from "./useCompanyLimits";
 import type { AppRole } from "./useUserRole";
 
+// Special ID used in UI for "No Department" permission - NOT stored in member_departments
+export const NO_DEPARTMENT_ID = "__no_department__";
+
 export interface TeamMember {
   id: string;
   full_name: string;
@@ -16,6 +19,7 @@ export interface TeamMember {
   is_active: boolean;
   role: AppRole;
   department_ids: string[];
+  can_access_no_department: boolean;
 }
 
 export interface MemberDepartment {
@@ -70,12 +74,24 @@ export function useTeamMembers() {
         memberDepts = [];
       }
 
-      // Map profiles with their roles and departments
+      // Get member no-department access
+      let memberNoDeptAccess: Array<{ member_id: string; can_access_no_department: boolean }> = [];
+      try {
+        const { data } = await supabase
+          .from("member_department_access")
+          .select("member_id, can_access_no_department");
+        memberNoDeptAccess = data || [];
+      } catch (e) {
+        memberNoDeptAccess = [];
+      }
+
+      // Map profiles with their roles, departments, and no-dept access
       return profiles.map((p) => {
         const userRole = roles.find((r) => r.user_id === p.id);
         const deptIds = (memberDepts || [])
           .filter((md: any) => md.member_id === p.id)
           .map((md: any) => md.department_id);
+        const noDeptAccess = memberNoDeptAccess.find((a: any) => a.member_id === p.id);
 
         return {
           id: p.id,
@@ -87,6 +103,7 @@ export function useTeamMembers() {
           is_active: p.is_active,
           role: (userRole?.role || "atendente") as AppRole,
           department_ids: deptIds,
+          can_access_no_department: noDeptAccess?.can_access_no_department || false,
         };
       });
     },
@@ -119,20 +136,23 @@ export function useTeamMembers() {
     },
   });
 
-  // Update member departments
+  // Update member departments (filters out NO_DEPARTMENT_ID to prevent UUID error)
   const updateMemberDepartments = useMutation({
     mutationFn: async ({ memberId, departmentIds }: { memberId: string; departmentIds: string[] }) => {
+      // Filter out the special NO_DEPARTMENT_ID - it's not a real UUID
+      const realDepartmentIds = departmentIds.filter(id => id !== NO_DEPARTMENT_ID);
+      
       // First delete existing departments
       await supabase
         .from("member_departments" as any)
         .delete()
         .eq("member_id", memberId);
 
-      // Then insert new ones
-      if (departmentIds.length > 0) {
+      // Then insert new ones (only real UUIDs)
+      if (realDepartmentIds.length > 0) {
         const { error } = await supabase
           .from("member_departments" as any)
-          .insert(departmentIds.map((deptId) => ({
+          .insert(realDepartmentIds.map((deptId) => ({
             member_id: memberId,
             department_id: deptId,
           })));
@@ -150,6 +170,33 @@ export function useTeamMembers() {
     onError: (error: any) => {
       toast({
         title: "Erro ao atualizar departamentos",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update member "No Department" access flag
+  const updateMemberNoDepartmentAccess = useMutation({
+    mutationFn: async ({ memberId, canAccessNoDepartment }: { memberId: string; canAccessNoDepartment: boolean }) => {
+      const { error } = await supabase
+        .from("member_department_access" as any)
+        .upsert({
+          member_id: memberId,
+          can_access_no_department: canAccessNoDepartment,
+        }, {
+          onConflict: "member_id",
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["team-members"] });
+      queryClient.invalidateQueries({ queryKey: ["user-no-dept-access"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao atualizar acesso",
         description: error.message,
         variant: "destructive",
       });
@@ -253,6 +300,7 @@ export function useTeamMembers() {
     isLoading,
     updateMemberRole,
     updateMemberDepartments,
+    updateMemberNoDepartmentAccess,
     inviteMember,
     removeMember,
   };
