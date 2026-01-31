@@ -1,70 +1,96 @@
 
-# Plano: Adicionar Foto do Contato no Header do Painel de Chat do Kanban
+# Plano: Adicionar Banner de Arquivamento no Painel de Chat do Kanban
 
 ## Situação Atual
 
-O header do `KanbanChatPanel` exibe um avatar gerado pelo **Dicebear** baseado nas iniciais do nome:
+O painel de chat em **Conversas** já exibe um banner compacto para conversas arquivadas mostrando:
+- Ícone de arquivo + texto "Conversa arquivada"
+- Quem arquivou (Por: Nome)
+- Data/hora do arquivamento
+- Motivo do arquivamento
 
-```tsx
-// Linhas 2703-2710 - Código atual
-<Avatar className="h-10 w-10">
-  <AvatarImage
-    src={`https://api.dicebear.com/7.x/initials/svg?seed=${contactName || contactPhone}`}
-  />
-  <AvatarFallback>
-    {contactName?.charAt(0)?.toUpperCase() || "?"}
-  </AvatarFallback>
-</Avatar>
-```
+O **KanbanChatPanel** não exibe essa informação, mesmo quando a conversa selecionada está arquivada.
 
-O `avatar_url` **já está disponível** via `selectedConversation.client?.avatar_url` no Kanban.tsx (linha 605), mas não é passado para o componente.
+---
+
+## Dados Disponíveis
+
+O hook `useConversations` já retorna todos os campos necessários:
+
+| Campo | Descrição |
+|-------|-----------|
+| `archived_at` | Data/hora do arquivamento |
+| `archived_reason` | Motivo do arquivamento |
+| `archived_by` | ID do usuário que arquivou |
+| `archived_by_name` | Nome do usuário que arquivou |
 
 ---
 
 ## Alterações Necessárias
 
-### 1. `KanbanChatPanel.tsx` - Adicionar Prop
+### 1. `KanbanChatPanel.tsx` - Adicionar Props na Interface
 
-**Interface (linhas 1007-1032):**
 ```typescript
 interface KanbanChatPanelProps {
   // ... existing props ...
-  avatarUrl?: string | null;  // NEW
+  archivedAt?: string | null;
+  archivedReason?: string | null;
+  archivedByName?: string | null;
 }
 ```
 
-**Destruturação (linha 1034-1055):**
+### 2. `KanbanChatPanel.tsx` - Adicionar Destruturação
+
 ```typescript
 export function KanbanChatPanel({
   // ... existing props ...
-  avatarUrl,  // NEW
+  archivedAt,
+  archivedReason,
+  archivedByName,
 }: KanbanChatPanelProps) {
 ```
 
-### 2. `KanbanChatPanel.tsx` - Usar Foto Real no Avatar
+### 3. `KanbanChatPanel.tsx` - Adicionar Banner no Header
 
-**Header (linhas 2703-2710):**
+Adicionar após o header e antes das mensagens (aproximadamente linha 2900, após o header):
+
 ```tsx
-<Avatar className="h-10 w-10 border border-primary/20">
-  {avatarUrl ? (
-    <AvatarImage 
-      src={avatarUrl} 
-      alt={contactName || "Avatar"} 
-    />
-  ) : null}
-  <AvatarFallback className="bg-primary/10 text-primary">
-    {contactName?.charAt(0)?.toUpperCase() || "?"}
-  </AvatarFallback>
-</Avatar>
+{/* Archived Conversation Banner - Compact version */}
+{archivedAt && (
+  <div className="bg-orange-100 dark:bg-orange-900/30 border-l-4 border-orange-500 p-2 mx-3 my-1.5 rounded">
+    <div className="flex items-center gap-1.5">
+      <Archive className="h-3 w-3 text-orange-600 dark:text-orange-400" />
+      <span className="text-xs font-medium text-orange-800 dark:text-orange-200">
+        Conversa arquivada
+      </span>
+    </div>
+    <div className="text-xs text-orange-700 dark:text-orange-300 mt-0.5">
+      {archivedByName && `Por: ${archivedByName} • `}
+      Em: {new Date(archivedAt).toLocaleString('pt-BR', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      })}
+    </div>
+    {archivedReason && (
+      <div className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
+        Motivo: {archivedReason}
+      </div>
+    )}
+  </div>
+)}
 ```
 
-### 3. `Kanban.tsx` - Passar Avatar URL
+### 4. `Kanban.tsx` - Passar Props para KanbanChatPanel
 
-**Linha 594-618 (onde KanbanChatPanel é chamado):**
 ```tsx
 <KanbanChatPanel
   // ... existing props ...
-  avatarUrl={selectedConversation.client?.avatar_url}
+  archivedAt={(selectedConversation as any).archived_at}
+  archivedReason={(selectedConversation as any).archived_reason}
+  archivedByName={(selectedConversation as any).archived_by_name}
 />
 ```
 
@@ -74,23 +100,26 @@ export function KanbanChatPanel({
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar prop `avatarUrl` + usar no Avatar do header |
-| `src/pages/Kanban.tsx` | Passar `client?.avatar_url` para KanbanChatPanel |
+| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar props + banner de arquivamento |
+| `src/pages/Kanban.tsx` | Passar props de arquivamento |
 
 ---
 
 ## Resultado Esperado
 
-- **Com foto**: Exibe a foto do WhatsApp do contato no header
-- **Sem foto**: Fallback para a inicial do nome (mesmo visual atual, sem Dicebear)
-- **Estilo**: Mantém tamanho 10x10 (40px), adiciona borda sutil para harmonizar
+Quando uma conversa arquivada for aberta no Kanban, o usuário verá:
+
+- Banner laranja compacto abaixo do header
+- "Conversa arquivada"
+- "Por: [Nome] • Em: 31/01/2026 14:30"
+- "Motivo: [Razão do arquivamento]"
 
 ---
 
 ## Garantias de Segurança
 
-- **Sem regressões**: O fallback para iniciais mantém o comportamento visual atual
-- **Retrocompatível**: O campo `avatarUrl` é opcional na interface
-- **Dados já disponíveis**: `useConversations` já retorna `client.avatar_url`
-- **Sem alteração de lógica**: Apenas mudança visual no header
-- **Remove dependência externa**: Não usa mais Dicebear API (avatar gerado localmente)
+- **Sem regressões**: O banner só aparece quando `archivedAt` existe
+- **Retrocompatível**: Todas as novas props são opcionais
+- **Dados já disponíveis**: O hook já retorna os campos
+- **Mesmo visual**: Idêntico ao banner de Conversas
+- **Sem alteração de lógica**: Apenas adição de componente visual
