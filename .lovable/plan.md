@@ -1,82 +1,65 @@
 
-# Plano: Adicionar Fotos de Contatos no Kanban e Conversas
+# Plano: Adicionar Foto do Contato no Header Central de Conversas
 
 ## Situação Atual
 
-### ✅ Conversas (Lista Lateral) - JÁ FUNCIONA!
-- O `ConversationSidebarCard` **já exibe** a foto do contato (`avatarUrl`)
-- O `useConversationMapping.tsx` **já passa** o `client.avatar_url`
-- Nenhuma alteração necessária aqui!
+O header central da página de Conversas (área do chat) mostra apenas as **iniciais do contato** em um círculo colorido:
 
-### ❌ Kanban - PRECISA DE AJUSTE
-- O `KanbanCard` usa **Dicebear** (avatar gerado) em vez da foto real
-- A interface não inclui `avatar_url` do cliente
-- O hook `useConversations` **já retorna** `client.avatar_url`, mas não é passado para o componente
-
----
-
-## Arquitetura de Dados
-
-O fluxo de dados do avatar já existe:
-
-```text
-Database (clients.avatar_url)
-        ↓
-useConversations hook (client.avatar_url ✓)
-        ↓
-Kanban.tsx passa conversations para KanbanColumn
-        ↓
-KanbanColumn passa para KanbanCard
-        ↓
-❌ KanbanCard ignora avatar_url e usa Dicebear
+```tsx
+// Linha 3556-3565 - Código atual
+<div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+  <span className="text-sm font-semibold text-primary">
+    {(selectedConversation.contact_name || ...).slice(0, 2).toUpperCase()}
+  </span>
+</div>
 ```
+
+O `avatar_url` **já está disponível** via `selectedConversation.client?.avatar_url` (confirmado na linha 4499).
 
 ---
 
 ## Alterações Necessárias
 
-### 1. `KanbanColumn.tsx` - Atualizar Interface
+### 1. Adicionar Importação do Avatar
 
-Adicionar `avatar_url` à interface `Conversation.client`:
+Adicionar após a linha 61:
 
 ```typescript
-interface Conversation {
-  // ... existing fields ...
-  client?: { 
-    custom_status_id?: string | null;
-    avatar_url?: string | null;  // NEW
-  } | null;
-  // ...
-}
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 ```
 
-### 2. `KanbanCard.tsx` - Usar Avatar Real
+### 2. Substituir Div por Avatar no Header (linhas 3556-3565)
 
-**Atualizar interface:**
-```typescript
-interface KanbanCardProps {
-  conversation: {
-    // ... existing fields ...
-    client?: { 
-      custom_status_id?: string | null;
-      avatar_url?: string | null;  // NEW
-    } | null;
-    // ...
-  };
-}
-```
-
-**Atualizar renderização do Avatar (linha 237-242):**
+**De:**
 ```tsx
-<Avatar className="h-8 w-8 border border-success/30">
-  {conversation.client?.avatar_url ? (
+<div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+  <span className="text-sm font-semibold text-primary">
+    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()}
+  </span>
+</div>
+```
+
+**Para:**
+```tsx
+<Avatar className="h-10 w-10 flex-shrink-0 border border-primary/20">
+  {(selectedConversation as any).client?.avatar_url ? (
     <AvatarImage 
-      src={conversation.client.avatar_url} 
-      alt={conversation.contact_name || "Avatar"} 
+      src={(selectedConversation as any).client.avatar_url} 
+      alt={selectedConversation.contact_name || "Avatar"} 
     />
   ) : null}
-  <AvatarFallback className="bg-muted text-muted-foreground text-xs font-medium">
-    {getInitials(conversation.contact_name)}
+  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+    {(selectedConversation.contact_name || selectedConversation.contact_phone || "?")
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()}
   </AvatarFallback>
 </Avatar>
 ```
@@ -87,32 +70,21 @@ interface KanbanCardProps {
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/kanban/KanbanColumn.tsx` | Adicionar `avatar_url` na interface `Conversation.client` |
-| `src/components/kanban/KanbanCard.tsx` | Adicionar `avatar_url` na interface + usar no Avatar |
+| `src/pages/Conversations.tsx` | Adicionar import do Avatar + substituir div por Avatar no header |
 
 ---
 
 ## Resultado Esperado
 
-### Antes (Kanban)
-- Avatar mostra iniciais geradas pelo Dicebear (ex: "JF", "GM")
-- Todos os avatares são iguais se o nome for igual
-
-### Depois (Kanban)
-- Avatar mostra foto do WhatsApp quando disponível
-- Fallback para iniciais quando foto não existe
-- Mesmo comportamento visual que a lista de Conversas
+- **Com foto**: Exibe a foto do WhatsApp do contato
+- **Sem foto**: Fallback para iniciais (mesmo visual atual)
+- **Estilo**: Mantém tamanho 10x10 (40px), borda sutil para harmonizar
 
 ---
 
-## Impacto em Outros Componentes
+## Garantias de Segurança
 
-- ✅ **Nenhum** - Os dados já são passados corretamente pelo `useConversations`
-- ✅ **Retrocompatível** - O campo `avatar_url` é opcional, fallback para iniciais
-- ✅ **Sem regressões** - Apenas adicionamos uso de um campo existente
-
----
-
-## Nota Técnica
-
-O `useConversations` hook já retorna `client.avatar_url` (linha 101-102 do hook), e o Kanban já recebe as conversas completas. A única alteração necessária é atualizar as interfaces TypeScript e usar o campo no componente de renderização.
+- ✅ **Sem regressões**: O fallback para iniciais mantém o comportamento atual
+- ✅ **Retrocompatível**: O campo `avatar_url` é opcional
+- ✅ **Dados já disponíveis**: O hook `useConversations` já retorna `client.avatar_url`
+- ✅ **Sem alteração de lógica**: Apenas mudança visual no header
