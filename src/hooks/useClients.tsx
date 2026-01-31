@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLawFirm } from "@/hooks/useLawFirm";
+import { useUserDepartments } from "./useUserDepartments";
+import { useMemo } from "react";
 
 export interface Client {
   id: string;
@@ -48,8 +50,9 @@ export function useClients() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  const { hasFullAccess, departmentIds: userDeptIds, userId, isLoading: permissionsLoading } = useUserDepartments();
 
-  const { data: clients = [], isLoading } = useQuery({
+  const { data: allClients = [], isLoading: clientsLoading } = useQuery({
     queryKey: ["clients", lawFirm?.id],
     queryFn: async () => {
       if (!lawFirm?.id) return [];
@@ -78,6 +81,23 @@ export function useClients() {
     },
     enabled: !!lawFirm?.id,
   });
+
+  // Filter clients based on user department access
+  const clients = useMemo(() => {
+    if (hasFullAccess) return allClients;
+    
+    // Atendente sees:
+    // 1. Clients in their assigned departments
+    // 2. Clients assigned directly to them
+    // 3. Clients without a department (to not block workflow)
+    return allClients.filter(client => 
+      !client.department_id ||
+      userDeptIds.includes(client.department_id) ||
+      client.assigned_to === userId
+    );
+  }, [allClients, hasFullAccess, userDeptIds, userId]);
+
+  const isLoading = clientsLoading || permissionsLoading;
 
   const createClient = useMutation({
     mutationFn: async (client: Omit<Client, "id" | "law_firm_id" | "created_at" | "updated_at">) => {

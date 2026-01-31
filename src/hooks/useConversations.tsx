@@ -3,7 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Tables } from "@/integrations/supabase/types";
 import { useLawFirm } from "@/hooks/useLawFirm";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useUserDepartments } from "@/hooks/useUserDepartments";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 
 type Conversation = Tables<"conversations">;
 
@@ -112,6 +113,7 @@ export function useConversations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { lawFirm } = useLawFirm();
+  const { hasFullAccess, departmentIds: userDeptIds, userId, isLoading: permissionsLoading } = useUserDepartments();
   
   // Pagination state
   const [allConversations, setAllConversations] = useState<ConversationWithLastMessage[]>([]);
@@ -121,7 +123,7 @@ export function useConversations() {
   const lawFirmIdRef = useRef<string | null>(null);
 
   // Initial fetch query
-  const { data: initialData, isLoading, error } = useQuery({
+  const { data: initialData, isLoading: dataLoading, error } = useQuery({
     queryKey: ["conversations", lawFirm?.id],
     queryFn: async () => {
       if (!lawFirm?.id) return [];
@@ -237,8 +239,22 @@ export function useConversations() {
     }
   }, [lawFirm?.id, isLoadingMore, hasMore]);
 
-  // Use allConversations as the source of truth
-  const conversations = allConversations;
+  // Filter conversations based on user department access
+  const conversations = useMemo(() => {
+    if (hasFullAccess) return allConversations;
+    
+    // Atendente sees:
+    // 1. Conversations in their assigned departments
+    // 2. Conversations assigned directly to them
+    // 3. Conversations without a department (to not block initial workflow)
+    return allConversations.filter(conv => 
+      !conv.department_id ||
+      userDeptIds.includes(conv.department_id) ||
+      conv.assigned_to === userId
+    );
+  }, [allConversations, hasFullAccess, userDeptIds, userId]);
+
+  const isLoading = dataLoading || permissionsLoading;
 
   // ============================================================================
   // REALTIME: Handled by RealtimeSyncContext (centralized)
