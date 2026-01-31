@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Search, X } from "lucide-react";
+import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Search, X, Settings } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,7 +18,7 @@ import { useUserDepartments } from "@/hooks/useUserDepartments";
 import { FilterBar } from "@/components/filters/FilterBar";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
 import { KanbanChatPanel } from "@/components/kanban/KanbanChatPanel";
-import { CreateDepartmentDialog } from "@/components/kanban/CreateDepartmentDialog";
+
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { ImportContactsDialog } from "@/components/contacts/ImportContactsDialog";
 import { useToast } from "@/hooks/use-toast";
@@ -328,16 +328,12 @@ export default function Kanban() {
             </div>
             <h2 className="text-xl font-semibold mb-2">Nenhum departamento criado</h2>
             <p className="text-muted-foreground mb-6">
-              Crie departamentos para organizar suas conversas no Kanban.
+              Crie departamentos em Configurações → Classes → Departamento para organizar suas conversas no Kanban.
             </p>
-            <CreateDepartmentDialog
-              trigger={
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Criar Departamento
-                </Button>
-              }
-            />
+            <Button onClick={() => navigate("/settings?tab=classes")}>
+              <Settings className="h-4 w-4 mr-2" />
+              Ir para Configurações
+            </Button>
           </div>
         </div>
       </div>
