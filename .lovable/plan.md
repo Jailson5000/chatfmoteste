@@ -1,161 +1,147 @@
 
-# Correções: Departamentos e Alertas de Tarefas
+## Diagnóstico (por que acontece o erro)
 
-## Análise Detalhada dos Problemas
+O erro do print (“invalid input syntax for type uuid: '__no_department__'”) acontece porque:
 
-### Problema 1: Falta opção "Sem Departamento" na configuração de Atendente
+- A tabela **`member_departments.department_id`** é do tipo **UUID** e tem FK para `departments(id)`.
+- A UI passou a usar o valor especial **`"__no_department__"`** para representar “Sem Departamento”.
+- Ao salvar, o código tenta **inserir `"__no_department__"`** em `member_departments.department_id`, e o banco rejeita (não é UUID).
 
-**Localização:** `src/pages/Settings.tsx` (linhas 711-759)
-
-**Situação Atual:**
-Na tela de edição de permissões de um membro atendente, só aparecem os departamentos **ativos** da empresa. Não existe a opção de marcar "Sem departamento" como área de acesso.
-
-**Impacto:**
-Quando um atendente é configurado sem nenhum departamento selecionado, a lógica atual em `useConversations` e `useClients` **automaticamente** dá acesso a conversas/clientes "Sem departamento" (pois `!conv.department_id` retorna `true`).
-
-Isso significa:
-- Se o atendente tem `departmentIds = []` (nenhum marcado), ele vê todas as conversas sem departamento
-- Mas o admin não pode **controlar explicitamente** se o atendente pode ou não ver "Sem departamento"
-
-**Solução:**
-Adicionar um checkbox especial "Sem Departamento" na lista de departamentos ao editar um atendente. Esse checkbox controla se o atendente pode ver conversas/clientes que não estão em nenhum departamento.
-
-Para isso, precisamos:
-1. Usar um ID especial (ex: `"__no_department__"`) para representar "Sem departamento"
-2. Salvar esse ID junto com os outros na tabela `member_departments`
-3. Atualizar a lógica de filtragem para verificar se o atendente tem esse ID especial
+Ou seja: a ideia de “Sem Departamento” como um “ID fake” precisa ser armazenada **fora** da tabela `member_departments`.
 
 ---
 
-### Problema 2: Confirmação sobre Tarefas Concluídas e Alertas
+## Objetivo da correção
 
-**Localização:** `supabase/functions/process-task-due-alerts/index.ts` (linha 108)
-
-**Status: ✅ CORRETO - Não precisa de correção**
-
-A query na Edge Function já inclui o filtro:
-```sql
-.neq("status", "done")
-```
-
-Isso significa que tarefas com status `"done"` (concluídas) **não são selecionadas** e, portanto, **não recebem alertas de vencimento**.
-
-O fluxo está correto:
-1. A Edge Function busca apenas tarefas onde `status != 'done'`
-2. Tarefas concluídas são ignoradas automaticamente
-3. Não há necessidade de correção
+1) Continuar exibindo “Sem Departamento” para marcar/desmarcar na tela de permissões do atendente.  
+2) Persistir essa permissão no backend sem quebrar constraints/UUID/FKs.  
+3) Manter a filtragem atual (atendente só vê “sem departamento” quando tiver permissão explícita), sem regressão para admin/gerente.
 
 ---
 
-## Mudanças Necessárias
+## Solução (sem regressão e alinhada ao modelo atual)
 
-### Arquivo: `src/pages/Settings.tsx`
+### A) Backend (Lovable Cloud) — criar uma tabela própria para “Sem Departamento”
 
-**Adicionar opção "Sem Departamento" no dialog de edição:**
+Criar uma tabela dedicada, por exemplo:
 
-Na seção onde os departamentos são listados (aproximadamente linhas 717-758), adicionar um checkbox especial antes dos departamentos ativos:
+**`member_department_access`**
+- `id uuid primary key default gen_random_uuid()`
+- `member_id uuid not null references profiles(id) on delete cascade unique`
+- `can_access_no_department boolean not null default false`
+- `created_at timestamptz default now()`
+- `updated_at timestamptz default now()` (com trigger `update_updated_at_column` já existente no projeto)
 
-```tsx
-// Antes dos departamentos ativos, adicionar:
-<div 
-  className="flex items-center gap-2 cursor-pointer p-1 rounded hover:bg-muted/50 border-b pb-2 mb-2"
-  onClick={() => {
-    const NO_DEPT = "__no_department__";
-    setEditMemberDepts(prev => 
-      prev.includes(NO_DEPT) 
-        ? prev.filter(id => id !== NO_DEPT)
-        : [...prev, NO_DEPT]
-    );
-  }}
->
-  <Checkbox checked={editMemberDepts.includes("__no_department__")} />
-  <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/50" />
-  <span className="text-sm font-medium">Sem Departamento</span>
-</div>
-```
+**RLS (mesma filosofia do projeto):**
+- Admin do tenant pode **gerenciar** (ALL) registros de membros do seu escritório.
+- O próprio membro pode **ler** seu registro (SELECT) para o app aplicar filtro.
+- (Opcional) Global admin (`is_admin(auth.uid())`) pode ler/gerenciar.
 
-### Arquivo: `src/hooks/useUserDepartments.tsx`
+**RPC auxiliar (opcional, recomendado para simplificar o front):**
+- `get_member_no_department_access_for_user(_user_id uuid) returns boolean`
+  - Retorna `coalesce(can_access_no_department, false)`
+  - Restringe leitura: apenas o próprio usuário ou admin/global admin.
 
-**Exportar constante e ajustar retorno:**
-
-```tsx
-// Constante pública para "Sem departamento"
-export const NO_DEPARTMENT_ID = "__no_department__";
-```
-
-### Arquivo: `src/hooks/useConversations.tsx`
-
-**Atualizar lógica de filtragem para considerar permissão explícita:**
-
-```tsx
-// Importar constante
-import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
-
-// Na filtragem (linha ~250):
-const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
-
-return allConversations.filter(conv => {
-  // Conversa sem departamento: só vê se tem permissão explícita
-  if (!conv.department_id) {
-    return canSeeNoDepartment || conv.assigned_to === userId;
-  }
-  // Conversa com departamento: precisa ter acesso ao dept ou ser assigned
-  return userDeptIds.includes(conv.department_id) || conv.assigned_to === userId;
-});
-```
-
-### Arquivo: `src/hooks/useClients.tsx`
-
-**Aplicar a mesma lógica:**
-
-```tsx
-import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
-
-const canSeeNoDepartment = userDeptIds.includes(NO_DEPARTMENT_ID);
-
-return allClients.filter(client => {
-  if (!client.department_id) {
-    return canSeeNoDepartment || client.assigned_to === userId;
-  }
-  return userDeptIds.includes(client.department_id) || client.assigned_to === userId;
-});
-```
+> Importante: **não** mexer na tabela `member_departments` para guardar “Sem Departamento”.
 
 ---
 
-## Arquivos a Modificar
+### B) Frontend — impedir insert do ID fake e salvar corretamente
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Settings.tsx` | Adicionar checkbox "Sem Departamento" no dialog de edição de membro |
-| `src/hooks/useUserDepartments.tsx` | Exportar constante `NO_DEPARTMENT_ID` |
-| `src/hooks/useConversations.tsx` | Ajustar filtro para verificar permissão explícita de "Sem departamento" |
-| `src/hooks/useClients.tsx` | Mesma correção do filtro |
+#### 1) `src/hooks/useTeamMembers.tsx`
+Ajustar o `updateMemberDepartments` para:
+- **filtrar** o array antes de inserir:
+  - `realDepartmentIds = departmentIds.filter(id => id !== NO_DEPARTMENT_ID)`
+- assim nunca tenta inserir `"__no_department__"` em `member_departments`.
+
+Criar uma nova mutation:
+- `updateMemberNoDepartmentAccess({ memberId, canAccessNoDepartment })`
+  - faz **upsert** em `member_department_access` (insert on conflict member_id do update)
+
+No carregamento dos membros (`queryFn`), além de `member_departments`, buscar também `member_department_access` e montar no retorno:
+- `can_access_no_department: boolean`
+
+E no `TeamMember` retornar:
+- `department_ids: string[]` (somente UUIDs)
+- `can_access_no_department: boolean`
+
+#### 2) `src/pages/Settings.tsx`
+Ajustar o fluxo do dialog “Editar Permissões”:
+
+- Manter o checkbox “Sem Departamento” (como hoje).
+- Ao abrir o modal (`Editar`):
+  - inicializar `editMemberDepts` com:
+    - `member.department_ids`
+    - + `NO_DEPARTMENT_ID` se `member.can_access_no_department === true`
+
+- Ao salvar:
+  - `canAccessNoDepartment = editMemberDepts.includes(NO_DEPARTMENT_ID)`
+  - `realDepartmentIds = editMemberDepts.filter(id => id !== NO_DEPARTMENT_ID)`
+
+  Executar:
+  1. `updateMemberDepartments({ memberId, departmentIds: realDepartmentIds })`
+  2. `updateMemberNoDepartmentAccess({ memberId, canAccessNoDepartment })`
+
+Isso elimina o erro e persiste corretamente a permissão.
+
+#### 3) `src/hooks/useUserDepartments.tsx`
+Hoje o hook assume que `NO_DEPARTMENT_ID` estaria vindo da lista de departamentos (RPC de `member_departments`), mas isso não vai funcionar.
+
+Atualizar o hook para:
+- Buscar `departmentIds` (UUIDs) via RPC existente `get_member_department_ids_for_user`
+- Buscar `canAccessNoDepartment` via:
+  - RPC nova `get_member_no_department_access_for_user` (recomendado), ou
+  - query direta na tabela nova
+- Montar `departmentIdsFinal`:
+  - `uuidDeptIds + (canAccessNoDepartment ? [NO_DEPARTMENT_ID] : [])`
+
+Assim, **não precisa mudar** a lógica atual de filtro em:
+- `src/hooks/useConversations.tsx`
+- `src/hooks/useClients.tsx`
+porque elas já usam `userDeptIds.includes(NO_DEPARTMENT_ID)`.
+
+#### 4) Ajuste visual (opcional, mas melhora auditoria)
+Na lista de membros (Settings > Membros), quando mostrar badges de departamentos:
+- se `can_access_no_department` for true, mostrar uma badge “Sem Departamento”.
 
 ---
 
-## Comportamento Após Correção
+## Testes (para garantir que não regrediu)
 
-**Cenário: Gabrielle (atendente)**
+1) Como admin:
+- Abrir **Configurações > Membros**
+- Editar atendente
+- Marcar “Sem Departamento” + 1 departamento real
+- Salvar
+- Confirmar que **não aparece** mais o erro de UUID.
 
-| Configuração | Comportamento Esperado |
-|--------------|------------------------|
-| Apenas "CLIENTES FMO" marcado | Vê apenas conversas/clientes em "CLIENTES FMO" + atribuídas a ela |
-| "CLIENTES FMO" + "Sem Departamento" marcados | Vê conversas/clientes em "CLIENTES FMO" + sem departamento + atribuídas a ela |
-| Nenhum marcado | Vê apenas conversas/clientes atribuídas diretamente a ela |
-| Apenas "Sem Departamento" marcado | Vê apenas conversas/clientes sem departamento + atribuídas a ela |
+2) Logar como atendente (ou usar um usuário atendente real):
+- Verificar que:
+  - Conversas/Clientes **Sem Departamento** aparecem somente quando a permissão foi marcada.
+  - Se desmarcar “Sem Departamento”, itens com `department_id = null` **somem** (exceto os `assigned_to` dele, como já implementado).
+
+3) Validar que admin/gerente continuam vendo tudo (sem impacto).
 
 ---
 
-## Sobre Tarefas Concluídas
+## Sobre tarefas concluídas e alertas (confirmação)
+A função `process-task-due-alerts` já contém:
+- `.neq("status", "done")`
 
-**Confirmado:** Tarefas com `status === "done"` **não recebem alertas**. A Edge Function já tem o filtro `.neq("status", "done")` na linha 108, garantindo que tarefas concluídas são excluídas da lista de alertas.
+Então **tarefas concluídas (“done”) não recebem alerta**. Nenhuma mudança necessária aqui (apenas manter e, se quiser, validar que o status usado para concluído no sistema é realmente `"done"`).
 
 ---
 
-## Garantias de Não-Regressão
+## Entregáveis (o que será alterado)
 
-1. **Compatibilidade retroativa**: Atendentes existentes sem o ID especial continuarão a não ver conversas sem departamento (comportamento mais restritivo)
-2. **Admin/Gerente**: Continuam com acesso total, sem mudanças
-3. **Tarefas**: Sistema de alertas continua funcionando normalmente
-4. **Outras áreas**: Nenhuma modificação em chat, agenda, agentes de IA, etc.
+### Banco (migration)
+- Criar `member_department_access`
+- Criar triggers e políticas RLS
+- (Opcional) criar RPC `get_member_no_department_access_for_user`
+
+### Código
+- `src/hooks/useTeamMembers.tsx` (filtrar NO_DEPARTMENT_ID + nova mutation + carregar flag)
+- `src/pages/Settings.tsx` (salvar separado: dept UUIDs vs permissão “Sem Departamento”)
+- `src/hooks/useUserDepartments.tsx` (compor `departmentIds` incluindo NO_DEPARTMENT_ID via flag persistida)
+
+Isso corrige o erro atual, mantém o controle explícito da permissão e preserva a regra de restrição já implementada, sem regressão no resto do sistema.
