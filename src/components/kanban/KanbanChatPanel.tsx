@@ -1023,6 +1023,8 @@ interface KanbanChatPanelProps {
   departmentId?: string | null;
   /** Conversation origin - used to route messages correctly (WhatsApp vs Widget/Tray) */
   origin?: string | null;
+  /** Avatar URL from client's WhatsApp profile */
+  avatarUrl?: string | null;
   customStatuses: CustomStatus[];
   tags: TagItem[];
   departments: Department[];
@@ -1046,6 +1048,7 @@ export function KanbanChatPanel({
   conversationTags,
   departmentId,
   origin,
+  avatarUrl,
   customStatuses,
   tags,
   departments,
@@ -2700,11 +2703,14 @@ export function KanbanChatPanel({
         {/* Top row: Avatar, name, actions */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Avatar className="h-10 w-10">
-              <AvatarImage
-                src={`https://api.dicebear.com/7.x/initials/svg?seed=${contactName || contactPhone}`}
-              />
-              <AvatarFallback>
+            <Avatar className="h-10 w-10 border border-primary/20">
+              {avatarUrl ? (
+                <AvatarImage 
+                  src={avatarUrl} 
+                  alt={contactName || "Avatar"} 
+                />
+              ) : null}
+              <AvatarFallback className="bg-primary/10 text-primary">
                 {contactName?.charAt(0)?.toUpperCase() || "?"}
               </AvatarFallback>
             </Avatar>

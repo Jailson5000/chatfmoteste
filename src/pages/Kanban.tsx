@@ -606,6 +606,7 @@ export default function Kanban() {
             conversationTags={selectedConversation.tags}
             departmentId={selectedConversation.department_id}
             origin={selectedConversation.origin}
+            avatarUrl={selectedConversation.client?.avatar_url}
             customStatuses={customStatuses}
             tags={tags}
             departments={departments}
