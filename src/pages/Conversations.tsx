@@ -1459,7 +1459,7 @@ export default function Conversations() {
     });
   };
   
-  // Handle internal file upload
+  // Handle internal file upload with optimistic UI
   const handleInternalFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !selectedConversationId || !lawFirm?.id) return;
@@ -1467,26 +1467,46 @@ export default function Conversations() {
     event.target.value = ""; // Reset input
     setIsSending(true);
     
+    // 1. Create local preview URL for instant display
+    const localPreviewUrl = URL.createObjectURL(file);
+    const tempId = crypto.randomUUID();
+    const isImage = file.type.startsWith('image/');
+    const messageType = isImage ? "image" : "document";
+    
+    // 2. Add optimistic message IMMEDIATELY for fast UX
+    const optimisticMessage: Message = {
+      id: tempId,
+      conversation_id: selectedConversationId,
+      content: isImage ? "" : `📎 ${file.name}`,
+      message_type: messageType,
+      media_url: localPreviewUrl, // Local blob URL for instant preview
+      media_mime_type: file.type,
+      is_from_me: true,
+      sender_type: "human",
+      ai_generated: false,
+      is_internal: true,
+      created_at: new Date().toISOString(),
+      status: "sending",
+      _clientTempId: tempId, // Used for reconciliation with Realtime
+    } as Message;
+    
+    setMessages(prev => [...prev, optimisticMessage]);
+    
     try {
-      // Upload file to internal-chat-files bucket
+      // 3. Upload file to internal-chat-files bucket (background)
       // IMPORTANT: Use lawFirmId as first folder to comply with RLS policies
       const fileName = `${lawFirm.id}/${Date.now()}_${file.name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from("internal-chat-files")
         .upload(fileName, file);
       
       if (uploadError) throw uploadError;
       
       // Store the file path (not public URL since bucket is private)
-      // The path will be used to generate signed URLs on download
       const filePath = fileName;
       
-      // Detect media type based on file MIME type
-      const isImage = file.type.startsWith('image/');
-      const messageType = isImage ? "image" : "document";
-      
-      // Save internal message with file - store path prefixed to identify internal files
-      const { error: msgError } = await supabase
+      // 4. Save internal message with file - store path prefixed to identify internal files
+      const { data: insertedMsg, error: msgError } = await supabase
         .from("messages")
         .insert({
           conversation_id: selectedConversationId,
@@ -1498,14 +1518,25 @@ export default function Conversations() {
           sender_type: "human",
           ai_generated: false,
           is_internal: true,
-        });
+        })
+        .select()
+        .single();
       
       if (msgError) throw msgError;
       
-      // NOTE: Don't add to local state - Realtime subscription will handle it
-      // This prevents duplicate messages appearing in the UI
+      // 5. Replace optimistic message with real one (Realtime may also trigger, dedup by id)
+      if (insertedMsg) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === tempId ? { ...insertedMsg, status: "sent" } : msg
+        ));
+        // Revoke blob URL to free memory
+        URL.revokeObjectURL(localPreviewUrl);
+      }
     } catch (error) {
       console.error("Erro ao enviar arquivo interno:", error);
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(msg => msg.id !== tempId));
+      URL.revokeObjectURL(localPreviewUrl);
       toast({
         title: "Erro ao enviar arquivo",
         description: error instanceof Error ? error.message : "Falha ao enviar arquivo",

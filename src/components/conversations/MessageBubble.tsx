@@ -937,7 +937,8 @@ function ImageViewer({
     loadImage();
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 
-  const imageSrc = needsDecryption ? decryptedSrc : src;
+  // Use decryptedSrc for both WhatsApp decryption AND internal files (signed URLs)
+  const imageSrc = (needsDecryption || isInternalFile) ? decryptedSrc : src;
 
   if (isDecrypting) {
     return (
@@ -971,7 +972,8 @@ function ImageViewer({
     );
   }
 
-  if (error || (!imageSrc && needsDecryption)) {
+  // Show error if: explicit error, or waiting for signed URL/decryption but none provided
+  if (error || (!imageSrc && (needsDecryption || isInternalFile))) {
     return (
       <div className="flex items-center justify-center min-w-[200px] min-h-[150px] bg-destructive/10 rounded-lg">
         <div className="flex flex-col items-center gap-2">
