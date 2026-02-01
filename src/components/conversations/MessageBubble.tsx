@@ -834,10 +834,54 @@ function ImageViewer({
   // Public URLs can be accessed directly without WhatsApp decryption
   const isPublicUrl = isPublicStorageUrl(src);
   
-  // Only need decryption for WhatsApp encrypted media (not public URLs)
-  const needsDecryption = !isPublicUrl && !!whatsappMessageId && !!conversationId;
+  // Check if this is an internal chat file (from private bucket)
+  const isInternalFile = src.startsWith('internal-chat-files://');
+  
+  // Only need WhatsApp decryption for encrypted media (not public URLs or internal files)
+  const needsDecryption = !isPublicUrl && !isInternalFile && !!whatsappMessageId && !!conversationId;
 
-  // Decrypt/fetch image on mount if needed
+  // Load internal files via signed URL
+  useEffect(() => {
+    if (!isInternalFile) return;
+    
+    const loadInternalImage = async () => {
+      const filePath = src.replace('internal-chat-files://', '');
+      
+      // Check memory cache first
+      const cacheKey = `internal-${filePath}`;
+      const memoryCached = memoryCache.get(cacheKey);
+      if (memoryCached) {
+        setDecryptedSrc(memoryCached);
+        return;
+      }
+      
+      setIsDecrypting(true);
+      try {
+        const { data, error: signedUrlError } = await supabase.storage
+          .from('internal-chat-files')
+          .createSignedUrl(filePath, 300); // 5 minutes expiry
+        
+        if (signedUrlError || !data?.signedUrl) {
+          console.error("Failed to get signed URL for internal image:", signedUrlError);
+          setError(true);
+          return;
+        }
+        
+        // Cache the signed URL
+        memoryCache.set(cacheKey, data.signedUrl);
+        setDecryptedSrc(data.signedUrl);
+      } catch (err) {
+        console.error("Error loading internal image:", err);
+        setError(true);
+      } finally {
+        setIsDecrypting(false);
+      }
+    };
+    
+    loadInternalImage();
+  }, [isInternalFile, src]);
+
+  // Decrypt/fetch WhatsApp image on mount if needed
   useEffect(() => {
     if (!needsDecryption) return;
     

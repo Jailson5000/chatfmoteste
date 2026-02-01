@@ -1481,13 +1481,17 @@ export default function Conversations() {
       // The path will be used to generate signed URLs on download
       const filePath = fileName;
       
+      // Detect media type based on file MIME type
+      const isImage = file.type.startsWith('image/');
+      const messageType = isImage ? "image" : "document";
+      
       // Save internal message with file - store path prefixed to identify internal files
       const { error: msgError } = await supabase
         .from("messages")
         .insert({
           conversation_id: selectedConversationId,
-          content: `📎 ${file.name}`,
-          message_type: "document",
+          content: isImage ? "" : `📎 ${file.name}`,
+          message_type: messageType,
           media_url: `internal-chat-files://${filePath}`,
           media_mime_type: file.type,
           is_from_me: true,
@@ -1498,22 +1502,8 @@ export default function Conversations() {
       
       if (msgError) throw msgError;
       
-      // Add to local state
-      const newMessage: Message = {
-        id: crypto.randomUUID(),
-        content: `📎 ${file.name}`,
-        created_at: new Date().toISOString(),
-        is_from_me: true,
-        sender_type: "human",
-        ai_generated: false,
-        message_type: "document",
-        media_url: `internal-chat-files://${filePath}`,
-        media_mime_type: file.type,
-        status: "sent",
-        is_internal: true,
-      };
-      
-      setMessages(prev => [...prev, newMessage]);
+      // NOTE: Don't add to local state - Realtime subscription will handle it
+      // This prevents duplicate messages appearing in the UI
     } catch (error) {
       console.error("Erro ao enviar arquivo interno:", error);
       toast({
