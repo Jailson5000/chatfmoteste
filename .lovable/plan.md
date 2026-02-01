@@ -1,176 +1,179 @@
 
-# Plano: Criar Templates de Agentes de IA para Clientes
+# Plano: Corrigir Chat Interno (Imagens e Duplicação)
 
-## Diagnóstico do Problema
+## Problemas Identificados
 
-Você salvou um template no **Template Base** (`ai_template_base`), que é usado para configurar novas empresas no momento do provisioning. Isso funciona corretamente para o propósito de setup inicial.
+### Problema 1: Imagens não funcionam
+Quando o usuário envia uma imagem no modo interno:
+- A imagem é salva com `message_type: "document"` em vez de `"image"`
+- O `ImageViewer` não suporta o protocolo `internal-chat-files://`
+- Resultado: mostra "Imagem não disponível" ❌
 
-Porém, os **templates que os clientes veem** na aba "Templates" (dentro de Agentes de IA) vêm de outra tabela: **`agent_templates`**.
-
-Atualmente existe apenas 1 template nessa tabela:
-- "Agente de Agendamento" (já cadastrado, ativo e em destaque)
-
----
-
-## O Que Será Feito
-
-### 1. Criar 2 Novos Templates de Agentes
-
-Inserir na tabela `agent_templates` os seguintes templates:
-
-#### Template 1: Agente Simples de Atendimento
-
-| Campo | Valor |
-|-------|-------|
-| Nome | Agente de Atendimento |
-| Descrição | Agente para triagem inicial de leads e clientes. Identifica se é cliente ou novo contato e direciona para o departamento correto. |
-| Categoria | atendimento |
-| Ícone | headphones |
-| Destaque | Sim |
-| Prompt | Template com etiquetas substituíveis |
-
-**Prompt proposto:**
-```text
-Você é um agente inteligente de atendimento da @empresa, responsável pela triagem dos leads e clientes que enviam mensagem no WhatsApp.
-
-## 👋 Início do Atendimento
-
-1. Cumprimente o cliente de forma cordial
-2. Pergunte: "Você já é nosso cliente ou está buscando saber mais sobre nossos serviços?"
-
-### Se já é cliente:
-- Altere o status para @status [NOME_DO_STATUS_SUPORTE]
-- Altere o departamento para @departamento [NOME_DO_DEPARTAMENTO_SUPORTE]
-- Peça o CPF ou identificação para localizar o cadastro
-- Mensagem: "Ótimo! Me confirme seu CPF que um de nossos especialistas já irá lhe atender."
-
-### Se não é cliente (novo lead):
-- Altere o status para @status [NOME_DO_STATUS_NOVO]
-- Altere o departamento para @departamento [NOME_DO_DEPARTAMENTO_VENDAS]
-- Pergunte sobre o interesse: "Perfeito! Sobre qual assunto gostaria de mais informações?"
-
-## Diretrizes Gerais
-- Seja sempre educado e profissional
-- Responda de forma clara e objetiva
-- Use emojis com moderação para humanizar a conversa
-- Se não souber responder, informe que vai encaminhar para um atendente humano
-
-## Variáveis Disponíveis
-- @nome - Nome do contato
-- @empresa - Nome da empresa
-- @status [nome] - Altera o status do cliente
-- @departamento [nome] - Altera o departamento
-```
+### Problema 2: Arquivos duplicados
+Quando o usuário envia um arquivo interno:
+1. O código insere no banco de dados
+2. O código adiciona ao state local com ID diferente
+3. O Realtime detecta o INSERT e tenta adicionar novamente
+4. A deduplicação falha porque os IDs são diferentes
+- Resultado: arquivo aparece 2 vezes até dar F5 ❌
 
 ---
 
-#### Template 2: Agente de Agendamento (Atualizado)
+## Solução Proposta
 
-O template existente será mantido, mas vou verificar se precisa de ajustes para incluir etiquetas substituíveis.
+### Correção 1: Suporte a Imagens Internas
 
----
-
-### 2. Adicionar Link para Admin Global > Templates de Agentes
-
-Garantir que a navegação no menu global admin tenha fácil acesso a essa página.
-
----
-
-## Arquivos que Serão Modificados
-
-| Arquivo | Ação |
-|---------|------|
-| **Banco de Dados** | INSERT em `agent_templates` via SQL |
-
-## Dados SQL a Serem Inseridos
-
-```sql
-INSERT INTO agent_templates (
-  name,
-  description,
-  icon,
-  ai_prompt,
-  ai_temperature,
-  response_delay_seconds,
-  trigger_type,
-  trigger_config,
-  voice_enabled,
-  category,
-  tags,
-  is_active,
-  is_featured,
-  display_order
-) VALUES (
-  'Agente de Atendimento',
-  'Agente para triagem inicial de leads e clientes. Identifica se é cliente ou novo contato e direciona para o departamento correto.',
-  'headphones',
-  'Você é um agente inteligente de atendimento da @empresa...',
-  0.7,
-  2,
-  'message_received',
-  '{"keywords": ["olá", "oi", "bom dia", "boa tarde", "boa noite"]}',
-  false,
-  'atendimento',
-  '{}',
-  true,
-  true,
-  0
-);
-```
-
----
-
-## Fluxo de Onde os Templates Aparecem
+Modificar o `handleInternalFileUpload` para detectar o tipo correto de mídia:
 
 ```text
-+---------------------------+
-| Admin Global              |
-| Templates de Agentes      |  ← Você gerencia aqui
-+---------------------------+
-           |
-           v
-+---------------------------+
-| Tabela: agent_templates   |
-| (is_active = true)        |
-+---------------------------+
-           |
-           v
-+---------------------------+
-| Cliente: Agentes de IA    |
-| Aba "Templates"           |  ← Clientes veem aqui
-+---------------------------+
+Se arquivo é imagem → message_type = "image"
+Se arquivo é documento → message_type = "document"
+```
+
+Modificar o `ImageViewer` para suportar arquivos internos (signed URLs):
+
+```text
+Se src começa com "internal-chat-files://"
+  → Gerar signed URL do storage privado
+  → Exibir imagem normalmente
+```
+
+### Correção 2: Eliminar Duplicação
+
+Remover a adição manual ao state local e deixar o Realtime cuidar disso:
+
+**Antes:**
+```typescript
+// Insert no banco
+const { error } = await supabase.from("messages").insert({...});
+
+// ❌ PROBLEMA: Adiciona manualmente ao state
+setMessages(prev => [...prev, newMessage]);
+```
+
+**Depois:**
+```typescript
+// Insert no banco
+const { error } = await supabase.from("messages").insert({...});
+
+// ✅ NÃO adicionar ao state - Realtime vai cuidar disso
+// Mensagem aparece via subscription de INSERT
 ```
 
 ---
 
-## Diferença Entre as Duas Tabelas
+## Arquivos a Modificar
 
-| Tabela | Propósito | Quem Usa |
-|--------|-----------|----------|
-| `ai_template_base` | Configurações padrão para NOVAS empresas (departamentos, status, prompt inicial) | Sistema de provisioning |
-| `agent_templates` | Templates prontos para clientes CLONAREM e criar agentes | Clientes na aba Templates |
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/Conversations.tsx` | 1. Detectar tipo de mídia (image/document) na função `handleInternalFileUpload`<br>2. Remover `setMessages(prev => [...prev, newMessage])` para evitar duplicação |
+| `src/components/conversations/MessageBubble.tsx` | Adicionar suporte a `internal-chat-files://` no `ImageViewer` |
 
 ---
 
-## Resultado Esperado
+## Detalhes Técnicos
 
-1. Clientes verão **3 templates** na aba "Templates":
-   - Agente de Atendimento (novo)
-   - Agente de Agendamento (existente)
-   
-2. Cada template terá **etiquetas substituíveis** como:
-   - `@empresa` - Nome da empresa
-   - `@status [nome]` - Para alterar status
-   - `@departamento [nome]` - Para alterar departamento
-   - `@nome` - Nome do contato
+### Arquivo: `src/pages/Conversations.tsx`
+**Linhas 1462-1527 - `handleInternalFileUpload`**
 
-3. Templates serão marcados como **destaque** para aparecerem no topo
+```typescript
+// ANTES (linha 1489-1490):
+message_type: "document",
+
+// DEPOIS:
+// Detectar se é imagem
+const isImage = file.type.startsWith('image/');
+const messageType = isImage ? "image" : "document";
+// ...
+message_type: messageType,
+```
+
+**Remover linhas 1501-1516** (adição manual ao state):
+```typescript
+// REMOVER ESTE BLOCO:
+const newMessage: Message = {...};
+setMessages(prev => [...prev, newMessage]);
+```
+
+### Arquivo: `src/components/conversations/MessageBubble.tsx`
+**Linhas 816-962 - `ImageViewer`**
+
+Adicionar lógica para arquivos internos:
+
+```typescript
+// Verificar se é arquivo interno
+const isInternalFile = src.startsWith('internal-chat-files://');
+
+// Se for interno, gerar signed URL
+useEffect(() => {
+  if (!isInternalFile) return;
+  
+  const loadInternalImage = async () => {
+    const filePath = src.replace('internal-chat-files://', '');
+    const { data, error } = await supabase.storage
+      .from('internal-chat-files')
+      .createSignedUrl(filePath, 60);
+    
+    if (data?.signedUrl) {
+      setDecryptedSrc(data.signedUrl);
+    } else {
+      setError(true);
+    }
+  };
+  
+  loadInternalImage();
+}, [src, isInternalFile]);
+```
+
+---
+
+## Fluxo Corrigido
+
+```text
+Usuário envia arquivo interno
+         │
+         v
+┌─────────────────────────────┐
+│ handleInternalFileUpload    │
+│ 1. Upload para storage      │
+│ 2. Detecta tipo (image/doc) │
+│ 3. Insert no banco          │
+│ 4. NÃO adiciona ao state ✓  │
+└─────────────────────────────┘
+         │
+         v
+┌─────────────────────────────┐
+│ Realtime Subscription       │
+│ Detecta INSERT              │
+│ Adiciona ao state (único)   │
+└─────────────────────────────┘
+         │
+         v
+┌─────────────────────────────┐
+│ MessageBubble renderiza     │
+│ - Se imagem → ImageViewer   │
+│   → Gera signed URL         │
+│   → Exibe imagem ✓          │
+│ - Se documento → DocViewer  │
+│   (já funciona)             │
+└─────────────────────────────┘
+```
 
 ---
 
 ## Segurança
 
-- ✅ Sem alteração em código existente
-- ✅ Apenas inserção de dados no banco
-- ✅ Sem risco de regressão
-- ✅ RLS da tabela `agent_templates` já está configurada (sem `law_firm_id`, é global)
+- ✅ Sem alteração em RLS
+- ✅ Arquivos continuam no bucket privado
+- ✅ Signed URLs expiram em 60 segundos
+- ✅ Sem risco de regressão em canais WhatsApp
+- ✅ Mantém compatibilidade com arquivos existentes
+
+---
+
+## Resultado Esperado
+
+1. **Imagens internas**: Exibem corretamente no chat ✓
+2. **Arquivos internos**: Aparecem apenas 1 vez ✓
+3. **Canais WhatsApp**: Não afetados (fluxo separado) ✓
+4. **Documentos internos**: Continuam funcionando (já OK) ✓
