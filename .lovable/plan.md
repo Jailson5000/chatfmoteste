@@ -1,96 +1,16 @@
 
-# Plano: Correção Bug de Data nas Tarefas + Análise Impacto Anúncios
+# Plano: Exibir Mensagens de Anúncios do Facebook no Chat
+
+## Objetivo
+Detectar mensagens que vêm de anúncios "Click-to-WhatsApp" (CTWA) do Facebook/Instagram e exibir um badge visual no chat com os metadados do anúncio.
 
 ---
 
-## Parte 1: Correção do Bug de Data nas Tarefas (IMPLEMENTAR)
+## Análise Técnica
 
-### Problema
+### Estrutura dos Dados de Anúncios (externalAdReply)
 
-Quando o usuário altera a data de vencimento de uma tarefa, ela sempre volta para o dia 01 ou um dia anterior ao esperado.
-
-### Causa Raiz
-
-O bug acontece devido à interpretação de fuso horário no JavaScript:
-
-```typescript
-// Linha 329 - TaskDetailSheet.tsx
-selected={task.due_date ? new Date(task.due_date) : undefined}
-
-// O problema:
-new Date("2026-02-03")  // Resultado: 2026-02-03T00:00:00.000Z (UTC)
-                        // No Brasil (UTC-3): 2026-02-02T21:00:00 ← DIA ERRADO!
-```
-
-A mesma lógica aparece na linha 320 (exibição da data) e linha 329 (seleção do calendário).
-
-### Solução
-
-Criar função helper para parsear datas "YYYY-MM-DD" como horário local (meia-noite local, não UTC):
-
-```typescript
-// Helper para evitar bug de fuso horário
-const parseDateLocal = (dateStr: string): Date => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day); // month é 0-indexed
-};
-```
-
-### Arquivos a Modificar
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/components/tasks/TaskDetailSheet.tsx` | Usar `parseDateLocal` nas linhas 320 e 329 |
-
-### Detalhes das Alterações
-
-**Linha 320 (exibição da data)**
-```typescript
-// ANTES:
-{format(new Date(task.due_date), "dd/MM/yyyy", { locale: ptBR })}
-
-// DEPOIS:
-{format(parseDateLocal(task.due_date), "dd/MM/yyyy", { locale: ptBR })}
-```
-
-**Linha 329 (seleção no calendário)**
-```typescript
-// ANTES:
-selected={task.due_date ? new Date(task.due_date) : undefined}
-
-// DEPOIS:
-selected={task.due_date ? parseDateLocal(task.due_date) : undefined}
-```
-
-### Segurança
-
-- Sem alteração em banco de dados
-- Sem alteração em RLS
-- Não afeta outras partes do sistema
-- Correção isolada no componente de tarefas
-
----
-
-## Parte 2: Análise de Impacto - Anúncios do Facebook no Chat
-
-### O que é
-
-Mensagens que vêm de anúncios "Click-to-WhatsApp" do Facebook/Instagram incluem metadados especiais com a mídia e informações do anúncio (como na sua imagem: "Anúncio do Facebook - Mostrar detalhes").
-
-### Impacto: BAIXO
-
-| Aspecto | Impacto |
-|---------|---------|
-| **Banco de Dados** | Zero alterações - campos `origin` e `origin_metadata` já existem |
-| **Webhook** | ~50 linhas adicionais para extrair `externalAdReply` |
-| **Frontend** | ~30 linhas para exibir badge "Via Anúncio" no chat |
-| **Risco** | Mínimo - lógica puramente aditiva |
-| **Performance** | Negligível - apenas parsing de campos existentes |
-| **Tempo Estimado** | ~30-45 minutos |
-
-### Estrutura Técnica (para referência futura)
-
-Anúncios CTWA enviam dados no campo `contextInfo.externalAdReply`:
+Quando uma mensagem vem de um anúncio CTWA, o payload do WhatsApp inclui `contextInfo.externalAdReply`:
 
 ```json
 {
@@ -108,20 +28,209 @@ Anúncios CTWA enviam dados no campo `contextInfo.externalAdReply`:
 }
 ```
 
-A implementação requer:
+### Campos Existentes no Banco
 
-1. **Webhook**: Detectar `externalAdReply` e salvar em `origin_metadata`
-2. **Conversation**: Atualizar `origin` para `whatsapp_ctwa` quando vem de anúncio
-3. **MessageBubble**: Exibir badge visual "Via Anúncio do Facebook" com preview da mídia
+| Tabela | Campo | Status |
+|--------|-------|--------|
+| `conversations` | `origin` | Existe (text) |
+| `conversations` | `origin_metadata` | Existe (jsonb) |
+| `messages` | N/A | Não precisa de novo campo |
 
-Se você quiser prosseguir com esta funcionalidade futuramente, posso implementar.
+---
+
+## Arquivos a Modificar
+
+### 1. Webhook: `supabase/functions/evolution-webhook/index.ts`
+
+**Alterações:**
+
+1. **Adicionar interface `ExternalAdReply`** (~linha 773, junto com `ContextInfo`)
+2. **Detectar `externalAdReply`** na função de extração de mensagem (~linha 4150)
+3. **Atualizar conversa com `origin` e `origin_metadata`** quando detectar anúncio
+
+```typescript
+// Interface nova
+interface ExternalAdReply {
+  title?: string;
+  body?: string;
+  thumbnailUrl?: string;
+  mediaUrl?: string;
+  sourceId?: string;
+  sourceType?: string;
+  sourceUrl?: string;
+}
+
+// Atualizar ContextInfo para incluir externalAdReply
+interface ContextInfo {
+  stanzaId?: string;
+  participant?: string;
+  quotedMessage?: {...};
+  externalAdReply?: ExternalAdReply; // NOVO
+}
+```
+
+**Lógica de detecção (~linha 4150):**
+
+```typescript
+// Extrair info de anúncio CTWA se existir
+const externalAdReply = 
+  data.contextInfo?.externalAdReply ||
+  data.message?.extendedTextMessage?.contextInfo?.externalAdReply ||
+  data.message?.imageMessage?.contextInfo?.externalAdReply ||
+  data.message?.videoMessage?.contextInfo?.externalAdReply ||
+  null;
+
+if (externalAdReply && !isFromMe) {
+  // Atualizar conversa com origin = 'whatsapp_ctwa' e metadados do anúncio
+  await supabaseClient
+    .from('conversations')
+    .update({
+      origin: 'whatsapp_ctwa',
+      origin_metadata: {
+        ad_title: externalAdReply.title,
+        ad_body: externalAdReply.body,
+        ad_thumbnail: externalAdReply.thumbnailUrl,
+        ad_source_id: externalAdReply.sourceId,
+        ad_source_url: externalAdReply.sourceUrl,
+        detected_at: new Date().toISOString(),
+      }
+    })
+    .eq('id', conversation.id);
+}
+```
+
+---
+
+### 2. Frontend: `src/components/conversations/ConversationSidebarCard.tsx`
+
+Adicionar badge visual na lista de conversas para indicar origem de anúncio:
+
+```typescript
+// Badge para conversas vindas de anúncio
+{conversation.origin === 'whatsapp_ctwa' && (
+  <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700 px-1">
+    Via Anúncio
+  </Badge>
+)}
+```
+
+---
+
+### 3. Frontend: `src/components/conversations/ContactDetailsPanel.tsx`
+
+Exibir informações do anúncio no painel de detalhes do contato:
+
+```typescript
+{conversation.origin === 'whatsapp_ctwa' && conversation.origin_metadata && (
+  <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200">
+    <div className="flex items-center gap-2 mb-2">
+      <Megaphone className="h-4 w-4 text-blue-600" />
+      <span className="text-sm font-medium text-blue-700">Via Anúncio do Facebook</span>
+    </div>
+    {conversation.origin_metadata.ad_title && (
+      <p className="text-sm text-blue-600">{conversation.origin_metadata.ad_title}</p>
+    )}
+    {conversation.origin_metadata.ad_thumbnail && (
+      <img 
+        src={conversation.origin_metadata.ad_thumbnail} 
+        alt="Preview do anúncio" 
+        className="mt-2 rounded max-h-24 object-cover"
+      />
+    )}
+  </div>
+)}
+```
+
+---
+
+### 4. Frontend: `src/components/conversations/MessageBubble.tsx` (Opcional)
+
+Para a **primeira mensagem** de uma conversa vinda de anúncio, exibir um banner contextual acima da mensagem:
+
+```typescript
+// Prop adicional (opcional)
+adContext?: {
+  title: string;
+  thumbnailUrl?: string;
+} | null;
+
+// Renderização
+{adContext && (
+  <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center gap-2">
+    {adContext.thumbnailUrl && (
+      <img src={adContext.thumbnailUrl} alt="" className="w-10 h-10 rounded object-cover" />
+    )}
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+        <Megaphone className="h-3 w-3" />
+        <span>Via Anúncio do Facebook</span>
+      </div>
+      {adContext.title && (
+        <p className="text-xs text-blue-700 dark:text-blue-300 truncate">{adContext.title}</p>
+      )}
+    </div>
+  </div>
+)}
+```
+
+---
+
+## Fluxo Após Implementação
+
+```text
+Cliente clica em anúncio CTWA
+         │
+         v
+┌─────────────────────────────┐
+│ Evolution Webhook           │
+│ Detecta externalAdReply     │
+│ Salva origin=whatsapp_ctwa  │
+│ Salva metadados do anúncio  │
+└─────────────────────────────┘
+         │
+         v
+┌─────────────────────────────┐
+│ Lista de Conversas          │
+│ Badge "Via Anúncio" ✓       │
+└─────────────────────────────┘
+         │
+         v
+┌─────────────────────────────┐
+│ Painel de Detalhes          │
+│ Seção com info do anúncio   │
+│ (título, thumbnail, etc.)   │
+└─────────────────────────────┘
+```
+
+---
+
+## Detalhes de Segurança
+
+| Aspecto | Análise |
+|---------|---------|
+| **RLS** | Sem alteração - campos já existem e estão protegidos |
+| **Multi-tenant** | origin_metadata é por conversa, isolado por law_firm_id |
+| **Regressão** | Zero risco - lógica puramente aditiva |
+| **Performance** | Negligível - apenas parsing de campo existente |
+
+---
+
+## Arquivos Afetados
+
+| Arquivo | Tipo de Alteração | Linhas Estimadas |
+|---------|------------------|------------------|
+| `supabase/functions/evolution-webhook/index.ts` | Adicionar detecção de externalAdReply | ~40 linhas |
+| `src/components/conversations/ConversationSidebarCard.tsx` | Badge "Via Anúncio" | ~5 linhas |
+| `src/components/conversations/ContactDetailsPanel.tsx` | Seção de info do anúncio | ~20 linhas |
+| `src/components/conversations/MessageBubble.tsx` | Banner opcional (primeira msg) | ~15 linhas |
+
+**Total: ~80 linhas de código novo**
 
 ---
 
 ## Resultado Esperado
 
-Após a correção:
-
-1. **Tarefas**: Datas são exibidas e selecionadas corretamente, independente do fuso horário do usuário
-2. **Anúncios**: Análise de impacto concluída - implementação disponível quando desejar
-
+1. **Lista de conversas**: Badge discreto "Via Anúncio" em conversas vindas de CTWA
+2. **Painel de detalhes**: Seção com título e thumbnail do anúncio original
+3. **Chat**: Banner contextual na primeira mensagem (opcional)
+4. **Dados persistentes**: Metadados do anúncio salvos para análise futura
