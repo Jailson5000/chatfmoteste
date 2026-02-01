@@ -1,162 +1,127 @@
 
-# Plano: Corrigir Exibição de Imagens Internas e Melhorar Velocidade
-
-## Problemas Identificados
-
-### Problema 1: Imagens Internas Não Funcionam ❌
-**Causa raiz identificada na linha 940 do `ImageViewer`:**
-
-```typescript
-const imageSrc = needsDecryption ? decryptedSrc : src;
-```
-
-Esta lógica está errada para arquivos internos:
-- Para arquivos internos: `needsDecryption = false` (correto)
-- Então `imageSrc = src` (que é `internal-chat-files://...` - URL inválida!)
-- O `decryptedSrc` É preenchido pelo useEffect mas **nunca é usado**!
-
-### Problema 2: Duplicação ✅
-Já foi corrigido na última alteração e você confirmou que não duplica mais.
-
-### Problema 3: Demora para Aparecer
-O fluxo atual é:
-1. Usuário envia arquivo interno
-2. Upload para storage (~500ms)
-3. Insert no banco de dados
-4. Realtime detecta INSERT (debounce 100ms)
-5. Mensagem aparece no chat
-
-**Solução:** Adicionar UI otimista - mostrar mensagem com loading imediatamente.
+# Plano: Correção Bug de Data nas Tarefas + Análise Impacto Anúncios
 
 ---
 
-## Correções a Implementar
+## Parte 1: Correção do Bug de Data nas Tarefas (IMPLEMENTAR)
 
-### Correção 1: Exibição de Imagens Internas
+### Problema
 
-**Arquivo:** `src/components/conversations/MessageBubble.tsx`
-**Linhas:** 940 e 974
+Quando o usuário altera a data de vencimento de uma tarefa, ela sempre volta para o dia 01 ou um dia anterior ao esperado.
 
-Alterar a lógica de `imageSrc` para considerar também `isInternalFile`:
+### Causa Raiz
+
+O bug acontece devido à interpretação de fuso horário no JavaScript:
 
 ```typescript
-// ANTES (linha 940):
-const imageSrc = needsDecryption ? decryptedSrc : src;
+// Linha 329 - TaskDetailSheet.tsx
+selected={task.due_date ? new Date(task.due_date) : undefined}
 
-// DEPOIS:
-// Use decryptedSrc for both WhatsApp decryption AND internal files (signed URLs)
-const imageSrc = (needsDecryption || isInternalFile) ? decryptedSrc : src;
+// O problema:
+new Date("2026-02-03")  // Resultado: 2026-02-03T00:00:00.000Z (UTC)
+                        // No Brasil (UTC-3): 2026-02-02T21:00:00 ← DIA ERRADO!
 ```
 
-E ajustar a condição de erro (linha 974):
+A mesma lógica aparece na linha 320 (exibição da data) e linha 329 (seleção do calendário).
+
+### Solução
+
+Criar função helper para parsear datas "YYYY-MM-DD" como horário local (meia-noite local, não UTC):
 
 ```typescript
-// ANTES:
-if (error || (!imageSrc && needsDecryption)) {
-
-// DEPOIS:
-// Show error if: explicit error, or waiting for signed URL/decryption but none provided
-if (error || (!imageSrc && (needsDecryption || isInternalFile))) {
-```
-
-### Correção 2: Velocidade de Exibição (UI Otimista)
-
-**Arquivo:** `src/pages/Conversations.tsx`
-**Função:** `handleInternalFileUpload`
-
-Adicionar mensagem otimista com preview local antes do upload:
-
-```typescript
-const handleInternalFileUpload = async (file: File) => {
-  // 1. Criar preview local (URL temporária)
-  const localPreviewUrl = URL.createObjectURL(file);
-  const tempId = crypto.randomUUID();
-  
-  // 2. Adicionar mensagem otimista IMEDIATAMENTE
-  const optimisticMessage = {
-    id: tempId,
-    content: isImage ? "" : `📎 ${file.name}`,
-    message_type: isImage ? "image" : "document",
-    media_url: localPreviewUrl, // Preview local (blob URL)
-    media_mime_type: file.type,
-    is_from_me: true,
-    sender_type: "human",
-    is_internal: true,
-    created_at: new Date().toISOString(),
-    status: "sending",
-    _clientTempId: tempId,
-  };
-  
-  setMessages(prev => [...prev, optimisticMessage]);
-  
-  // 3. Fazer upload e insert (em background)
-  // ... resto da lógica
-  
-  // 4. Quando INSERT completar, Realtime vai reconciliar
-  // O merge vai preservar o _clientTempId para evitar duplicação
+// Helper para evitar bug de fuso horário
+const parseDateLocal = (dateStr: string): Date => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day); // month é 0-indexed
 };
 ```
 
----
-
-## Fluxo Após Correções
-
-```text
-Usuário envia imagem interna
-         │
-         v  (IMEDIATO - ~10ms)
-┌─────────────────────────────┐
-│ Mensagem otimista aparece   │
-│ com preview local (blob:)   │
-│ Status: "Enviando..."       │
-└─────────────────────────────┘
-         │
-         v  (Background - 500ms)
-┌─────────────────────────────┐
-│ Upload para storage         │
-│ Insert no banco             │
-└─────────────────────────────┘
-         │
-         v  (Realtime - 100ms)
-┌─────────────────────────────┐
-│ Merge: substitui blob URL   │
-│ pelo internal-chat-files:// │
-│ Status: "Enviado" ✓         │
-└─────────────────────────────┘
-         │
-         v
-┌─────────────────────────────┐
-│ ImageViewer detecta         │
-│ internal-chat-files://      │
-│ → Gera signed URL           │
-│ → Exibe imagem real         │
-└─────────────────────────────┘
-```
-
----
-
-## Arquivos a Modificar
+### Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/conversations/MessageBubble.tsx` | Corrigir lógica de `imageSrc` para usar `decryptedSrc` quando `isInternalFile = true` (linhas 940, 974) |
-| `src/pages/Conversations.tsx` | Adicionar UI otimista em `handleInternalFileUpload` para exibir mensagem imediatamente com preview local |
+| `src/components/tasks/TaskDetailSheet.tsx` | Usar `parseDateLocal` nas linhas 320 e 329 |
+
+### Detalhes das Alterações
+
+**Linha 320 (exibição da data)**
+```typescript
+// ANTES:
+{format(new Date(task.due_date), "dd/MM/yyyy", { locale: ptBR })}
+
+// DEPOIS:
+{format(parseDateLocal(task.due_date), "dd/MM/yyyy", { locale: ptBR })}
+```
+
+**Linha 329 (seleção no calendário)**
+```typescript
+// ANTES:
+selected={task.due_date ? new Date(task.due_date) : undefined}
+
+// DEPOIS:
+selected={task.due_date ? parseDateLocal(task.due_date) : undefined}
+```
+
+### Segurança
+
+- Sem alteração em banco de dados
+- Sem alteração em RLS
+- Não afeta outras partes do sistema
+- Correção isolada no componente de tarefas
 
 ---
 
-## Segurança
+## Parte 2: Análise de Impacto - Anúncios do Facebook no Chat
 
-- ✅ Sem alteração em RLS
-- ✅ Bucket continua privado
-- ✅ Signed URLs com expiração de 5 minutos
-- ✅ Não afeta canais WhatsApp (fluxo separado)
-- ✅ Não afeta documentos internos (já funcionam)
+### O que é
+
+Mensagens que vêm de anúncios "Click-to-WhatsApp" do Facebook/Instagram incluem metadados especiais com a mídia e informações do anúncio (como na sua imagem: "Anúncio do Facebook - Mostrar detalhes").
+
+### Impacto: BAIXO
+
+| Aspecto | Impacto |
+|---------|---------|
+| **Banco de Dados** | Zero alterações - campos `origin` e `origin_metadata` já existem |
+| **Webhook** | ~50 linhas adicionais para extrair `externalAdReply` |
+| **Frontend** | ~30 linhas para exibir badge "Via Anúncio" no chat |
+| **Risco** | Mínimo - lógica puramente aditiva |
+| **Performance** | Negligível - apenas parsing de campos existentes |
+| **Tempo Estimado** | ~30-45 minutos |
+
+### Estrutura Técnica (para referência futura)
+
+Anúncios CTWA enviam dados no campo `contextInfo.externalAdReply`:
+
+```json
+{
+  "contextInfo": {
+    "externalAdReply": {
+      "title": "Nome do Anúncio",
+      "body": "Texto do anúncio",
+      "thumbnailUrl": "https://...",
+      "mediaUrl": "https://...",
+      "sourceId": "ad_id_123",
+      "sourceType": "AD",
+      "sourceUrl": "https://fb.com/..."
+    }
+  }
+}
+```
+
+A implementação requer:
+
+1. **Webhook**: Detectar `externalAdReply` e salvar em `origin_metadata`
+2. **Conversation**: Atualizar `origin` para `whatsapp_ctwa` quando vem de anúncio
+3. **MessageBubble**: Exibir badge visual "Via Anúncio do Facebook" com preview da mídia
+
+Se você quiser prosseguir com esta funcionalidade futuramente, posso implementar.
 
 ---
 
 ## Resultado Esperado
 
-1. **Imagens internas exibem corretamente** ✓
-2. **Mensagem aparece instantaneamente** (preview local)
-3. **Sem duplicação** (reconciliação por `_clientTempId`)
-4. **Transição suave** de preview → imagem real
+Após a correção:
+
+1. **Tarefas**: Datas são exibidas e selecionadas corretamente, independente do fuso horário do usuário
+2. **Anúncios**: Análise de impacto concluída - implementação disponível quando desejar
+
