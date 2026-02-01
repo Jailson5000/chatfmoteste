@@ -234,8 +234,8 @@ export function TaskDetailSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-200px)] mt-4 px-1">
-          <div className="space-y-4 pr-3">
+        <ScrollArea className="h-[calc(100vh-200px)] mt-4 px-2">
+          <div className="space-y-4 pr-2">
             {/* Status & Priority */}
             <div className="grid grid-cols-2 gap-4">
               <div>
