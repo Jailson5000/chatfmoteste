@@ -1,111 +1,131 @@
 
+# Plano: Botão de Exportar Empresas em PDF
 
-# Plano: Limitar Alertas de Desconexão a 2 Dias
+## Objetivo
 
-## Problema Identificado
+Adicionar um botão "Exportar PDF" no cabeçalho da página de Empresas do Global Admin que gera um relatório completo com todas as empresas e suas informações.
 
-Atualmente, o sistema envia alertas infinitamente enquanto a instância estiver desconectada:
-- **Primeiro alerta**: após 5 minutos de desconexão
-- **Lembretes**: a cada 24 horas (sem limite)
-- **Escalação para admin global**: após 48 horas
+## Dados a Exportar
 
-O usuário recebeu e-mail informando desconexão há 15 dias, indicando que os lembretes continuam sendo enviados indefinidamente.
+| Campo | Origem | Formato |
+|-------|--------|---------|
+| Nome | `company.name` | Texto |
+| Email | `company.email` | Texto |
+| CPF/CNPJ | `company.document` | Formatado (XX.XXX.XXX/XXXX-XX) |
+| Telefone | `company.phone` | Formatado ((XX) XXXXX-XXXX) |
+| Plano | `company.plan?.name` | Nome do plano |
+| Status | `company.status` | Ativa / Trial / Suspensa |
+| Situação Trial | `company.trial_ends_at` | Data ou "N/A" |
+| Criado em | `company.created_at` | DD/MM/YYYY |
 
-## Configuração Atual (Linhas 11-14)
-
-```typescript
-const ALERT_THRESHOLD_MINUTES = 5;        // Primeiro alerta após 5 min
-const CONNECTING_ALERT_THRESHOLD_MINUTES = 10; // Alerta se preso conectando por 10 min
-const REMINDER_THRESHOLD_HOURS = 24;       // Lembrete após 24h ← repete infinitamente
-const ADMIN_ESCALATION_HOURS = 48;         // Escalação após 48h
-```
-
-## Solução Proposta
-
-Adicionar uma nova constante `MAX_ALERT_DURATION_HOURS = 48` (2 dias) para limitar o período de alertas:
-
-| Constante | Valor Antes | Valor Depois | Descrição |
-|-----------|-------------|--------------|-----------|
-| `MAX_ALERT_DURATION_HOURS` | (não existe) | 48 | **Nova** - Para de alertar após 2 dias |
-| `ADMIN_ESCALATION_HOURS` | 48 | 48 | Mantém - escalação final para admin |
-| `REMINDER_THRESHOLD_HOURS` | 24 | 24 | Mantém - intervalo entre lembretes |
-
-## Fluxo de Alertas Após Correção
+## Layout do PDF
 
 ```text
-Desconectado
-    │
-    ├── 5 min ─────► 1º Alerta ao cliente
-    │
-    ├── 24h ───────► 2º Alerta (lembrete) ao cliente  
-    │
-    ├── 48h ───────► 3º Alerta + Escalação ao admin global
-    │                         │
-    │                         └──► ÚLTIMO ALERTA
-    │
-    └── > 48h ─────► ✋ PARA de enviar alertas
-                     (cliente decidiu manter desconectado)
+┌─────────────────────────────────────────────────────────────────┐
+│                    MiauChat - Relatório de Empresas             │
+│                    Gerado em: 01/02/2026 às 14:30               │
+├─────────────────────────────────────────────────────────────────┤
+│  Resumo: 45 empresas | 38 ativas | 5 trial | 2 suspensas        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  EMPRESA 1                                                      │
+│  ─────────────────────────────────────────────────────────────  │
+│  Nome: Acme Ltda                                                │
+│  Email: contato@acme.com.br                                     │
+│  CPF/CNPJ: 12.345.678/0001-90                                   │
+│  Telefone: (11) 99999-9999                                      │
+│  Plano: Professional                                            │
+│  Status: ✓ Ativa                                                │
+│  Criado em: 15/01/2026                                          │
+│                                                                 │
+│  EMPRESA 2                                                      │
+│  ─────────────────────────────────────────────────────────────  │
+│  ...                                                            │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│              MiauChat SaaS - Relatório Confidencial             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Alterações Técnicas
 
-### Arquivo: `supabase/functions/check-instance-alerts/index.ts`
+### 1. Arquivo: `src/lib/exportUtils.ts`
 
-**1. Adicionar constante de limite (linha 15)**
-```typescript
-const MAX_ALERT_DURATION_HOURS = 48; // Stop alerting after 2 days
-```
-
-**2. Adicionar filtro para instâncias com mais de 48h (linhas 99-128)**
-
-Na lógica de filtro, antes de permitir lembretes, verificar se já passou do limite máximo:
+Adicionar nova função `exportCompaniesToPDF`:
 
 ```typescript
-// Filter instances - improved logic with reminder support
-const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
-  // Skip if manually disconnected
-  if (instance.manual_disconnect === true) {
-    console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: manual_disconnect=true`);
-    return false;
-  }
+interface CompanyExportData {
+  id: string;
+  name: string;
+  email: string | null;
+  document: string | null;
+  phone: string | null;
+  planName: string;
+  status: string;
+  trialEndsAt: string | null;
+  createdAt: string;
+}
 
-  // NEW: Check if disconnected for more than MAX_ALERT_DURATION_HOURS - stop alerting
-  if (instance.disconnected_since) {
-    const hoursSinceDisconnect = (Date.now() - new Date(instance.disconnected_since).getTime()) / (1000 * 60 * 60);
-    if (hoursSinceDisconnect >= MAX_ALERT_DURATION_HOURS) {
-      console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: exceeded ${MAX_ALERT_DURATION_HOURS}h limit (${hoursSinceDisconnect.toFixed(1)}h disconnected)`);
-      return false;
-    }
-  }
-
-  // ... rest of the existing logic
-});
+export function exportCompaniesToPDF(
+  companies: CompanyExportData[],
+  filename: string = 'empresas-miauchat'
+) {
+  // Gera PDF com layout profissional
+  // Múltiplas páginas se necessário
+  // Inclui resumo no topo
+}
 ```
 
-**3. Atualizar mensagens de rodapé dos e-mails (linhas 335-337)**
+### 2. Arquivo: `src/pages/global-admin/GlobalAdminCompanies.tsx`
 
-Atualizar o texto informativo no e-mail:
+Adicionar botão na área de ações do cabeçalho (linha ~566-608):
 
 ```typescript
-const footerMessage = isReminderAlert
-  ? 'Este é um lembrete automático. Você receberá um último alerta após 48h de desconexão.'
-  : 'Este alerta é enviado uma única vez por desconexão. Você receberá lembretes até 48h.';
+import { FileDown } from "lucide-react";
+import { exportCompaniesToPDF, getFormattedDate } from "@/lib/exportUtils";
+
+// Na área de botões, adicionar:
+<Button
+  variant="outline"
+  onClick={handleExportPDF}
+>
+  <FileDown className="mr-2 h-4 w-4" />
+  Exportar PDF
+</Button>
 ```
 
-## Impacto
+Função de exportação:
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Desconectado 15 dias | Recebe e-mail | **Não recebe** |
-| Desconectado 3 dias | Recebe e-mail | **Não recebe** |
-| Desconectado 47h | Recebe e-mail | Recebe e-mail |
-| Desconectado 24h | Recebe lembrete | Recebe lembrete |
-| Desconectado 5min | Recebe primeiro alerta | Recebe primeiro alerta |
+```typescript
+const handleExportPDF = () => {
+  const exportData = approvedCompanies.map(company => ({
+    id: company.id,
+    name: company.name,
+    email: company.email,
+    document: company.document,
+    phone: company.phone,
+    planName: company.plan?.name || 'Sem plano',
+    status: statusLabels[company.status] || company.status,
+    trialEndsAt: company.trial_ends_at,
+    createdAt: company.created_at,
+  }));
+  
+  exportCompaniesToPDF(exportData, `empresas-${getFormattedDate()}`);
+  toast.success(`PDF exportado com ${exportData.length} empresas`);
+};
+```
+
+## Arquivos a Modificar
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/lib/exportUtils.ts` | Adicionar função `exportCompaniesToPDF` |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Importar função e adicionar botão + handler |
 
 ## Resultado Esperado
 
-1. Cliente recebe **no máximo 3 alertas**: 5min, 24h, 48h
-2. Após 48h, sistema **para de enviar** lembretes
-3. Admin global ainda recebe **uma** escalação quando atinge 48h
-4. Cliente que deseja manter desconectado não será mais importunado
-
+1. Botão "Exportar PDF" aparece ao lado dos outros botões de ação
+2. Ao clicar, gera PDF com todas as empresas aprovadas
+3. PDF inclui resumo de totais no topo
+4. Suporta múltiplas páginas automaticamente
+5. Download imediato do arquivo
