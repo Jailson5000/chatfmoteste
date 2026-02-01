@@ -42,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTasks, TaskPriority, TaskStatus } from "@/hooks/useTasks";
 import { TaskCategory } from "@/hooks/useTaskCategories";
 import { cn } from "@/lib/utils";
+import { formatDateForDatabase } from "@/lib/dateUtils";
 
 interface TeamMember {
   id: string;
@@ -98,7 +99,7 @@ export function NewTaskDialog({
       status: data.status as TaskStatus,
       priority: data.priority as TaskPriority,
       category_id: data.category_id,
-      due_date: data.due_date?.toISOString(),
+      due_date: data.due_date ? formatDateForDatabase(data.due_date) : undefined,
       assignee_ids: data.assignee_ids,
       send_due_alert: data.send_due_alert,
     });
