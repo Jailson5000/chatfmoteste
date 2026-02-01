@@ -1,86 +1,80 @@
 
-# Plano: Corrigir Bug de Data "1 Dia a Menos" Definitivamente
+# Plano: Ajustar Layout do Painel de Detalhes da Tarefa
 
-## Problema Identificado
+## Problemas Identificados
 
-A data retrocede 1 dia após alguns segundos porque:
+Analisando a captura de tela:
 
-1. A coluna `due_date` é do tipo `timestamptz` (timestamp with time zone)
-2. Quando o banco retorna `2026-02-10T00:00:00+00:00` (meia-noite UTC)
-3. A função `parseDateLocal` detecta o `T` e usa `new Date()` que interpreta como UTC
-4. Ao exibir no Brasil (UTC-3), `2026-02-10 00:00:00 UTC` vira `2026-02-09 21:00:00 local`
-5. O `format()` mostra dia 09 em vez de dia 10
+1. **Lado esquerdo cortado**: O conteúdo parece estar encostando na borda esquerda do Sheet
+2. **Botão Excluir muito baixo**: A altura da ScrollArea é muito grande, empurrando o botão para fora da tela
 
-## Causa Raiz no Código
+## Causa Raiz
 
+| Problema | Causa no Código |
+|----------|-----------------|
+| Corte à esquerda | `ScrollArea` com `pr-4` mas sem padding à esquerda equivalente |
+| Botão muito baixo | `ScrollArea` com `h-[calc(100vh-180px)]` muito generosa |
+
+---
+
+## Correções Propostas
+
+### 1. Ajustar Padding da ScrollArea
+
+Linha 237:
 ```typescript
-// src/lib/dateUtils.ts - PROBLEMA
-if (dateStr.includes('T')) {
-  const date = new Date(dateStr);  // ← Interpreta como UTC!
-  return isNaN(date.getTime()) ? null : date;
-}
+// Antes
+<ScrollArea className="h-[calc(100vh-180px)] mt-4 pr-4">
+
+// Depois - Adicionar padding uniforme e reduzir altura
+<ScrollArea className="h-[calc(100vh-200px)] mt-4 px-1">
+```
+
+### 2. Ajustar Espaçamento Interno
+
+Alterar o espaçamento do container interno (linha 238):
+```typescript
+// Antes
+<div className="space-y-6">
+
+// Depois - Reduzir espaçamento vertical para compactar
+<div className="space-y-4 pr-3">
+```
+
+### 3. Reduzir Altura Mínima da Descrição
+
+A descrição tem `min-h-[80px]` que ocupa espaço desnecessário (linha 397):
+```typescript
+// Antes
+"p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[80px]"
+
+// Depois - Reduzir altura mínima
+"p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[60px]"
 ```
 
 ---
 
-## Solução
+## Resumo das Alterações
 
-Modificar `parseDateLocal` para SEMPRE extrair apenas a parte da data (YYYY-MM-DD) e parsear como horário local, ignorando qualquer componente de hora ou timezone:
-
-```typescript
-export function parseDateLocal(dateStr: string | null | undefined): Date | null {
-  if (!dateStr) return null;
-  
-  // Extrair apenas a parte da data (YYYY-MM-DD)
-  // Funciona com: "2026-02-10", "2026-02-10T00:00:00", "2026-02-10 00:00:00+00"
-  const dateOnly = dateStr.split('T')[0].split(' ')[0];
-  
-  const parts = dateOnly.split('-');
-  if (parts.length !== 3) return null;
-  
-  const [year, month, day] = parts.map(Number);
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
-  
-  // Criar data como horário LOCAL (não UTC)
-  return new Date(year, month - 1, day);
-}
-```
+| Arquivo | Linha | Alteração |
+|---------|-------|-----------|
+| `TaskDetailSheet.tsx` | 237 | `h-[calc(100vh-180px)] mt-4 pr-4` → `h-[calc(100vh-200px)] mt-4 px-1` |
+| `TaskDetailSheet.tsx` | 238 | `space-y-6` → `space-y-4 pr-3` |
+| `TaskDetailSheet.tsx` | 397 | `min-h-[80px]` → `min-h-[60px]` |
 
 ---
 
-## Fluxo Corrigido
+## Resultado Esperado
 
-| Etapa | Antes (Bug) | Depois (Corrigido) |
-|-------|-------------|-------------------|
-| Usuário seleciona | 10/02/2026 | 10/02/2026 |
-| Salva no DB | `"2026-02-10"` | `"2026-02-10"` |
-| DB retorna | `"2026-02-10T00:00:00+00"` | `"2026-02-10T00:00:00+00"` |
-| `parseDateLocal` extrai | `new Date("2026-02-10T00:00:00+00")` → UTC | `"2026-02-10"` → `new Date(2026, 1, 10)` local |
-| `format()` exibe | **09/02/2026** (errado) | **10/02/2026** (correto) |
-
----
-
-## Sobre Alertas
-
-O sistema de alertas já está funcionando corretamente:
-
-- Quando `due_date` é alterada, o hook `useTasks` deleta os registros antigos de `task_alert_logs`
-- Isso permite que a edge function `process-task-due-alerts` envie novos alertas para a nova data
-- A exclusão de tarefas já remove os logs automaticamente via `ON DELETE CASCADE`
-
----
-
-## Arquivo a Modificar
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/lib/dateUtils.ts` | Reescrever `parseDateLocal` para extrair apenas YYYY-MM-DD |
+1. Conteúdo com padding uniforme (não corta à esquerda)
+2. Botão "Excluir Tarefa" visível mais acima na tela
+3. Layout mais compacto e equilibrado
+4. Nenhuma quebra nas funcionalidades já corrigidas (datas, alertas, optimistic updates)
 
 ---
 
 ## Segurança
 
-- Sem alterações no banco de dados
-- Sem alterações em RLS
-- Correção isolada apenas na função de parsing de data
-- Não afeta outros módulos do sistema
+- Alterações apenas de CSS/layout
+- Sem mudanças de lógica ou funcionalidade
+- Isolado ao componente `TaskDetailSheet`
