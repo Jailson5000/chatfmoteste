@@ -58,7 +58,7 @@ import { useTaskActivityLog } from "@/hooks/useTaskActivityLog";
 import { TaskCategory } from "@/hooks/useTaskCategories";
 import { EditableAssigneesPopover } from "./EditableAssigneesPopover";
 import { cn } from "@/lib/utils";
-import { parseDateLocal } from "@/lib/dateUtils";
+import { parseDateLocal, formatDateForDatabase } from "@/lib/dateUtils";
 
 interface TeamMember {
   id: string;
@@ -172,7 +172,7 @@ export function TaskDetailSheet({
   const handleDueDateChange = (date: Date | undefined) => {
     updateTask.mutate({
       id: task.id,
-      due_date: date ? date.toISOString().split("T")[0] : null,
+      due_date: date ? formatDateForDatabase(date) : null,
     });
     setDueDateOpen(false);
   };

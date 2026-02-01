@@ -24,3 +24,17 @@ export function parseDateLocal(dateStr: string | null | undefined): Date | null 
   
   return new Date(year, month - 1, day);
 }
+
+/**
+ * Formata uma data JavaScript para o formato YYYY-MM-DD preservando o dia local.
+ * Evita bug de fuso horário onde toISOString() converte para UTC.
+ * 
+ * @param date - Objeto Date
+ * @returns String no formato YYYY-MM-DD
+ */
+export function formatDateForDatabase(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

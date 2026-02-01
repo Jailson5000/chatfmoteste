@@ -233,6 +233,14 @@ export function useTasks() {
 
       if (error) throw error;
 
+      // Se a data foi alterada, limpar logs de alerta antigos para permitir novo envio
+      if (updates.due_date !== undefined) {
+        await supabase
+          .from("task_alert_logs")
+          .delete()
+          .eq("task_id", id);
+      }
+
       // Update assignees if provided
       if (assignee_ids !== undefined) {
         await supabase.from("task_assignees").delete().eq("task_id", id);
@@ -258,15 +266,40 @@ export function useTasks() {
 
       return { id };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
+    onMutate: async (input) => {
+      // Cancelar queries em andamento
+      await queryClient.cancelQueries({ queryKey: ["internal_tasks", lawFirm?.id] });
+      
+      // Salvar estado anterior
+      const previousTasks = queryClient.getQueryData<Task[]>(["internal_tasks", lawFirm?.id]);
+      
+      // Atualizar cache otimisticamente
+      if (previousTasks) {
+        queryClient.setQueryData<Task[]>(["internal_tasks", lawFirm?.id], 
+          previousTasks.map(task => 
+            task.id === input.id 
+              ? { ...task, ...input, assignees: task.assignees } 
+              : task
+          )
+        );
+      }
+      
+      return { previousTasks };
     },
-    onError: (error) => {
+    onError: (error, _input, context) => {
+      // Reverter em caso de erro
+      if (context?.previousTasks) {
+        queryClient.setQueryData(["internal_tasks", lawFirm?.id], context.previousTasks);
+      }
       toast({
         title: "Erro ao atualizar tarefa",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      // Revalidar para garantir sincronização
+      queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
     },
   });
 
@@ -280,16 +313,35 @@ export function useTasks() {
       if (error) throw error;
       return taskId;
     },
+    onMutate: async (taskId) => {
+      await queryClient.cancelQueries({ queryKey: ["internal_tasks", lawFirm?.id] });
+      
+      const previousTasks = queryClient.getQueryData<Task[]>(["internal_tasks", lawFirm?.id]);
+      
+      if (previousTasks) {
+        queryClient.setQueryData<Task[]>(
+          ["internal_tasks", lawFirm?.id],
+          previousTasks.filter(task => task.id !== taskId)
+        );
+      }
+      
+      return { previousTasks };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
       toast({ title: "Tarefa excluída" });
     },
-    onError: (error) => {
+    onError: (error, _taskId, context) => {
+      if (context?.previousTasks) {
+        queryClient.setQueryData(["internal_tasks", lawFirm?.id], context.previousTasks);
+      }
       toast({
         title: "Erro ao excluir tarefa",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
     },
   });
 
@@ -336,7 +388,36 @@ export function useTasks() {
 
       return { taskId, status };
     },
-    onSuccess: () => {
+    onMutate: async ({ taskId, status, position }) => {
+      await queryClient.cancelQueries({ queryKey: ["internal_tasks", lawFirm?.id] });
+      
+      const previousTasks = queryClient.getQueryData<Task[]>(["internal_tasks", lawFirm?.id]);
+      
+      if (previousTasks) {
+        queryClient.setQueryData<Task[]>(
+          ["internal_tasks", lawFirm?.id],
+          previousTasks.map(task => 
+            task.id === taskId 
+              ? { 
+                  ...task, 
+                  status, 
+                  position: position ?? task.position,
+                  completed_at: status === "done" ? new Date().toISOString() : null,
+                  completed_by: status === "done" ? user?.id || null : null,
+                } 
+              : task
+          )
+        );
+      }
+      
+      return { previousTasks };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousTasks) {
+        queryClient.setQueryData(["internal_tasks", lawFirm?.id], context.previousTasks);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
     },
   });
