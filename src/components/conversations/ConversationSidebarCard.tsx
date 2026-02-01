@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Globe, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
+import { Bot, Folder, Globe, Megaphone, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -193,9 +193,19 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
         </p>
       </div>
 
-      {/* Status + Department + Tags */}
-      {(conversation.clientStatus || conversation.department || conversation.tags.length > 0) && (
+      {/* Status + Department + Tags + Ad Badge */}
+      {(conversation.clientStatus || conversation.department || conversation.tags.length > 0 || conversation.origin === 'whatsapp_ctwa') && (
         <div className="mt-2 flex flex-wrap gap-1 min-w-0 overflow-hidden">
+          {/* CTWA Ad Badge */}
+          {conversation.origin === 'whatsapp_ctwa' && (
+            <Badge
+              className="text-[10px] h-[18px] px-1.5 border-0 gap-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+            >
+              <Megaphone className="h-2.5 w-2.5 flex-shrink-0" />
+              <span className="truncate">Via Anúncio</span>
+            </Badge>
+          )}
+
           {conversation.clientStatus && (
             <Badge
               className="text-[10px] h-[18px] px-1.5 border-0 min-w-0 max-w-[100px]"

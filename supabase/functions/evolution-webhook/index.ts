@@ -757,6 +757,17 @@ interface QRCodeData {
   code?: string;
 }
 
+// External ad reply info (Click-to-WhatsApp ads from Facebook/Instagram)
+interface ExternalAdReply {
+  title?: string;
+  body?: string;
+  thumbnailUrl?: string;
+  mediaUrl?: string;
+  sourceId?: string;
+  sourceType?: string;
+  sourceUrl?: string;
+}
+
 // Context info for quoted/reply messages
 interface ContextInfo {
   stanzaId?: string;  // WhatsApp message ID of the quoted message
@@ -769,6 +780,7 @@ interface ContextInfo {
     videoMessage?: { caption?: string };
     documentMessage?: { fileName?: string };
   };
+  externalAdReply?: ExternalAdReply; // CTWA ad metadata
 }
 
 // MessageContextInfo - contains quoted message info for some message types
@@ -4449,6 +4461,60 @@ serve(async (req) => {
           type: messageType,
           hasMedia: !!mediaUrl
         });
+
+        // ========================================================================
+        // CTWA: Detect Click-to-WhatsApp ad metadata (Facebook/Instagram ads)
+        // ========================================================================
+        // When a user clicks on a Facebook/Instagram CTWA ad, the first message
+        // contains externalAdReply in the contextInfo with ad metadata.
+        // We save this to origin/origin_metadata for analytics and display.
+        // ========================================================================
+        const externalAdReply: ExternalAdReply | null =
+          (data.contextInfo as ContextInfo | undefined)?.externalAdReply ||
+          data.message?.extendedTextMessage?.contextInfo?.externalAdReply ||
+          data.message?.imageMessage?.contextInfo?.externalAdReply ||
+          data.message?.videoMessage?.contextInfo?.externalAdReply ||
+          null;
+
+        if (externalAdReply && !isFromMe) {
+          logDebug('CTWA', 'Click-to-WhatsApp ad detected', {
+            requestId,
+            conversationId: conversation.id,
+            adTitle: externalAdReply.title,
+            adSourceType: externalAdReply.sourceType,
+            hasAdThumbnail: !!externalAdReply.thumbnailUrl,
+          });
+
+          // Update conversation with ad origin metadata
+          const { error: adUpdateError } = await supabaseClient
+            .from('conversations')
+            .update({
+              origin: 'whatsapp_ctwa',
+              origin_metadata: {
+                ad_title: externalAdReply.title || null,
+                ad_body: externalAdReply.body || null,
+                ad_thumbnail: externalAdReply.thumbnailUrl || null,
+                ad_media_url: externalAdReply.mediaUrl || null,
+                ad_source_id: externalAdReply.sourceId || null,
+                ad_source_url: externalAdReply.sourceUrl || null,
+                ad_source_type: externalAdReply.sourceType || null,
+                detected_at: new Date().toISOString(),
+              },
+            })
+            .eq('id', conversation.id);
+
+          if (adUpdateError) {
+            logDebug('CTWA', 'Failed to update ad metadata', { 
+              requestId, 
+              error: adUpdateError.message 
+            });
+          } else {
+            logDebug('CTWA', 'Ad metadata saved successfully', { 
+              requestId,
+              conversationId: conversation.id 
+            });
+          }
+        }
 
         // Save message (avoid duplicates - webhook may retry and fromMe messages can come back after we already inserted)
         logDebug('DB', `Saving message to database`, { requestId, messageId: data.key.id });
