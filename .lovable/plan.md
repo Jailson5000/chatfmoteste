@@ -1,139 +1,111 @@
 
-# Plano: Corrigir "Intervenção pontual" não aparecendo no Kanban
+
+# Plano: Limitar Alertas de Desconexão a 2 Dias
 
 ## Problema Identificado
 
-Na tela de **Conversas**, a mensagem de "Intervenção pontual" é exibida corretamente com a label amarela e ícone ⚡. No **Kanban**, a mesma mensagem aparece sem a label "Intervenção pontual" no topo.
+Atualmente, o sistema envia alertas infinitamente enquanto a instância estiver desconectada:
+- **Primeiro alerta**: após 5 minutos de desconexão
+- **Lembretes**: a cada 24 horas (sem limite)
+- **Escalação para admin global**: após 48 horas
 
-## Causa Raiz
+O usuário recebeu e-mail informando desconexão há 15 dias, indicando que os lembretes continuam sendo enviados indefinidamente.
 
-Ao comparar os dois arquivos, encontrei a diferença:
+## Configuração Atual (Linhas 11-14)
 
-| Arquivo | Linha | Parâmetro `isPontual` |
-|---------|-------|-----------------------|
-| `Conversations.tsx` | 1416 | ✅ `isPontual: wasPontualMode` |
-| `KanbanChatPanel.tsx` | 1827-1834 | ❌ **Falta o parâmetro** |
-
-**Código no Conversations.tsx (correto):**
 ```typescript
-const response = await supabase.functions.invoke("evolution-api", {
-  body: {
-    action: "send_message_async",
-    conversationId: conversationId,
-    message: messageToSend,
-    replyToWhatsAppMessageId: replyWhatsAppId,
-    replyToMessageId: replyMessage?.id || null,
-    isPontual: wasPontualMode, // ✅ Presente
-  },
-});
+const ALERT_THRESHOLD_MINUTES = 5;        // Primeiro alerta após 5 min
+const CONNECTING_ALERT_THRESHOLD_MINUTES = 10; // Alerta se preso conectando por 10 min
+const REMINDER_THRESHOLD_HOURS = 24;       // Lembrete após 24h ← repete infinitamente
+const ADMIN_ESCALATION_HOURS = 48;         // Escalação após 48h
 ```
 
-**Código no KanbanChatPanel.tsx (faltando):**
-```typescript
-const response = await supabase.functions.invoke("evolution-api", {
-  body: {
-    action: "send_message_async",
-    conversationId,
-    message: messageToSend,
-    replyToWhatsAppMessageId: replyWhatsAppId,
-    replyToMessageId: replyToId,
-    // ❌ isPontual está FALTANDO aqui
-  },
-});
-```
+## Solução Proposta
 
-A edge function `evolution-api` já está preparada para receber `isPontual` e salvá-lo no banco (linha 1676), mas o Kanban simplesmente não está enviando.
+Adicionar uma nova constante `MAX_ALERT_DURATION_HOURS = 48` (2 dias) para limitar o período de alertas:
 
----
+| Constante | Valor Antes | Valor Depois | Descrição |
+|-----------|-------------|--------------|-----------|
+| `MAX_ALERT_DURATION_HOURS` | (não existe) | 48 | **Nova** - Para de alertar após 2 dias |
+| `ADMIN_ESCALATION_HOURS` | 48 | 48 | Mantém - escalação final para admin |
+| `REMINDER_THRESHOLD_HOURS` | 24 | 24 | Mantém - intervalo entre lembretes |
 
-## Solução
-
-Adicionar `isPontual: wasPontualMode` na chamada da Evolution API no KanbanChatPanel.
-
-| Arquivo | Linha | Alteração |
-|---------|-------|-----------|
-| `src/components/kanban/KanbanChatPanel.tsx` | 1827-1834 | Adicionar `isPontual: wasPontualMode` |
-
-**Antes (linha 1827-1834):**
-```typescript
-const response = await supabase.functions.invoke("evolution-api", {
-  body: {
-    action: "send_message_async",
-    conversationId,
-    message: messageToSend,
-    replyToWhatsAppMessageId: replyWhatsAppId,
-    replyToMessageId: replyToId,
-  },
-});
-```
-
-**Depois:**
-```typescript
-const response = await supabase.functions.invoke("evolution-api", {
-  body: {
-    action: "send_message_async",
-    conversationId,
-    message: messageToSend,
-    replyToWhatsAppMessageId: replyWhatsAppId,
-    replyToMessageId: replyToId,
-    isPontual: wasPontualMode, // Marcar como intervenção pontual
-  },
-});
-```
-
----
-
-## Fluxo da Correção
+## Fluxo de Alertas Após Correção
 
 ```text
-                     ┌─────────────────────┐
-                     │  Usuário clica ⚡   │
-                     │  (Modo Pontual ON)  │
-                     └──────────┬──────────┘
-                                │
-                     ┌──────────▼──────────┐
-                     │  Envia mensagem     │
-                     │  wasPontualMode=true│
-                     └──────────┬──────────┘
-                                │
-         ┌──────────────────────┼──────────────────────┐
-         │                      │                      │
-    ┌────▼────┐           ┌─────▼─────┐         ┌──────▼──────┐
-    │Conversa │           │ Kanban    │         │ Mensagem    │
-    │Otimista │           │ Otimista  │         │ Otimista    │
-    │is_pontual│          │is_pontual │         │ exibida     │
-    │= true ✅│           │= true ✅  │         │ c/ label ⚡ │
-    └────┬────┘           └─────┬─────┘         └──────┬──────┘
-         │                      │                      │
-         │                      │                      │
-    ┌────▼────────────────┬─────▼───────────────┐      │
-    │      Evolution API  │                     │      │
-    │      (edge function)│                     │      │
-    └──────────┬──────────┴─────────────────────┘      │
-               │                                       │
-    ┌──────────▼──────────┐                            │
-    │ Salva no DB         │                            │
-    │ is_pontual = true   │◄───────────────────────────┘
-    └──────────┬──────────┘
-               │
-    ┌──────────▼──────────┐
-    │ Webhook Realtime    │
-    │ Atualiza mensagem   │
-    │ mantém is_pontual   │
-    └─────────────────────┘
+Desconectado
+    │
+    ├── 5 min ─────► 1º Alerta ao cliente
+    │
+    ├── 24h ───────► 2º Alerta (lembrete) ao cliente  
+    │
+    ├── 48h ───────► 3º Alerta + Escalação ao admin global
+    │                         │
+    │                         └──► ÚLTIMO ALERTA
+    │
+    └── > 48h ─────► ✋ PARA de enviar alertas
+                     (cliente decidiu manter desconectado)
 ```
 
----
+## Alterações Técnicas
+
+### Arquivo: `supabase/functions/check-instance-alerts/index.ts`
+
+**1. Adicionar constante de limite (linha 15)**
+```typescript
+const MAX_ALERT_DURATION_HOURS = 48; // Stop alerting after 2 days
+```
+
+**2. Adicionar filtro para instâncias com mais de 48h (linhas 99-128)**
+
+Na lógica de filtro, antes de permitir lembretes, verificar se já passou do limite máximo:
+
+```typescript
+// Filter instances - improved logic with reminder support
+const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
+  // Skip if manually disconnected
+  if (instance.manual_disconnect === true) {
+    console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: manual_disconnect=true`);
+    return false;
+  }
+
+  // NEW: Check if disconnected for more than MAX_ALERT_DURATION_HOURS - stop alerting
+  if (instance.disconnected_since) {
+    const hoursSinceDisconnect = (Date.now() - new Date(instance.disconnected_since).getTime()) / (1000 * 60 * 60);
+    if (hoursSinceDisconnect >= MAX_ALERT_DURATION_HOURS) {
+      console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: exceeded ${MAX_ALERT_DURATION_HOURS}h limit (${hoursSinceDisconnect.toFixed(1)}h disconnected)`);
+      return false;
+    }
+  }
+
+  // ... rest of the existing logic
+});
+```
+
+**3. Atualizar mensagens de rodapé dos e-mails (linhas 335-337)**
+
+Atualizar o texto informativo no e-mail:
+
+```typescript
+const footerMessage = isReminderAlert
+  ? 'Este é um lembrete automático. Você receberá um último alerta após 48h de desconexão.'
+  : 'Este alerta é enviado uma única vez por desconexão. Você receberá lembretes até 48h.';
+```
 
 ## Impacto
 
-- **Seguro**: Alteração de 1 linha em 1 arquivo
-- **Sem regressão**: Não afeta nenhuma outra funcionalidade
-- **Isolado**: Apenas adiciona parâmetro que já é esperado pela API
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Desconectado 15 dias | Recebe e-mail | **Não recebe** |
+| Desconectado 3 dias | Recebe e-mail | **Não recebe** |
+| Desconectado 47h | Recebe e-mail | Recebe e-mail |
+| Desconectado 24h | Recebe lembrete | Recebe lembrete |
+| Desconectado 5min | Recebe primeiro alerta | Recebe primeiro alerta |
 
 ## Resultado Esperado
 
-Após a correção:
-1. No Kanban, ao ativar modo pontual (⚡) e enviar mensagem
-2. A mensagem exibirá a label "⚡ Intervenção pontual" no topo do balão
-3. Comportamento idêntico à tela de Conversas
+1. Cliente recebe **no máximo 3 alertas**: 5min, 24h, 48h
+2. Após 48h, sistema **para de enviar** lembretes
+3. Admin global ainda recebe **uma** escalação quando atinge 48h
+4. Cliente que deseja manter desconectado não será mais importunado
+
