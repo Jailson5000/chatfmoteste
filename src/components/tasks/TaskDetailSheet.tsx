@@ -234,8 +234,8 @@ export function TaskDetailSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-180px)] mt-4 pr-4">
-          <div className="space-y-6">
+        <ScrollArea className="h-[calc(100vh-200px)] mt-4 px-1">
+          <div className="space-y-4 pr-3">
             {/* Status & Priority */}
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -394,7 +394,7 @@ export function TaskDetailSheet({
               ) : (
                 <div
                   className={cn(
-                    "p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[80px]",
+                    "p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[60px]",
                     !task.description && "text-muted-foreground"
                   )}
                   onClick={() => setIsEditingDescription(true)}
