@@ -1,80 +1,43 @@
 
-# Plano: Ajustar Layout do Painel de Detalhes da Tarefa
+# Plano: Corrigir Corte do Focus Ring à Esquerda
 
-## Problemas Identificados
+## Problema Identificado
 
-Analisando a captura de tela:
-
-1. **Lado esquerdo cortado**: O conteúdo parece estar encostando na borda esquerda do Sheet
-2. **Botão Excluir muito baixo**: A altura da ScrollArea é muito grande, empurrando o botão para fora da tela
+Os elementos focados (Status, Categoria, Descrição, Comentários) exibem um contorno vermelho (focus ring) que está sendo cortado no lado esquerdo devido ao padding insuficiente no container.
 
 ## Causa Raiz
 
-| Problema | Causa no Código |
-|----------|-----------------|
-| Corte à esquerda | `ScrollArea` com `pr-4` mas sem padding à esquerda equivalente |
-| Botão muito baixo | `ScrollArea` com `h-[calc(100vh-180px)]` muito generosa |
+Na última alteração, mudamos o padding de `pr-4` para `px-1`:
 
----
-
-## Correções Propostas
-
-### 1. Ajustar Padding da ScrollArea
-
-Linha 237:
 ```typescript
-// Antes
-<ScrollArea className="h-[calc(100vh-180px)] mt-4 pr-4">
-
-// Depois - Adicionar padding uniforme e reduzir altura
 <ScrollArea className="h-[calc(100vh-200px)] mt-4 px-1">
+  <div className="space-y-4 pr-3">
 ```
 
-### 2. Ajustar Espaçamento Interno
+O `px-1` (4px cada lado) é muito pequeno para acomodar o outline/ring que tipicamente tem 2px de largura + 2px de offset, totalizando ~4px mínimo necessário.
 
-Alterar o espaçamento do container interno (linha 238):
+## Solução
+
+Aumentar o padding à esquerda para `px-2` (8px cada lado) para garantir espaço suficiente:
+
+| Propriedade | Antes | Depois |
+|-------------|-------|--------|
+| ScrollArea padding | `px-1` | `px-2` |
+
 ```typescript
-// Antes
-<div className="space-y-6">
-
-// Depois - Reduzir espaçamento vertical para compactar
-<div className="space-y-4 pr-3">
+<ScrollArea className="h-[calc(100vh-200px)] mt-4 px-2">
+  <div className="space-y-4 pr-2">
 ```
 
-### 3. Reduzir Altura Mínima da Descrição
-
-A descrição tem `min-h-[80px]` que ocupa espaço desnecessário (linha 397):
-```typescript
-// Antes
-"p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[80px]"
-
-// Depois - Reduzir altura mínima
-"p-3 rounded-md border cursor-pointer transition-colors hover:bg-muted/50 group min-h-[60px]"
-```
-
----
-
-## Resumo das Alterações
+## Arquivo a Modificar
 
 | Arquivo | Linha | Alteração |
 |---------|-------|-----------|
-| `TaskDetailSheet.tsx` | 237 | `h-[calc(100vh-180px)] mt-4 pr-4` → `h-[calc(100vh-200px)] mt-4 px-1` |
-| `TaskDetailSheet.tsx` | 238 | `space-y-6` → `space-y-4 pr-3` |
-| `TaskDetailSheet.tsx` | 397 | `min-h-[80px]` → `min-h-[60px]` |
-
----
+| `TaskDetailSheet.tsx` | 237 | `px-1` → `px-2` |
+| `TaskDetailSheet.tsx` | 238 | `pr-3` → `pr-2` (manter proporção) |
 
 ## Resultado Esperado
 
-1. Conteúdo com padding uniforme (não corta à esquerda)
-2. Botão "Excluir Tarefa" visível mais acima na tela
-3. Layout mais compacto e equilibrado
-4. Nenhuma quebra nas funcionalidades já corrigidas (datas, alertas, optimistic updates)
-
----
-
-## Segurança
-
-- Alterações apenas de CSS/layout
-- Sem mudanças de lógica ou funcionalidade
-- Isolado ao componente `TaskDetailSheet`
+- Focus ring visível por completo em todos os lados
+- Layout equilibrado sem cortes visuais
+- Mantém todas as funcionalidades já corrigidas (datas, alertas, optimistic updates)
