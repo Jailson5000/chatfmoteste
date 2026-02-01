@@ -12,6 +12,7 @@ const ALERT_THRESHOLD_MINUTES = 5; // First alert after 5 min
 const CONNECTING_ALERT_THRESHOLD_MINUTES = 10; // Alert if stuck connecting for 10 min
 const REMINDER_THRESHOLD_HOURS = 24; // Send reminder after 24h if still disconnected
 const ADMIN_ESCALATION_HOURS = 48; // Escalate to global admin after 48h
+const MAX_ALERT_DURATION_HOURS = 48; // Stop alerting after 2 days - client decided to keep disconnected
 
 interface DisconnectedInstance {
   id: string;
@@ -95,12 +96,22 @@ serve(async (req) => {
 
     const rawInstances = [...(disconnectedInstances || []), ...(connectingInstances || [])];
 
-    // Filter instances - improved logic with reminder support
+    // Filter instances - improved logic with reminder support and max duration limit
     const instances = (rawInstances || []).filter((instance: DisconnectedInstance) => {
       // Skip if manually disconnected
       if (instance.manual_disconnect === true) {
         console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: manual_disconnect=true`);
         return false;
+      }
+
+      // NEW: Check if disconnected for more than MAX_ALERT_DURATION_HOURS - stop alerting
+      // If client hasn't reconnected after 2 days, they've decided to keep it disconnected
+      if (instance.disconnected_since) {
+        const hoursSinceDisconnect = (Date.now() - new Date(instance.disconnected_since).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceDisconnect >= MAX_ALERT_DURATION_HOURS) {
+          console.log(`[Check Instance Alerts] Skipping ${instance.instance_name}: exceeded ${MAX_ALERT_DURATION_HOURS}h limit (${hoursSinceDisconnect.toFixed(1)}h disconnected)`);
+          return false;
+        }
       }
 
       // For instances that already received first alert
@@ -333,8 +344,8 @@ serve(async (req) => {
         : 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'; // Red for alert
 
       const footerMessage = isReminderAlert
-        ? 'Este é um lembrete automático. Você receberá novos lembretes a cada 24h enquanto a conexão permanecer offline.'
-        : 'Este alerta é enviado uma única vez por desconexão. Você receberá um lembrete em 24h se não reconectar.';
+        ? 'Este é um lembrete automático. Você receberá um último alerta após 48h de desconexão, depois os alertas serão pausados.'
+        : 'Este alerta é enviado uma única vez por desconexão. Você receberá lembretes por até 48h.';
 
       const emailHtml = `
         <!DOCTYPE html>
