@@ -1831,6 +1831,7 @@ export function KanbanChatPanel({
               message: messageToSend,
               replyToWhatsAppMessageId: replyWhatsAppId,
               replyToMessageId: replyToId,
+              isPontual: wasPontualMode,
             },
           });
 
