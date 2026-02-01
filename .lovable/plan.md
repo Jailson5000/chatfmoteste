@@ -1,54 +1,139 @@
 
-# Plano: Corrigir Corte do Focus Ring no ScrollArea
+# Plano: Corrigir "Intervenção pontual" não aparecendo no Kanban
 
 ## Problema Identificado
 
-Analisando a estrutura:
+Na tela de **Conversas**, a mensagem de "Intervenção pontual" é exibida corretamente com a label amarela e ícone ⚡. No **Kanban**, a mesma mensagem aparece sem a label "Intervenção pontual" no topo.
 
-1. O `ScrollArea` usa `overflow-hidden` no Root (linha 18 do scroll-area.tsx)
-2. Mesmo com `px-2` no Root, o overflow corta qualquer elemento que ultrapasse os limites
-3. O focus ring (outline/ring) externo aos inputs é cortado porque está fora do espaço de padding
+## Causa Raiz
 
-## Estrutura Atual
+Ao comparar os dois arquivos, encontrei a diferença:
 
+| Arquivo | Linha | Parâmetro `isPontual` |
+|---------|-------|-----------------------|
+| `Conversations.tsx` | 1416 | ✅ `isPontual: wasPontualMode` |
+| `KanbanChatPanel.tsx` | 1827-1834 | ❌ **Falta o parâmetro** |
+
+**Código no Conversations.tsx (correto):**
+```typescript
+const response = await supabase.functions.invoke("evolution-api", {
+  body: {
+    action: "send_message_async",
+    conversationId: conversationId,
+    message: messageToSend,
+    replyToWhatsAppMessageId: replyWhatsAppId,
+    replyToMessageId: replyMessage?.id || null,
+    isPontual: wasPontualMode, // ✅ Presente
+  },
+});
 ```
-ScrollArea (Root) → overflow-hidden + px-2 ← padding aqui não ajuda!
-  └── Viewport → aqui está o conteúdo
-       └── div.space-y-4 → elementos com focus ring
+
+**Código no KanbanChatPanel.tsx (faltando):**
+```typescript
+const response = await supabase.functions.invoke("evolution-api", {
+  body: {
+    action: "send_message_async",
+    conversationId,
+    message: messageToSend,
+    replyToWhatsAppMessageId: replyWhatsAppId,
+    replyToMessageId: replyToId,
+    // ❌ isPontual está FALTANDO aqui
+  },
+});
 ```
 
-O problema é que o `px-2` está no **Root** que tem `overflow-hidden`, mas o padding precisa estar **dentro do Viewport** para criar espaço visual.
+A edge function `evolution-api` já está preparada para receber `isPontual` e salvá-lo no banco (linha 1676), mas o Kanban simplesmente não está enviando.
+
+---
 
 ## Solução
 
-Mover o padding do ScrollArea para o container interno:
+Adicionar `isPontual: wasPontualMode` na chamada da Evolution API no KanbanChatPanel.
 
-| Elemento | Antes | Depois |
-|----------|-------|--------|
-| ScrollArea | `px-2` | (remover) |
-| div interno | `pr-2` | `px-3` (padding uniforme) |
+| Arquivo | Linha | Alteração |
+|---------|-------|-----------|
+| `src/components/kanban/KanbanChatPanel.tsx` | 1827-1834 | Adicionar `isPontual: wasPontualMode` |
 
+**Antes (linha 1827-1834):**
 ```typescript
-// Antes
-<ScrollArea className="h-[calc(100vh-200px)] mt-4 px-2">
-  <div className="space-y-4 pr-2">
-
-// Depois  
-<ScrollArea className="h-[calc(100vh-200px)] mt-4">
-  <div className="space-y-4 px-3">
+const response = await supabase.functions.invoke("evolution-api", {
+  body: {
+    action: "send_message_async",
+    conversationId,
+    message: messageToSend,
+    replyToWhatsAppMessageId: replyWhatsAppId,
+    replyToMessageId: replyToId,
+  },
+});
 ```
 
-O padding `px-3` dentro do Viewport cria 12px de espaço em cada lado, suficiente para o focus ring (2px + 2px offset ≈ 4px).
+**Depois:**
+```typescript
+const response = await supabase.functions.invoke("evolution-api", {
+  body: {
+    action: "send_message_async",
+    conversationId,
+    message: messageToSend,
+    replyToWhatsAppMessageId: replyWhatsAppId,
+    replyToMessageId: replyToId,
+    isPontual: wasPontualMode, // Marcar como intervenção pontual
+  },
+});
+```
 
-## Arquivo a Modificar
+---
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/components/tasks/TaskDetailSheet.tsx` | Linha 237: remover `px-2` |
-| `src/components/tasks/TaskDetailSheet.tsx` | Linha 238: `pr-2` → `px-3` |
+## Fluxo da Correção
+
+```text
+                     ┌─────────────────────┐
+                     │  Usuário clica ⚡   │
+                     │  (Modo Pontual ON)  │
+                     └──────────┬──────────┘
+                                │
+                     ┌──────────▼──────────┐
+                     │  Envia mensagem     │
+                     │  wasPontualMode=true│
+                     └──────────┬──────────┘
+                                │
+         ┌──────────────────────┼──────────────────────┐
+         │                      │                      │
+    ┌────▼────┐           ┌─────▼─────┐         ┌──────▼──────┐
+    │Conversa │           │ Kanban    │         │ Mensagem    │
+    │Otimista │           │ Otimista  │         │ Otimista    │
+    │is_pontual│          │is_pontual │         │ exibida     │
+    │= true ✅│           │= true ✅  │         │ c/ label ⚡ │
+    └────┬────┘           └─────┬─────┘         └──────┬──────┘
+         │                      │                      │
+         │                      │                      │
+    ┌────▼────────────────┬─────▼───────────────┐      │
+    │      Evolution API  │                     │      │
+    │      (edge function)│                     │      │
+    └──────────┬──────────┴─────────────────────┘      │
+               │                                       │
+    ┌──────────▼──────────┐                            │
+    │ Salva no DB         │                            │
+    │ is_pontual = true   │◄───────────────────────────┘
+    └──────────┬──────────┘
+               │
+    ┌──────────▼──────────┐
+    │ Webhook Realtime    │
+    │ Atualiza mensagem   │
+    │ mantém is_pontual   │
+    └─────────────────────┘
+```
+
+---
+
+## Impacto
+
+- **Seguro**: Alteração de 1 linha em 1 arquivo
+- **Sem regressão**: Não afeta nenhuma outra funcionalidade
+- **Isolado**: Apenas adiciona parâmetro que já é esperado pela API
 
 ## Resultado Esperado
 
-- Focus ring visível por completo em todos os lados
-- O padding está **dentro** da área scrollável
-- Mantém todas as funcionalidades já corrigidas
+Após a correção:
+1. No Kanban, ao ativar modo pontual (⚡) e enviar mensagem
+2. A mensagem exibirá a label "⚡ Intervenção pontual" no topo do balão
+3. Comportamento idêntico à tela de Conversas
