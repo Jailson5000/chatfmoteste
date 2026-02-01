@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Task } from "@/hooks/useTasks";
 import { AlertTriangle, CheckCircle2, Clock, Users } from "lucide-react";
+import { parseDateLocal } from "@/lib/dateUtils";
 
 interface TaskDashboardProps {
   tasks: Task[];
@@ -27,26 +28,20 @@ export function TaskDashboard({ tasks }: TaskDashboardProps) {
     const inProgress = tasks.filter((t) => t.status === "in_progress").length;
     const todo = tasks.filter((t) => t.status === "todo").length;
 
-    const overdue = tasks.filter(
-      (t) =>
-        t.due_date &&
-        isPast(new Date(t.due_date)) &&
-        t.status !== "done"
-    ).length;
+    const overdue = tasks.filter((t) => {
+      const date = parseDateLocal(t.due_date);
+      return date && isPast(date) && t.status !== "done";
+    }).length;
 
-    const dueToday = tasks.filter(
-      (t) =>
-        t.due_date &&
-        isToday(new Date(t.due_date)) &&
-        t.status !== "done"
-    ).length;
+    const dueToday = tasks.filter((t) => {
+      const date = parseDateLocal(t.due_date);
+      return date && isToday(date) && t.status !== "done";
+    }).length;
 
-    const dueThisWeek = tasks.filter(
-      (t) =>
-        t.due_date &&
-        isWithinInterval(new Date(t.due_date), { start: weekStart, end: weekEnd }) &&
-        t.status !== "done"
-    ).length;
+    const dueThisWeek = tasks.filter((t) => {
+      const date = parseDateLocal(t.due_date);
+      return date && isWithinInterval(date, { start: weekStart, end: weekEnd }) && t.status !== "done";
+    }).length;
 
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 

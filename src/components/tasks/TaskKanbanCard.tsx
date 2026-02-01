@@ -14,6 +14,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Task, TaskPriority, TaskStatus, useTasks } from "@/hooks/useTasks";
+import { parseDateLocal } from "@/lib/dateUtils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,11 +90,9 @@ export function TaskKanbanCard({
 
   const priorityStyle = priorityStyles[task.priority];
   const isDone = task.status === "done";
-  const isOverdue =
-    task.due_date &&
-    isPast(new Date(task.due_date)) &&
-    !isDone;
-  const isDueToday = task.due_date && isToday(new Date(task.due_date));
+  const dueDateParsed = parseDateLocal(task.due_date);
+  const isOverdue = dueDateParsed && isPast(dueDateParsed) && !isDone;
+  const isDueToday = dueDateParsed && isToday(dueDateParsed);
 
   const handleStatusChange = (status: TaskStatus) => {
     updateTaskStatus.mutate({ taskId: task.id, status });
@@ -256,7 +255,7 @@ export function TaskKanbanCard({
                 {isOverdue && <AlertTriangle className="h-3 w-3" />}
                 <Calendar className="h-3 w-3" />
                 <span>
-                  {format(new Date(task.due_date), "dd/MM", { locale: ptBR })}
+                  {dueDateParsed && format(dueDateParsed, "dd/MM", { locale: ptBR })}
                 </span>
               </div>
             )}
