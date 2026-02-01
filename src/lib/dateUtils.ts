@@ -9,19 +9,17 @@
 export function parseDateLocal(dateStr: string | null | undefined): Date | null {
   if (!dateStr) return null;
   
-  // Se for ISO timestamp completo, usar diretamente
-  if (dateStr.includes('T')) {
-    const date = new Date(dateStr);
-    return isNaN(date.getTime()) ? null : date;
-  }
+  // Extrair apenas a parte da data (YYYY-MM-DD), ignorando hora e timezone
+  // Funciona com: "2026-02-10", "2026-02-10T00:00:00", "2026-02-10T00:00:00+00:00"
+  const dateOnly = dateStr.split('T')[0].split(' ')[0];
   
-  // Se for formato YYYY-MM-DD, parsear como local
-  const parts = dateStr.split('-');
+  const parts = dateOnly.split('-');
   if (parts.length !== 3) return null;
   
   const [year, month, day] = parts.map(Number);
   if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
   
+  // Criar data como horário LOCAL (não UTC)
   return new Date(year, month - 1, day);
 }
 
