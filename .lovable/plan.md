@@ -1,163 +1,86 @@
 
+# Plano: Corrigir Bug de Data "1 Dia a Menos" Definitivamente
 
-# Plano: Correções Completas do Módulo de Tarefas
+## Problema Identificado
 
-## Problemas Identificados
+A data retrocede 1 dia após alguns segundos porque:
 
-| # | Problema | Causa |
-|---|----------|-------|
-| 1 | Data mostra 1 dia a menos (ex: seleciona 28, mostra 27) | `toISOString()` converte para UTC antes de extrair a data |
-| 2 | Alerta de tarefa quando muda a data | Precisa apagar logs antigos de alerta para permitir novo envio |
-| 3 | Alertas não são apagados ao excluir tarefa | Já resolvido - tem `ON DELETE CASCADE` |
-| 4 | Demora nas alterações | Múltiplas queries sequenciais e falta de `optimistic update` |
+1. A coluna `due_date` é do tipo `timestamptz` (timestamp with time zone)
+2. Quando o banco retorna `2026-02-10T00:00:00+00:00` (meia-noite UTC)
+3. A função `parseDateLocal` detecta o `T` e usa `new Date()` que interpreta como UTC
+4. Ao exibir no Brasil (UTC-3), `2026-02-10 00:00:00 UTC` vira `2026-02-09 21:00:00 local`
+5. O `format()` mostra dia 09 em vez de dia 10
 
----
-
-## Correção 1: Bug de Data (1 dia a menos)
-
-### Causa Raiz
-
-Quando o usuário seleciona uma data no calendário (ex: 28/02/2026), o componente `Calendar` retorna um objeto `Date` local:
-
-```javascript
-// Usuário seleciona 28/02/2026 no Brasil (UTC-3)
-date = new Date(2026, 1, 28) // 28/02/2026 00:00:00 (horário local)
-
-// Ao salvar:
-date.toISOString() // "2026-02-27T03:00:00.000Z" ← Converte para UTC!
-date.toISOString().split("T")[0] // "2026-02-27" ← DIA ERRADO!
-```
-
-### Solução
-
-Criar função `formatDateForDatabase` que extrai ano/mês/dia locais diretamente:
+## Causa Raiz no Código
 
 ```typescript
-// Em src/lib/dateUtils.ts
-export function formatDateForDatabase(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+// src/lib/dateUtils.ts - PROBLEMA
+if (dateStr.includes('T')) {
+  const date = new Date(dateStr);  // ← Interpreta como UTC!
+  return isNaN(date.getTime()) ? null : date;
 }
 ```
 
-### Arquivos a Modificar
-
-| Arquivo | Linha | Mudança |
-|---------|-------|---------|
-| `src/lib/dateUtils.ts` | Novo | Adicionar `formatDateForDatabase` |
-| `src/components/tasks/TaskDetailSheet.tsx` | 175 | `date.toISOString().split("T")[0]` → `formatDateForDatabase(date)` |
-| `src/components/tasks/NewTaskDialog.tsx` | 101 | `data.due_date?.toISOString()` → `formatDateForDatabase(data.due_date!)` |
-
 ---
 
-## Correção 2: Alerta quando muda a data
+## Solução
 
-Quando a data de vencimento é alterada, os logs de alerta antigos devem ser removidos para permitir que um novo alerta seja enviado na nova data.
-
-### Solução
-
-No hook `useTasks.tsx`, ao atualizar `due_date`, deletar os registros correspondentes em `task_alert_logs`:
+Modificar `parseDateLocal` para SEMPRE extrair apenas a parte da data (YYYY-MM-DD) e parsear como horário local, ignorando qualquer componente de hora ou timezone:
 
 ```typescript
-// Se a data foi alterada, limpar logs de alerta antigos
-if (updates.due_date !== undefined) {
-  await supabase
-    .from("task_alert_logs")
-    .delete()
-    .eq("task_id", id);
+export function parseDateLocal(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null;
+  
+  // Extrair apenas a parte da data (YYYY-MM-DD)
+  // Funciona com: "2026-02-10", "2026-02-10T00:00:00", "2026-02-10 00:00:00+00"
+  const dateOnly = dateStr.split('T')[0].split(' ')[0];
+  
+  const parts = dateOnly.split('-');
+  if (parts.length !== 3) return null;
+  
+  const [year, month, day] = parts.map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+  
+  // Criar data como horário LOCAL (não UTC)
+  return new Date(year, month - 1, day);
 }
 ```
 
-### Arquivo a Modificar
+---
 
-| Arquivo | Linha | Mudança |
-|---------|-------|---------|
-| `src/hooks/useTasks.tsx` | ~234 | Adicionar lógica para limpar `task_alert_logs` |
+## Fluxo Corrigido
+
+| Etapa | Antes (Bug) | Depois (Corrigido) |
+|-------|-------------|-------------------|
+| Usuário seleciona | 10/02/2026 | 10/02/2026 |
+| Salva no DB | `"2026-02-10"` | `"2026-02-10"` |
+| DB retorna | `"2026-02-10T00:00:00+00"` | `"2026-02-10T00:00:00+00"` |
+| `parseDateLocal` extrai | `new Date("2026-02-10T00:00:00+00")` → UTC | `"2026-02-10"` → `new Date(2026, 1, 10)` local |
+| `format()` exibe | **09/02/2026** (errado) | **10/02/2026** (correto) |
 
 ---
 
-## Correção 3: Alertas ao excluir tarefa
+## Sobre Alertas
 
-**Status**: Já implementado corretamente!
+O sistema de alertas já está funcionando corretamente:
 
-A tabela `task_alert_logs` já possui `ON DELETE CASCADE` na foreign key `task_id`:
-
-```sql
-FOREIGN KEY (task_id) REFERENCES internal_tasks(id) ON DELETE CASCADE
-```
-
-Quando uma tarefa é excluída, os logs de alerta são automaticamente removidos.
+- Quando `due_date` é alterada, o hook `useTasks` deleta os registros antigos de `task_alert_logs`
+- Isso permite que a edge function `process-task-due-alerts` envie novos alertas para a nova data
+- A exclusão de tarefas já remove os logs automaticamente via `ON DELETE CASCADE`
 
 ---
 
-## Correção 4: Lentidão nas alterações
+## Arquivo a Modificar
 
-### Causa
-
-O hook `useTasks` usa `invalidateQueries` após cada mutation, forçando um refetch completo da lista. Isso causa:
-
-1. Delay visual (espera o servidor responder)
-2. Múltiplas queries desnecessárias
-3. Percepção de lentidão
-
-### Solução
-
-Implementar **Optimistic Updates** para atualização instantânea da UI:
-
-```typescript
-const updateTask = useMutation({
-  mutationFn: async (input: UpdateTaskInput) => { /* ... */ },
-  onMutate: async (input) => {
-    // Cancelar queries em andamento
-    await queryClient.cancelQueries({ queryKey: ["internal_tasks"] });
-    
-    // Salvar estado anterior
-    const previousTasks = queryClient.getQueryData(["internal_tasks", lawFirm?.id]);
-    
-    // Atualizar cache otimisticamente
-    queryClient.setQueryData(["internal_tasks", lawFirm?.id], (old: Task[]) =>
-      old?.map(task => task.id === input.id ? { ...task, ...input } : task)
-    );
-    
-    return { previousTasks };
-  },
-  onError: (err, input, context) => {
-    // Reverter em caso de erro
-    queryClient.setQueryData(["internal_tasks", lawFirm?.id], context?.previousTasks);
-  },
-  onSettled: () => {
-    // Revalidar para garantir sincronização
-    queryClient.invalidateQueries({ queryKey: ["internal_tasks"] });
-  },
-});
-```
-
-### Benefícios
-
-- UI atualiza instantaneamente
-- Experiência mais fluida
-- Rollback automático se houver erro
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/lib/dateUtils.ts` | Reescrever `parseDateLocal` para extrair apenas YYYY-MM-DD |
 
 ---
 
-## Resumo das Alterações
-
-| Arquivo | Tipo | Descrição |
-|---------|------|-----------|
-| `src/lib/dateUtils.ts` | Adicionar função | `formatDateForDatabase()` |
-| `src/components/tasks/TaskDetailSheet.tsx` | Correção | Usar `formatDateForDatabase` |
-| `src/components/tasks/NewTaskDialog.tsx` | Correção | Usar `formatDateForDatabase` |
-| `src/hooks/useTasks.tsx` | Correção | Limpar alert logs ao mudar data |
-| `src/hooks/useTasks.tsx` | Otimização | Adicionar optimistic updates |
-
----
-
-## Segurança e Isolamento
+## Segurança
 
 - Sem alterações no banco de dados
-- Sem alterações em RLS policies
-- Alterações isoladas ao módulo de tarefas
-- Não afeta outros módulos (chat, kanban clientes, agenda)
-
+- Sem alterações em RLS
+- Correção isolada apenas na função de parsing de data
+- Não afeta outros módulos do sistema
