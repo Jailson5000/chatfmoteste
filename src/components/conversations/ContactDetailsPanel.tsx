@@ -59,6 +59,7 @@ import {
   StickyNote,
   RefreshCw,
   Loader2,
+  Megaphone,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -115,6 +116,17 @@ interface ContactDetailsPanelProps {
     last_message_at: string | null;
     assigned_to?: string | null;
     ai_summary?: string | null;
+    origin?: string | null;
+    origin_metadata?: {
+      ad_title?: string | null;
+      ad_body?: string | null;
+      ad_thumbnail?: string | null;
+      ad_media_url?: string | null;
+      ad_source_id?: string | null;
+      ad_source_url?: string | null;
+      ad_source_type?: string | null;
+      detected_at?: string | null;
+    } | null;
     client?: {
       id?: string;
       email?: string | null;
@@ -766,6 +778,48 @@ export function ContactDetailsPanel({
             </div>
 
             <Separator />
+
+            {/* CTWA Ad Info Section */}
+            {conversation.origin === 'whatsapp_ctwa' && conversation.origin_metadata && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-2 mb-2">
+                  <Megaphone className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                    Via Anúncio do Facebook
+                  </span>
+                </div>
+                {conversation.origin_metadata.ad_title && (
+                  <p className="text-sm text-blue-600 dark:text-blue-400">
+                    {conversation.origin_metadata.ad_title}
+                  </p>
+                )}
+                {conversation.origin_metadata.ad_body && (
+                  <p className="text-xs text-blue-500 dark:text-blue-400/80 mt-1 line-clamp-2">
+                    {conversation.origin_metadata.ad_body}
+                  </p>
+                )}
+                {conversation.origin_metadata.ad_thumbnail && (
+                  <img 
+                    src={conversation.origin_metadata.ad_thumbnail} 
+                    alt="Preview do anúncio" 
+                    className="mt-2 rounded max-h-24 w-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                )}
+                {conversation.origin_metadata.ad_source_url && (
+                  <a 
+                    href={conversation.origin_metadata.ad_source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-500 hover:underline mt-2 inline-block"
+                  >
+                    Ver anúncio original →
+                  </a>
+                )}
+              </div>
+            )}
 
             {/* Atendimento Section */}
             <div className="space-y-3">
