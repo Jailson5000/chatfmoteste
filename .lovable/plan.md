@@ -1,43 +1,54 @@
 
-# Plano: Corrigir Corte do Focus Ring à Esquerda
+# Plano: Corrigir Corte do Focus Ring no ScrollArea
 
 ## Problema Identificado
 
-Os elementos focados (Status, Categoria, Descrição, Comentários) exibem um contorno vermelho (focus ring) que está sendo cortado no lado esquerdo devido ao padding insuficiente no container.
+Analisando a estrutura:
 
-## Causa Raiz
+1. O `ScrollArea` usa `overflow-hidden` no Root (linha 18 do scroll-area.tsx)
+2. Mesmo com `px-2` no Root, o overflow corta qualquer elemento que ultrapasse os limites
+3. O focus ring (outline/ring) externo aos inputs é cortado porque está fora do espaço de padding
 
-Na última alteração, mudamos o padding de `pr-4` para `px-1`:
+## Estrutura Atual
 
-```typescript
-<ScrollArea className="h-[calc(100vh-200px)] mt-4 px-1">
-  <div className="space-y-4 pr-3">
+```
+ScrollArea (Root) → overflow-hidden + px-2 ← padding aqui não ajuda!
+  └── Viewport → aqui está o conteúdo
+       └── div.space-y-4 → elementos com focus ring
 ```
 
-O `px-1` (4px cada lado) é muito pequeno para acomodar o outline/ring que tipicamente tem 2px de largura + 2px de offset, totalizando ~4px mínimo necessário.
+O problema é que o `px-2` está no **Root** que tem `overflow-hidden`, mas o padding precisa estar **dentro do Viewport** para criar espaço visual.
 
 ## Solução
 
-Aumentar o padding à esquerda para `px-2` (8px cada lado) para garantir espaço suficiente:
+Mover o padding do ScrollArea para o container interno:
 
-| Propriedade | Antes | Depois |
-|-------------|-------|--------|
-| ScrollArea padding | `px-1` | `px-2` |
+| Elemento | Antes | Depois |
+|----------|-------|--------|
+| ScrollArea | `px-2` | (remover) |
+| div interno | `pr-2` | `px-3` (padding uniforme) |
 
 ```typescript
+// Antes
 <ScrollArea className="h-[calc(100vh-200px)] mt-4 px-2">
   <div className="space-y-4 pr-2">
+
+// Depois  
+<ScrollArea className="h-[calc(100vh-200px)] mt-4">
+  <div className="space-y-4 px-3">
 ```
+
+O padding `px-3` dentro do Viewport cria 12px de espaço em cada lado, suficiente para o focus ring (2px + 2px offset ≈ 4px).
 
 ## Arquivo a Modificar
 
-| Arquivo | Linha | Alteração |
-|---------|-------|-----------|
-| `TaskDetailSheet.tsx` | 237 | `px-1` → `px-2` |
-| `TaskDetailSheet.tsx` | 238 | `pr-3` → `pr-2` (manter proporção) |
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/components/tasks/TaskDetailSheet.tsx` | Linha 237: remover `px-2` |
+| `src/components/tasks/TaskDetailSheet.tsx` | Linha 238: `pr-2` → `px-3` |
 
 ## Resultado Esperado
 
 - Focus ring visível por completo em todos os lados
-- Layout equilibrado sem cortes visuais
-- Mantém todas as funcionalidades já corrigidas (datas, alertas, optimistic updates)
+- O padding está **dentro** da área scrollável
+- Mantém todas as funcionalidades já corrigidas
