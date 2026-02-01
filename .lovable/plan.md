@@ -1,63 +1,136 @@
 
-# Plano: Corrigir Chat Interno (Imagens e Duplicação)
+# Plano: Corrigir Exibição de Imagens Internas e Melhorar Velocidade
 
 ## Problemas Identificados
 
-### Problema 1: Imagens não funcionam
-Quando o usuário envia uma imagem no modo interno:
-- A imagem é salva com `message_type: "document"` em vez de `"image"`
-- O `ImageViewer` não suporta o protocolo `internal-chat-files://`
-- Resultado: mostra "Imagem não disponível" ❌
+### Problema 1: Imagens Internas Não Funcionam ❌
+**Causa raiz identificada na linha 940 do `ImageViewer`:**
 
-### Problema 2: Arquivos duplicados
-Quando o usuário envia um arquivo interno:
-1. O código insere no banco de dados
-2. O código adiciona ao state local com ID diferente
-3. O Realtime detecta o INSERT e tenta adicionar novamente
-4. A deduplicação falha porque os IDs são diferentes
-- Resultado: arquivo aparece 2 vezes até dar F5 ❌
+```typescript
+const imageSrc = needsDecryption ? decryptedSrc : src;
+```
+
+Esta lógica está errada para arquivos internos:
+- Para arquivos internos: `needsDecryption = false` (correto)
+- Então `imageSrc = src` (que é `internal-chat-files://...` - URL inválida!)
+- O `decryptedSrc` É preenchido pelo useEffect mas **nunca é usado**!
+
+### Problema 2: Duplicação ✅
+Já foi corrigido na última alteração e você confirmou que não duplica mais.
+
+### Problema 3: Demora para Aparecer
+O fluxo atual é:
+1. Usuário envia arquivo interno
+2. Upload para storage (~500ms)
+3. Insert no banco de dados
+4. Realtime detecta INSERT (debounce 100ms)
+5. Mensagem aparece no chat
+
+**Solução:** Adicionar UI otimista - mostrar mensagem com loading imediatamente.
 
 ---
 
-## Solução Proposta
+## Correções a Implementar
 
-### Correção 1: Suporte a Imagens Internas
+### Correção 1: Exibição de Imagens Internas
 
-Modificar o `handleInternalFileUpload` para detectar o tipo correto de mídia:
+**Arquivo:** `src/components/conversations/MessageBubble.tsx`
+**Linhas:** 940 e 974
+
+Alterar a lógica de `imageSrc` para considerar também `isInternalFile`:
+
+```typescript
+// ANTES (linha 940):
+const imageSrc = needsDecryption ? decryptedSrc : src;
+
+// DEPOIS:
+// Use decryptedSrc for both WhatsApp decryption AND internal files (signed URLs)
+const imageSrc = (needsDecryption || isInternalFile) ? decryptedSrc : src;
+```
+
+E ajustar a condição de erro (linha 974):
+
+```typescript
+// ANTES:
+if (error || (!imageSrc && needsDecryption)) {
+
+// DEPOIS:
+// Show error if: explicit error, or waiting for signed URL/decryption but none provided
+if (error || (!imageSrc && (needsDecryption || isInternalFile))) {
+```
+
+### Correção 2: Velocidade de Exibição (UI Otimista)
+
+**Arquivo:** `src/pages/Conversations.tsx`
+**Função:** `handleInternalFileUpload`
+
+Adicionar mensagem otimista com preview local antes do upload:
+
+```typescript
+const handleInternalFileUpload = async (file: File) => {
+  // 1. Criar preview local (URL temporária)
+  const localPreviewUrl = URL.createObjectURL(file);
+  const tempId = crypto.randomUUID();
+  
+  // 2. Adicionar mensagem otimista IMEDIATAMENTE
+  const optimisticMessage = {
+    id: tempId,
+    content: isImage ? "" : `📎 ${file.name}`,
+    message_type: isImage ? "image" : "document",
+    media_url: localPreviewUrl, // Preview local (blob URL)
+    media_mime_type: file.type,
+    is_from_me: true,
+    sender_type: "human",
+    is_internal: true,
+    created_at: new Date().toISOString(),
+    status: "sending",
+    _clientTempId: tempId,
+  };
+  
+  setMessages(prev => [...prev, optimisticMessage]);
+  
+  // 3. Fazer upload e insert (em background)
+  // ... resto da lógica
+  
+  // 4. Quando INSERT completar, Realtime vai reconciliar
+  // O merge vai preservar o _clientTempId para evitar duplicação
+};
+```
+
+---
+
+## Fluxo Após Correções
 
 ```text
-Se arquivo é imagem → message_type = "image"
-Se arquivo é documento → message_type = "document"
-```
-
-Modificar o `ImageViewer` para suportar arquivos internos (signed URLs):
-
-```text
-Se src começa com "internal-chat-files://"
-  → Gerar signed URL do storage privado
-  → Exibir imagem normalmente
-```
-
-### Correção 2: Eliminar Duplicação
-
-Remover a adição manual ao state local e deixar o Realtime cuidar disso:
-
-**Antes:**
-```typescript
-// Insert no banco
-const { error } = await supabase.from("messages").insert({...});
-
-// ❌ PROBLEMA: Adiciona manualmente ao state
-setMessages(prev => [...prev, newMessage]);
-```
-
-**Depois:**
-```typescript
-// Insert no banco
-const { error } = await supabase.from("messages").insert({...});
-
-// ✅ NÃO adicionar ao state - Realtime vai cuidar disso
-// Mensagem aparece via subscription de INSERT
+Usuário envia imagem interna
+         │
+         v  (IMEDIATO - ~10ms)
+┌─────────────────────────────┐
+│ Mensagem otimista aparece   │
+│ com preview local (blob:)   │
+│ Status: "Enviando..."       │
+└─────────────────────────────┘
+         │
+         v  (Background - 500ms)
+┌─────────────────────────────┐
+│ Upload para storage         │
+│ Insert no banco             │
+└─────────────────────────────┘
+         │
+         v  (Realtime - 100ms)
+┌─────────────────────────────┐
+│ Merge: substitui blob URL   │
+│ pelo internal-chat-files:// │
+│ Status: "Enviado" ✓         │
+└─────────────────────────────┘
+         │
+         v
+┌─────────────────────────────┐
+│ ImageViewer detecta         │
+│ internal-chat-files://      │
+│ → Gera signed URL           │
+│ → Exibe imagem real         │
+└─────────────────────────────┘
 ```
 
 ---
@@ -66,114 +139,24 @@ const { error } = await supabase.from("messages").insert({...});
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Conversations.tsx` | 1. Detectar tipo de mídia (image/document) na função `handleInternalFileUpload`<br>2. Remover `setMessages(prev => [...prev, newMessage])` para evitar duplicação |
-| `src/components/conversations/MessageBubble.tsx` | Adicionar suporte a `internal-chat-files://` no `ImageViewer` |
-
----
-
-## Detalhes Técnicos
-
-### Arquivo: `src/pages/Conversations.tsx`
-**Linhas 1462-1527 - `handleInternalFileUpload`**
-
-```typescript
-// ANTES (linha 1489-1490):
-message_type: "document",
-
-// DEPOIS:
-// Detectar se é imagem
-const isImage = file.type.startsWith('image/');
-const messageType = isImage ? "image" : "document";
-// ...
-message_type: messageType,
-```
-
-**Remover linhas 1501-1516** (adição manual ao state):
-```typescript
-// REMOVER ESTE BLOCO:
-const newMessage: Message = {...};
-setMessages(prev => [...prev, newMessage]);
-```
-
-### Arquivo: `src/components/conversations/MessageBubble.tsx`
-**Linhas 816-962 - `ImageViewer`**
-
-Adicionar lógica para arquivos internos:
-
-```typescript
-// Verificar se é arquivo interno
-const isInternalFile = src.startsWith('internal-chat-files://');
-
-// Se for interno, gerar signed URL
-useEffect(() => {
-  if (!isInternalFile) return;
-  
-  const loadInternalImage = async () => {
-    const filePath = src.replace('internal-chat-files://', '');
-    const { data, error } = await supabase.storage
-      .from('internal-chat-files')
-      .createSignedUrl(filePath, 60);
-    
-    if (data?.signedUrl) {
-      setDecryptedSrc(data.signedUrl);
-    } else {
-      setError(true);
-    }
-  };
-  
-  loadInternalImage();
-}, [src, isInternalFile]);
-```
-
----
-
-## Fluxo Corrigido
-
-```text
-Usuário envia arquivo interno
-         │
-         v
-┌─────────────────────────────┐
-│ handleInternalFileUpload    │
-│ 1. Upload para storage      │
-│ 2. Detecta tipo (image/doc) │
-│ 3. Insert no banco          │
-│ 4. NÃO adiciona ao state ✓  │
-└─────────────────────────────┘
-         │
-         v
-┌─────────────────────────────┐
-│ Realtime Subscription       │
-│ Detecta INSERT              │
-│ Adiciona ao state (único)   │
-└─────────────────────────────┘
-         │
-         v
-┌─────────────────────────────┐
-│ MessageBubble renderiza     │
-│ - Se imagem → ImageViewer   │
-│   → Gera signed URL         │
-│   → Exibe imagem ✓          │
-│ - Se documento → DocViewer  │
-│   (já funciona)             │
-└─────────────────────────────┘
-```
+| `src/components/conversations/MessageBubble.tsx` | Corrigir lógica de `imageSrc` para usar `decryptedSrc` quando `isInternalFile = true` (linhas 940, 974) |
+| `src/pages/Conversations.tsx` | Adicionar UI otimista em `handleInternalFileUpload` para exibir mensagem imediatamente com preview local |
 
 ---
 
 ## Segurança
 
 - ✅ Sem alteração em RLS
-- ✅ Arquivos continuam no bucket privado
-- ✅ Signed URLs expiram em 60 segundos
-- ✅ Sem risco de regressão em canais WhatsApp
-- ✅ Mantém compatibilidade com arquivos existentes
+- ✅ Bucket continua privado
+- ✅ Signed URLs com expiração de 5 minutos
+- ✅ Não afeta canais WhatsApp (fluxo separado)
+- ✅ Não afeta documentos internos (já funcionam)
 
 ---
 
 ## Resultado Esperado
 
-1. **Imagens internas**: Exibem corretamente no chat ✓
-2. **Arquivos internos**: Aparecem apenas 1 vez ✓
-3. **Canais WhatsApp**: Não afetados (fluxo separado) ✓
-4. **Documentos internos**: Continuam funcionando (já OK) ✓
+1. **Imagens internas exibem corretamente** ✓
+2. **Mensagem aparece instantaneamente** (preview local)
+3. **Sem duplicação** (reconciliação por `_clientTempId`)
+4. **Transição suave** de preview → imagem real
