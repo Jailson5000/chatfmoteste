@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Task, TaskPriority, TaskStatus, useTasks } from "@/hooks/useTasks";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, MessageSquare } from "lucide-react";
+import { parseDateLocal } from "@/lib/dateUtils";
 
 interface TaskListViewProps {
   tasks: Task[];
@@ -82,13 +83,10 @@ export function TaskListView({ tasks, onTaskClick }: TaskListViewProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tasks.map((task) => {
-            const isOverdue =
-              task.due_date &&
-              isPast(new Date(task.due_date)) &&
-              task.status !== "done";
-            const isDueToday =
-              task.due_date && isToday(new Date(task.due_date));
+        {tasks.map((task) => {
+            const dueDateParsed = parseDateLocal(task.due_date);
+            const isOverdue = dueDateParsed && isPast(dueDateParsed) && task.status !== "done";
+            const isDueToday = dueDateParsed && isToday(dueDateParsed);
 
             return (
               <TableRow
@@ -154,7 +152,7 @@ export function TaskListView({ tasks, onTaskClick }: TaskListViewProps) {
                       )}
                     >
                       {isOverdue && <AlertTriangle className="h-3 w-3" />}
-                      {format(new Date(task.due_date), "dd/MM/yyyy", {
+                      {dueDateParsed && format(dueDateParsed, "dd/MM/yyyy", {
                         locale: ptBR,
                       })}
                     </div>

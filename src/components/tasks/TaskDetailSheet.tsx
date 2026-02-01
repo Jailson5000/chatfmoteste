@@ -58,6 +58,7 @@ import { useTaskActivityLog } from "@/hooks/useTaskActivityLog";
 import { TaskCategory } from "@/hooks/useTaskCategories";
 import { EditableAssigneesPopover } from "./EditableAssigneesPopover";
 import { cn } from "@/lib/utils";
+import { parseDateLocal } from "@/lib/dateUtils";
 
 interface TeamMember {
   id: string;
@@ -93,11 +94,6 @@ const actionLabels: Record<string, string> = {
   comment_added: "Adicionou comentário",
 };
 
-// Helper para evitar bug de fuso horário ao parsear datas YYYY-MM-DD
-const parseDateLocal = (dateStr: string): Date => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day); // month é 0-indexed
-};
 
 export function TaskDetailSheet({
   task,
@@ -322,8 +318,8 @@ export function TaskDetailSheet({
                     )}
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {task.due_date
-                      ? format(parseDateLocal(task.due_date), "dd/MM/yyyy", {
+                    {task.due_date && parseDateLocal(task.due_date)
+                      ? format(parseDateLocal(task.due_date)!, "dd/MM/yyyy", {
                           locale: ptBR,
                         })
                       : "Adicionar data"}
@@ -332,7 +328,7 @@ export function TaskDetailSheet({
                 <PopoverContent className="w-auto p-0" align="start">
                   <Calendar
                     mode="single"
-                    selected={task.due_date ? parseDateLocal(task.due_date) : undefined}
+                    selected={task.due_date ? parseDateLocal(task.due_date) ?? undefined : undefined}
                     onSelect={handleDueDateChange}
                     locale={ptBR}
                     className="pointer-events-auto"

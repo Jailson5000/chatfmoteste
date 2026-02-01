@@ -16,6 +16,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Task, TaskPriority } from "@/hooks/useTasks";
 import { cn } from "@/lib/utils";
+import { parseDateLocal } from "@/lib/dateUtils";
 
 interface TaskCalendarViewProps {
   tasks: Task[];
@@ -40,9 +41,10 @@ export function TaskCalendarView({ tasks, onTaskClick }: TaskCalendarViewProps) 
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
   const getTasksForDay = (date: Date) =>
-    tasks.filter(
-      (task) => task.due_date && isSameDay(new Date(task.due_date), date)
-    );
+    tasks.filter((task) => {
+      const taskDate = parseDateLocal(task.due_date);
+      return taskDate && isSameDay(taskDate, date);
+    });
 
   const weekDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
