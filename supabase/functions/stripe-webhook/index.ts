@@ -198,12 +198,13 @@ serve(async (req) => {
           invoiceId: invoice.id,
           customerId: invoice.customer,
           amountPaid: invoice.amount_paid,
+          subscriptionId: invoice.subscription,
         });
 
         // Find company by Stripe customer ID
         const { data: subscription } = await supabase
           .from("company_subscriptions")
-          .select("company_id")
+          .select("company_id, stripe_subscription_id")
           .eq("stripe_customer_id", invoice.customer as string)
           .single();
 
@@ -217,17 +218,38 @@ serve(async (req) => {
             })
             .eq("id", subscription.company_id);
 
-          // Update subscription status
+          // Update subscription status with last_payment_at
+          const subscriptionUpdateData: Record<string, unknown> = { 
+            status: "active",
+            last_payment_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+
+          // If invoice has subscription, fetch billing cycle dates from Stripe
+          if (invoice.subscription && subscription.stripe_subscription_id) {
+            try {
+              const stripeSubscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
+              subscriptionUpdateData.current_period_start = new Date(stripeSubscription.current_period_start * 1000).toISOString();
+              subscriptionUpdateData.current_period_end = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+              subscriptionUpdateData.next_payment_at = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+              logStep("Fetched billing cycle from subscription on invoice.paid", {
+                periodStart: subscriptionUpdateData.current_period_start,
+                periodEnd: subscriptionUpdateData.current_period_end,
+              });
+            } catch (subErr) {
+              logStep("WARNING: Could not fetch subscription for billing cycle", { error: subErr });
+            }
+          }
+
           await supabase
             .from("company_subscriptions")
-            .update({ 
-              status: "active",
-              last_payment_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
+            .update(subscriptionUpdateData)
             .eq("company_id", subscription.company_id);
 
-          logStep("Company marked as active after payment", { companyId: subscription.company_id });
+          logStep("Company marked as active after payment", { 
+            companyId: subscription.company_id,
+            nextPayment: subscriptionUpdateData.next_payment_at 
+          });
         }
         break;
       }

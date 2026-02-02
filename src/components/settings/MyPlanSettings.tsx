@@ -32,6 +32,7 @@ import { useAddonRequests } from "@/hooks/useAddonRequests";
 import { formatCurrency, ADDITIONAL_PRICING, calculateAdditionalCosts, AdditionalBreakdown } from "@/lib/billing-config";
 import { format, differenceInDays, isPast } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { parseDateLocal } from "@/lib/dateUtils";
 import { toast } from "sonner";
 import { generateInvoicePDF } from "@/lib/invoiceGenerator";
 import {
@@ -511,17 +512,26 @@ export function MyPlanSettings() {
                   </div>
                 </div>
               </div>
-            ) : companyData?.subscription?.next_payment_at ? (
+            ) : companyData?.subscription?.current_period_start || companyData?.subscription?.next_payment_at ? (
               <div className="p-3 rounded-lg bg-muted/50 border border-border">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Calendar className="h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      Próximo vencimento: {format(new Date(companyData.subscription.next_payment_at), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                    </p>
-                    <p className="text-xs">
-                      Ciclo de 30 dias (dia {format(new Date(companyData.subscription.next_payment_at), "d")} de cada mês)
-                    </p>
+                  <div className="space-y-0.5">
+                    {companyData?.subscription?.current_period_start && (
+                      <p className="text-xs">
+                        Ciclo iniciado em {format(parseDateLocal(companyData.subscription.current_period_start) || new Date(), "d 'de' MMMM", { locale: ptBR })}
+                      </p>
+                    )}
+                    {companyData?.subscription?.next_payment_at && (
+                      <>
+                        <p className="text-sm font-medium text-foreground">
+                          Próximo vencimento: {format(parseDateLocal(companyData.subscription.next_payment_at) || new Date(), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                        </p>
+                        <p className="text-xs">
+                          Renovação automática (dia {format(parseDateLocal(companyData.subscription.next_payment_at) || new Date(), "d")} de cada mês)
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -741,8 +751,8 @@ export function MyPlanSettings() {
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {invoice.paymentDate 
-                          ? `Pago em ${format(new Date(invoice.paymentDate), "dd/MM/yyyy", { locale: ptBR })}`
-                          : `Vence em ${format(new Date(invoice.dueDate), "dd/MM/yyyy", { locale: ptBR })}`
+                          ? `Pago em ${format(parseDateLocal(invoice.paymentDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}`
+                          : `Vence em ${format(parseDateLocal(invoice.dueDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}`
                         }
                         {invoice.billingType && ` • ${invoice.billingType}`}
                       </div>

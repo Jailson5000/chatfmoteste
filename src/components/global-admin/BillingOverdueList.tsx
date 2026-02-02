@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { parseDateLocal } from "@/lib/dateUtils";
 
 interface PaymentRecord {
   paymentId: string;
@@ -108,7 +109,7 @@ export function BillingOverdueList({
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Venceu em: {format(new Date(payment.dueDate), "dd/MM/yyyy", { locale: ptBR })}
+                      Venceu em: {format(parseDateLocal(payment.dueDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}
                     </p>
                   </div>
                 </div>
