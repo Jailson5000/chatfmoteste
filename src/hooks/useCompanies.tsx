@@ -382,6 +382,54 @@ export function useCompanies() {
     },
   });
 
+  const suspendCompany = useMutation({
+    mutationFn: async ({ companyId, reason }: { companyId: string; reason?: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { error } = await supabase
+        .from("companies")
+        .update({
+          status: 'suspended',
+          suspended_at: new Date().toISOString(),
+          suspended_by: user?.id,
+          suspended_reason: reason || 'Inadimplência',
+        })
+        .eq("id", companyId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Empresa suspensa com sucesso");
+    },
+    onError: (error) => {
+      toast.error("Erro ao suspender empresa: " + error.message);
+    },
+  });
+
+  const unsuspendCompany = useMutation({
+    mutationFn: async (companyId: string) => {
+      const { error } = await supabase
+        .from("companies")
+        .update({
+          status: 'active',
+          suspended_at: null,
+          suspended_by: null,
+          suspended_reason: null,
+        })
+        .eq("id", companyId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      toast.success("Empresa liberada com sucesso");
+    },
+    onError: (error) => {
+      toast.error("Erro ao liberar empresa: " + error.message);
+    },
+  });
+
   // Filter companies by approval status
   const pendingApprovalCompanies = companies.filter(c => c.approval_status === 'pending_approval');
   const approvedCompanies = companies.filter(c => c.approval_status === 'approved');
@@ -402,5 +450,7 @@ export function useCompanies() {
     resendInitialAccess,
     approveCompany,
     rejectCompany,
+    suspendCompany,
+    unsuspendCompany,
   };
 }

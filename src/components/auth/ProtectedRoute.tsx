@@ -6,6 +6,7 @@ import PendingApproval from "@/pages/PendingApproval";
 import CompanyBlocked from "@/pages/CompanyBlocked";
 import TenantMismatch from "@/pages/TenantMismatch";
 import TrialExpired from "@/pages/TrialExpired";
+import CompanySuspended from "@/pages/CompanySuspended";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -17,16 +18,29 @@ interface ProtectedRouteProps {
  * Security checks (in order):
  * 1. Authentication - Must be logged in
  * 2. Company approval status - Company must be approved
- * 3. Trial expiration - Trial must not be expired
- * 4. Tenant subdomain validation - User must access via their company's subdomain
- * 5. Password change requirement - Must change password if flagged
+ * 3. Company suspension status - Company must not be suspended
+ * 4. Trial expiration - Trial must not be expired
+ * 5. Tenant subdomain validation - User must access via their company's subdomain
+ * 6. Password change requirement - Must change password if flagged
  * 
  * CRITICAL: Each client can ONLY access their own subdomain.
  * Access to other subdomains is blocked.
  */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, mustChangePassword } = useAuth();
-  const { approval_status, rejection_reason, company_subdomain, trial_type, trial_ends_at, trial_expired, plan_name, loading: approvalLoading } = useCompanyApproval();
+  const { 
+    approval_status, 
+    rejection_reason, 
+    company_subdomain, 
+    trial_type, 
+    trial_ends_at, 
+    trial_expired, 
+    plan_name,
+    plan_price,
+    company_status,
+    suspended_reason,
+    loading: approvalLoading 
+  } = useCompanyApproval();
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
 
   // Show loading while checking auth
@@ -66,6 +80,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   // BLOCK: Company rejected
   if (approval_status === 'rejected') {
     return <CompanyBlocked reason={rejection_reason || undefined} />;
+  }
+
+  // BLOCK: Company suspended for non-payment
+  if (company_status === 'suspended') {
+    console.log('[ProtectedRoute] Blocking: Company suspended for non-payment');
+    return <CompanySuspended reason={suspended_reason} planName={plan_name} planPrice={plan_price} />;
   }
 
   // BLOCK: Trial expired

@@ -2350,6 +2350,9 @@ export type Database = {
           rejected_by: string | null
           rejection_reason: string | null
           status: string
+          suspended_at: string | null
+          suspended_by: string | null
+          suspended_reason: string | null
           template_cloned_at: string | null
           template_version: number | null
           trial_ends_at: string | null
@@ -2399,6 +2402,9 @@ export type Database = {
           rejected_by?: string | null
           rejection_reason?: string | null
           status?: string
+          suspended_at?: string | null
+          suspended_by?: string | null
+          suspended_reason?: string | null
           template_cloned_at?: string | null
           template_version?: number | null
           trial_ends_at?: string | null
@@ -2448,6 +2454,9 @@ export type Database = {
           rejected_by?: string | null
           rejection_reason?: string | null
           status?: string
+          suspended_at?: string | null
+          suspended_by?: string | null
+          suspended_reason?: string | null
           template_cloned_at?: string | null
           template_version?: number | null
           trial_ends_at?: string | null
