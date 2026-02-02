@@ -1,176 +1,130 @@
 
-# Plano: Correção do Fluxo Trial → Stripe e Teste em Modo de Produção
+# Diagnóstico: Envio de Email e Erro no Pagamento
 
-## 📋 Diagnóstico Completo
+## Problema 1: Email de Acesso Mostra "Erro" (Badge Vermelha)
 
-### 1. Sobre o "Modo Teste"
-**Sim, você está em modo de teste.** A prova está na imagem do boleto:
-- Aviso: "Este é um boleto de teste"
-- A URL da fatura contém `test_` (ex: `invoice.stripe.com/i/acct_1Sn4EdPuIhszhOCI/test_...`)
+### Causa Raiz
+O erro acontece porque o email `miautest03@gmail.com` **já existe** no sistema (usuario já cadastrado anteriormente).
 
-Quando for para produção, você precisará:
-- Usar chaves de API do modo Live (sk_live_...)
-- Recriar os Price IDs em modo Live no Dashboard do Stripe
+Quando o sistema tenta criar o trial novamente:
+1. A Edge Function `create-company-admin` tenta criar um novo usuário
+2. Supabase Auth retorna erro: `"A user with this email address has already been registered"`
+3. O sistema salva `initial_access_email_error: "Failed to create user"`
+4. Badge mostra "Erro"
 
----
-
-### 2. Erro "Edge Function returned a non-2xx status code"
-
-O erro aconteceu durante o fluxo de **Trial** (não de pagamento). O log mostra:
-
+**Log do erro:**
 ```
-[register-company] Admin creation failed: "A user with this email address has already been registered"
-```
-
-**Causa:** O usuário tentou registrar um trial com email já existente no sistema.
-
----
-
-### 3. Problema Principal: Cliente Stripe não é criado no Trial
-
-**Fluxo Atual:**
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│ TRIAL (7 dias grátis)                                                    │
-│                                                                          │
-│  1. Usuário clica "Trial Grátis"                                         │
-│  2. register-company cria: law_firm → company → admin_user               │
-│  3. ❌ NÃO CRIA CLIENTE NO STRIPE                                        │
-│  4. Após 7 dias, trial expira                                            │
-│  5. Usuário quer pagar → precisa fazer checkout do zero                  │
-│  6. Stripe cria novo cliente → sem histórico/data de cadastro            │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Problema:** Quando o trial expira e o usuário quer assinar, o Stripe não sabe que ele já era cliente há 7 dias.
-
----
-
-## 🔧 Solução Proposta
-
-### Criar Cliente Stripe durante o registro do Trial
-
-**Novo Fluxo:**
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│ TRIAL (7 dias grátis) - NOVO FLUXO                                      │
-│                                                                          │
-│  1. Usuário clica "Trial Grátis"                                         │
-│  2. register-company cria: law_firm → company → admin_user               │
-│  3. ✅ CRIAR CLIENTE NO STRIPE (com metadata: trial_start_date)          │
-│  4. ✅ SALVAR stripe_customer_id no banco                                │
-│  5. Após 7 dias, trial expira                                            │
-│  6. Usuário quer pagar → checkout usa o MESMO cliente Stripe             │
-│  7. Stripe tem todo histórico: data cadastro, trial, etc.                │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 📝 Alterações Necessárias
-
-### 1. Modificar `register-company` para criar cliente Stripe no trial
-
-```typescript
-// Após criar law_firm, company e admin_user, criar cliente Stripe
-if (shouldAutoApprove) {
-  try {
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (stripeKey) {
-      const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
-      
-      // Verificar se já existe cliente com este email
-      const existingCustomers = await stripe.customers.list({ 
-        email: admin_email, 
-        limit: 1 
-      });
-      
-      let stripeCustomerId: string;
-      
-      if (existingCustomers.data.length > 0) {
-        stripeCustomerId = existingCustomers.data[0].id;
-        console.log(`[register-company] Found existing Stripe customer: ${stripeCustomerId}`);
-      } else {
-        // Criar novo cliente Stripe
-        const customer = await stripe.customers.create({
-          email: admin_email,
-          name: company_name,
-          phone: phone || undefined,
-          metadata: {
-            company_id: company.id,
-            law_firm_id: lawFirm.id,
-            trial_started_at: new Date().toISOString(),
-            trial_ends_at: trialEndsAt,
-            source: "self_service_trial",
-          },
-        });
-        stripeCustomerId = customer.id;
-        console.log(`[register-company] Created Stripe customer: ${stripeCustomerId}`);
-      }
-      
-      // Salvar stripe_customer_id na tabela company_subscriptions
-      await supabase.from('company_subscriptions').upsert({
-        company_id: company.id,
-        stripe_customer_id: stripeCustomerId,
-        status: 'trialing',
-        current_period_start: new Date().toISOString(),
-        current_period_end: trialEndsAt,
-        billing_type: 'stripe',
-      }, { onConflict: 'company_id' });
-      
-    }
-  } catch (stripeError) {
-    console.error('[register-company] Error creating Stripe customer:', stripeError);
-    // Não falhar o registro - apenas logar o erro
-  }
+[register-company] Admin creation failed: {
+  error: "Failed to create user",
+  details: "A user with this email address has already been registered"
 }
 ```
 
-### 2. Modificar `create-checkout-session` para usar cliente existente
+**Situação atual no banco:**
+- Empresa: `Miau test` (id: 93e0ce06-...)
+- Email: `miautest03@gmail.com`
+- `initial_access_email_sent`: false
+- `initial_access_email_error`: "Failed to create user"
 
-O código atual já faz isso corretamente:
+### Solução
+Existe botão "Reenviar Email" no Admin Global. Porém, para esse caso específico o usuário admin já existe - precisa usar esse usuário existente, não criar um novo.
+
+A solução permanente seria detectar que o email já existe e **vincular** ao usuário existente em vez de tentar criar um novo.
+
+---
+
+## Problema 2: Erro "Edge Function returned a non-2xx status code" no Checkout
+
+### Causa Raiz
+**Constraint no banco de dados está errada!**
+
+A tabela `company_subscriptions` tem uma constraint:
+```sql
+CHECK (billing_type IN ('monthly', 'yearly'))
+```
+
+Porém, o código `register-company` tenta inserir:
 ```typescript
-// Check if customer already exists
-const customers = await stripe.customers.list({ email: adminEmail, limit: 1 });
-let customerId: string | undefined;
+billing_type: 'stripe'  // ❌ Não é permitido pela constraint!
+```
 
-if (customers.data.length > 0) {
-  customerId = customers.data[0].id;
-  console.log("[CREATE-CHECKOUT] Found existing customer:", customerId);
+**Log do erro:**
+```
+[register-company] Error saving Stripe customer ID: {
+  code: "23514",
+  message: 'new row for relation "company_subscriptions" violates check constraint 
+           "company_subscriptions_billing_type_check"'
+}
+```
+
+O cliente Stripe foi criado com sucesso (`cus_Tu0adlMyb2ZcEp`), mas não foi salvo no banco de dados porque o `billing_type: 'stripe'` violou a constraint.
+
+---
+
+## Correções Necessárias
+
+### Correção 1: Atualizar constraint da tabela `company_subscriptions`
+
+Alterar a constraint para aceitar mais valores:
+```sql
+ALTER TABLE company_subscriptions 
+DROP CONSTRAINT company_subscriptions_billing_type_check;
+
+ALTER TABLE company_subscriptions 
+ADD CONSTRAINT company_subscriptions_billing_type_check 
+CHECK (billing_type IN ('monthly', 'yearly', 'stripe', 'asaas', 'trialing'));
+```
+
+### Correção 2: Ajustar código da Edge Function
+
+Alternativamente, podemos usar um valor compatível:
+- Usar `billing_type: 'monthly'` como padrão durante o trial
+- Ou simplesmente não definir o campo (deixar null/default)
+
+### Correção 3: Tratar email duplicado no registro
+
+Quando o email já existe, vincular ao usuário existente:
+```typescript
+// Se o usuário já existe, recuperar em vez de criar
+const { data: existingUser } = await supabase
+  .from('profiles')
+  .select('id, law_firm_id')
+  .eq('email', admin_email)
+  .single();
+
+if (existingUser && existingUser.law_firm_id) {
+  // Usuário já tem conta, não criar outra
+  return { error: "Email já cadastrado. Use o login ou recuperação de senha." };
 }
 ```
 
 ---
 
-## ✅ Benefícios
+## Resumo das Correções
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| Cliente Stripe no trial | ❌ Não criado | ✅ Criado no registro |
-| Data de cadastro | Data do pagamento | Data real do trial |
-| Histórico no Stripe | Só após 1º pagamento | Desde o trial |
-| Conversão trial→pago | Novo cliente | Mesmo cliente |
-| Relatórios Stripe | Incompletos | Completos |
+| Problema | Arquivo | Correção |
+|----------|---------|----------|
+| Constraint `billing_type` inválida | Migração SQL | Adicionar 'stripe', 'trialing' à constraint |
+| Email duplicado não tratado | `register-company` | Retornar erro amigável ou vincular ao existente |
+| `billing_type: 'stripe'` inválido | `register-company` | Usar 'monthly' ou remover o campo |
 
 ---
 
-## 📁 Arquivos a Modificar
+## Fluxo de Email (Funcionando Corretamente)
 
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/register-company/index.ts` | Adicionar criação de cliente Stripe e upsert em company_subscriptions |
+O sistema de email está **correto** - o problema é a criação do admin que falhou:
 
----
-
-## ⚠️ Sobre o Modo de Produção
-
-Para sair do modo teste:
-1. No Dashboard Stripe, alterne para **Live Mode**
-2. Crie novos Products/Prices em Live Mode
-3. Atualize os Price IDs em `create-checkout-session` e `admin-create-stripe-subscription`
-4. Configure o webhook apontando para a mesma URL
-5. Use a chave `sk_live_...` como secret `STRIPE_SECRET_KEY`
-
-**Recomendação:** Mantenha em modo teste até validar todo o fluxo trial → pagamento.
+```text
+register-company
+     │
+     ├── Cria law_firm ✅
+     ├── Cria company ✅
+     ├── Cria admin via create-company-admin
+     │         │
+     │         ├── Usuário já existe? ❌ FALHA AQUI
+     │         ├── Gera senha temporária
+     │         ├── Cria usuário no Supabase Auth
+     │         └── Envia email via Resend (suporte@miauchat.com.br)
+     │
+     └── Cria cliente Stripe ✅ (mas não salva por causa da constraint)
+```
