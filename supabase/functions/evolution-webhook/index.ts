@@ -873,6 +873,21 @@ interface MessageData {
       };
       contextInfo?: ContextInfo;
     };
+    // Shared contact (vCard) - single contact
+    contactMessage?: {
+      displayName?: string;
+      vcard?: string;
+      contextInfo?: ContextInfo;
+    };
+    // Shared contacts (multiple vCards)
+    contactsArrayMessage?: {
+      displayName?: string;
+      contacts?: Array<{
+        displayName?: string;
+        vcard?: string;
+      }>;
+      contextInfo?: ContextInfo;
+    };
     // WABA: Template messages (marketing/utility templates sent via official API)
     templateMessage?: {
       templateId?: string;
@@ -4451,6 +4466,53 @@ serve(async (req) => {
             mediaType: messageType,
             contentLength: messageContent.length,
             buttonCount: hydrated?.hydratedButtons?.length || 0
+          });
+        } else if (data.message?.contactMessage) {
+          // Shared contact (vCard) - single contact
+          messageType = 'contact';
+          const contact = data.message.contactMessage;
+          const displayName = contact.displayName || '';
+          
+          // Extract phone number from vCard (TEL field)
+          const phoneMatch = contact.vcard?.match(/TEL[^:]*:([+\d\s\-()]+)/i);
+          const phone = phoneMatch ? phoneMatch[1].replace(/\s/g, '') : '';
+          
+          // Format readable content
+          messageContent = phone 
+            ? `📇 Contato: ${displayName}\n📞 ${phone}`
+            : `📇 Contato: ${displayName}`;
+            
+          logDebug('CONTACT', 'Contact message received', { 
+            requestId, 
+            displayName, 
+            hasVcard: !!contact.vcard,
+            phone 
+          });
+        } else if (data.message?.contactsArrayMessage) {
+          // Shared contacts (multiple vCards)
+          messageType = 'contact';
+          const contactsArray = data.message.contactsArrayMessage;
+          const contacts = contactsArray.contacts || [];
+          
+          if (contacts.length === 1) {
+            // Single contact in array
+            const contact = contacts[0];
+            const displayName = contact.displayName || contactsArray.displayName || '';
+            const phoneMatch = contact.vcard?.match(/TEL[^:]*:([+\d\s\-()]+)/i);
+            const phone = phoneMatch ? phoneMatch[1].replace(/\s/g, '') : '';
+            
+            messageContent = phone 
+              ? `📇 Contato: ${displayName}\n📞 ${phone}`
+              : `📇 Contato: ${displayName}`;
+          } else {
+            // Multiple contacts
+            const names = contacts.map(c => c.displayName || 'Contato').join(', ');
+            messageContent = `📇 ${contacts.length} contatos: ${names}`;
+          }
+          
+          logDebug('CONTACT', 'Contacts array message received', { 
+            requestId, 
+            count: contacts.length 
           });
         }
 

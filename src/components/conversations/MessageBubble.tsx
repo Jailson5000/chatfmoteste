@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown, Star, Trash2, MoreVertical, Smile, StickyNote } from "lucide-react";
+import { Bot, Check, CheckCheck, Clock, FileText, Download, Reply, Play, Pause, Loader2, RotateCcw, AlertCircle, X, Mic, Lock, Zap, FileAudio, ChevronDown, Star, Trash2, MoreVertical, Smile, StickyNote, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderWithLinks } from "@/lib/linkify";
 import { useState, useRef, ReactNode, useEffect, useCallback, memo, useReducer } from "react";
@@ -1136,8 +1136,54 @@ function VideoPlayer({
   );
 }
 
+// Contact card viewer for shared vCard contacts
+function ContactCardViewer({ content, isFromMe }: { content: string; isFromMe?: boolean }) {
+  // Parse content formatted by backend: "📇 Contato: Name\n📞 +55..."
+  const lines = content.split('\n');
+  const nameLine = lines.find(l => l.includes('Contato:') || l.includes('contatos:'));
+  const phoneLine = lines.find(l => l.includes('📞'));
+  
+  // Handle multiple contacts
+  const isMultiple = nameLine?.includes('contatos:');
+  
+  let name = 'Contato';
+  if (isMultiple && nameLine) {
+    // Format: "📇 3 contatos: Nome1, Nome2, Nome3"
+    name = nameLine.replace(/📇\s*/g, '').trim();
+  } else if (nameLine) {
+    name = nameLine.replace(/📇\s*Contato:\s*/i, '').trim();
+  }
+  
+  const phone = phoneLine?.replace(/📞\s*/g, '').trim() || '';
+
+  return (
+    <div className={cn(
+      "flex items-center gap-3 p-3 rounded-lg border",
+      isFromMe 
+        ? "bg-primary-foreground/10 border-primary-foreground/20" 
+        : "bg-background/50 border-border/50"
+    )}>
+      <div className={cn(
+        "h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0",
+        isFromMe ? "bg-primary-foreground/20" : "bg-primary/20"
+      )}>
+        <User className={cn(
+          "h-5 w-5",
+          isFromMe ? "text-primary-foreground" : "text-primary"
+        )} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{name}</p>
+        {phone && (
+          <p className="text-xs text-muted-foreground">{phone}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Document viewer component with decryption support for .enc files
-function DocumentViewer({ 
+function DocumentViewer({
   src, 
   mimeType,
   whatsappMessageId,
@@ -1727,6 +1773,11 @@ export function MessageBubble({
           content={content}
         />
       );
+    }
+
+    // Contact card (vCard) - shared contact messages
+    if (messageType === 'contact' && content) {
+      return <ContactCardViewer content={content} isFromMe={isFromMe} />;
     }
 
     return null;
