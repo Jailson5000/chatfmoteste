@@ -248,7 +248,7 @@ serve(async (req) => {
       }
     }
 
-    // Check if email is already registered
+    // Check if email is already registered in companies table
     const { data: existingEmail } = await supabase
       .from('companies')
       .select('id')
@@ -258,6 +258,24 @@ serve(async (req) => {
     if (existingEmail) {
       return new Response(
         JSON.stringify({ error: 'Este email já está cadastrado no sistema' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check if email already exists in Supabase Auth (profiles table)
+    // This prevents the "email already registered" error from auth.admin.createUser
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id, law_firm_id')
+      .eq('email', admin_email)
+      .maybeSingle();
+
+    if (existingProfile) {
+      console.log(`[register-company] Email already exists in profiles: ${admin_email}`);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Este email já possui uma conta. Use o login ou recuperação de senha.' 
+        }),
         { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -473,6 +491,7 @@ serve(async (req) => {
           }
           
           // Save stripe_customer_id to company_subscriptions
+          // Use 'monthly' as default billing_type (compatible with constraint)
           const { error: subscriptionError } = await supabase
             .from('company_subscriptions')
             .upsert({
@@ -481,7 +500,7 @@ serve(async (req) => {
               status: 'trialing',
               current_period_start: now,
               current_period_end: trialEndsAt,
-              billing_type: 'stripe',
+              billing_type: 'monthly', // Use 'monthly' instead of 'stripe' for compatibility
               created_at: now,
               updated_at: now,
             }, { onConflict: 'company_id' });
