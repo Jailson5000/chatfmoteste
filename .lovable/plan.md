@@ -1,152 +1,54 @@
 
-# Plano: Corrigir Exclusão Completa de Empresa no Admin Global
+# Plano: Correções Finais para Fluxo de Pagamento Stripe
 
-## Diagnóstico
+## Diagnóstico Atual
 
-### Situação Atual
-Quando você "apaga" uma empresa no Admin Global, o sistema:
+### Sobre as Chaves (Confirmado)
+**Sim, são duas chaves diferentes e AMBAS estão configuradas:**
 
-| O que acontece | Status |
-|----------------|--------|
-| Deleta `companies` | ✅ Sim (se não tiver erros de FK) |
-| Deleta `law_firms` | ❌ **NÃO** |
-| Deleta usuários `auth.users` | ❌ **NÃO** |
-| Limpa `profiles` | ❌ **NÃO** |
-| Deleta n8n workflow | ✅ Sim |
+| Chave | Formato | Uso | Status |
+|-------|---------|-----|--------|
+| `STRIPE_SECRET_KEY` | `sk_test_...` / `sk_live_...` | Criar clientes, checkouts, assinaturas | ✅ Configurado |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_...` | Validar assinatura dos webhooks | ✅ Configurado |
 
-### Dados Órfãos Encontrados para `miautest03@gmail.com`
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│ auth.users                                                              │
-│   id: 7406c011-90f7-40b7-86a7-338b790bf2d8                              │
-│   email: miautest03@gmail.com                                           │
-│   created_at: 2026-01-28 (5 dias atrás - registro anterior!)            │
-├─────────────────────────────────────────────────────────────────────────┤
-│ profiles                                                                │
-│   id: 7406c011-90f7-40b7-86a7-338b790bf2d8                              │
-│   law_firm_id: NULL (foi desvinculado, mas não deletado)                │
-├─────────────────────────────────────────────────────────────────────────┤
-│ law_firms (AINDA EXISTE!)                                               │
-│   id: 6403c3c5-b8ea-4999-9ffb-16f49f414baa                              │
-│   name: "Miau test"                                                      │
-├─────────────────────────────────────────────────────────────────────────┤
-│ companies (AINDA EXISTE!)                                               │
-│   id: 93e0ce06-44fd-4d94-a727-38c6aca52d9c                              │
-│   name: "Miau test"                                                      │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**Nota importante:** O usuário foi criado em 28/01, antes do trial de 02/02. Isso significa que houve uma tentativa anterior de registro.
+### Constraint do Banco (Atualizada)
+A constraint `billing_type_check` já foi atualizada e aceita: `'monthly', 'yearly', 'stripe', 'asaas', 'trialing'` ✅
 
 ---
 
-## Solução Proposta
+## Problema Encontrado: Coluna Faltando
 
-### Criar uma Edge Function dedicada: `delete-company-full`
-
-Esta função fará a exclusão completa e segura:
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│ delete-company-full (Nova Edge Function)                                │
-│                                                                          │
-│ Entrada: company_id, delete_users: boolean                              │
-│                                                                          │
-│ Passos:                                                                  │
-│ 1. Validar que chamador é super_admin                                   │
-│ 2. Buscar company e law_firm_id                                         │
-│ 3. Deletar n8n workflow (se existir)                                    │
-│ 4. Listar todos profiles vinculados ao law_firm                         │
-│ 5. Se delete_users=true:                                                │
-│    - Para cada profile: deletar de auth.users via admin API             │
-│ 6. Deletar company (CASCADE deleta company_subscriptions, addon_requests)│
-│ 7. Deletar law_firm (CASCADE deleta todas as 80+ tabelas relacionadas)  │
-│ 8. Criar audit log                                                       │
-│ 9. Retornar resumo da limpeza                                           │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Fluxo de Exclusão
-
-```text
-law_firms → ON DELETE CASCADE → 80+ tabelas (conversas, mensagens, clientes, etc)
-         → ON DELETE SET NULL → profiles (desvincula, mas não deleta)
-
-auth.users → Precisa ser deletado via auth.admin.deleteUser()
-          → Automaticamente deleta o profile vinculado
-```
-
----
-
-## Alterações Necessárias
-
-### 1. Nova Edge Function: `supabase/functions/delete-company-full/index.ts`
+O arquivo `stripe-webhook/index.ts` tenta usar uma coluna que **não existe**:
 
 ```typescript
-// Pseudocódigo
-serve(async (req) => {
-  // Validar super_admin
-  const { company_id, delete_users = true } = await req.json();
-  
-  // Buscar company e law_firm
-  const company = await supabase.from('companies').select('*, law_firm:law_firms(*)').eq('id', company_id).single();
-  
-  // Deletar n8n workflow
-  if (company.n8n_workflow_id) { ... }
-  
-  // Listar usuários do law_firm
-  const profiles = await supabase.from('profiles').select('id').eq('law_firm_id', company.law_firm_id);
-  
-  // Deletar usuários do auth (opcional)
-  if (delete_users) {
-    for (const profile of profiles) {
-      await supabaseAdmin.auth.admin.deleteUser(profile.id);
-    }
-  }
-  
-  // Deletar law_firm (CASCADE deleta company e todas as outras tabelas)
-  await supabase.from('law_firms').delete().eq('id', company.law_firm_id);
-  
-  // Audit log
-  await supabase.from('audit_logs').insert({ action: 'COMPANY_FULL_DELETE', ... });
-  
-  return { success: true, deleted_users: profiles.length };
-});
+// Linha 297-300 - Quando assinatura é cancelada
+.update({ 
+  status: "cancelled",
+  cancelled_at: new Date().toISOString(),  // ❌ COLUNA NÃO EXISTE
+  updated_at: new Date().toISOString()
+})
 ```
 
-### 2. Atualizar `useCompanies.tsx`
-
-Modificar `deleteCompany` para chamar a nova Edge Function em vez de deletar só a company.
+Quando o Stripe envia um evento `customer.subscription.deleted`, o webhook falha porque tenta atualizar uma coluna inexistente.
 
 ---
 
-## Limpeza Imediata dos Dados Órfãos
+## Correções Necessárias
 
-Para limpar os dados existentes de `miautest03@gmail.com`, podemos usar as ferramentas já existentes:
+### 1. Adicionar Coluna `cancelled_at`
 
-### Opção 1: Usar `purge-user-by-email` (já existe!)
-
-Esta Edge Function já existe e faz:
-- Deleta de `member_departments`
-- Deleta de `user_roles`
-- Deleta de `profiles`
-- Deleta de `admin_user_roles`
-- Deleta de `admin_profiles`
-- Deleta do `auth.users`
-
-Mas **NÃO** deleta company/law_firm.
-
-### Opção 2: Deletar manualmente via SQL
-
-Para limpar os dados órfãos atuais:
+Migração SQL:
 ```sql
--- 1. Deletar law_firm (CASCADE deleta company e ~80 tabelas)
-DELETE FROM law_firms WHERE id = '6403c3c5-b8ea-4999-9ffb-16f49f414baa';
-
--- 2. Deletar usuário do auth (via Edge Function purge-user-by-email)
--- Isso remove auth.users + profiles
+ALTER TABLE company_subscriptions 
+ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
 ```
+
+### 2. Verificar se há outros campos faltando
+
+Analisando o webhook, ele também pode usar:
+- `last_payment_at` → ✅ Existe
+- `status` → ✅ Existe
+- `updated_at` → ✅ Existe
 
 ---
 
@@ -154,19 +56,18 @@ DELETE FROM law_firms WHERE id = '6403c3c5-b8ea-4999-9ffb-16f49f414baa';
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/delete-company-full/index.ts` | **CRIAR** - Nova Edge Function para exclusão completa |
-| `src/hooks/useCompanies.tsx` | **MODIFICAR** - Usar nova Edge Function |
-| (limpeza manual) | Executar limpeza dos dados órfãos existentes |
+| Migração SQL | Adicionar coluna `cancelled_at` |
 
 ---
 
-## Benefícios
+## Por que o erro "non-2xx" ao clicar em pagar?
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| Deleta company | ✅ | ✅ |
-| Deleta law_firm | ❌ | ✅ |
-| Deleta auth.users | ❌ | ✅ (opcional) |
-| Limpa profiles | ❌ | ✅ |
-| Audit log | ❌ | ✅ |
-| Dados órfãos | Acumulam | Zero |
+O erro anterior era causado pela constraint `billing_type_check` que já foi corrigida. 
+
+**Para testar agora:**
+1. Deletar o usuário órfão `miautest03@gmail.com` via `purge-user-by-email`
+2. Deletar o law_firm órfão via SQL ou nova função `delete-company-full`
+3. Criar um novo trial com email limpo
+4. Tentar assinar
+
+Se ainda houver erro, precisamos ver os logs específicos da função `generate-payment-link` ou `register-company`.
