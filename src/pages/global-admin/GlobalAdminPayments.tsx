@@ -369,25 +369,43 @@ export default function GlobalAdminPayments() {
               <TabsTrigger value="stripe" className="flex items-center gap-2">
                 <CreditCard className="h-4 w-4" />
                 Stripe
-                {metrics?.stripe.connected && (
+                {metrics?.stripe?.connected && (
                   <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
                 )}
               </TabsTrigger>
               <TabsTrigger value="asaas" className="flex items-center gap-2">
                 <CreditCard className="h-4 w-4" />
                 ASAAS
-                {metrics?.asaas.connected && (
+                {metrics?.asaas?.connected && (
                   <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
                 )}
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="stripe">
-              {metrics && renderProviderMetrics(metrics.stripe, "Stripe")}
+              {metrics?.stripe && renderProviderMetrics(metrics.stripe, "Stripe")}
+              {metrics && !metrics.stripe && (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <XCircle className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">Stripe não configurado</h3>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Configure a API key nas configurações para ver as métricas
+                  </p>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="asaas">
-              {metrics && renderProviderMetrics(metrics.asaas, "ASAAS")}
+              {metrics?.asaas && renderProviderMetrics(metrics.asaas, "ASAAS")}
+              {metrics && !metrics.asaas && (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <XCircle className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">ASAAS não configurado</h3>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Configure a API key nas configurações para ver as métricas
+                  </p>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </TabsContent>
