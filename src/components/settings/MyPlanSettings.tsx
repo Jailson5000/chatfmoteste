@@ -62,11 +62,11 @@ export function MyPlanSettings() {
     instances: 0,
   });
 
-  // Fetch ASAAS invoices
+  // Fetch Stripe invoices
   const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useQuery({
-    queryKey: ["asaas-invoices", lawFirm?.id],
+    queryKey: ["stripe-invoices", lawFirm?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("list-asaas-invoices");
+      const { data, error } = await supabase.functions.invoke("list-stripe-invoices");
       if (error) throw error;
       return data;
     },

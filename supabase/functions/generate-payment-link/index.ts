@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
 /**
- * Generate Payment Link
+ * Generate Payment Link (Stripe)
  * 
- * Creates an ASAAS payment link for an existing company.
+ * Creates a Stripe Checkout Session for an existing company.
  * Used by trial users to subscribe or by expired trial users to pay.
  */
 
@@ -12,6 +13,30 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Price IDs from Stripe Dashboard
+const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
+  "BASIC": {
+    monthly: "price_BASIC_MONTHLY", // TODO: Create in Stripe Dashboard
+    yearly: "price_BASIC_YEARLY",
+  },
+  "STARTER": {
+    monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw",
+    yearly: "price_1Sn4K7PuIhszhOCItPywPXua",
+  },
+  "PROFESSIONAL": {
+    monthly: "price_1Sn4I3PuIhszhOCIkzaV5obi",
+    yearly: "price_1Sn4KcPuIhszhOCIe4PRabMr",
+  },
+  "ENTERPRISE": {
+    monthly: "price_1Sn4IJPuIhszhOCIIzHxe05Q",
+    yearly: "price_1Sn4KnPuIhszhOCIGtWyHEST",
+  },
+};
+
+// Add-on pricing (must match src/lib/billing-config.ts)
+const PRICING_USER = 29.90;
+const PRICING_INSTANCE = 57.90;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -21,10 +46,10 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const asaasApiKey = Deno.env.get("ASAAS_API_KEY");
+    const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
 
-    if (!asaasApiKey) {
-      console.error("[generate-payment-link] ASAAS_API_KEY not configured");
+    if (!stripeSecretKey) {
+      console.error("[generate-payment-link] STRIPE_SECRET_KEY not configured");
       return new Response(
         JSON.stringify({ error: "Sistema de pagamento não configurado" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
@@ -32,6 +57,7 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2025-08-27.basil" });
 
     // Validate auth
     const authHeader = req.headers.get("Authorization");
@@ -68,7 +94,7 @@ serve(async (req) => {
       );
     }
 
-    // Get company data (including plan limits for add-on calculation)
+    // Get company data
     const { data: company, error: companyError } = await supabase
       .from("companies")
       .select(`
@@ -97,101 +123,40 @@ serve(async (req) => {
 
     console.log("[generate-payment-link] Generating link for company:", company.id, "plan:", company.plan.name);
 
-    const asaasBaseUrl = "https://api.asaas.com/v3";
-
-    // Check or create ASAAS customer
-    let customerId: string | null = null;
+    // Check or create Stripe customer
+    let customerId: string | undefined;
 
     // Check existing subscription record
     const { data: subscription } = await supabase
       .from("company_subscriptions")
-      .select("asaas_customer_id")
+      .select("stripe_customer_id")
       .eq("company_id", company.id)
       .maybeSingle();
 
-    if (subscription?.asaas_customer_id) {
-      customerId = subscription.asaas_customer_id;
-      console.log("[generate-payment-link] Using existing ASAAS customer:", customerId);
+    if (subscription?.stripe_customer_id) {
+      customerId = subscription.stripe_customer_id;
+      console.log("[generate-payment-link] Using existing Stripe customer:", customerId);
     } else {
-      // Search by email
-      const searchResponse = await fetch(
-        `${asaasBaseUrl}/customers?email=${encodeURIComponent(company.email)}`,
-        {
-          headers: {
-            "access_token": asaasApiKey,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const searchData = await searchResponse.json();
+      // Search for existing customer by email
+      const customers = await stripe.customers.list({ email: company.email, limit: 1 });
       
-      if (searchData.data && searchData.data.length > 0) {
-        customerId = searchData.data[0].id;
-        console.log("[generate-payment-link] Found ASAAS customer by email:", customerId);
-      } else {
-        // Create new customer
-        const customerPayload = {
-          name: company.name,
-          email: company.email,
-          phone: company.phone?.replace(/\D/g, "") || undefined,
-          cpfCnpj: company.document?.replace(/\D/g, "") || undefined,
-          externalReference: `company_${company.id}`,
-        };
-
-        const createResponse = await fetch(`${asaasBaseUrl}/customers`, {
-          method: "POST",
-          headers: {
-            "access_token": asaasApiKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(customerPayload),
-        });
-
-        const customerData = await createResponse.json();
-
-        if (customerData.errors) {
-          console.error("[generate-payment-link] ASAAS customer error:", customerData.errors);
-          return new Response(
-            JSON.stringify({ error: "Erro ao criar cliente: " + customerData.errors[0]?.description }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-          );
-        }
-
-        customerId = customerData.id;
-        console.log("[generate-payment-link] Created ASAAS customer:", customerId);
+      if (customers.data.length > 0) {
+        customerId = customers.data[0].id;
+        console.log("[generate-payment-link] Found Stripe customer by email:", customerId);
       }
-
-      // Save or update subscription record
-      await supabase
-        .from("company_subscriptions")
-        .upsert({
-          company_id: company.id,
-          asaas_customer_id: customerId,
-          plan_id: company.plan.id,
-          billing_type,
-          status: "pending",
-        }, { onConflict: "company_id" });
     }
 
     // ============ CALCULATE PRICE WITH ADD-ONS ============
-    // Pricing constants (must match src/lib/billing-config.ts)
-    const PRICING_USER = 29.90;
-    const PRICING_INSTANCE = 57.90;
-    
-    // Plan limits (base)
     const planLimits = {
       max_users: company.plan.max_users || 0,
       max_instances: company.plan.max_instances || 0,
     };
     
-    // Effective limits (with add-ons)
     const effectiveLimits = {
       max_users: company.max_users || planLimits.max_users,
       max_instances: company.max_instances || planLimits.max_instances,
     };
     
-    // Calculate add-ons
     const additionalUsers = Math.max(0, effectiveLimits.max_users - planLimits.max_users);
     const additionalInstances = Math.max(0, effectiveLimits.max_instances - planLimits.max_instances);
     
@@ -199,20 +164,10 @@ serve(async (req) => {
     const instancesCost = additionalInstances * PRICING_INSTANCE;
     const totalAdditional = usersCost + instancesCost;
     
-    // Final price
     const basePlanPrice = company.plan.price || 0;
     const monthlyPrice = basePlanPrice + totalAdditional;
-    const yearlyPrice = monthlyPrice * 11; // 11 months (1 free)
+    const yearlyPrice = monthlyPrice * 11;
     const priceInReais = billing_type === "yearly" ? yearlyPrice : monthlyPrice;
-    
-    // Build description with add-ons breakdown
-    let descriptionParts = [`Assinatura MiauChat ${company.plan.name}`];
-    if (additionalUsers > 0 || additionalInstances > 0) {
-      descriptionParts.push("- Inclui:");
-      if (additionalUsers > 0) descriptionParts.push(`+${additionalUsers} usuário(s)`);
-      if (additionalInstances > 0) descriptionParts.push(`+${additionalInstances} WhatsApp`);
-    }
-    const description = descriptionParts.join(" ");
     
     console.log("[generate-payment-link] Pricing breakdown:", {
       basePlanPrice,
@@ -225,53 +180,100 @@ serve(async (req) => {
       priceInReais,
     });
 
-    // Create payment link
-    // NOTE: ASAAS externalReference has a max length of 100 characters
-    const origin = req.headers.get("origin") || "https://miauchat.com.br";
-    const externalReference = `company:${company.id}`.slice(0, 100);
+    // Get the correct price ID from Stripe
+    const planNameUpper = (company.plan.name || "BASIC").toUpperCase();
+    const planPrices = PLAN_PRICES[planNameUpper] || PLAN_PRICES["STARTER"];
+    const priceId = billing_type === "yearly" ? planPrices.yearly : planPrices.monthly;
 
-    const paymentLinkPayload = {
-      name: `${company.plan.name} - ${billing_type === "yearly" ? "Anual" : "Mensal"}`,
-      description,
-      value: priceInReais,
-      billingType: "UNDEFINED", // Customer chooses payment method
-      chargeType: "RECURRENT",
-      subscriptionCycle: billing_type === "yearly" ? "YEARLY" : "MONTHLY",
-      dueDateLimitDays: 7,
-      externalReference,
-      callback: {
-        successUrl: `${origin}/payment-success?provider=asaas&company_id=${company.id}`,
-        autoRedirect: true,
+    // Build line items
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        price: priceId,
+        quantity: 1,
       },
-    };
+    ];
 
-    console.log("[generate-payment-link] Creating payment link:", paymentLinkPayload.name);
-
-    const paymentLinkResponse = await fetch(`${asaasBaseUrl}/paymentLinks`, {
-      method: "POST",
-      headers: {
-        "access_token": asaasApiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(paymentLinkPayload),
-    });
-
-    const paymentLinkData = await paymentLinkResponse.json();
-
-    if (paymentLinkData.errors) {
-      console.error("[generate-payment-link] Payment link error:", paymentLinkData.errors);
-      return new Response(
-        JSON.stringify({ error: "Erro ao gerar link: " + paymentLinkData.errors[0]?.description }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-      );
+    // Add add-ons as separate line items if present
+    if (additionalUsers > 0) {
+      lineItems.push({
+        price_data: {
+          currency: "brl",
+          product_data: {
+            name: `Usuários Adicionais (${additionalUsers}x)`,
+            description: `${additionalUsers} usuário(s) extra(s) além do plano base`,
+          },
+          unit_amount: Math.round(usersCost * 100),
+          recurring: {
+            interval: billing_type === "yearly" ? "year" : "month",
+          },
+        },
+        quantity: 1,
+      });
     }
 
-    console.log("[generate-payment-link] Payment link created:", paymentLinkData.url);
+    if (additionalInstances > 0) {
+      lineItems.push({
+        price_data: {
+          currency: "brl",
+          product_data: {
+            name: `WhatsApp Adicionais (${additionalInstances}x)`,
+            description: `${additionalInstances} conexão(ões) WhatsApp extra(s) além do plano base`,
+          },
+          unit_amount: Math.round(instancesCost * 100),
+          recurring: {
+            interval: billing_type === "yearly" ? "year" : "month",
+          },
+        },
+        quantity: 1,
+      });
+    }
+
+    // Create Checkout Session
+    const origin = req.headers.get("origin") || "https://miauchat.com.br";
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      customer_email: customerId ? undefined : company.email,
+      line_items: lineItems,
+      mode: "subscription",
+      success_url: `${origin}/payment-success?provider=stripe&company_id=${company.id}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/settings?tab=meu-plano`,
+      metadata: {
+        company_id: company.id,
+        law_firm_id: company.law_firm_id || "",
+        plan_name: company.plan.name,
+        billing_type,
+      },
+      subscription_data: {
+        metadata: {
+          company_id: company.id,
+          law_firm_id: company.law_firm_id || "",
+          plan_name: company.plan.name,
+        },
+      },
+      allow_promotion_codes: true,
+      billing_address_collection: "required",
+    });
+
+    console.log("[generate-payment-link] Checkout session created:", session.url);
+
+    // Save or update subscription record with customer if new
+    if (session.customer && !subscription?.stripe_customer_id) {
+      await supabase
+        .from("company_subscriptions")
+        .upsert({
+          company_id: company.id,
+          stripe_customer_id: session.customer as string,
+          plan_id: company.plan.id,
+          billing_type,
+          status: "pending",
+        }, { onConflict: "company_id" });
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        payment_url: paymentLinkData.url,
+        payment_url: session.url,
         plan_name: company.plan.name,
         base_plan_price: basePlanPrice,
         additional_users: additionalUsers,

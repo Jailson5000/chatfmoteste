@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
 
 /**
- * Get Billing Status
+ * Get Billing Status (Stripe)
  * 
- * Fetches overdue and pending payments from ASAAS and enriches them with company data.
+ * Fetches overdue and pending invoices from Stripe and enriches them with company data.
  * Used by the Global Admin Payments dashboard to track delinquent companies.
  */
 
@@ -48,10 +49,10 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const asaasApiKey = Deno.env.get("ASAAS_API_KEY");
+    const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY");
 
-    if (!asaasApiKey) {
-      console.error("[get-billing-status] ASAAS_API_KEY not configured");
+    if (!stripeSecretKey) {
+      console.error("[get-billing-status] STRIPE_SECRET_KEY not configured");
       return new Response(
         JSON.stringify({ error: "Sistema de pagamento não configurado" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
@@ -59,6 +60,7 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2025-08-27.basil" });
 
     // Validate admin auth
     const authHeader = req.headers.get("Authorization");
@@ -94,14 +96,12 @@ serve(async (req) => {
 
     console.log(`[get-billing-status] Admin ${userId} fetching billing status`);
 
-    const asaasBaseUrl = "https://api.asaas.com/v3";
-
     // Fetch company mappings for enrichment
     const { data: subscriptions } = await supabase
       .from("company_subscriptions")
       .select(`
         company_id,
-        asaas_customer_id,
+        stripe_customer_id,
         companies(id, name, plan:plans(name))
       `);
 
@@ -109,9 +109,9 @@ serve(async (req) => {
     const customerToCompany = new Map<string, { id: string; name: string; planName: string }>();
     if (subscriptions) {
       for (const sub of subscriptions) {
-        if (sub.asaas_customer_id && sub.companies) {
+        if (sub.stripe_customer_id && sub.companies) {
           const company = sub.companies as unknown as { id: string; name: string; plan: { name: string } | null };
-          customerToCompany.set(sub.asaas_customer_id, {
+          customerToCompany.set(sub.stripe_customer_id, {
             id: company.id,
             name: company.name,
             planName: company.plan?.name || "-",
@@ -120,91 +120,58 @@ serve(async (req) => {
       }
     }
 
-    // Fetch overdue payments from ASAAS
-    const overdueResponse = await fetch(
-      `${asaasBaseUrl}/payments?status=OVERDUE&limit=100`,
-      {
-        headers: {
-          "access_token": asaasApiKey,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    const overdueData = await overdueResponse.json();
-    console.log(`[get-billing-status] Overdue payments: ${overdueData.data?.length || 0}`);
-
-    // Fetch pending payments from ASAAS
-    const pendingResponse = await fetch(
-      `${asaasBaseUrl}/payments?status=PENDING&limit=100`,
-      {
-        headers: {
-          "access_token": asaasApiKey,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    const pendingData = await pendingResponse.json();
-    console.log(`[get-billing-status] Pending payments: ${pendingData.data?.length || 0}`);
-
     // Helper to calculate days difference
-    const daysDiff = (dateStr: string, fromNow = true): number => {
-      const date = new Date(dateStr);
+    const daysDiff = (timestamp: number, fromNow = true): number => {
+      const date = new Date(timestamp * 1000);
       const now = new Date();
       const diffTime = fromNow ? now.getTime() - date.getTime() : date.getTime() - now.getTime();
       return Math.floor(diffTime / (1000 * 60 * 60 * 24));
     };
 
-    // Process overdue payments
-    const overduePayments: PaymentRecord[] = (overdueData.data || []).map((p: Record<string, unknown>) => {
-      const companyInfo = customerToCompany.get(p.customer as string);
-      return {
-        paymentId: p.id as string,
-        customerId: p.customer as string,
-        companyId: companyInfo?.id || null,
-        companyName: companyInfo?.name || "Desconhecido",
-        planName: companyInfo?.planName || "-",
-        value: p.value as number,
-        dueDate: p.dueDate as string,
-        daysOverdue: daysDiff(p.dueDate as string, true),
-        daysUntilDue: 0,
-        invoiceUrl: p.invoiceUrl as string | null,
-        status: "OVERDUE",
-      };
+    // Fetch overdue invoices (past_due status)
+    const overdueInvoices = await stripe.invoices.list({
+      status: "open",
+      limit: 100,
     });
 
-    // Process pending payments - split into upcoming this week and others
-    const today = new Date();
-    const weekFromNow = new Date();
-    weekFromNow.setDate(today.getDate() + 7);
-
+    // Process overdue invoices (due date in the past)
+    const now = new Date();
+    const overduePayments: PaymentRecord[] = [];
     const pendingPayments: PaymentRecord[] = [];
     const upcomingThisWeek: PaymentRecord[] = [];
 
-    for (const p of (pendingData.data || [])) {
-      const companyInfo = customerToCompany.get(p.customer as string);
-      const dueDate = new Date(p.dueDate as string);
-      const daysUntil = daysDiff(p.dueDate as string, false);
+    const weekFromNow = new Date();
+    weekFromNow.setDate(now.getDate() + 7);
+
+    for (const invoice of overdueInvoices.data) {
+      const dueDate = invoice.due_date ? new Date(invoice.due_date * 1000) : new Date(invoice.created * 1000);
+      const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id || "";
+      const companyInfo = customerToCompany.get(customerId);
       
       const record: PaymentRecord = {
-        paymentId: p.id as string,
-        customerId: p.customer as string,
+        paymentId: invoice.id,
+        customerId,
         companyId: companyInfo?.id || null,
-        companyName: companyInfo?.name || "Desconhecido",
+        companyName: companyInfo?.name || invoice.customer_name || "Desconhecido",
         planName: companyInfo?.planName || "-",
-        value: p.value as number,
-        dueDate: p.dueDate as string,
-        daysOverdue: 0,
-        daysUntilDue: daysUntil,
-        invoiceUrl: p.invoiceUrl as string | null,
-        status: "PENDING",
+        value: (invoice.amount_due || 0) / 100, // Stripe uses cents
+        dueDate: dueDate.toISOString().split('T')[0],
+        daysOverdue: dueDate < now ? daysDiff(dueDate.getTime() / 1000, true) : 0,
+        daysUntilDue: dueDate >= now ? daysDiff(dueDate.getTime() / 1000, false) : 0,
+        invoiceUrl: invoice.hosted_invoice_url || null,
+        status: dueDate < now ? "OVERDUE" : "PENDING",
       };
 
-      if (dueDate <= weekFromNow && dueDate >= today) {
+      if (dueDate < now) {
+        overduePayments.push(record);
+      } else if (dueDate <= weekFromNow) {
         upcomingThisWeek.push(record);
       } else {
         pendingPayments.push(record);
       }
     }
+
+    console.log(`[get-billing-status] Found invoices: ${overduePayments.length} overdue, ${upcomingThisWeek.length} upcoming, ${pendingPayments.length} pending`);
 
     // Sort: overdue by days (most overdue first), upcoming by days until (soonest first)
     overduePayments.sort((a, b) => b.daysOverdue - a.daysOverdue);
