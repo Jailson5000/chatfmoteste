@@ -106,7 +106,7 @@ Após as alterações, você pode usar:
 
 | Item | Status |
 |------|--------|
-| Price IDs do Basic atualizados | ⏳ Pendente |
+| Price IDs do Basic atualizados | ✅ Concluído |
 | Webhook configurado no Stripe | ✅ Verificar |
 | STRIPE_WEBHOOK_SECRET configurado | ✅ Verificar |
 | payment_provider = "stripe" | ✅ Verificar |
