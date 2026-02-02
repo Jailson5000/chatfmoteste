@@ -1,239 +1,180 @@
 
-# Plano: Função de Cobrança por Email para Empresas Inadimplentes
+# Plano: Corrigir Inconsistência de Datas + Adicionar Ciclo de Faturamento
 
-## Resumo
+## Problemas Identificados
 
-Implementar a funcionalidade do botão **"Cobrar"** que envia um email automático para a empresa inadimplente, notificando sobre o pagamento pendente e incluindo link para regularização.
+### 1. Bug de Timezone nas Datas (01/02 vs 02/02)
+
+**Causa Raiz:**
+- O Stripe retorna `dueDate` como timestamp Unix, convertido para ISO string (ex: `2026-02-02T00:00:00.000Z`)
+- Quando o frontend faz `new Date("2026-02-02T00:00:00.000Z")`, interpreta como **meia-noite UTC**
+- Para fuso horário Brasil (UTC-3), meia-noite UTC = 21:00 do dia **anterior** (01/02)
+- Resultado: Dashboard mostra "01/02" enquanto Stripe e faturas mostram "02/02"
+
+**Locais Afetados:**
+- `BillingOverdueList.tsx` linha 111: `format(new Date(payment.dueDate), "dd/MM/yyyy")`
+- `MyPlanSettings.tsx` linha 745: `format(new Date(invoice.dueDate), "dd/MM/yyyy")`
+
+**Solução:**
+Usar a função `parseDateLocal()` do `src/lib/dateUtils.ts` que já existe no projeto:
+```typescript
+// Antes (bug de timezone)
+format(new Date(payment.dueDate), "dd/MM/yyyy")
+
+// Depois (correto)
+import { parseDateLocal } from "@/lib/dateUtils";
+format(parseDateLocal(payment.dueDate) || new Date(), "dd/MM/yyyy")
+```
+
+### 2. Falta do Ciclo de Faturamento (Início → Vencimento)
+
+**Causa Raiz:**
+Os campos `current_period_start`, `current_period_end`, `next_payment_at`, `last_payment_at` na tabela `company_subscriptions` estão **NULL** para todas as empresas.
+
+O webhook do Stripe provavelmente não está atualizando esses campos corretamente.
+
+**Verificação nos dados:**
+```sql
+SELECT current_period_start, current_period_end, next_payment_at 
+FROM company_subscriptions LIMIT 5;
+-- Resultado: todos NULL
+```
+
+**Solução em 2 partes:**
+
+**Parte A:** Atualizar o `stripe-webhook` para sincronizar as datas do ciclo quando:
+- `invoice.paid` - Atualizar `last_payment_at`
+- `customer.subscription.created/updated` - Atualizar `current_period_start`, `current_period_end`
+
+**Parte B:** Atualizar `MyPlanSettings.tsx` para mostrar o ciclo completo:
+- Exibir "Assinatura iniciada em: {data_início}"
+- Exibir "Próximo vencimento: {data_fim} (dia X de cada mês)"
 
 ---
 
-## Análise das Alterações Feitas Hoje
+## Arquivos a Modificar
 
-### ✅ Funcionando Corretamente
+| Arquivo | Mudança |
+|---------|---------|
+| `src/components/global-admin/BillingOverdueList.tsx` | Usar `parseDateLocal()` para datas |
+| `src/components/settings/MyPlanSettings.tsx` | Usar `parseDateLocal()` + mostrar ciclo completo |
+| `supabase/functions/stripe-webhook/index.ts` | Sincronizar datas do ciclo |
 
-| Componente | Status | Descrição |
-|------------|--------|-----------|
-| `CompanySuspended.tsx` | ✅ OK | Página amigável com mensagem "Conta Suspensa" e botão "Regularizar Agora" |
-| `ProtectedRoute.tsx` | ✅ OK | Verifica `company_status === 'suspended'` e bloqueia acesso |
-| `useCompanyApproval.tsx` | ✅ OK | Busca `status`, `suspended_reason` da empresa |
-| `useCompanies.tsx` | ✅ OK | Mutations `suspendCompany` e `unsuspendCompany` + subscription join |
-| `GlobalAdminCompanies.tsx` | ✅ OK | Opções de Suspender/Liberar no dropdown + coluna Faturamento |
-| `GlobalAdminPayments.tsx` | ✅ OK (após fix) | Optional chaining corrigido para `metrics?.stripe?.connected` |
-| `BillingOverdueList.tsx` | ✅ OK | Botão "Cobrar" chamando `onSendReminder` (atualmente placeholder) |
-| Migração SQL | ✅ OK | Colunas `suspended_at`, `suspended_by`, `suspended_reason` adicionadas |
+---
 
-### ⚠️ Pendente (A Implementar)
+## Detalhes da Implementação
 
-O botão **"Cobrar"** atualmente mostra apenas um toast:
+### 1. Corrigir `BillingOverdueList.tsx`
+
 ```typescript
-const handleSendReminder = (paymentId: string, companyName: string) => {
-  toast.info(`Função de cobrança para ${companyName} em desenvolvimento`);
-};
+import { parseDateLocal } from "@/lib/dateUtils";
+
+// Linha 111 - antes:
+Venceu em: {format(new Date(payment.dueDate), "dd/MM/yyyy", { locale: ptBR })}
+
+// Depois:
+Venceu em: {format(parseDateLocal(payment.dueDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}
+```
+
+### 2. Corrigir `MyPlanSettings.tsx`
+
+**Linha 745 - Diálogo de Faturas:**
+```typescript
+import { parseDateLocal } from "@/lib/dateUtils";
+
+// Antes:
+`Vence em ${format(new Date(invoice.dueDate), "dd/MM/yyyy")}`
+
+// Depois:
+`Vence em ${format(parseDateLocal(invoice.dueDate) || new Date(), "dd/MM/yyyy")}`
+```
+
+**Linhas 514-528 - Adicionar info de ciclo completo:**
+```typescript
+// Se tiver current_period_start, mostrar quando iniciou
+{companyData?.subscription?.current_period_start && (
+  <p className="text-xs text-muted-foreground">
+    Ciclo iniciado em {format(parseDateLocal(companyData.subscription.current_period_start) || new Date(), "d 'de' MMMM", { locale: ptBR })}
+  </p>
+)}
+```
+
+### 3. Atualizar `stripe-webhook` para Sincronizar Ciclo
+
+No evento `invoice.paid` ou `customer.subscription.updated`:
+
+```typescript
+// Atualizar campos de ciclo
+await supabase
+  .from("company_subscriptions")
+  .update({
+    current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+    current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+    next_payment_at: new Date(subscription.current_period_end * 1000).toISOString(),
+    last_payment_at: new Date().toISOString(),
+  })
+  .eq("stripe_subscription_id", subscription.id);
 ```
 
 ---
 
-## Implementação da Função de Cobrança
-
-### 1. Nova Edge Function: `send-billing-reminder`
-
-Criar função que:
-1. Recebe `invoice_id` ou `company_id` do Stripe
-2. Busca dados da empresa (email, nome, plano, valor)
-3. Busca ou gera link de pagamento (Stripe Hosted Invoice URL)
-4. Envia email via Resend com template profissional
-5. Registra o envio para controle
-
-**Dados da requisição:**
-```typescript
-{
-  invoice_id?: string;      // ID da invoice Stripe (preferencial)
-  company_id?: string;      // Fallback se não tiver invoice
-  custom_message?: string;  // Mensagem personalizada (opcional)
-}
-```
-
-**Resposta:**
-```typescript
-{
-  success: boolean;
-  email_sent_to: string;
-  payment_url: string;
-  invoice_amount: number;
-}
-```
-
-### 2. Template de Email de Cobrança
-
-**Assunto:** 📋 Aviso de Pagamento Pendente — MiauChat
-
-**Conteúdo:**
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                      [Logo MiauChat]                                │
-│                                                                     │
-│           💳 Aviso de Pagamento Pendente                            │
-│                                                                     │
-│   Olá, [Nome da Empresa]!                                           │
-│                                                                     │
-│   Identificamos uma pendência financeira em sua conta:              │
-│                                                                     │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │  Valor: R$ 497,00                                           │   │
-│   │  Plano: Starter                                              │   │
-│   │  Vencimento: 01/02/2026                                      │   │
-│   │  Dias em atraso: 3                                           │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│   Para continuar utilizando o MiauChat normalmente,                 │
-│   regularize seu pagamento clicando no botão abaixo:                │
-│                                                                     │
-│         ┌───────────────────────────────────────────┐               │
-│         │  💳 Regularizar Pagamento Agora            │               │
-│         └───────────────────────────────────────────┘               │
-│                                                                     │
-│   Caso já tenha efetuado o pagamento, desconsidere este aviso.      │
-│                                                                     │
-│   Dúvidas? Entre em contato:                                        │
-│   📧 suporte@miauchat.com.br                                         │
-│   📱 WhatsApp: (XX) XXXXX-XXXX                                       │
-│                                                                     │
-│                  — MIAUCHAT                                         │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### 3. Atualizar Frontend
-
-**Em `GlobalAdminPayments.tsx`:**
-- Alterar `handleSendReminder` para chamar a nova Edge Function
-- Adicionar estado de loading por invoice
-- Mostrar confirmação antes de enviar
-- Toast de sucesso/erro após envio
-
-```typescript
-const [sendingReminder, setSendingReminder] = useState<string | null>(null);
-
-const handleSendReminder = async (paymentId: string, companyName: string) => {
-  // Confirm before sending
-  const confirmed = confirm(`Enviar email de cobrança para ${companyName}?`);
-  if (!confirmed) return;
-  
-  setSendingReminder(paymentId);
-  try {
-    const { data, error } = await supabase.functions.invoke("send-billing-reminder", {
-      body: { invoice_id: paymentId }
-    });
-    
-    if (error) throw error;
-    
-    toast.success(`Email de cobrança enviado para ${data.email_sent_to}`);
-  } catch (err) {
-    toast.error(`Erro ao enviar cobrança: ${err.message}`);
-  } finally {
-    setSendingReminder(null);
-  }
-};
-```
-
-**Em `BillingOverdueList.tsx`:**
-- Adicionar prop `loadingPaymentId` para indicar qual está em processo
-- Mostrar spinner no botão "Cobrar" quando enviando
-
----
-
-## Arquivos a Criar/Modificar
-
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `supabase/functions/send-billing-reminder/index.ts` | **Criar** | Edge Function para enviar email de cobrança |
-| `src/pages/global-admin/GlobalAdminPayments.tsx` | Modificar | Implementar `handleSendReminder` real |
-| `src/components/global-admin/BillingOverdueList.tsx` | Modificar | Adicionar estado de loading |
-
----
-
-## Fluxo Completo
+## Fluxo Esperado Após Correção
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  1. Admin acessa Global Admin > Pagamentos > Inadimplência          │
+│  Dashboard Admin > Pagamentos > Inadimplência                       │
+│  ─────────────────────────────────────────────────────────────────  │
+│  Empresa X | R$ 197,00 | 0 dias em atraso                           │
+│  Venceu em: 02/02/2026  ← CORRETO (antes: 01/02)                    │
 └─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
+
 ┌─────────────────────────────────────────────────────────────────────┐
-│  2. Vê lista de empresas com faturas vencidas                       │
-│     - Nome, plano, valor, dias em atraso                            │
+│  Configurações > Plano > Ver Faturas                                │
+│  ─────────────────────────────────────────────────────────────────  │
+│  R$ 197,00 | Pendente                                               │
+│  Vence em 02/02/2026 • Stripe  ← CORRETO (igual ao Admin)          │
 └─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
+
 ┌─────────────────────────────────────────────────────────────────────┐
-│  3. Clica no botão "Cobrar" em uma empresa                          │
-│     - Confirma o envio no dialog                                     │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  4. Edge Function send-billing-reminder:                            │
-│     - Busca dados da fatura no Stripe                                │
-│     - Busca email da empresa no Supabase                             │
-│     - Gera email com template de cobrança                            │
-│     - Envia via Resend                                               │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  5. Cliente recebe email com:                                        │
-│     - Valor pendente                                                 │
-│     - Dias em atraso                                                 │
-│     - Botão "Regularizar Pagamento"                                  │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  6. Cliente clica no link → Stripe Checkout/Invoice Page            │
-│     - Paga a fatura pendente                                        │
-│     - Webhook atualiza status                                        │
+│  Configurações > Plano > Resumo Mensal                              │
+│  ─────────────────────────────────────────────────────────────────  │
+│  📅 Ciclo de faturamento                                            │
+│  Iniciado em: 2 de janeiro de 2026                                  │
+│  Próximo vencimento: 2 de fevereiro de 2026 (dia 2 de cada mês)    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Dependências
+## Dados Necessários (Query de Subscription)
 
-| Requisito | Status |
-|-----------|--------|
-| `RESEND_API_KEY` | ✅ Configurado |
-| `STRIPE_SECRET_KEY` | ✅ Configurado |
-| Tabela `company_subscriptions` | ✅ Existe |
-| Join com `companies` | ✅ Implementado |
+A query em `MyPlanSettings.tsx` (linha 96-100) já busca os campos corretos:
+```typescript
+const { data: subscription } = await supabase
+  .from("company_subscriptions")
+  .select("status, current_period_start, current_period_end, next_payment_at, last_payment_at")
+  .eq("company_id", company.id)
+  .maybeSingle();
+```
 
----
-
-## Segurança
-
-1. **Autenticação obrigatória**: Apenas admins globais podem enviar cobranças
-2. **Validação de invoice**: Verifica se a invoice pertence ao Stripe configurado
-3. **Rate limiting natural**: Usa mesmo endpoint Resend com quota
-4. **Logs de auditoria**: Registra quem enviou cobrança e quando
+O problema é que esses campos estão **NULL** porque o webhook não os popula.
 
 ---
 
 ## Risco de Quebrar o Sistema
 
-**Mínimo:**
+**Baixo:**
 
-1. **Nova Edge Function**: Não afeta código existente
-2. **Mudança em handleSendReminder**: Troca placeholder por lógica real
-3. **BillingOverdueList**: Apenas adiciona estado de loading visual
-4. **Resend já configurado**: Mesma API usada para emails de auth
+1. **parseDateLocal**: Função já existe e é usada em outras partes do sistema
+2. **Novo código de ciclo**: Apenas adiciona informação visual, com null-checks seguros
+3. **Webhook update**: Adiciona lógica extra sem remover a existente
 
 ---
 
 ## Validações Pós-Implementação
 
-- [ ] Botão "Cobrar" envia email corretamente
-- [ ] Email chega com template correto
-- [ ] Link de pagamento funciona
-- [ ] Loading aparece no botão durante envio
-- [ ] Toast de sucesso/erro aparece
-- [ ] Fluxo de suspensão/liberação continua funcionando
-- [ ] Dashboard de pagamentos não quebra
+- [ ] Data de vencimento no Dashboard Admin = Data no Stripe
+- [ ] Data de vencimento nas Faturas do cliente = Data no Stripe
+- [ ] Ciclo de faturamento aparece no Resumo Mensal
+- [ ] Funcionalidade de cobrança continua funcionando
+- [ ] Suspensão/liberação de empresa continua funcionando
