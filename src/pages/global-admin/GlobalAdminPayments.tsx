@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -129,8 +130,27 @@ export default function GlobalAdminPayments() {
     return <Badge variant={config.variant}>{config.label}</Badge>;
   };
 
-  const handleSendReminder = (paymentId: string, companyName: string) => {
-    toast.info(`Função de cobrança para ${companyName} em desenvolvimento`);
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
+
+  const handleSendReminder = async (paymentId: string, companyName: string) => {
+    const confirmed = confirm(`Enviar email de cobrança para ${companyName}?`);
+    if (!confirmed) return;
+
+    setSendingReminder(paymentId);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-billing-reminder", {
+        body: { invoice_id: paymentId }
+      });
+
+      if (error) throw error;
+
+      toast.success(`Email de cobrança enviado para ${data.email_sent_to}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido";
+      toast.error(`Erro ao enviar cobrança: ${errorMessage}`);
+    } finally {
+      setSendingReminder(null);
+    }
   };
 
   const handleBlockCompany = (companyId: string, companyName: string) => {
@@ -420,6 +440,7 @@ export default function GlobalAdminPayments() {
                 onSendReminder={handleSendReminder}
                 onBlockCompany={handleBlockCompany}
                 onViewInvoice={handleViewInvoice}
+                loadingPaymentId={sendingReminder}
               />
             </>
           )}
