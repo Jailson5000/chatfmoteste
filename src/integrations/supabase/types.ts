@@ -2495,6 +2495,8 @@ export type Database = {
           next_payment_at: string | null
           plan_id: string | null
           status: string | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
           updated_at: string | null
         }
         Insert: {
@@ -2510,6 +2512,8 @@ export type Database = {
           next_payment_at?: string | null
           plan_id?: string | null
           status?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -2525,6 +2529,8 @@ export type Database = {
           next_payment_at?: string | null
           plan_id?: string | null
           status?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
           updated_at?: string | null
         }
         Relationships: [

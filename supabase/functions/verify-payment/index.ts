@@ -245,7 +245,36 @@ serve(async (req) => {
     console.log("[VERIFY-PAYMENT] Template clone result:", cloneResult);
 
     // ========================================
-    // STEP 5: Create admin user via create-company-admin
+    // STEP 5: Create company_subscriptions record with Stripe IDs
+    // ========================================
+    console.log("[VERIFY-PAYMENT] Creating company subscription record");
+    
+    const subscription = session.subscription as Stripe.Subscription | string | null;
+    const subscriptionId = typeof subscription === 'string' ? subscription : subscription?.id;
+    const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    
+    const { error: subscriptionError } = await supabase
+      .from("company_subscriptions")
+      .upsert({
+        company_id: company.id,
+        stripe_customer_id: customerId || null,
+        stripe_subscription_id: subscriptionId || null,
+        status: "active",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: "company_id"
+      });
+
+    if (subscriptionError) {
+      console.error("[VERIFY-PAYMENT] Error creating subscription record:", subscriptionError);
+      // Non-critical, continue
+    } else {
+      console.log("[VERIFY-PAYMENT] Subscription record created with Stripe IDs");
+    }
+
+    // ========================================
+    // STEP 6: Create admin user via create-company-admin
     // (Uses secure crypto.getRandomValues for password generation)
     // ========================================
     console.log("[VERIFY-PAYMENT] Creating admin user via create-company-admin");
