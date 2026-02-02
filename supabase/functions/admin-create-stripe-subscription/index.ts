@@ -17,8 +17,8 @@ const corsHeaders = {
 // Price IDs from Stripe Dashboard - must match billing-config.ts plans
 const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
   "BASIC": {
-    monthly: "price_BASIC_MONTHLY", // TODO: Create in Stripe Dashboard
-    yearly: "price_BASIC_YEARLY",   // TODO: Create in Stripe Dashboard
+    monthly: "price_1SwAujPssGNUXxgnzQ51nJCQ",
+    yearly: "price_1SwAujPssGNUXxgnEFJL0T6l",
   },
   "STARTER": {
     monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw",
