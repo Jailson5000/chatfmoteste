@@ -178,34 +178,25 @@ export function useCompanies() {
 
   const deleteCompany = useMutation({
     mutationFn: async (company: Company) => {
-      // First, delete the n8n workflow if it exists
-      if (company.n8n_workflow_id) {
-        try {
-          console.log('Deleting n8n workflow:', company.n8n_workflow_id);
-          await supabase.functions.invoke('delete-n8n-workflow', {
-            body: {
-              workflow_id: company.n8n_workflow_id,
-              company_id: company.id,
-            },
-          });
-        } catch (error) {
-          console.error('Failed to delete n8n workflow:', error);
-          // Log but continue - orphaned workflows can be cleaned up later
-          // TODO: Add to a cleanup queue for manual review
-        }
-      }
-
-      // Then delete the company
-      const { error } = await supabase
-        .from("companies")
-        .delete()
-        .eq("id", company.id);
+      // Use the new delete-company-full Edge Function for complete deletion
+      const { data, error } = await supabase.functions.invoke('delete-company-full', {
+        body: {
+          company_id: company.id,
+          delete_users: true,
+        },
+      });
 
       if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Falha ao excluir empresa');
+      
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      toast.success("Empresa excluída com sucesso");
+      const message = data.deleted_users > 0 
+        ? `Empresa "${data.company_name}" excluída. ${data.deleted_users} usuário(s) removido(s).`
+        : `Empresa "${data.company_name}" excluída com sucesso.`;
+      toast.success(message);
     },
     onError: (error) => {
       toast.error("Erro ao excluir empresa: " + error.message);
