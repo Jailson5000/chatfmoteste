@@ -181,13 +181,25 @@ serve(async (req) => {
     }
 
     // Get or create Stripe customer
-    let customerId: string;
+    let customerId: string = "";
+    let needsCustomerUpdate = false;
 
     if (existingSubscription?.stripe_customer_id) {
-      customerId = existingSubscription.stripe_customer_id;
-      console.log("[admin-create-stripe-subscription] Using existing Stripe customer:", customerId);
-    } else {
-      // Search for existing customer by email
+      // Verify customer exists in current Stripe environment
+      try {
+        await stripe.customers.retrieve(existingSubscription.stripe_customer_id);
+        customerId = existingSubscription.stripe_customer_id;
+        console.log("[admin-create-stripe-subscription] Using existing Stripe customer:", customerId);
+      } catch (e) {
+        // Customer doesn't exist (likely switched from test to live mode)
+        console.log("[admin-create-stripe-subscription] Existing customer not found in Stripe, will create new one");
+        needsCustomerUpdate = true;
+      }
+    }
+
+    // Create or find customer if needed
+    if (!customerId || needsCustomerUpdate) {
+      // Search for existing customer by email in current Stripe environment
       const customers = await stripe.customers.list({ email: billingEmail, limit: 1 });
       
       if (customers.data.length > 0) {
@@ -205,7 +217,16 @@ serve(async (req) => {
           },
         });
         customerId = customer.id;
-        console.log("[admin-create-stripe-subscription] Created Stripe customer:", customerId);
+        console.log("[admin-create-stripe-subscription] Created new Stripe customer:", customerId);
+      }
+      
+      // Update the subscription record with new customer ID
+      if (needsCustomerUpdate && existingSubscription) {
+        await supabase
+          .from("company_subscriptions")
+          .update({ stripe_customer_id: customerId })
+          .eq("company_id", company.id);
+        console.log("[admin-create-stripe-subscription] Updated subscription record with new customer ID");
       }
     }
 
