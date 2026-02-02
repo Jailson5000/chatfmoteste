@@ -1,77 +1,133 @@
 
-# Plano de Correção: Pagamento Direto e Planos
+# Plano: Remoção Segura do ASAAS
 
-## Diagnóstico
+## Resumo
 
-Identifiquei **dois problemas** que impedem o pagamento direto:
-
-### Problema 1: Provider de Pagamento Incorreto
-A página de registro está chamando `create-asaas-checkout` diretamente, mas o sistema está configurado para usar **Stripe** (`payment_provider: stripe`). A API do ASAAS está retornando respostas vazias, causando erro "Unexpected end of JSON input".
-
-### Problema 2: Price IDs Desatualizados
-A função `create-checkout-session` (Stripe) ainda usa Price IDs do ambiente de **teste**, que não existem no ambiente de **produção**.
-
-| Plano | ID Atual (Teste - Inválido) | ID Correto (Produção) |
-|-------|---------------------------|----------------------|
-| Basic Mensal | `price_1SwBhvPuIhszhOCI...` | `price_1SwDgnPssGNUXxgnH6kyepNO` |
-| Basic Anual | `price_1SwBiAPuIhszhOCI...` | `price_1SwAujPssGNUXxgnEFJL0T6l` |
-| Starter Mensal | `price_1Sn4HqPuIhszhOCI...` | `price_1SwAvUPssGNUXxgnT3lrWG6S` |
-| Starter Anual | `price_1Sn4K7PuIhszhOCI...` | `price_1SwAwNPssGNUXxgnnMMSemHz` |
-| Professional Mensal | `price_1Sn4I3PuIhszhOCI...` | `price_1SwAyyPssGNUXxgn8mzTO9gC` |
-| Professional Anual | `price_1Sn4KcPuIhszhOCI...` | `price_1SwAyyPssGNUXxgnNEbvcWuw` |
-| Enterprise Mensal | `price_1Sn4IJPuIhszhOCI...` | `price_1SwAzXPssGNUXxgnfHklx8Qx` |
-| Enterprise Anual | `price_1Sn4KnPuIhszhOCI...` | `price_1SwAzuPssGNUXxgn3SbEka4n` |
+Vou remover **todas** as referências ao ASAAS do projeto para evitar erros, mantendo apenas o Stripe como provedor de pagamento. Farei isso de forma incremental e segura para não quebrar o sistema.
 
 ---
 
-## Solução
+## Inventário Completo - O que será removido
 
-### Correção 1: Atualizar Página de Registro
-Modificar `src/pages/Register.tsx` para:
-- Consultar o `payment_provider` configurado em `system_settings`
-- Usar `create-checkout-session` (Stripe) quando provider = "stripe"
-- Manter `create-asaas-checkout` como fallback
+### Edge Functions (5 funções a deletar)
+| Função | Pasta | Descrição |
+|--------|-------|-----------|
+| `admin-create-asaas-subscription` | supabase/functions/ | Cria assinatura ASAAS via admin |
+| `asaas-webhook` | supabase/functions/ | Recebe webhooks do ASAAS |
+| `create-asaas-checkout` | supabase/functions/ | Checkout público ASAAS |
+| `list-asaas-invoices` | supabase/functions/ | Lista faturas ASAAS |
+| `update-asaas-subscription` | supabase/functions/ | Atualiza valor da assinatura |
 
-### Correção 2: Atualizar Price IDs do Stripe
-Modificar `supabase/functions/create-checkout-session/index.ts`:
-- Substituir todos os Price IDs de teste pelos IDs de produção corretos
-- Alinhar com os IDs já corrigidos em `admin-create-stripe-subscription`
+### Arquivos Frontend (3 arquivos a modificar)
+| Arquivo | Modificação |
+|---------|-------------|
+| `src/pages/Register.tsx` | Remover fallback para `create-asaas-checkout` |
+| `src/components/landing/CheckoutModal.tsx` | Remover fallback para `create-asaas-checkout` |
+| `src/hooks/useAddonRequests.tsx` | Remover chamada a `update-asaas-subscription` |
+
+### Configuração (1 arquivo a modificar)
+| Arquivo | Modificação |
+|---------|-------------|
+| `supabase/config.toml` | Remover `[functions.asaas-webhook]` |
+
+### Admin UI (1 arquivo a modificar)
+| Arquivo | Modificação |
+|---------|-------------|
+| `src/pages/global-admin/GlobalAdminSettings.tsx` | Remover opção ASAAS do RadioGroup |
+
+### Edge Function a Modificar (1 arquivo)
+| Arquivo | Modificação |
+|---------|-------------|
+| `supabase/functions/get-payment-metrics/index.ts` | Remover lógica ASAAS, manter apenas Stripe |
 
 ---
 
-## Arquivos a Modificar
+## O que NÃO será alterado (preservar)
 
-1. **`src/pages/Register.tsx`** - Linha ~190
-   - Adicionar lógica para consultar `system_settings` e determinar o provider
-   - Chamar a função correta com base no provider
-
-2. **`supabase/functions/create-checkout-session/index.ts`** - Linhas 11-27
-   - Atualizar o objeto `PLAN_PRICES` com os IDs de produção corretos
+- **Colunas do banco**: `asaas_customer_id` e `asaas_subscription_id` na tabela `company_subscriptions` - manter para histórico
+- **Arquivo `types.ts`**: Gerado automaticamente pelo Supabase, não editamos
+- **Valor `payment_provider` no banco**: Permanece "stripe", sem alterações no banco
+- **`billing_type` constraint**: Mantém suporte a "asaas" para dados históricos
 
 ---
 
-## Resultado Esperado
+## Ordem de Execução (Incremental e Segura)
 
-Após as correções:
-- "Pagar Agora" redirecionará para o checkout do **Stripe** (provider ativo)
-- Os Price IDs corretos serão utilizados
-- O fluxo de pagamento direto funcionará para todos os planos
+### Fase 1: Simplificar Frontend
+1. **`src/pages/Register.tsx`**
+   - Remover consulta de `payment_provider`
+   - Chamar diretamente `create-checkout-session` (Stripe)
+
+2. **`src/components/landing/CheckoutModal.tsx`**
+   - Remover lógica condicional ASAAS/Stripe
+   - Chamar diretamente `create-checkout-session`
+
+3. **`src/hooks/useAddonRequests.tsx`**
+   - Remover toda lógica de `update-asaas-subscription`
+   - Remover variáveis `asaasUpdated`, `asaasError`, etc.
+   - Simplificar toast de sucesso
+
+### Fase 2: Simplificar Admin UI
+4. **`src/pages/global-admin/GlobalAdminSettings.tsx`**
+   - Remover RadioGroup de seleção de provider
+   - Manter apenas exibição de "Stripe está ativo"
+
+### Fase 3: Remover Edge Functions
+5. **Deletar as 5 pastas de funções ASAAS**:
+   - `supabase/functions/admin-create-asaas-subscription/`
+   - `supabase/functions/asaas-webhook/`
+   - `supabase/functions/create-asaas-checkout/`
+   - `supabase/functions/list-asaas-invoices/`
+   - `supabase/functions/update-asaas-subscription/`
+
+6. **Atualizar `supabase/config.toml`**
+   - Remover linha `[functions.asaas-webhook]`
+
+### Fase 4: Simplificar Métricas
+7. **`supabase/functions/get-payment-metrics/index.ts`**
+   - Remover todo bloco de código ASAAS (linhas ~127-220)
+   - Remover objeto `asaas` do metrics
+   - Manter apenas Stripe
 
 ---
 
-## Detalhes Técnicos
+## Validação Pós-Implementação
+
+Após as mudanças, o sistema deve:
+- ✅ Checkout funcionar via Stripe (Pagar Agora)
+- ✅ Trial funcionar normalmente  
+- ✅ Aprovação de addons não tentar chamar ASAAS
+- ✅ Métricas mostrarem apenas Stripe
+- ✅ Nenhuma menção a ASAAS na UI
+
+---
+
+## Arquivos que Serão Modificados
 
 ```text
-┌─────────────────┐     ┌───────────────────────┐     ┌──────────────┐
-│  Register.tsx   │────▶│ Query system_settings │────▶│ provider=?   │
-└─────────────────┘     └───────────────────────┘     └──────────────┘
-                                                             │
-                    ┌────────────────────────────────────────┼────────────────────┐
-                    │                                        │                    │
-                    ▼                                        ▼                    ▼
-        ┌───────────────────────┐              ┌─────────────────────┐    ┌──────────────┐
-        │ create-checkout-      │              │ create-asaas-       │    │ Erro:        │
-        │ session (Stripe)      │              │ checkout (ASAAS)    │    │ Provedor     │
-        │ com Price IDs corretos│              │                     │    │ desconhecido │
-        └───────────────────────┘              └─────────────────────┘    └──────────────┘
+DELETAR:
+├── supabase/functions/admin-create-asaas-subscription/index.ts
+├── supabase/functions/asaas-webhook/index.ts
+├── supabase/functions/create-asaas-checkout/index.ts
+├── supabase/functions/list-asaas-invoices/index.ts
+└── supabase/functions/update-asaas-subscription/index.ts
+
+MODIFICAR:
+├── src/pages/Register.tsx
+├── src/components/landing/CheckoutModal.tsx
+├── src/hooks/useAddonRequests.tsx
+├── src/pages/global-admin/GlobalAdminSettings.tsx
+├── supabase/config.toml
+└── supabase/functions/get-payment-metrics/index.ts
 ```
+
+---
+
+## Riscos Mitigados
+
+| Risco | Mitigação |
+|-------|-----------|
+| Quebrar checkout público | Usar Stripe diretamente (já funciona) |
+| Perder histórico de dados | Colunas do banco mantidas |
+| Quebrar aprovação de addons | Remover chamada ASAAS, manter lógica de limites |
+| Quebrar métricas | Simplificar para apenas Stripe |
