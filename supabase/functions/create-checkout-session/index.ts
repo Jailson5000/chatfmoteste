@@ -10,8 +10,8 @@ const corsHeaders = {
 // Map plan names to Stripe price IDs
 const PLAN_PRICES = {
   basic: {
-    monthly: "price_1SwAujPssGNUXxgnzQ51nJCQ",
-    yearly: "price_1SwAujPssGNUXxgnEFJL0T6l"
+    monthly: "price_1SwBhvPuIhszhOCIxpDaGJ55",
+    yearly: "price_1SwBiAPuIhszhOCICGSDf2lN"
   },
   starter: {
     monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw",
