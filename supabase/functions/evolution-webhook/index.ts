@@ -921,6 +921,15 @@ interface MessageData {
         hydratedContentText?: string;
       };
     };
+    // Reaction message - when client reacts with emoji to a message
+    reactionMessage?: {
+      text?: string; // The emoji (empty string means reaction removed)
+      key?: {
+        id?: string; // WhatsApp message ID of the reacted message
+        fromMe?: boolean; // Whether the reacted message was sent by us
+        remoteJid?: string;
+      };
+    };
   };
   messageType?: string;
   messageTimestamp?: number;
@@ -3831,6 +3840,114 @@ serve(async (req) => {
               action: 'ignored',
               reason: 'group_message_blocked',
               message: 'Messages from groups and broadcasts are not processed'
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // ========================================
+        // REACTION MESSAGE HANDLING (reactionMessage inside messages.upsert)
+        // ========================================
+        // Some Evolution API versions send reactions as messages.upsert with messageType='reactionMessage'
+        // instead of a dedicated 'messages.reaction' event. We detect this and handle it here
+        // to avoid creating ghost messages (empty text messages that show as "📎 Mídia").
+        // ========================================
+        const reactionMessage = data.message?.reactionMessage;
+        const isReactionMessage = data.messageType === 'reactionMessage' || !!reactionMessage;
+        
+        if (isReactionMessage && reactionMessage) {
+          const emoji = reactionMessage.text || null; // Empty string = reaction removed
+          const reactedMessageId = reactionMessage.key?.id;
+          const reactedMessageIsFromMe = reactionMessage.key?.fromMe === true;
+          const reacterIsClient = data.key.fromMe === false;
+          
+          logDebug('REACTION_UPSERT', 'Detected reactionMessage in messages.upsert', { 
+            requestId, 
+            emoji,
+            reactedMessageId,
+            reacterIsClient,
+            reactedMessageIsFromMe,
+            lawFirmId,
+          });
+          
+          if (reactedMessageId) {
+            // Client reacted to our outgoing message → update client_reaction
+            if (reacterIsClient && reactedMessageIsFromMe) {
+              const { data: updateResult, error: updateError } = await supabaseClient
+                .from('messages')
+                .update({ client_reaction: emoji || null })
+                .eq('whatsapp_message_id', reactedMessageId)
+                .eq('law_firm_id', lawFirmId)
+                .eq('is_from_me', true)
+                .select('id')
+                .maybeSingle();
+              
+              if (updateError) {
+                logDebug('REACTION_UPSERT', 'Failed to update client_reaction', { 
+                  requestId, 
+                  error: updateError,
+                  reactedMessageId,
+                });
+              } else if (updateResult) {
+                logDebug('REACTION_UPSERT', 'Client reaction saved successfully', { 
+                  requestId, 
+                  messageId: reactedMessageId, 
+                  dbMessageId: updateResult.id,
+                  emoji: emoji || '(removed)',
+                });
+              } else {
+                // No rows updated - message not found (could be old message or wrong tenant)
+                logDebug('REACTION_UPSERT', 'No message found to update (may be old or wrong tenant)', { 
+                  requestId, 
+                  reactedMessageId,
+                  lawFirmId,
+                });
+              }
+            } 
+            // We reacted to client's incoming message → update my_reaction
+            else if (!reacterIsClient && !reactedMessageIsFromMe) {
+              const { data: updateResult, error: updateError } = await supabaseClient
+                .from('messages')
+                .update({ my_reaction: emoji || null })
+                .eq('whatsapp_message_id', reactedMessageId)
+                .eq('law_firm_id', lawFirmId)
+                .eq('is_from_me', false)
+                .select('id')
+                .maybeSingle();
+              
+              if (updateError) {
+                logDebug('REACTION_UPSERT', 'Failed to update my_reaction', { 
+                  requestId, 
+                  error: updateError,
+                  reactedMessageId,
+                });
+              } else if (updateResult) {
+                logDebug('REACTION_UPSERT', 'My reaction saved successfully', { 
+                  requestId, 
+                  messageId: reactedMessageId, 
+                  dbMessageId: updateResult.id,
+                  emoji: emoji || '(removed)',
+                });
+              }
+            } else {
+              logDebug('REACTION_UPSERT', 'Skipping reaction (unhandled case)', { 
+                requestId, 
+                reacterIsClient, 
+                reactedMessageIsFromMe,
+              });
+            }
+          } else {
+            logDebug('REACTION_UPSERT', 'Missing reactedMessageId, cannot process', { requestId });
+          }
+          
+          // CRITICAL: Return early to NOT save reaction as a new message
+          // This prevents the "📎 Mídia" ghost messages
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              action: 'reaction_updated',
+              emoji: emoji || null,
+              reactedMessageId,
             }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );

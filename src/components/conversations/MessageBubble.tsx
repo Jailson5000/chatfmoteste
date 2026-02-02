@@ -2064,7 +2064,8 @@ export function MessageBubble({
         )}
 
         {/* Show placeholder for other media without preview */}
-        {!hasMedia && !content && messageType !== "audio" && (
+        {/* Don't show placeholder for text messages without content (these may be reaction ghost messages) */}
+        {!hasMedia && !content && messageType !== "audio" && messageType !== "text" && (
           <p className="text-sm leading-relaxed text-muted-foreground italic">
             {messageType === "image" ? "📷 Imagem" : "📎 Mídia"}
           </p>
