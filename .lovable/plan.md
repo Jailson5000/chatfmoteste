@@ -1,131 +1,201 @@
 
-# Plano: Botão de Exportar Empresas em PDF
 
-## Objetivo
+# Análise: Status da Integração Stripe vs ASAAS
 
-Adicionar um botão "Exportar PDF" no cabeçalho da página de Empresas do Global Admin que gera um relatório completo com todas as empresas e suas informações.
+## Resumo Executivo
 
-## Dados a Exportar
+A integração Stripe já está **parcialmente implementada**, mas falta funcionalidades críticas para substituir completamente o ASAAS. A boa notícia é que a chave `STRIPE_SECRET_KEY` já está configurada.
 
-| Campo | Origem | Formato |
-|-------|--------|---------|
-| Nome | `company.name` | Texto |
-| Email | `company.email` | Texto |
-| CPF/CNPJ | `company.document` | Formatado (XX.XXX.XXX/XXXX-XX) |
-| Telefone | `company.phone` | Formatado ((XX) XXXXX-XXXX) |
-| Plano | `company.plan?.name` | Nome do plano |
-| Status | `company.status` | Ativa / Trial / Suspensa |
-| Situação Trial | `company.trial_ends_at` | Data ou "N/A" |
-| Criado em | `company.created_at` | DD/MM/YYYY |
+---
 
-## Layout do PDF
+## Status Atual das Integrações
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                    MiauChat - Relatório de Empresas             │
-│                    Gerado em: 01/02/2026 às 14:30               │
-├─────────────────────────────────────────────────────────────────┤
-│  Resumo: 45 empresas | 38 ativas | 5 trial | 2 suspensas        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  EMPRESA 1                                                      │
-│  ─────────────────────────────────────────────────────────────  │
-│  Nome: Acme Ltda                                                │
-│  Email: contato@acme.com.br                                     │
-│  CPF/CNPJ: 12.345.678/0001-90                                   │
-│  Telefone: (11) 99999-9999                                      │
-│  Plano: Professional                                            │
-│  Status: ✓ Ativa                                                │
-│  Criado em: 15/01/2026                                          │
-│                                                                 │
-│  EMPRESA 2                                                      │
-│  ─────────────────────────────────────────────────────────────  │
-│  ...                                                            │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│              MiauChat SaaS - Relatório Confidencial             │
-└─────────────────────────────────────────────────────────────────┘
-```
+### Stripe ✅ Parcial
 
-## Alterações Técnicas
+| Funcionalidade | Status | Arquivo |
+|----------------|--------|---------|
+| Checkout de assinatura | ✅ OK | `create-checkout-session` |
+| Verificação após pagamento | ✅ OK | `verify-payment` |
+| Métricas no admin | ✅ OK | `get-payment-metrics` |
+| Chave API | ✅ Configurada | `STRIPE_SECRET_KEY` |
+| Webhook de eventos | ❌ **NÃO EXISTE** | - |
+| Listar faturas do cliente | ❌ **NÃO EXISTE** | - |
+| Atualizar valor da assinatura | ❌ **NÃO EXISTE** | - |
 
-### 1. Arquivo: `src/lib/exportUtils.ts`
+### ASAAS ✅ Completo
 
-Adicionar nova função `exportCompaniesToPDF`:
+| Funcionalidade | Status | Arquivo |
+|----------------|--------|---------|
+| Checkout de assinatura | ✅ OK | `create-asaas-checkout` |
+| Webhook de eventos | ✅ OK | `asaas-webhook` |
+| Listar faturas do cliente | ✅ OK | `list-asaas-invoices` |
+| Atualizar valor da assinatura | ✅ OK | `update-asaas-subscription` |
+| Métricas no admin | ✅ OK | `get-payment-metrics` |
 
-```typescript
-interface CompanyExportData {
-  id: string;
-  name: string;
-  email: string | null;
-  document: string | null;
-  phone: string | null;
-  planName: string;
-  status: string;
-  trialEndsAt: string | null;
-  createdAt: string;
-}
+---
 
-export function exportCompaniesToPDF(
-  companies: CompanyExportData[],
-  filename: string = 'empresas-miauchat'
-) {
-  // Gera PDF com layout profissional
-  // Múltiplas páginas se necessário
-  // Inclui resumo no topo
-}
-```
+## O Que Falta Para Substituir o ASAAS
 
-### 2. Arquivo: `src/pages/global-admin/GlobalAdminCompanies.tsx`
+### 1. Stripe Webhook (CRÍTICO)
 
-Adicionar botão na área de ações do cabeçalho (linha ~566-608):
+O ASAAS usa webhook para:
+- Confirmar pagamentos automaticamente
+- Atualizar status de assinaturas (ativo/cancelado/vencido)
+- Ativar empresas após primeiro pagamento
 
-```typescript
-import { FileDown } from "lucide-react";
-import { exportCompaniesToPDF, getFormattedDate } from "@/lib/exportUtils";
+**Arquivo a criar:** `supabase/functions/stripe-webhook/index.ts`
 
-// Na área de botões, adicionar:
-<Button
-  variant="outline"
-  onClick={handleExportPDF}
->
-  <FileDown className="mr-2 h-4 w-4" />
-  Exportar PDF
-</Button>
-```
+**Eventos a tratar:**
+- `checkout.session.completed` - Provisionar empresa
+- `invoice.paid` - Marcar assinatura como ativa
+- `invoice.payment_failed` - Marcar como inadimplente
+- `customer.subscription.deleted` - Cancelar acesso
 
-Função de exportação:
+### 2. Listar Faturas do Cliente
+
+Para que clientes vejam suas faturas na área "Meu Plano".
+
+**Arquivo a criar:** `supabase/functions/list-stripe-invoices/index.ts`
+
+### 3. Atualizar Valor da Assinatura (Addons)
+
+Quando admin aprova adicional de usuários/instâncias, o valor da assinatura precisa ser atualizado no Stripe.
+
+**Arquivo a criar:** `supabase/functions/update-stripe-subscription/index.ts`
+
+### 4. Adicionar Colunas na Tabela
+
+A tabela `company_subscriptions` atualmente tem:
+- `asaas_customer_id`
+- `asaas_subscription_id`
+
+**Precisa adicionar:**
+- `stripe_customer_id`
+- `stripe_subscription_id`
+
+---
+
+## Price IDs do Stripe (Já Configurados)
+
+Os planos Starter, Professional e Enterprise já têm Price IDs no Stripe:
 
 ```typescript
-const handleExportPDF = () => {
-  const exportData = approvedCompanies.map(company => ({
-    id: company.id,
-    name: company.name,
-    email: company.email,
-    document: company.document,
-    phone: company.phone,
-    planName: company.plan?.name || 'Sem plano',
-    status: statusLabels[company.status] || company.status,
-    trialEndsAt: company.trial_ends_at,
-    createdAt: company.created_at,
-  }));
-  
-  exportCompaniesToPDF(exportData, `empresas-${getFormattedDate()}`);
-  toast.success(`PDF exportado com ${exportData.length} empresas`);
+const PLAN_PRICES = {
+  basic: {
+    monthly: "price_basic_monthly", // ⚠️ TODO: Criar no Stripe
+    yearly: "price_basic_yearly"    // ⚠️ TODO: Criar no Stripe
+  },
+  starter: {
+    monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw", // ✅ OK
+    yearly: "price_1Sn4K7PuIhszhOCItPywPXua"   // ✅ OK
+  },
+  professional: {
+    monthly: "price_1Sn4I3PuIhszhOCIkzaV5obi", // ✅ OK
+    yearly: "price_1Sn4KcPuIhszhOCIe4PRabMr"   // ✅ OK
+  },
+  enterprise: {
+    monthly: "price_1Sn4IJPuIhszhOCIIzHxe05Q", // ✅ OK
+    yearly: "price_1Sn4KnPuIhszhOCIGtWyHEST"   // ✅ OK
+  }
 };
 ```
 
+**Ação necessária:** Criar produtos Basic no painel do Stripe e atualizar os IDs.
+
+---
+
+## Fluxo de Substituição
+
+```text
+           ┌─────────────────────────────────────────────┐
+           │           ETAPAS DE MIGRAÇÃO                │
+           └─────────────────────────────────────────────┘
+                              │
+    ┌─────────────────────────┼─────────────────────────┐
+    │                         │                         │
+    ▼                         ▼                         ▼
+┌───────────┐          ┌───────────┐          ┌───────────┐
+│ ETAPA 1   │          │ ETAPA 2   │          │ ETAPA 3   │
+│ Banco     │          │ Funções   │          │ Frontend  │
+└───────────┘          └───────────┘          └───────────┘
+    │                         │                         │
+    ├─ Adicionar              ├─ stripe-webhook         ├─ Configurar
+    │  stripe_customer_id     │                         │  payment_provider
+    │                         ├─ list-stripe-invoices   │  = "stripe"
+    ├─ Adicionar              │                         │
+    │  stripe_subscription_id ├─ update-stripe-         │
+    │                         │  subscription           │
+    └─────────────────────────┴─────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │ CONFIGURAR URL  │
+                    │ DO WEBHOOK NO   │
+                    │ PAINEL STRIPE   │
+                    └─────────────────┘
+```
+
+---
+
+## Arquivos a Criar
+
+| Ordem | Arquivo | Descrição | Complexidade |
+|-------|---------|-----------|--------------|
+| 1 | Migração SQL | Adicionar colunas stripe_* | Baixa |
+| 2 | `stripe-webhook/index.ts` | Handler de eventos Stripe | Alta |
+| 3 | `list-stripe-invoices/index.ts` | Listar faturas do cliente | Média |
+| 4 | `update-stripe-subscription/index.ts` | Atualizar valor da assinatura | Média |
+
+---
+
 ## Arquivos a Modificar
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/lib/exportUtils.ts` | Adicionar função `exportCompaniesToPDF` |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Importar função e adicionar botão + handler |
+| Arquivo | Modificação |
+|---------|-------------|
+| `verify-payment/index.ts` | Salvar `stripe_customer_id` e `stripe_subscription_id` |
+| `supabase/config.toml` | Adicionar `[functions.stripe-webhook]` com `verify_jwt = false` |
+| `src/components/settings/MyPlanSettings.tsx` | Usar `list-stripe-invoices` quando provider=stripe |
 
-## Resultado Esperado
+---
 
-1. Botão "Exportar PDF" aparece ao lado dos outros botões de ação
-2. Ao clicar, gera PDF com todas as empresas aprovadas
-3. PDF inclui resumo de totais no topo
-4. Suporta múltiplas páginas automaticamente
-5. Download imediato do arquivo
+## Configuração do Webhook no Stripe
+
+Após criar a função `stripe-webhook`, você precisará:
+
+1. Acessar: https://dashboard.stripe.com/webhooks
+2. Adicionar endpoint: `https://jiragtersejnarxruqyd.supabase.co/functions/v1/stripe-webhook`
+3. Selecionar eventos:
+   - `checkout.session.completed`
+   - `invoice.paid`
+   - `invoice.payment_failed`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+4. Copiar o **Webhook Signing Secret** e adicionar como `STRIPE_WEBHOOK_SECRET`
+
+---
+
+## Próximos Passos (Ordem Recomendada)
+
+1. **Criar produtos Basic no Stripe** (manual no painel)
+2. **Adicionar colunas stripe_* na tabela** (migração)
+3. **Criar stripe-webhook** (provisioning automático)
+4. **Criar list-stripe-invoices** (visualização de faturas)
+5. **Criar update-stripe-subscription** (addons)
+6. **Modificar verify-payment** (salvar IDs do Stripe)
+7. **Configurar webhook no painel Stripe**
+8. **Mudar payment_provider para "stripe"** no admin
+
+---
+
+## Estimativa de Tempo
+
+| Item | Tempo Estimado |
+|------|----------------|
+| Migração SQL | 5 min |
+| stripe-webhook | 30-40 min |
+| list-stripe-invoices | 15-20 min |
+| update-stripe-subscription | 15-20 min |
+| Ajustes verify-payment | 10 min |
+| Testes e ajustes | 30 min |
+| **Total** | **~2 horas** |
+
