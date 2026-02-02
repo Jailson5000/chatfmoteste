@@ -1,140 +1,107 @@
 
-# Plano: Correção da Integração Stripe - Faturas e Webhook
+# Plano: Correção de Faturas Stripe e Página de Visualização
 
-## 📋 Resumo dos Problemas Encontrados
+## 📋 Diagnóstico Completo
 
-### Problema 1: Faturas não aparecem para o cliente
-**Causa raiz**: A função `list-stripe-invoices` não encontra o `stripe_customer_id` porque a query aninhada `company_subscriptions(stripe_customer_id)` não funciona corretamente devido à forma como o relacionamento está configurado.
+### Problema 1: Página quebra ao clicar em "Ver Faturas"
+**Causa raiz**: O frontend (`MyPlanSettings.tsx`) espera campos no formato ASAAS (`dueDate`, `paymentDate`, `value`), mas a Edge Function `list-stripe-invoices` retorna campos no formato Stripe (`due_date`, `paid_at`, `amount`).
 
-**Evidência**: 
-- Log: `"No Stripe customer ID found" - {"companyId":"08370f53-1f7c-4e72-91bc-425c8da3613b"}`
-- Mas no banco: `stripe_customer_id: cus_TtzlYvo7KEtYwo` EXISTE na tabela `company_subscriptions`
+Quando o código tenta executar:
+```typescript
+format(new Date(invoice.dueDate), "dd/MM/yyyy", { locale: ptBR })
+```
+O valor `invoice.dueDate` é `undefined`, resultando em `RangeError: Invalid time value`.
 
-### Problema 2: Webhook não está recebendo eventos
-**Causa raiz**: O Stripe Dashboard mostra "Total 0" entregas de eventos, o que significa que o Stripe nunca enviou eventos para o webhook.
+### Problema 2: Assinatura existe no Stripe mas não aparece na UI
+**Confirmação**: A assinatura **FOI criada** no Stripe! Encontrei 2 faturas em aberto:
+- `in_1SwC5RPuIhszhOCI...` - R$ 197,00 (status: open)
+- `in_1SwBliPuIhszhOCI...` - R$ 197,00 (status: open)
 
-**Possíveis causas**:
-1. O `STRIPE_WEBHOOK_SECRET` configurado aqui não corresponde ao secret do endpoint no Stripe Dashboard
-2. O webhook foi criado recentemente e os eventos anteriores não foram capturados
-3. Os eventos configurados não incluem `invoice.created` (apenas assinaturas)
+O cliente `cus_TtzgYrnbQ5fSYj` existe e tem faturas. O problema é apenas o mapeamento de campos.
+
+### Problema 3: Próximo vencimento mostra "null"
+A assinatura está com status `incomplete` porque aguarda pagamento. O campo `current_period_end` só é definido corretamente após o primeiro pagamento.
 
 ---
 
-## 🔧 Correções Necessárias
+## 🔧 Solução
 
-### Correção 1: Atualizar `list-stripe-invoices` (Edge Function)
+### Correção: Atualizar mapeamento de campos na Edge Function
 
 **Arquivo**: `supabase/functions/list-stripe-invoices/index.ts`
 
-**Mudança**: Substituir a query aninhada por uma consulta direta à tabela `company_subscriptions`:
+O formato atual retorna snake_case e campos diferentes. Precisamos mapear para o formato que o frontend espera:
 
+| Atual (Stripe) | Novo (compatível ASAAS) |
+|----------------|-------------------------|
+| `amount` | `value` |
+| `due_date` | `dueDate` |
+| `paid_at` | `paymentDate` |
+| `invoice_url` | `invoiceUrl` |
+| `pdf_url` | `bankSlipUrl` (reutilizando para PDF) |
+| *(derivado)* | `statusLabel` |
+| *(derivado)* | `statusColor` |
+| *(derivado)* | `description` |
+| `"stripe"` | `billingType` |
+
+Código atualizado:
 ```typescript
-// ANTES (não funciona):
-const { data: company } = await supabase
-  .from("companies")
-  .select("id, name, company_subscriptions(stripe_customer_id)")
-  .eq("law_firm_id", profile.law_firm_id)
-  .single();
-
-const stripeCustomerId = company.company_subscriptions?.[0]?.stripe_customer_id;
-
-// DEPOIS (corrigido):
-// 1. Buscar empresa
-const { data: company } = await supabase
-  .from("companies")
-  .select("id, name")
-  .eq("law_firm_id", profile.law_firm_id)
-  .single();
-
-// 2. Buscar subscription separadamente
-const { data: subscription } = await supabase
-  .from("company_subscriptions")
-  .select("stripe_customer_id")
-  .eq("company_id", company.id)
-  .maybeSingle();
-
-const stripeCustomerId = subscription?.stripe_customer_id;
-```
-
-### Correção 2: Verificar/Atualizar o STRIPE_WEBHOOK_SECRET
-
-**Ação manual necessária**: O usuário precisa verificar se o secret configurado no projeto corresponde ao secret exibido no Stripe Dashboard.
-
-No Stripe Dashboard:
-1. Acesse `Webhooks > miauchatstripe > Detalhes do destino`
-2. Clique em "Exibir" ao lado de "Segredo da assinatura" (`whsec_...`)
-3. Compare com o secret atual configurado no projeto
-
-**Para atualizar**: Use a ferramenta de secrets para inserir o valor correto do `STRIPE_WEBHOOK_SECRET`.
-
-### Correção 3: Adicionar mais logging ao webhook
-
-**Arquivo**: `supabase/functions/stripe-webhook/index.ts`
-
-Adicionar mais logs para diagnóstico:
-
-```typescript
-// No início da função, antes da verificação de assinatura:
-logStep("Request received", { 
-  hasSignature: !!signature,
-  signatureStart: signature?.substring(0, 20) + "...",
-  bodyLength: body.length 
+const formattedInvoices = invoices.data.map((invoice) => {
+  // Map Stripe status to label and color
+  const statusMap: Record<string, { label: string; color: string }> = {
+    draft: { label: "Rascunho", color: "gray" },
+    open: { label: "Pendente", color: "yellow" },
+    paid: { label: "Pago", color: "green" },
+    void: { label: "Cancelado", color: "gray" },
+    uncollectible: { label: "Inadimplente", color: "red" },
+  };
+  
+  const statusInfo = statusMap[invoice.status || "open"] || { label: "Pendente", color: "yellow" };
+  
+  return {
+    id: invoice.id,
+    value: invoice.amount_due / 100,
+    statusLabel: statusInfo.label,
+    statusColor: statusInfo.color,
+    description: `Assinatura - ${invoice.number || invoice.id}`,
+    dueDate: invoice.due_date 
+      ? new Date(invoice.due_date * 1000).toISOString() 
+      : new Date(invoice.created * 1000).toISOString(), // Fallback to created date
+    paymentDate: invoice.status_transitions?.paid_at 
+      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() 
+      : null,
+    invoiceUrl: invoice.hosted_invoice_url,
+    bankSlipUrl: invoice.invoice_pdf, // PDF do Stripe
+    billingType: "Stripe",
+  };
 });
 ```
 
 ---
 
-## 📝 Verificação do Webhook Secret
+## ✅ Resultado Esperado
 
-Para verificar se o secret está correto, você precisará:
-
-1. **No Stripe Dashboard**: 
-   - Ir para "Workbench > Webhooks > miauchatstripe"
-   - Clicar no ícone de olho (👁️) ao lado de "Segredo da assinatura"
-   - Copiar o valor `whsec_xxxxx...`
-
-2. **No Lovable**:
-   - Atualizar o secret `STRIPE_WEBHOOK_SECRET` com o valor copiado
+Após a correção:
+1. A página de faturas não vai mais quebrar
+2. As 2 faturas pendentes (R$ 197,00 cada) vão aparecer na lista
+3. O cliente poderá clicar no link para pagar diretamente no Stripe
+4. Status será mostrado corretamente como "Pendente" (amarelo)
 
 ---
 
-## 🧪 Plano de Testes
-
-### Após as correções:
-
-1. **Testar listagem de faturas**:
-   - Acessar `/settings` como usuário da FMO Advogados
-   - Clicar em "Ver Faturas"
-   - Verificar se as 2 faturas em aberto aparecem
-
-2. **Testar webhook**:
-   - Criar nova cobrança Stripe para uma empresa
-   - Verificar logs do `stripe-webhook` para ver se eventos chegaram
-   - Verificar se o erro de signature verification aparece (indicará secret incorreto)
-
-3. **Testar fluxo completo de pagamento**:
-   - Usar cartão de teste (4242...)
-   - Verificar se `invoice.paid` é recebido pelo webhook
-   - Verificar se status muda para "active" nas tabelas
-
----
-
-## 📁 Arquivos a Modificar
+## 📁 Arquivo a Modificar
 
 | Arquivo | Tipo de Mudança |
 |---------|-----------------|
-| `supabase/functions/list-stripe-invoices/index.ts` | Corrigir query para buscar subscription |
-| `supabase/functions/stripe-webhook/index.ts` | Adicionar mais logging |
-| `STRIPE_WEBHOOK_SECRET` | Verificar/Atualizar secret (ação manual) |
+| `supabase/functions/list-stripe-invoices/index.ts` | Remapear campos para formato compatível com frontend |
 
 ---
 
-## ⚠️ Ação Manual Crítica
+## ⚠️ Nota sobre a Assinatura
 
-**O usuário PRECISA verificar o STRIPE_WEBHOOK_SECRET**:
+A assinatura **foi criada com sucesso** no Stripe (`sub_1SwC5RPuIhszhOCI4Rzxs6f0`).
+- Status: `incomplete` (aguardando primeiro pagamento)
+- Cliente: `cus_TtzgYrnbQ5fSYj`
+- 2 faturas em aberto de R$ 197,00
 
-Pela imagem, vejo que o webhook está configurado no Stripe mas mostra "0 entregas". Isso pode significar que:
-- O secret está incorreto (mais provável)
-- Os eventos não foram disparados ainda
-
-Se o secret estiver errado, o webhook retornará erro 400 "Webhook signature verification failed" e isso não será logado porque o Stripe não consegue validar a assinatura.
+Quando o cliente pagar a primeira fatura, o status mudará para `active` e o webhook vai atualizar o banco de dados.
