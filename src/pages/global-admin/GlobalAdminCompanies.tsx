@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { SuspendCompanyDialog } from "@/components/global-admin/SuspendCompanyDialog";
 import { Switch } from "@/components/ui/switch";
 import { useCompanies } from "@/hooks/useCompanies";
 import { usePlans } from "@/hooks/usePlans";
@@ -60,7 +61,7 @@ import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function GlobalAdminCompanies() {
-  const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany } = useCompanies();
+  const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany, suspendCompany, unsuspendCompany } = useCompanies();
   const { plans } = usePlans();
   const { summary: orphanSummary } = useOrphanLawFirms();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -79,6 +80,7 @@ export default function GlobalAdminCompanies() {
   const [billingCompany, setBillingCompany] = useState<typeof companies[0] | null>(null);
   const [billingType, setBillingType] = useState<"monthly" | "yearly">("monthly");
   const [isGeneratingBilling, setIsGeneratingBilling] = useState(false);
+  const [suspendingCompany, setSuspendingCompany] = useState<typeof companies[0] | null>(null);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -1450,6 +1452,28 @@ export default function GlobalAdminCompanies() {
                                   <CreditCard className="mr-2 h-4 w-4" />
                                   Gerar Cobrança Stripe
                                 </DropdownMenuItem>
+                                {company.status !== 'suspended' ? (
+                                  <DropdownMenuItem
+                                    onClick={() => setSuspendingCompany(company)}
+                                    className="text-orange-600 focus:text-orange-600"
+                                  >
+                                    <Lock className="mr-2 h-4 w-4" />
+                                    Suspender Empresa
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      if (confirm(`Liberar acesso da empresa "${company.name}"?`)) {
+                                        unsuspendCompany.mutate(company.id);
+                                      }
+                                    }}
+                                    disabled={unsuspendCompany.isPending}
+                                    className="text-green-600 focus:text-green-600"
+                                  >
+                                    <Unlock className="mr-2 h-4 w-4" />
+                                    Liberar Empresa
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem 
                                   onClick={() => handleDelete(company)}
                                   className="text-destructive"
@@ -1837,6 +1861,22 @@ export default function GlobalAdminCompanies() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Suspend Company Dialog */}
+      <SuspendCompanyDialog
+        open={!!suspendingCompany}
+        onOpenChange={(open) => !open && setSuspendingCompany(null)}
+        companyName={suspendingCompany?.name || ""}
+        onConfirm={(reason) => {
+          if (suspendingCompany) {
+            suspendCompany.mutate(
+              { companyId: suspendingCompany.id, reason },
+              { onSuccess: () => setSuspendingCompany(null) }
+            );
+          }
+        }}
+        isLoading={suspendCompany.isPending}
+      />
     </div>
   );
 }
