@@ -101,24 +101,51 @@ serve(async (req) => {
         const companyId = metadata.company_id;
         const adminEmail = session.customer_email || metadata.admin_email;
 
+        // Fetch subscription details from Stripe to get billing cycle dates
+        let subscriptionDetails: Stripe.Subscription | null = null;
+        if (session.subscription) {
+          try {
+            subscriptionDetails = await stripe.subscriptions.retrieve(session.subscription as string);
+            logStep("Fetched subscription details", {
+              subscriptionId: subscriptionDetails.id,
+              currentPeriodStart: subscriptionDetails.current_period_start,
+              currentPeriodEnd: subscriptionDetails.current_period_end,
+            });
+          } catch (subError) {
+            logStep("WARNING: Failed to fetch subscription details", { error: subError });
+          }
+        }
+
         if (companyId) {
-          // Update existing company with Stripe IDs
+          // Build subscription data with billing cycle dates
+          const subscriptionData: Record<string, unknown> = {
+            company_id: companyId,
+            stripe_customer_id: session.customer as string,
+            stripe_subscription_id: session.subscription as string,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          };
+
+          // Add billing cycle dates if available
+          if (subscriptionDetails) {
+            subscriptionData.current_period_start = new Date(subscriptionDetails.current_period_start * 1000).toISOString();
+            subscriptionData.current_period_end = new Date(subscriptionDetails.current_period_end * 1000).toISOString();
+            subscriptionData.next_payment_at = new Date(subscriptionDetails.current_period_end * 1000).toISOString();
+          }
+
           const { error: updateError } = await supabase
             .from("company_subscriptions")
-            .upsert({
-              company_id: companyId,
-              stripe_customer_id: session.customer as string,
-              stripe_subscription_id: session.subscription as string,
-              status: "active",
-              updated_at: new Date().toISOString(),
-            }, {
+            .upsert(subscriptionData, {
               onConflict: "company_id"
             });
 
           if (updateError) {
             logStep("ERROR: Failed to update company subscription", { error: updateError });
           } else {
-            logStep("Company subscription updated", { companyId });
+            logStep("Company subscription updated with billing cycle", { 
+              companyId,
+              nextPayment: subscriptionData.next_payment_at 
+            });
           }
 
           // Update company status to active
@@ -135,19 +162,31 @@ serve(async (req) => {
             .single();
 
           if (company) {
+            const subscriptionData: Record<string, unknown> = {
+              company_id: company.id,
+              stripe_customer_id: session.customer as string,
+              stripe_subscription_id: session.subscription as string,
+              status: "active",
+              updated_at: new Date().toISOString(),
+            };
+
+            // Add billing cycle dates if available
+            if (subscriptionDetails) {
+              subscriptionData.current_period_start = new Date(subscriptionDetails.current_period_start * 1000).toISOString();
+              subscriptionData.current_period_end = new Date(subscriptionDetails.current_period_end * 1000).toISOString();
+              subscriptionData.next_payment_at = new Date(subscriptionDetails.current_period_end * 1000).toISOString();
+            }
+
             await supabase
               .from("company_subscriptions")
-              .upsert({
-                company_id: company.id,
-                stripe_customer_id: session.customer as string,
-                stripe_subscription_id: session.subscription as string,
-                status: "active",
-                updated_at: new Date().toISOString(),
-              }, {
+              .upsert(subscriptionData, {
                 onConflict: "company_id"
               });
 
-            logStep("Company subscription created from email", { companyId: company.id });
+            logStep("Company subscription created from email with billing cycle", { 
+              companyId: company.id,
+              nextPayment: subscriptionData.next_payment_at 
+            });
           }
         }
         break;
@@ -243,6 +282,8 @@ serve(async (req) => {
           subscriptionId: subscription.id,
           customerId: subscription.customer,
           status: subscription.status,
+          currentPeriodStart: subscription.current_period_start,
+          currentPeriodEnd: subscription.current_period_end,
         });
 
         // Find company by Stripe subscription ID
@@ -259,17 +300,22 @@ serve(async (req) => {
           if (subscription.status === "canceled") newStatus = "cancelled";
           if (subscription.status === "unpaid") newStatus = "suspended";
 
+          // Update subscription with billing cycle dates
           await supabase
             .from("company_subscriptions")
             .update({ 
               status: newStatus,
+              current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+              current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+              next_payment_at: new Date(subscription.current_period_end * 1000).toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq("company_id", companySubscription.company_id);
 
-          logStep("Subscription status updated", { 
+          logStep("Subscription status and billing cycle updated", { 
             companyId: companySubscription.company_id,
-            newStatus 
+            newStatus,
+            nextPayment: new Date(subscription.current_period_end * 1000).toISOString()
           });
         }
         break;

@@ -22,7 +22,8 @@ import {
   FileText,
   ExternalLink,
   X,
-  History
+  History,
+  Calendar
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -89,7 +90,16 @@ export function MyPlanSettings() {
         .maybeSingle();
 
       if (error) throw error;
-      return company;
+      if (!company) return null;
+
+      // Fetch subscription data for billing cycle info
+      const { data: subscription } = await supabase
+        .from("company_subscriptions")
+        .select("status, current_period_start, current_period_end, next_payment_at, last_payment_at")
+        .eq("company_id", company.id)
+        .maybeSingle();
+
+      return { ...company, subscription };
     },
     enabled: !!lawFirm?.id,
   });
@@ -482,6 +492,40 @@ export function MyPlanSettings() {
                 {formatCurrency(billingInfo?.totalMonthly || plan?.price || 0)}
               </span>
             </div>
+
+            {/* Billing Cycle Info */}
+            {isInTrial ? (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                  <Clock className="h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">
+                      Trial termina em {companyData?.trial_ends_at 
+                        ? format(new Date(companyData.trial_ends_at), "d 'de' MMMM", { locale: ptBR })
+                        : "breve"
+                      }
+                    </p>
+                    <p className="text-xs text-amber-600/80 dark:text-amber-400/80">
+                      {trialDaysLeft} {trialDaysLeft === 1 ? "dia restante" : "dias restantes"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : companyData?.subscription?.next_payment_at ? (
+              <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Calendar className="h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      Próximo vencimento: {format(new Date(companyData.subscription.next_payment_at), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                    </p>
+                    <p className="text-xs">
+                      Ciclo de 30 dias (dia {format(new Date(companyData.subscription.next_payment_at), "d")} de cada mês)
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <p className="text-[10px] text-muted-foreground">
               * Conversas IA e minutos de áudio acima do limite são cobrados por uso.
