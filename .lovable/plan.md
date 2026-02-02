@@ -1,90 +1,71 @@
 
-# Plano: Remover Trial do Pagamento Direto
 
-## Diagnóstico
+# Plano: Remover Endereço do Rodapé
 
-O problema está na Edge Function `create-checkout-session`:
+## Localização do Problema
 
-```typescript
-// Linha 119-125 - PROBLEMA
-subscription_data: {
-  trial_period_days: 7, // ← SEMPRE aplica trial!
-  metadata: { ... }
-},
+O endereço está no rodapé da Landing Page em:
+
+**Arquivo:** `src/pages/landing/LandingPage.tsx`  
+**Linhas:** 901-903
+
+```tsx
+<p className="text-xs text-white/20 mt-1">
+  COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
+</p>
 ```
-
-Quando o cliente clica em **"Pagar Agora"**, ele espera ser cobrado imediatamente, mas o Stripe está oferecendo 7 dias grátis porque o `trial_period_days` está hardcoded.
 
 ---
 
 ## Solução
 
-Remover o `trial_period_days` do fluxo de pagamento direto. O trial só deve existir quando o cliente escolhe explicitamente a opção "Trial Grátis" (que usa a função `register-company`).
+Remover o parágrafo que contém o endereço, mantendo apenas:
+- Nome da empresa (MIAU - SOLUCOES DIGITAIS)
+- CNPJ (64.774.567/0001-06)
 
-### Alteração no Backend
+---
 
-**Arquivo:** `supabase/functions/create-checkout-session/index.ts`
+## Alteração
 
-**Antes (linha 119-125):**
-```typescript
-subscription_data: {
-  trial_period_days: 7, // 7-day trial, auto-charges on day 8
-  metadata: {
-    plan: planKey,
-    company_name: companyName,
-  },
-},
+**Antes (linhas 893-904):**
+```tsx
+{/* Informações Comerciais */}
+<div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
+  <p className="text-xs text-white/30">
+    MIAU - SOLUCOES DIGITAIS
+  </p>
+  <p className="text-xs text-white/25 mt-1">
+    CNPJ: 64.774.567/0001-06
+  </p>
+  <p className="text-xs text-white/20 mt-1">
+    COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
+  </p>
+</div>
 ```
 
 **Depois:**
-```typescript
-subscription_data: {
-  metadata: {
-    plan: planKey,
-    company_name: companyName,
-  },
-},
+```tsx
+{/* Informações Comerciais */}
+<div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
+  <p className="text-xs text-white/30">
+    MIAU - SOLUCOES DIGITAIS
+  </p>
+  <p className="text-xs text-white/25 mt-1">
+    CNPJ: 64.774.567/0001-06
+  </p>
+</div>
 ```
 
 ---
 
-## Comportamento Esperado Após Correção
+## Resultado
 
-| Opção | Comportamento |
-|-------|---------------|
-| **Pagar Agora** | Cobra imediatamente via Stripe, sem trial |
-| **Trial Grátis** | Ativa período de teste de 7 dias sem cobrança |
+O rodapé exibirá apenas:
+- **Logo + MIAUCHAT**
+- **Links legais** (Política de Privacidade, Termos de Serviço)
+- **Copyright**
+- **Nome da empresa** (MIAU - SOLUCOES DIGITAIS)
+- **CNPJ** (64.774.567/0001-06)
 
----
+Sem o endereço físico.
 
-## Arquivo a Modificar
-
-1. **`supabase/functions/create-checkout-session/index.ts`**
-   - Linha 120: Remover `trial_period_days: 7`
-
----
-
-## Fluxos Após Correção
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                       CHECKOUT MODAL                             │
-└─────────────────────────────────────────────────────────────────┘
-                    │                           │
-                    ▼                           ▼
-         ┌──────────────────┐        ┌──────────────────┐
-         │  💳 Pagar Agora  │        │  🎁 Trial Grátis │
-         └────────┬─────────┘        └────────┬─────────┘
-                  │                           │
-                  ▼                           ▼
-     ┌────────────────────────┐    ┌────────────────────────┐
-     │ create-checkout-session│    │   register-company     │
-     │ (SEM trial_period_days)│    │ (status: trialing)     │
-     └────────────────────────┘    └────────────────────────┘
-                  │                           │
-                  ▼                           ▼
-     ┌────────────────────────┐    ┌────────────────────────┐
-     │  Stripe Checkout       │    │  Empresa criada com    │
-     │  COBRA IMEDIATAMENTE   │    │  7 dias de trial grátis│
-     └────────────────────────┘    └────────────────────────┘
-```
