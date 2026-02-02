@@ -1107,6 +1107,7 @@ export default function GlobalAdminCompanies() {
                         <TableHead>Subdomínio</TableHead>
                         <TableHead>Plano</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Faturamento</TableHead>
                         <TableHead>Provisionamento</TableHead>
                         <TableHead>Email Acesso</TableHead>
                         <TableHead>Usuários</TableHead>
@@ -1118,7 +1119,7 @@ export default function GlobalAdminCompanies() {
                   <TableBody>
                     {filteredCompanies.filter(c => c.approval_status !== 'pending_approval' && c.approval_status !== 'rejected').length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                           Nenhuma empresa encontrada
                         </TableCell>
                       </TableRow>
@@ -1239,6 +1240,99 @@ export default function GlobalAdminCompanies() {
                                 })()
                               )}
                             </div>
+                          </TableCell>
+                          {/* Billing/Faturamento Column */}
+                          <TableCell>
+                            {(() => {
+                              const sub = Array.isArray(company.subscription) ? company.subscription[0] : company.subscription;
+                              
+                              if (!sub || !sub.stripe_subscription_id) {
+                                return (
+                                  <Badge variant="outline" className="text-muted-foreground">
+                                    Sem assinatura
+                                  </Badge>
+                                );
+                              }
+                              
+                              const status = sub.status;
+                              const periodEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+                              const now = new Date();
+                              const daysUntilDue = periodEnd ? Math.ceil((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+                              
+                              let badgeClass = "";
+                              let label = "";
+                              let icon = null;
+                              
+                              if (status === 'active') {
+                                badgeClass = "bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400";
+                                label = periodEnd ? `Em dia (${periodEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })})` : "Em dia";
+                                icon = <CheckCircle2 className="h-3 w-3" />;
+                              } else if (status === 'trialing') {
+                                badgeClass = "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400";
+                                label = "Trial";
+                                icon = <Clock className="h-3 w-3" />;
+                              } else if (status === 'past_due') {
+                                const daysOverdue = daysUntilDue ? Math.abs(daysUntilDue) : 0;
+                                badgeClass = "bg-red-50 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400";
+                                label = daysOverdue > 0 ? `Vencido (${daysOverdue}d)` : "Vencido";
+                                icon = <AlertCircle className="h-3 w-3" />;
+                              } else if (status === 'canceled') {
+                                badgeClass = "bg-gray-50 text-gray-600 border-gray-300 dark:bg-gray-900/20 dark:text-gray-400";
+                                label = "Cancelada";
+                                icon = <X className="h-3 w-3" />;
+                              } else if (status === 'unpaid') {
+                                badgeClass = "bg-red-50 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400";
+                                label = "Inadimplente";
+                                icon = <AlertTriangle className="h-3 w-3" />;
+                              } else {
+                                badgeClass = "text-muted-foreground";
+                                label = status || "Desconhecido";
+                              }
+                              
+                              return (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Badge variant="outline" className={`text-xs gap-1 cursor-pointer ${badgeClass}`}>
+                                        {icon}
+                                        {label}
+                                      </Badge>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right" className="w-56 p-0">
+                                      <div className="p-3 space-y-2">
+                                        <p className="font-semibold text-sm border-b pb-2">Assinatura Stripe</p>
+                                        <div className="space-y-1.5 text-sm">
+                                          <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Status:</span>
+                                            <span className="font-medium capitalize">{status}</span>
+                                          </div>
+                                          {sub.last_payment_at && (
+                                            <div className="flex justify-between">
+                                              <span className="text-muted-foreground">Último pgto:</span>
+                                              <span>{new Date(sub.last_payment_at).toLocaleDateString('pt-BR')}</span>
+                                            </div>
+                                          )}
+                                          {periodEnd && (
+                                            <div className="flex justify-between">
+                                              <span className="text-muted-foreground">Próx. venc:</span>
+                                              <span>{periodEnd.toLocaleDateString('pt-BR')}</span>
+                                            </div>
+                                          )}
+                                          {company.plan && (
+                                            <div className="flex justify-between pt-1 border-t">
+                                              <span className="text-muted-foreground">Valor:</span>
+                                              <span className="font-medium text-green-600">
+                                                R$ {company.plan.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell>
                             <TooltipProvider>

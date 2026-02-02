@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Lock, CreditCard, Mail, MessageCircle, Loader2, AlertTriangle } from "lucide-react";
+import { Lock, CreditCard, Mail, MessageCircle, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -56,30 +56,20 @@ export default function CompanySuspended({ reason, planName, planPrice }: Compan
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md text-center">
         <CardHeader className="pb-4">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-            <Lock className="h-8 w-8 text-red-600 dark:text-red-400" />
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/30">
+            <Lock className="h-8 w-8 text-orange-600 dark:text-orange-400" />
           </div>
-          <CardTitle className="text-2xl">Acesso Suspenso Temporariamente</CardTitle>
+          <CardTitle className="text-2xl">Conta Suspensa</CardTitle>
           <CardDescription className="text-base">
-            Identificamos uma pendência financeira na sua conta
+            Para voltar a usar o sistema, regularize seu pagamento clicando no botão abaixo.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {reason && (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30 p-3">
-              <div className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
-                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                <span className="text-sm font-medium">{reason}</span>
-              </div>
+            <div className="rounded-lg border border-muted bg-muted/50 p-3">
+              <p className="text-sm text-muted-foreground">{reason}</p>
             </div>
           )}
-
-          <p className="text-muted-foreground">
-            {planName 
-              ? `Regularize o pagamento do plano ${planName} para liberar o acesso.`
-              : "Regularize seu pagamento para liberar o acesso ao sistema."
-            }
-          </p>
 
           {/* Pay Now Button - Primary CTA */}
           <Button 
@@ -93,22 +83,17 @@ export default function CompanySuspended({ reason, planName, planPrice }: Compan
             ) : (
               <CreditCard className="h-5 w-5" />
             )}
-            Pagar Agora - {formattedPrice}/mês
+            Regularizar Agora - {formattedPrice}/mês
           </Button>
 
-          <div className="rounded-lg border bg-muted/50 p-4">
-            <h4 className="font-medium mb-2">Precisa de ajuda?</h4>
-            <ul className="text-sm text-muted-foreground space-y-1 text-left">
-              <li>• Efetue o pagamento para liberar o acesso imediatamente</li>
-              <li>• Entre em contato conosco para verificar pendências</li>
-              <li>• Fale com nosso suporte para opções de negociação</li>
-            </ul>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            Dúvidas? Fale com nosso suporte.
+          </p>
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
           <Button variant="outline" className="w-full gap-2" onClick={handleContactSupport}>
             <Mail className="h-4 w-4" />
-            Falar com Suporte por Email
+            Suporte por Email
           </Button>
           <Button variant="outline" className="w-full gap-2" onClick={handleWhatsAppContact}>
             <MessageCircle className="h-4 w-4" />
