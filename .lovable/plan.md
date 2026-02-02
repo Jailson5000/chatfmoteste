@@ -1,107 +1,176 @@
 
-# Plano: Correção de Faturas Stripe e Página de Visualização
+# Plano: Correção do Fluxo Trial → Stripe e Teste em Modo de Produção
 
 ## 📋 Diagnóstico Completo
 
-### Problema 1: Página quebra ao clicar em "Ver Faturas"
-**Causa raiz**: O frontend (`MyPlanSettings.tsx`) espera campos no formato ASAAS (`dueDate`, `paymentDate`, `value`), mas a Edge Function `list-stripe-invoices` retorna campos no formato Stripe (`due_date`, `paid_at`, `amount`).
+### 1. Sobre o "Modo Teste"
+**Sim, você está em modo de teste.** A prova está na imagem do boleto:
+- Aviso: "Este é um boleto de teste"
+- A URL da fatura contém `test_` (ex: `invoice.stripe.com/i/acct_1Sn4EdPuIhszhOCI/test_...`)
 
-Quando o código tenta executar:
-```typescript
-format(new Date(invoice.dueDate), "dd/MM/yyyy", { locale: ptBR })
-```
-O valor `invoice.dueDate` é `undefined`, resultando em `RangeError: Invalid time value`.
-
-### Problema 2: Assinatura existe no Stripe mas não aparece na UI
-**Confirmação**: A assinatura **FOI criada** no Stripe! Encontrei 2 faturas em aberto:
-- `in_1SwC5RPuIhszhOCI...` - R$ 197,00 (status: open)
-- `in_1SwBliPuIhszhOCI...` - R$ 197,00 (status: open)
-
-O cliente `cus_TtzgYrnbQ5fSYj` existe e tem faturas. O problema é apenas o mapeamento de campos.
-
-### Problema 3: Próximo vencimento mostra "null"
-A assinatura está com status `incomplete` porque aguarda pagamento. O campo `current_period_end` só é definido corretamente após o primeiro pagamento.
+Quando for para produção, você precisará:
+- Usar chaves de API do modo Live (sk_live_...)
+- Recriar os Price IDs em modo Live no Dashboard do Stripe
 
 ---
 
-## 🔧 Solução
+### 2. Erro "Edge Function returned a non-2xx status code"
 
-### Correção: Atualizar mapeamento de campos na Edge Function
+O erro aconteceu durante o fluxo de **Trial** (não de pagamento). O log mostra:
 
-**Arquivo**: `supabase/functions/list-stripe-invoices/index.ts`
+```
+[register-company] Admin creation failed: "A user with this email address has already been registered"
+```
 
-O formato atual retorna snake_case e campos diferentes. Precisamos mapear para o formato que o frontend espera:
+**Causa:** O usuário tentou registrar um trial com email já existente no sistema.
 
-| Atual (Stripe) | Novo (compatível ASAAS) |
-|----------------|-------------------------|
-| `amount` | `value` |
-| `due_date` | `dueDate` |
-| `paid_at` | `paymentDate` |
-| `invoice_url` | `invoiceUrl` |
-| `pdf_url` | `bankSlipUrl` (reutilizando para PDF) |
-| *(derivado)* | `statusLabel` |
-| *(derivado)* | `statusColor` |
-| *(derivado)* | `description` |
-| `"stripe"` | `billingType` |
+---
 
-Código atualizado:
-```typescript
-const formattedInvoices = invoices.data.map((invoice) => {
-  // Map Stripe status to label and color
-  const statusMap: Record<string, { label: string; color: string }> = {
-    draft: { label: "Rascunho", color: "gray" },
-    open: { label: "Pendente", color: "yellow" },
-    paid: { label: "Pago", color: "green" },
-    void: { label: "Cancelado", color: "gray" },
-    uncollectible: { label: "Inadimplente", color: "red" },
-  };
-  
-  const statusInfo = statusMap[invoice.status || "open"] || { label: "Pendente", color: "yellow" };
-  
-  return {
-    id: invoice.id,
-    value: invoice.amount_due / 100,
-    statusLabel: statusInfo.label,
-    statusColor: statusInfo.color,
-    description: `Assinatura - ${invoice.number || invoice.id}`,
-    dueDate: invoice.due_date 
-      ? new Date(invoice.due_date * 1000).toISOString() 
-      : new Date(invoice.created * 1000).toISOString(), // Fallback to created date
-    paymentDate: invoice.status_transitions?.paid_at 
-      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() 
-      : null,
-    invoiceUrl: invoice.hosted_invoice_url,
-    bankSlipUrl: invoice.invoice_pdf, // PDF do Stripe
-    billingType: "Stripe",
-  };
-});
+### 3. Problema Principal: Cliente Stripe não é criado no Trial
+
+**Fluxo Atual:**
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ TRIAL (7 dias grátis)                                                    │
+│                                                                          │
+│  1. Usuário clica "Trial Grátis"                                         │
+│  2. register-company cria: law_firm → company → admin_user               │
+│  3. ❌ NÃO CRIA CLIENTE NO STRIPE                                        │
+│  4. Após 7 dias, trial expira                                            │
+│  5. Usuário quer pagar → precisa fazer checkout do zero                  │
+│  6. Stripe cria novo cliente → sem histórico/data de cadastro            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Problema:** Quando o trial expira e o usuário quer assinar, o Stripe não sabe que ele já era cliente há 7 dias.
+
+---
+
+## 🔧 Solução Proposta
+
+### Criar Cliente Stripe durante o registro do Trial
+
+**Novo Fluxo:**
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ TRIAL (7 dias grátis) - NOVO FLUXO                                      │
+│                                                                          │
+│  1. Usuário clica "Trial Grátis"                                         │
+│  2. register-company cria: law_firm → company → admin_user               │
+│  3. ✅ CRIAR CLIENTE NO STRIPE (com metadata: trial_start_date)          │
+│  4. ✅ SALVAR stripe_customer_id no banco                                │
+│  5. Após 7 dias, trial expira                                            │
+│  6. Usuário quer pagar → checkout usa o MESMO cliente Stripe             │
+│  7. Stripe tem todo histórico: data cadastro, trial, etc.                │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ✅ Resultado Esperado
+## 📝 Alterações Necessárias
 
-Após a correção:
-1. A página de faturas não vai mais quebrar
-2. As 2 faturas pendentes (R$ 197,00 cada) vão aparecer na lista
-3. O cliente poderá clicar no link para pagar diretamente no Stripe
-4. Status será mostrado corretamente como "Pendente" (amarelo)
+### 1. Modificar `register-company` para criar cliente Stripe no trial
+
+```typescript
+// Após criar law_firm, company e admin_user, criar cliente Stripe
+if (shouldAutoApprove) {
+  try {
+    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+    if (stripeKey) {
+      const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+      
+      // Verificar se já existe cliente com este email
+      const existingCustomers = await stripe.customers.list({ 
+        email: admin_email, 
+        limit: 1 
+      });
+      
+      let stripeCustomerId: string;
+      
+      if (existingCustomers.data.length > 0) {
+        stripeCustomerId = existingCustomers.data[0].id;
+        console.log(`[register-company] Found existing Stripe customer: ${stripeCustomerId}`);
+      } else {
+        // Criar novo cliente Stripe
+        const customer = await stripe.customers.create({
+          email: admin_email,
+          name: company_name,
+          phone: phone || undefined,
+          metadata: {
+            company_id: company.id,
+            law_firm_id: lawFirm.id,
+            trial_started_at: new Date().toISOString(),
+            trial_ends_at: trialEndsAt,
+            source: "self_service_trial",
+          },
+        });
+        stripeCustomerId = customer.id;
+        console.log(`[register-company] Created Stripe customer: ${stripeCustomerId}`);
+      }
+      
+      // Salvar stripe_customer_id na tabela company_subscriptions
+      await supabase.from('company_subscriptions').upsert({
+        company_id: company.id,
+        stripe_customer_id: stripeCustomerId,
+        status: 'trialing',
+        current_period_start: new Date().toISOString(),
+        current_period_end: trialEndsAt,
+        billing_type: 'stripe',
+      }, { onConflict: 'company_id' });
+      
+    }
+  } catch (stripeError) {
+    console.error('[register-company] Error creating Stripe customer:', stripeError);
+    // Não falhar o registro - apenas logar o erro
+  }
+}
+```
+
+### 2. Modificar `create-checkout-session` para usar cliente existente
+
+O código atual já faz isso corretamente:
+```typescript
+// Check if customer already exists
+const customers = await stripe.customers.list({ email: adminEmail, limit: 1 });
+let customerId: string | undefined;
+
+if (customers.data.length > 0) {
+  customerId = customers.data[0].id;
+  console.log("[CREATE-CHECKOUT] Found existing customer:", customerId);
+}
+```
 
 ---
 
-## 📁 Arquivo a Modificar
+## ✅ Benefícios
 
-| Arquivo | Tipo de Mudança |
-|---------|-----------------|
-| `supabase/functions/list-stripe-invoices/index.ts` | Remapear campos para formato compatível com frontend |
+| Aspecto | Antes | Depois |
+|---------|-------|--------|
+| Cliente Stripe no trial | ❌ Não criado | ✅ Criado no registro |
+| Data de cadastro | Data do pagamento | Data real do trial |
+| Histórico no Stripe | Só após 1º pagamento | Desde o trial |
+| Conversão trial→pago | Novo cliente | Mesmo cliente |
+| Relatórios Stripe | Incompletos | Completos |
 
 ---
 
-## ⚠️ Nota sobre a Assinatura
+## 📁 Arquivos a Modificar
 
-A assinatura **foi criada com sucesso** no Stripe (`sub_1SwC5RPuIhszhOCI4Rzxs6f0`).
-- Status: `incomplete` (aguardando primeiro pagamento)
-- Cliente: `cus_TtzgYrnbQ5fSYj`
-- 2 faturas em aberto de R$ 197,00
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/register-company/index.ts` | Adicionar criação de cliente Stripe e upsert em company_subscriptions |
 
-Quando o cliente pagar a primeira fatura, o status mudará para `active` e o webhook vai atualizar o banco de dados.
+---
+
+## ⚠️ Sobre o Modo de Produção
+
+Para sair do modo teste:
+1. No Dashboard Stripe, alterne para **Live Mode**
+2. Crie novos Products/Prices em Live Mode
+3. Atualize os Price IDs em `create-checkout-session` e `admin-create-stripe-subscription`
+4. Configure o webhook apontando para a mesma URL
+5. Use a chave `sk_live_...` como secret `STRIPE_SECRET_KEY`
+
+**Recomendação:** Mantenha em modo teste até validar todo o fluxo trial → pagamento.
