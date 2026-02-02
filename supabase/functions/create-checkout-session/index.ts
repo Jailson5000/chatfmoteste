@@ -117,7 +117,6 @@ serve(async (req) => {
         document: document || "",
       },
       subscription_data: {
-        trial_period_days: 7, // 7-day trial, auto-charges on day 8
         metadata: {
           plan: planKey,
           company_name: companyName,
