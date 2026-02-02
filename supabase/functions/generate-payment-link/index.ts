@@ -147,15 +147,18 @@ serve(async (req) => {
     }
 
     // ============ CALCULATE PRICE WITH ADD-ONS ============
+    // IMPORTANT: Only calculate additional costs if use_custom_limits is true
+    // Otherwise, the plan limits are the effective limits (no add-ons)
     const planLimits = {
       max_users: company.plan.max_users || 0,
       max_instances: company.plan.max_instances || 0,
     };
     
-    const effectiveLimits = {
-      max_users: company.max_users || planLimits.max_users,
-      max_instances: company.max_instances || planLimits.max_instances,
-    };
+    // Use custom limits ONLY if explicitly enabled, otherwise use plan limits
+    const effectiveLimits = company.use_custom_limits ? {
+      max_users: company.max_users ?? planLimits.max_users,
+      max_instances: company.max_instances ?? planLimits.max_instances,
+    } : planLimits;
     
     const additionalUsers = Math.max(0, effectiveLimits.max_users - planLimits.max_users);
     const additionalInstances = Math.max(0, effectiveLimits.max_instances - planLimits.max_instances);

@@ -94,7 +94,7 @@ serve(async (req) => {
     // Get origin for redirect URLs
     const origin = req.headers.get("origin") || "https://miauchat.com.br";
 
-    // Create checkout session with metadata for provisioning
+    // Create checkout session with 7-day trial for automatic billing on day 8
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       customer_email: customerId ? undefined : adminEmail,
@@ -117,6 +117,7 @@ serve(async (req) => {
         document: document || "",
       },
       subscription_data: {
+        trial_period_days: 7, // 7-day trial, auto-charges on day 8
         metadata: {
           plan: planKey,
           company_name: companyName,
