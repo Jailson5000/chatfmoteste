@@ -182,22 +182,40 @@ export default function Register() {
 
     try {
       if (registrationMode === 'pay_now') {
-        // FLOW: Redirect to ASAAS checkout
+        // FLOW: Redirect to payment checkout
         if (!selectedPlan) {
           throw new Error('Selecione um plano para continuar');
         }
 
-        const { data, error } = await supabase.functions.invoke('create-asaas-checkout', {
-          body: {
-            plan: selectedPlan.name.toLowerCase().replace('miauchat ', ''),
-            billingPeriod: billingPeriod,
-            companyName: formData.companyName,
-            adminName: formData.adminName,
-            adminEmail: formData.email,
-            adminPhone: formData.phone,
-            document: formData.document,
-            subdomain: formData.subdomain || undefined,
-          },
+        // Get payment provider from system_settings
+        const { data: providerSetting } = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'payment_provider')
+          .single();
+        
+        const paymentProvider = (providerSetting?.value as string) || 'stripe';
+        console.log('[Register] Using payment provider:', paymentProvider);
+
+        const planName = selectedPlan.name.toLowerCase().replace('miauchat ', '');
+        const checkoutPayload = {
+          plan: planName,
+          billingPeriod: billingPeriod,
+          companyName: formData.companyName,
+          adminName: formData.adminName,
+          adminEmail: formData.email,
+          adminPhone: formData.phone,
+          document: formData.document,
+          subdomain: formData.subdomain || undefined,
+        };
+
+        // Call correct checkout function based on provider
+        const functionName = paymentProvider === 'stripe' 
+          ? 'create-checkout-session' 
+          : 'create-asaas-checkout';
+
+        const { data, error } = await supabase.functions.invoke(functionName, {
+          body: checkoutPayload,
         });
 
         if (error) {
@@ -208,7 +226,7 @@ export default function Register() {
           throw new Error('Não foi possível gerar o link de pagamento');
         }
 
-        // Redirect to ASAAS checkout
+        // Redirect to checkout
         window.location.href = data.url;
         return;
       }

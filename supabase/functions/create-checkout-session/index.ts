@@ -7,23 +7,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Map plan names to Stripe price IDs
+// Map plan names to Stripe price IDs (Production)
 const PLAN_PRICES = {
   basic: {
-    monthly: "price_1SwBhvPuIhszhOCIxpDaGJ55",
-    yearly: "price_1SwBiAPuIhszhOCICGSDf2lN"
+    monthly: "price_1SwDgnPssGNUXxgnH6kyepNO",
+    yearly: "price_1SwAujPssGNUXxgnEFJL0T6l"
   },
   starter: {
-    monthly: "price_1Sn4HqPuIhszhOCIJeKQV8Zw",
-    yearly: "price_1Sn4K7PuIhszhOCItPywPXua"
+    monthly: "price_1SwAvUPssGNUXxgnT3lrWG6S",
+    yearly: "price_1SwAwNPssGNUXxgnnMMSemHz"
   },
   professional: {
-    monthly: "price_1Sn4I3PuIhszhOCIkzaV5obi",
-    yearly: "price_1Sn4KcPuIhszhOCIe4PRabMr"
+    monthly: "price_1SwAyyPssGNUXxgn8mzTO9gC",
+    yearly: "price_1SwAyyPssGNUXxgnNEbvcWuw"
   },
   enterprise: {
-    monthly: "price_1Sn4IJPuIhszhOCIIzHxe05Q",
-    yearly: "price_1Sn4KnPuIhszhOCIGtWyHEST"
+    monthly: "price_1SwAzXPssGNUXxgnfHklx8Qx",
+    yearly: "price_1SwAzuPssGNUXxgn3SbEka4n"
   }
 };
 
