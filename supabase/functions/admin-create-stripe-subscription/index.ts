@@ -17,7 +17,7 @@ const corsHeaders = {
 // Price IDs from Stripe Dashboard (LIVE MODE) - must match billing-config.ts plans
 const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
   "BASIC": {
-    monthly: "price_1SwAujPssGNUXxgnzQ51nJCQ", // R$ 197 (one_time used as monthly placeholder)
+    monthly: "price_1SwDgnPssGNUXxgnH6kyepNO", // R$ 197 recurring monthly
     yearly: "price_1SwAujPssGNUXxgnEFJL0T6l",  // R$ 2.167
   },
   "STARTER": {
