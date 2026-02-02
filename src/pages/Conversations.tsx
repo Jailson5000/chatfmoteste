@@ -3138,6 +3138,7 @@ export default function Conversations() {
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
                                   myReaction={item.data.my_reaction}
+                                  clientReaction={(item.data as any).client_reaction}
                                   onReply={handleReply}
                                   onScrollToMessage={scrollToMessage}
                                   onRetry={handleRetryMessage}
@@ -4077,6 +4078,7 @@ export default function Conversations() {
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
                                   myReaction={item.data.my_reaction}
+                                  clientReaction={(item.data as any).client_reaction}
                                   onReply={handleReply}
                                   onScrollToMessage={scrollToMessage}
                                   onRetry={handleRetryMessage}
