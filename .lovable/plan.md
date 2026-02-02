@@ -1,48 +1,90 @@
 
-# Plano: Remoção Segura do ASAAS
+# Plano: Remover Trial do Pagamento Direto
 
-## ✅ CONCLUÍDO
+## Diagnóstico
 
-Todas as referências ao ASAAS foram removidas do projeto. Apenas o Stripe permanece como provedor de pagamento.
+O problema está na Edge Function `create-checkout-session`:
 
----
+```typescript
+// Linha 119-125 - PROBLEMA
+subscription_data: {
+  trial_period_days: 7, // ← SEMPRE aplica trial!
+  metadata: { ... }
+},
+```
 
-## Alterações Realizadas
-
-### Edge Functions Deletadas (5 funções)
-- ✅ `admin-create-asaas-subscription`
-- ✅ `asaas-webhook`
-- ✅ `create-asaas-checkout`
-- ✅ `list-asaas-invoices`
-- ✅ `update-asaas-subscription`
-
-### Frontend Simplificado (3 arquivos)
-- ✅ `src/pages/Register.tsx` - Chama diretamente `create-checkout-session` (Stripe)
-- ✅ `src/components/landing/CheckoutModal.tsx` - Removido provider selection, usa Stripe
-- ✅ `src/hooks/useAddonRequests.tsx` - Removida chamada a `update-asaas-subscription`
-
-### Configuração (1 arquivo)
-- ✅ `supabase/config.toml` - Removida entrada `[functions.asaas-webhook]`
-
-### Admin UI (1 arquivo)
-- ✅ `src/pages/global-admin/GlobalAdminSettings.tsx` - Removido RadioGroup de provider selection
-
-### Edge Function Simplificada (1 arquivo)
-- ✅ `supabase/functions/get-payment-metrics/index.ts` - Removida toda lógica ASAAS
+Quando o cliente clica em **"Pagar Agora"**, ele espera ser cobrado imediatamente, mas o Stripe está oferecendo 7 dias grátis porque o `trial_period_days` está hardcoded.
 
 ---
 
-## O que foi preservado
+## Solução
 
-- Colunas do banco: `asaas_customer_id`, `asaas_subscription_id` (histórico)
-- `billing_type` constraint: Mantém suporte a "asaas" para dados históricos
+Remover o `trial_period_days` do fluxo de pagamento direto. O trial só deve existir quando o cliente escolhe explicitamente a opção "Trial Grátis" (que usa a função `register-company`).
+
+### Alteração no Backend
+
+**Arquivo:** `supabase/functions/create-checkout-session/index.ts`
+
+**Antes (linha 119-125):**
+```typescript
+subscription_data: {
+  trial_period_days: 7, // 7-day trial, auto-charges on day 8
+  metadata: {
+    plan: planKey,
+    company_name: companyName,
+  },
+},
+```
+
+**Depois:**
+```typescript
+subscription_data: {
+  metadata: {
+    plan: planKey,
+    company_name: companyName,
+  },
+},
+```
 
 ---
 
-## Resultado
+## Comportamento Esperado Após Correção
 
-- ✅ Checkout funciona via Stripe
-- ✅ Trial funciona normalmente  
-- ✅ Aprovação de addons não tenta chamar ASAAS
-- ✅ Métricas mostram apenas Stripe
-- ✅ Nenhuma menção a ASAAS na UI
+| Opção | Comportamento |
+|-------|---------------|
+| **Pagar Agora** | Cobra imediatamente via Stripe, sem trial |
+| **Trial Grátis** | Ativa período de teste de 7 dias sem cobrança |
+
+---
+
+## Arquivo a Modificar
+
+1. **`supabase/functions/create-checkout-session/index.ts`**
+   - Linha 120: Remover `trial_period_days: 7`
+
+---
+
+## Fluxos Após Correção
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                       CHECKOUT MODAL                             │
+└─────────────────────────────────────────────────────────────────┘
+                    │                           │
+                    ▼                           ▼
+         ┌──────────────────┐        ┌──────────────────┐
+         │  💳 Pagar Agora  │        │  🎁 Trial Grátis │
+         └────────┬─────────┘        └────────┬─────────┘
+                  │                           │
+                  ▼                           ▼
+     ┌────────────────────────┐    ┌────────────────────────┐
+     │ create-checkout-session│    │   register-company     │
+     │ (SEM trial_period_days)│    │ (status: trialing)     │
+     └────────────────────────┘    └────────────────────────┘
+                  │                           │
+                  ▼                           ▼
+     ┌────────────────────────┐    ┌────────────────────────┐
+     │  Stripe Checkout       │    │  Empresa criada com    │
+     │  COBRA IMEDIATAMENTE   │    │  7 dias de trial grátis│
+     └────────────────────────┘    └────────────────────────┘
+```
