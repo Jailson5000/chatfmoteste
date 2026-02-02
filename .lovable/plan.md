@@ -1,139 +1,219 @@
 
-
-# Plano: Mensagem Amigável + Visualização de Status de Pagamento
+# Plano: Função de Cobrança por Email para Empresas Inadimplentes
 
 ## Resumo
 
-Duas melhorias:
-1. Tornar a mensagem de suspensão mais amigável e direta
-2. Adicionar coluna de status de pagamento na lista de empresas do Global Admin
+Implementar a funcionalidade do botão **"Cobrar"** que envia um email automático para a empresa inadimplente, notificando sobre o pagamento pendente e incluindo link para regularização.
 
 ---
 
-## 1. Mensagem de Suspensão Mais Amigável
+## Análise das Alterações Feitas Hoje
 
-### Antes vs Depois
+### ✅ Funcionando Corretamente
 
-| Antes | Depois |
-|-------|--------|
-| "Acesso Suspenso Temporariamente" | "Conta Suspensa" |
-| "Identificamos uma pendência financeira na sua conta" | "Para continuar usando, regularize seu pagamento" |
-| Texto longo explicativo | Direto ao ponto |
+| Componente | Status | Descrição |
+|------------|--------|-----------|
+| `CompanySuspended.tsx` | ✅ OK | Página amigável com mensagem "Conta Suspensa" e botão "Regularizar Agora" |
+| `ProtectedRoute.tsx` | ✅ OK | Verifica `company_status === 'suspended'` e bloqueia acesso |
+| `useCompanyApproval.tsx` | ✅ OK | Busca `status`, `suspended_reason` da empresa |
+| `useCompanies.tsx` | ✅ OK | Mutations `suspendCompany` e `unsuspendCompany` + subscription join |
+| `GlobalAdminCompanies.tsx` | ✅ OK | Opções de Suspender/Liberar no dropdown + coluna Faturamento |
+| `GlobalAdminPayments.tsx` | ✅ OK (após fix) | Optional chaining corrigido para `metrics?.stripe?.connected` |
+| `BillingOverdueList.tsx` | ✅ OK | Botão "Cobrar" chamando `onSendReminder` (atualmente placeholder) |
+| Migração SQL | ✅ OK | Colunas `suspended_at`, `suspended_by`, `suspended_reason` adicionadas |
 
-### Mudanças em `CompanySuspended.tsx`
+### ⚠️ Pendente (A Implementar)
 
-**Título:**
+O botão **"Cobrar"** atualmente mostra apenas um toast:
+```typescript
+const handleSendReminder = (paymentId: string, companyName: string) => {
+  toast.info(`Função de cobrança para ${companyName} em desenvolvimento`);
+};
 ```
-Conta Suspensa
-```
-
-**Subtítulo:**
-```
-Para voltar a usar o sistema, regularize seu pagamento clicando no botão abaixo.
-```
-
-**Caixa de motivo (se houver):**
-- Manter, mas com texto mais neutro
-
-**Seção de ajuda:**
-- Simplificar para mensagem curta: "Dúvidas? Fale com nosso suporte."
 
 ---
 
-## 2. Status de Pagamento na Lista de Empresas
+## Implementação da Função de Cobrança
 
-### Dados Disponíveis
+### 1. Nova Edge Function: `send-billing-reminder`
 
-Tabela `company_subscriptions`:
-- `stripe_subscription_id` - ID da assinatura Stripe
-- `current_period_start` - Início do período atual
-- `current_period_end` - Fim do período atual (vencimento)
-- `last_payment_at` - Último pagamento
-- `next_payment_at` - Próximo pagamento
-- `status` - Status da assinatura
+Criar função que:
+1. Recebe `invoice_id` ou `company_id` do Stripe
+2. Busca dados da empresa (email, nome, plano, valor)
+3. Busca ou gera link de pagamento (Stripe Hosted Invoice URL)
+4. Envia email via Resend com template profissional
+5. Registra o envio para controle
 
-### Lógica de Status
+**Dados da requisição:**
+```typescript
+{
+  invoice_id?: string;      // ID da invoice Stripe (preferencial)
+  company_id?: string;      // Fallback se não tiver invoice
+  custom_message?: string;  // Mensagem personalizada (opcional)
+}
+```
 
-```text
+**Resposta:**
+```typescript
+{
+  success: boolean;
+  email_sent_to: string;
+  payment_url: string;
+  invoice_amount: number;
+}
+```
+
+### 2. Template de Email de Cobrança
+
+**Assunto:** 📋 Aviso de Pagamento Pendente — MiauChat
+
+**Conteúdo:**
+```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Sem subscription      → Badge cinza: "Sem assinatura"             │
-│  status = 'active'     → Badge verde: "Em dia" + próx. venc.        │
-│  status = 'trialing'   → Badge azul: "Trial"                        │
-│  status = 'past_due'   → Badge vermelho: "Vencido" + dias atraso    │
-│  status = 'canceled'   → Badge outline: "Cancelada"                 │
-│  status = 'unpaid'     → Badge vermelho: "Inadimplente"             │
+│                      [Logo MiauChat]                                │
+│                                                                     │
+│           💳 Aviso de Pagamento Pendente                            │
+│                                                                     │
+│   Olá, [Nome da Empresa]!                                           │
+│                                                                     │
+│   Identificamos uma pendência financeira em sua conta:              │
+│                                                                     │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │  Valor: R$ 497,00                                           │   │
+│   │  Plano: Starter                                              │   │
+│   │  Vencimento: 01/02/2026                                      │   │
+│   │  Dias em atraso: 3                                           │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│   Para continuar utilizando o MiauChat normalmente,                 │
+│   regularize seu pagamento clicando no botão abaixo:                │
+│                                                                     │
+│         ┌───────────────────────────────────────────┐               │
+│         │  💳 Regularizar Pagamento Agora            │               │
+│         └───────────────────────────────────────────┘               │
+│                                                                     │
+│   Caso já tenha efetuado o pagamento, desconsidere este aviso.      │
+│                                                                     │
+│   Dúvidas? Entre em contato:                                        │
+│   📧 suporte@miauchat.com.br                                         │
+│   📱 WhatsApp: (XX) XXXXX-XXXX                                       │
+│                                                                     │
+│                  — MIAUCHAT                                         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Mudanças Necessárias
+### 3. Atualizar Frontend
 
-**1. Hook `useCompanies.tsx`:**
-- Adicionar join com `company_subscriptions` para trazer dados de billing
+**Em `GlobalAdminPayments.tsx`:**
+- Alterar `handleSendReminder` para chamar a nova Edge Function
+- Adicionar estado de loading por invoice
+- Mostrar confirmação antes de enviar
+- Toast de sucesso/erro após envio
 
 ```typescript
-interface Company {
-  // ... campos existentes ...
-  subscription?: {
-    id: string;
-    stripe_subscription_id: string | null;
-    status: string | null;
-    current_period_end: string | null;
-    last_payment_at: string | null;
-  } | null;
-}
+const [sendingReminder, setSendingReminder] = useState<string | null>(null);
 
-// Na query:
-.select(`
-  *,
-  plan:plans!companies_plan_id_fkey(...),
-  law_firm:law_firms(...),
-  subscription:company_subscriptions(id, stripe_subscription_id, status, current_period_end, last_payment_at)
-`)
+const handleSendReminder = async (paymentId: string, companyName: string) => {
+  // Confirm before sending
+  const confirmed = confirm(`Enviar email de cobrança para ${companyName}?`);
+  if (!confirmed) return;
+  
+  setSendingReminder(paymentId);
+  try {
+    const { data, error } = await supabase.functions.invoke("send-billing-reminder", {
+      body: { invoice_id: paymentId }
+    });
+    
+    if (error) throw error;
+    
+    toast.success(`Email de cobrança enviado para ${data.email_sent_to}`);
+  } catch (err) {
+    toast.error(`Erro ao enviar cobrança: ${err.message}`);
+  } finally {
+    setSendingReminder(null);
+  }
+};
 ```
 
-**2. Página `GlobalAdminCompanies.tsx`:**
-- Adicionar coluna "Faturamento" na tabela de empresas aprovadas
-- Mostrar badge colorido com status
-- Tooltip com detalhes (último pagamento, próximo vencimento)
+**Em `BillingOverdueList.tsx`:**
+- Adicionar prop `loadingPaymentId` para indicar qual está em processo
+- Mostrar spinner no botão "Cobrar" quando enviando
 
-### Visualização na Tabela
+---
+
+## Arquivos a Criar/Modificar
+
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `supabase/functions/send-billing-reminder/index.ts` | **Criar** | Edge Function para enviar email de cobrança |
+| `src/pages/global-admin/GlobalAdminPayments.tsx` | Modificar | Implementar `handleSendReminder` real |
+| `src/components/global-admin/BillingOverdueList.tsx` | Modificar | Adicionar estado de loading |
+
+---
+
+## Fluxo Completo
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Empresa     │ Plano   │ Status │ Faturamento        │ Criada em   │
-├─────────────────────────────────────────────────────────────────────┤
-│ MiauChat    │ Starter │ Ativa  │ ✅ Em dia (15/02)   │ 01/01/2026  │
-│ Empresa X   │ Basic   │ Trial  │ 🔵 Trial            │ 28/01/2026  │
-│ Empresa Y   │ Pro     │ Ativa  │ ⚠️ Vencido (3 dias) │ 15/12/2025  │
-│ Demo Corp   │ Basic   │ Susp.  │ ❌ Inadimplente     │ 10/01/2026  │
+│  1. Admin acessa Global Admin > Pagamentos > Inadimplência          │
 └─────────────────────────────────────────────────────────────────────┘
-```
-
-### Tooltip de Detalhes
-
-Ao passar o mouse na coluna "Faturamento":
-```text
-┌─────────────────────────────┐
-│ Assinatura Stripe           │
-│ ─────────────────────────── │
-│ Status: Ativa               │
-│ Último pgto: 08/01/2026     │
-│ Próx. venc: 08/02/2026      │
-│ Valor: R$ 497,00/mês        │
-│                             │
-│ [Ver no Stripe ↗]           │
-└─────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  2. Vê lista de empresas com faturas vencidas                       │
+│     - Nome, plano, valor, dias em atraso                            │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  3. Clica no botão "Cobrar" em uma empresa                          │
+│     - Confirma o envio no dialog                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  4. Edge Function send-billing-reminder:                            │
+│     - Busca dados da fatura no Stripe                                │
+│     - Busca email da empresa no Supabase                             │
+│     - Gera email com template de cobrança                            │
+│     - Envia via Resend                                               │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  5. Cliente recebe email com:                                        │
+│     - Valor pendente                                                 │
+│     - Dias em atraso                                                 │
+│     - Botão "Regularizar Pagamento"                                  │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  6. Cliente clica no link → Stripe Checkout/Invoice Page            │
+│     - Paga a fatura pendente                                        │
+│     - Webhook atualiza status                                        │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Arquivos a Modificar
+## Dependências
 
-| Arquivo | Descrição |
-|---------|-----------|
-| `src/pages/CompanySuspended.tsx` | Mensagem mais amigável e direta |
-| `src/hooks/useCompanies.tsx` | Adicionar join com company_subscriptions |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar coluna de faturamento |
+| Requisito | Status |
+|-----------|--------|
+| `RESEND_API_KEY` | ✅ Configurado |
+| `STRIPE_SECRET_KEY` | ✅ Configurado |
+| Tabela `company_subscriptions` | ✅ Existe |
+| Join com `companies` | ✅ Implementado |
+
+---
+
+## Segurança
+
+1. **Autenticação obrigatória**: Apenas admins globais podem enviar cobranças
+2. **Validação de invoice**: Verifica se a invoice pertence ao Stripe configurado
+3. **Rate limiting natural**: Usa mesmo endpoint Resend com quota
+4. **Logs de auditoria**: Registra quem enviou cobrança e quando
 
 ---
 
@@ -141,39 +221,19 @@ Ao passar o mouse na coluna "Faturamento":
 
 **Mínimo:**
 
-1. **CompanySuspended**: Apenas mudança de texto/UI - sem impacto funcional
-2. **useCompanies**: Adicionar campo opcional - empresas sem subscription continuam funcionando
-3. **GlobalAdminCompanies**: Adicionar coluna - colunas existentes não são afetadas
-
----
-
-## Fluxo de Verificação
-
-```text
-1. Admin abre Global Admin > Empresas
-   ↓
-2. Vê lista com nova coluna "Faturamento"
-   ↓
-3. Identifica visualmente quem está em dia, vencido, etc.
-   ↓
-4. Clica [...] > "Suspender" em empresa inadimplente
-   ↓
-5. Cliente vê tela amigável: "Conta Suspensa - Regularize aqui"
-   ↓
-6. Cliente clica "Pagar Agora" → vai pro Stripe
-   ↓
-7. Admin libera empresa após confirmação do pagamento
-```
+1. **Nova Edge Function**: Não afeta código existente
+2. **Mudança em handleSendReminder**: Troca placeholder por lógica real
+3. **BillingOverdueList**: Apenas adiciona estado de loading visual
+4. **Resend já configurado**: Mesma API usada para emails de auth
 
 ---
 
 ## Validações Pós-Implementação
 
-- [ ] Página de suspensão mostra mensagem amigável
-- [ ] Coluna de faturamento aparece na lista de empresas
-- [ ] Empresas sem assinatura mostram "Sem assinatura"
-- [ ] Empresas em dia mostram badge verde com data
-- [ ] Empresas vencidas mostram badge vermelho
-- [ ] Tooltip mostra detalhes do pagamento
-- [ ] Nenhuma quebra nas funcionalidades existentes
-
+- [ ] Botão "Cobrar" envia email corretamente
+- [ ] Email chega com template correto
+- [ ] Link de pagamento funciona
+- [ ] Loading aparece no botão durante envio
+- [ ] Toast de sucesso/erro aparece
+- [ ] Fluxo de suspensão/liberação continua funcionando
+- [ ] Dashboard de pagamentos não quebra
