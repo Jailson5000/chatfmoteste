@@ -7,7 +7,8 @@ import {
   Mail, 
   Ban, 
   FileText,
-  Clock
+  Clock,
+  Loader2
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -31,13 +32,15 @@ interface BillingOverdueListProps {
   onSendReminder?: (paymentId: string, companyName: string) => void;
   onBlockCompany?: (companyId: string, companyName: string) => void;
   onViewInvoice?: (invoiceUrl: string) => void;
+  loadingPaymentId?: string | null;
 }
 
 export function BillingOverdueList({ 
   payments, 
   onSendReminder, 
   onBlockCompany,
-  onViewInvoice 
+  onViewInvoice,
+  loadingPaymentId
 }: BillingOverdueListProps) {
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("pt-BR", {
@@ -117,9 +120,14 @@ export function BillingOverdueList({
                       size="sm"
                       onClick={() => onSendReminder(payment.paymentId, payment.companyName)}
                       className="flex-1 sm:flex-none"
+                      disabled={loadingPaymentId === payment.paymentId}
                     >
-                      <Mail className="h-4 w-4 mr-1" />
-                      Cobrar
+                      {loadingPaymentId === payment.paymentId ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Mail className="h-4 w-4 mr-1" />
+                      )}
+                      {loadingPaymentId === payment.paymentId ? "Enviando..." : "Cobrar"}
                     </Button>
                   )}
                   {payment.companyId && onBlockCompany && (
