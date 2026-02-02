@@ -895,11 +895,8 @@ export function LandingPage() {
             <p className="text-xs text-white/30">
               MIAU - SOLUCOES DIGITAIS
             </p>
-            <p className="text-xs text-white/25 mt-1">
+          <p className="text-xs text-white/25 mt-1">
               CNPJ: 64.774.567/0001-06
-            </p>
-            <p className="text-xs text-white/20 mt-1">
-              COND PAULISTA CORPORATE CONJ 4 PAVMTO 15 SALA 1504
             </p>
           </div>
         </div>
