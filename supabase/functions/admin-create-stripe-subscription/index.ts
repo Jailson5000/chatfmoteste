@@ -303,9 +303,14 @@ serve(async (req) => {
       console.log("[admin-create-stripe-subscription] Added add-on invoice items");
     }
 
-    // Calculate next due date
-    const nextDueDate = new Date(subscription.current_period_end * 1000);
-    const nextDueDateStr = nextDueDate.toISOString().split('T')[0];
+    // Calculate next due date (handle incomplete subscriptions)
+    let nextDueDateStr: string | null = null;
+    if (subscription.current_period_end) {
+      const nextDueDate = new Date(subscription.current_period_end * 1000);
+      if (!isNaN(nextDueDate.getTime())) {
+        nextDueDateStr = nextDueDate.toISOString().split('T')[0];
+      }
+    }
 
     // Save subscription record
     await supabase
