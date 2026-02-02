@@ -180,7 +180,7 @@ export default function GlobalAdminCompanies() {
         return;
       }
       
-      const response = await supabase.functions.invoke('admin-create-asaas-subscription', {
+      const response = await supabase.functions.invoke('admin-create-stripe-subscription', {
         body: {
           company_id: billingCompany.id,
           billing_type: billingType,
@@ -211,7 +211,7 @@ export default function GlobalAdminCompanies() {
       
       // Show success message with subscription details
       toast.success(
-        `✅ Assinatura criada com sucesso!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}/${billingType === 'yearly' ? 'ano' : 'mês'}\nPróximo vencimento: ${nextDueDate}\n\nO cliente receberá email/SMS do ASAAS para pagamento via Boleto, PIX ou Cartão.`,
+        `✅ Assinatura criada com sucesso!\n\nPlano: ${response.data.plan_name}\nValor: R$ ${priceFormatted}/${billingType === 'yearly' ? 'ano' : 'mês'}\nPróximo vencimento: ${nextDueDate}\n\nO cliente receberá email do Stripe para pagamento.`,
         { duration: 15000 }
       );
       
@@ -345,7 +345,7 @@ export default function GlobalAdminCompanies() {
     // Find selected plan for value calculation
     const selectedPlan = plans.find(p => p.id === formData.plan_id);
     
-    // Calculate the new monthly value for ASAAS sync
+    // Calculate the new monthly value for Stripe sync
     let newMonthlyValue = selectedPlan?.price || 0;
     if (formData.use_custom_limits && selectedPlan) {
       const additionalUsers = Math.max(0, formData.max_users - selectedPlan.max_users);
@@ -373,9 +373,9 @@ export default function GlobalAdminCompanies() {
       // 1. Update the company in the database
       await updateCompany.mutateAsync({ id: editingCompany, ...updateData });
       
-      // 2. Sync subscription value with ASAAS (if company has custom limits or plan changed)
+      // 2. Sync subscription value with Stripe (if company has custom limits or plan changed)
       if (selectedPlan) {
-        const { data: asaasResult, error: asaasError } = await supabase.functions.invoke('update-asaas-subscription', {
+        const { data: stripeResult, error: stripeError } = await supabase.functions.invoke('update-stripe-subscription', {
           body: {
             company_id: editingCompany,
             new_value: newMonthlyValue,
@@ -383,20 +383,20 @@ export default function GlobalAdminCompanies() {
           }
         });
         
-        if (asaasError) {
-          console.error("ASAAS sync error:", asaasError);
-          toast.error("Empresa atualizada, mas houve erro ao sincronizar com ASAAS: " + asaasError.message);
-        } else if (asaasResult?.skipped) {
-          // Company doesn't have an active ASAAS subscription yet
-          toast.info(asaasResult.message || "Empresa sem assinatura ASAAS ativa. O valor será aplicado quando assinar.");
-        } else if (asaasResult?.success) {
-          const oldValue = asaasResult.old_value || 0;
+        if (stripeError) {
+          console.error("Stripe sync error:", stripeError);
+          toast.error("Empresa atualizada, mas houve erro ao sincronizar com Stripe: " + stripeError.message);
+        } else if (stripeResult?.skipped) {
+          // Company doesn't have an active Stripe subscription yet
+          toast.info(stripeResult.message || "Empresa sem assinatura Stripe ativa. O valor será aplicado quando assinar.");
+        } else if (stripeResult?.success) {
+          const oldValue = stripeResult.old_value || 0;
           const diff = newMonthlyValue - oldValue;
           const diffText = diff > 0 ? `+R$ ${diff.toFixed(2).replace('.', ',')}` : 
                           diff < 0 ? `-R$ ${Math.abs(diff).toFixed(2).replace('.', ',')}` : 
                           "sem alteração";
           toast.success(
-            `Empresa e ASAAS atualizados!\n\nValor anterior: R$ ${oldValue.toFixed(2).replace('.', ',')}\nNovo valor: R$ ${newMonthlyValue.toFixed(2).replace('.', ',')}\nDiferença: ${diffText}`,
+            `Empresa e Stripe atualizados!\n\nValor anterior: R$ ${oldValue.toFixed(2).replace('.', ',')}\nNovo valor: R$ ${newMonthlyValue.toFixed(2).replace('.', ',')}\nDiferença: ${diffText}`,
             { duration: 8000 }
           );
         }
@@ -1448,7 +1448,7 @@ export default function GlobalAdminCompanies() {
                                   className="text-green-600 focus:text-green-600"
                                 >
                                   <CreditCard className="mr-2 h-4 w-4" />
-                                  Gerar Cobrança ASAAS
+                                  Gerar Cobrança Stripe
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleDelete(company)}
@@ -1754,13 +1754,13 @@ export default function GlobalAdminCompanies() {
         } : null}
       />
 
-      {/* Generate ASAAS Billing Dialog */}
+      {/* Generate Stripe Billing Dialog */}
       <Dialog open={!!billingCompany} onOpenChange={(open) => !open && setBillingCompany(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CreditCard className="h-5 w-5 text-green-600" />
-              Gerar Cobrança ASAAS
+              Gerar Cobrança Stripe
             </DialogTitle>
             <DialogDescription>
               Crie um link de pagamento para a empresa "{billingCompany?.name}"
