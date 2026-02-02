@@ -133,11 +133,27 @@ serve(async (req) => {
       .eq("company_id", company.id)
       .maybeSingle();
 
+    // Validate customer exists in current Stripe environment (test vs live)
     if (subscription?.stripe_customer_id) {
-      customerId = subscription.stripe_customer_id;
-      console.log("[generate-payment-link] Using existing Stripe customer:", customerId);
-    } else {
-      // Search for existing customer by email
+      try {
+        await stripe.customers.retrieve(subscription.stripe_customer_id);
+        customerId = subscription.stripe_customer_id;
+        console.log("[generate-payment-link] Verified existing Stripe customer:", customerId);
+      } catch (e) {
+        // Customer doesn't exist in current Stripe environment (test→live migration)
+        console.log("[generate-payment-link] Customer not found in Stripe, will search/create new one");
+        customerId = undefined;
+        
+        // Clear invalid ID from database
+        await supabase
+          .from("company_subscriptions")
+          .update({ stripe_customer_id: null, stripe_subscription_id: null })
+          .eq("company_id", company.id);
+      }
+    }
+    
+    // If no valid customer, search by email in current Stripe environment
+    if (!customerId) {
       const customers = await stripe.customers.list({ email: company.email, limit: 1 });
       
       if (customers.data.length > 0) {

@@ -127,6 +127,25 @@ serve(async (req) => {
     // Initialize Stripe
     const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
 
+    // Validate customer exists in current Stripe environment (test vs live)
+    try {
+      await stripe.customers.retrieve(stripeCustomerId);
+      logStep("Stripe customer verified", { stripeCustomerId });
+    } catch (e) {
+      // Customer doesn't exist - clear invalid ID and return empty
+      logStep("Customer not found in Stripe (test→live migration)", { stripeCustomerId });
+      
+      await supabase
+        .from("company_subscriptions")
+        .update({ stripe_customer_id: null, stripe_subscription_id: null })
+        .eq("company_id", company.id);
+      
+      return new Response(
+        JSON.stringify({ invoices: [], message: "Histórico será criado após primeiro pagamento" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Fetch invoices from Stripe
     const invoices = await stripe.invoices.list({
       customer: stripeCustomerId,
