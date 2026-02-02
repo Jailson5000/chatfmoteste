@@ -3146,6 +3146,7 @@ export function KanbanChatPanel({
                       isRevoked={msg.is_revoked}
                       isStarred={msg.is_starred}
                       myReaction={msg.my_reaction}
+                      clientReaction={msg.client_reaction}
                       onReply={handleReply}
                       onScrollToMessage={scrollToMessage}
                       onToggleStar={handleToggleStar}
