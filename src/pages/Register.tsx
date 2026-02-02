@@ -182,20 +182,10 @@ export default function Register() {
 
     try {
       if (registrationMode === 'pay_now') {
-        // FLOW: Redirect to payment checkout
+        // FLOW: Redirect to Stripe checkout
         if (!selectedPlan) {
           throw new Error('Selecione um plano para continuar');
         }
-
-        // Get payment provider from system_settings
-        const { data: providerSetting } = await supabase
-          .from('system_settings')
-          .select('value')
-          .eq('key', 'payment_provider')
-          .single();
-        
-        const paymentProvider = (providerSetting?.value as string) || 'stripe';
-        console.log('[Register] Using payment provider:', paymentProvider);
 
         const planName = selectedPlan.name.toLowerCase().replace('miauchat ', '');
         const checkoutPayload = {
@@ -209,12 +199,7 @@ export default function Register() {
           subdomain: formData.subdomain || undefined,
         };
 
-        // Call correct checkout function based on provider
-        const functionName = paymentProvider === 'stripe' 
-          ? 'create-checkout-session' 
-          : 'create-asaas-checkout';
-
-        const { data, error } = await supabase.functions.invoke(functionName, {
+        const { data, error } = await supabase.functions.invoke('create-checkout-session', {
           body: checkoutPayload,
         });
 

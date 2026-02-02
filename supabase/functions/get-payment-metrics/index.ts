@@ -20,28 +20,10 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // Get active payment provider
-    const { data: providerSetting } = await supabaseClient
-      .from("system_settings")
-      .select("value")
-      .eq("key", "payment_provider")
-      .single();
-
-    const activeProvider = String(providerSetting?.value || "stripe").replace(/"/g, "");
-
     // Initialize metrics
     const metrics = {
-      activeProvider,
+      activeProvider: "stripe",
       stripe: {
-        connected: false,
-        mrr: 0,
-        arr: 0,
-        activeSubscriptions: 0,
-        totalCustomers: 0,
-        recentPayments: [] as any[],
-        subscriptionsByPlan: {} as Record<string, number>,
-      },
-      asaas: {
         connected: false,
         mrr: 0,
         arr: 0,
@@ -89,7 +71,8 @@ serve(async (req) => {
             if (productId) {
               const planName = productId.includes("starter") ? "Starter" :
                              productId.includes("professional") ? "Professional" :
-                             productId.includes("enterprise") ? "Enterprise" : "Outro";
+                             productId.includes("enterprise") ? "Enterprise" : 
+                             productId.includes("basic") ? "Basic" : "Outro";
               metrics.stripe.subscriptionsByPlan[planName] = (metrics.stripe.subscriptionsByPlan[planName] || 0) + 1;
             }
           }
@@ -121,142 +104,6 @@ serve(async (req) => {
         console.log("[PAYMENT-METRICS] Stripe metrics fetched successfully");
       } catch (stripeError) {
         console.error("[PAYMENT-METRICS] Stripe error:", stripeError);
-      }
-    }
-
-    // Fetch ASAAS metrics - ONLY MiauChat subscriptions/payments
-    const asaasKey = Deno.env.get("ASAAS_API_KEY");
-    if (asaasKey) {
-      try {
-        const asaasBaseUrl = "https://api.asaas.com/v3";
-        metrics.asaas.connected = true;
-
-        // Get ALL subscriptions and filter by externalReference containing "miauchat"
-        const subsResponse = await fetch(`${asaasBaseUrl}/subscriptions?status=ACTIVE&limit=100`, {
-          headers: { "access_token": asaasKey },
-        });
-        const subsData = await subsResponse.json();
-
-        // Track MiauChat subscription IDs for filtering payments
-        const miauchatSubscriptionIds: string[] = [];
-
-        if (subsData.data) {
-          // Filter only MiauChat subscriptions
-          const miauchatSubs = subsData.data.filter((sub: any) => {
-            try {
-              // Check if externalReference contains "miauchat" or description starts with "MiauChat"
-              if (sub.externalReference) {
-                const ref = typeof sub.externalReference === 'string' 
-                  ? sub.externalReference 
-                  : JSON.stringify(sub.externalReference);
-                if (ref.includes('miauchat') || ref.includes('MiauChat')) {
-                  return true;
-                }
-              }
-              // Also check description
-              if (sub.description?.includes('MiauChat')) {
-                return true;
-              }
-              return false;
-            } catch {
-              return false;
-            }
-          });
-
-          metrics.asaas.activeSubscriptions = miauchatSubs.length;
-
-          let monthlyRevenue = 0;
-          for (const sub of miauchatSubs) {
-            miauchatSubscriptionIds.push(sub.id);
-            let amount = sub.value || 0;
-            
-            if (sub.cycle === "YEARLY") {
-              amount = amount / 12;
-            } else if (sub.cycle === "WEEKLY") {
-              amount = amount * 4.33;
-            }
-            
-            monthlyRevenue += amount;
-
-            // Identify plan from description or externalReference
-            let planName = "Outro";
-            const desc = sub.description?.toLowerCase() || "";
-            const extRef = sub.externalReference?.toLowerCase() || "";
-            
-            if (desc.includes("starter") || extRef.includes("starter")) {
-              planName = "Starter";
-            } else if (desc.includes("professional") || extRef.includes("professional")) {
-              planName = "Professional";
-            } else if (desc.includes("enterprise") || extRef.includes("enterprise")) {
-              planName = "Enterprise";
-            }
-            metrics.asaas.subscriptionsByPlan[planName] = (metrics.asaas.subscriptionsByPlan[planName] || 0) + 1;
-          }
-
-          metrics.asaas.mrr = monthlyRevenue;
-          metrics.asaas.arr = monthlyRevenue * 12;
-        }
-
-        // Get customers that have MiauChat subscriptions
-        // Count unique customers from MiauChat subscriptions
-        const uniqueCustomers = new Set<string>();
-        if (subsData.data) {
-          for (const sub of subsData.data) {
-            if (miauchatSubscriptionIds.includes(sub.id) || 
-                sub.description?.includes('MiauChat') ||
-                sub.externalReference?.includes('miauchat')) {
-              if (sub.customer) uniqueCustomers.add(sub.customer);
-            }
-          }
-        }
-        metrics.asaas.totalCustomers = uniqueCustomers.size;
-
-        // Get payments only from MiauChat subscriptions
-        // If no MiauChat subscriptions exist, don't fetch any payments
-        if (miauchatSubscriptionIds.length === 0) {
-          console.log("[PAYMENT-METRICS] No MiauChat subscriptions found, skipping payments fetch");
-          metrics.asaas.recentPayments = [];
-        } else {
-          const miauchatPayments: any[] = [];
-          
-          for (const subId of miauchatSubscriptionIds.slice(0, 5)) { // Limit to avoid too many API calls
-            try {
-              const subPaymentsResponse = await fetch(
-                `${asaasBaseUrl}/subscriptions/${subId}/payments?limit=5`,
-                { headers: { "access_token": asaasKey } }
-              );
-              const subPaymentsData = await subPaymentsResponse.json();
-              if (subPaymentsData.data) {
-                miauchatPayments.push(...subPaymentsData.data);
-              }
-            } catch (e) {
-              console.error(`[PAYMENT-METRICS] Error fetching payments for subscription ${subId}:`, e);
-            }
-          }
-
-          // Sort by date and take last 10
-          miauchatPayments.sort((a, b) => 
-            new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()
-          );
-
-          metrics.asaas.recentPayments = miauchatPayments.slice(0, 10).map((payment: any) => ({
-            id: payment.id,
-            amount: payment.value || 0,
-            currency: "BRL",
-            status: payment.status,
-            customerEmail: payment.customer,
-            createdAt: payment.dateCreated,
-            description: payment.description,
-          }));
-        }
-
-        console.log("[PAYMENT-METRICS] ASAAS metrics:", {
-          subscriptions: metrics.asaas.activeSubscriptions,
-          customers: metrics.asaas.totalCustomers,
-          payments: metrics.asaas.recentPayments.length,
-        });
-      } catch (asaasError) {
-        console.error("[PAYMENT-METRICS] ASAAS error:", asaasError);
       }
     }
 

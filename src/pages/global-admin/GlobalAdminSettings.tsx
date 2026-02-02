@@ -326,51 +326,17 @@ export default function GlobalAdminSettings() {
 
           <Separator />
 
-          <div className="space-y-4">
-            <RadioGroup
-              value={currentPaymentProvider}
-              onValueChange={(value) => handleChange("payment_provider", value)}
-              className="grid gap-4"
-            >
-              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
-                <RadioGroupItem value="stripe" id="stripe" />
-                <Label htmlFor="stripe" className="flex-1 cursor-pointer">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Stripe</p>
-                      <p className="text-sm text-muted-foreground">
-                        Plataforma internacional com suporte a cartões internacionais
-                      </p>
-                    </div>
-                    <Badge variant={currentPaymentProvider === "stripe" ? "default" : "outline"}>
-                      {currentPaymentProvider === "stripe" ? "Ativo" : "Inativo"}
-                    </Badge>
-                  </div>
-                </Label>
-              </div>
-              <div className="flex items-center space-x-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors">
-                <RadioGroupItem value="asaas" id="asaas" />
-                <Label htmlFor="asaas" className="flex-1 cursor-pointer">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">ASAAS</p>
-                      <p className="text-sm text-muted-foreground">
-                        Plataforma brasileira com boleto, PIX e cartão de crédito
-                      </p>
-                    </div>
-                    <Badge variant={currentPaymentProvider === "asaas" ? "default" : "outline"}>
-                      {currentPaymentProvider === "asaas" ? "Ativo" : "Inativo"}
-                    </Badge>
-                  </div>
-                </Label>
-              </div>
-            </RadioGroup>
-            {localSettings["payment_provider"] !== undefined && (
-              <Button onClick={() => handleSave("payment_provider")} className="w-full">
-                <Save className="h-4 w-4 mr-2" />
-                Salvar Plataforma de Pagamento
-              </Button>
-            )}
+          <div className="flex items-center space-x-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+            <CreditCard className="h-5 w-5 text-green-500" />
+            <div className="flex-1">
+              <p className="font-medium">Stripe</p>
+              <p className="text-sm text-muted-foreground">
+                Plataforma de pagamento ativa para cartões e assinaturas
+              </p>
+            </div>
+            <Badge variant="default" className="bg-green-600">
+              Ativo
+            </Badge>
           </div>
         </CardContent>
       </Card>

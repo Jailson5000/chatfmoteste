@@ -30,9 +30,6 @@ verify_jwt = false
 [functions.agenda-pro-confirmation]
 verify_jwt = false
 
-[functions.asaas-webhook]
-verify_jwt = false
-
 [functions.generate-payment-link]
 verify_jwt = false
 
