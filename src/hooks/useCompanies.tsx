@@ -2,6 +2,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+interface CompanySubscription {
+  id: string;
+  stripe_subscription_id: string | null;
+  status: string | null;
+  current_period_end: string | null;
+  last_payment_at: string | null;
+  next_payment_at: string | null;
+}
+
 interface Company {
   id: string;
   law_firm_id: string | null;
@@ -55,6 +64,8 @@ interface Company {
     id: string;
     subdomain: string | null;
   } | null;
+  // Subscription/billing info
+  subscription?: CompanySubscription | null;
   // Initial access email tracking
   admin_user_id: string | null;
   initial_access_email_sent: boolean;
@@ -119,7 +130,8 @@ export function useCompanies() {
         .select(`
           *,
           plan:plans!companies_plan_id_fkey(id, name, price, max_users, max_instances, max_agents, max_workspaces, max_ai_conversations, max_tts_minutes),
-          law_firm:law_firms(id, subdomain)
+          law_firm:law_firms(id, subdomain),
+          subscription:company_subscriptions(id, stripe_subscription_id, status, current_period_end, last_payment_at, next_payment_at)
         `)
         .order("created_at", { ascending: false });
 
