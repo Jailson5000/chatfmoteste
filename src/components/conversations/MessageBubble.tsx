@@ -45,6 +45,7 @@ interface MessageBubbleProps {
   isRevoked?: boolean; // Indicates if the message was deleted by sender
   isStarred?: boolean; // Indicates if message is favorited
   myReaction?: string | null; // Emoji reaction sent by the user on this message
+  clientReaction?: string | null; // Emoji reaction sent by the client on our outgoing message
   replyTo?: {
     id: string;
     content: string | null;
@@ -1601,6 +1602,7 @@ export function MessageBubble({
   isRevoked = false,
   isStarred = false,
   myReaction,
+  clientReaction,
   onReply,
   onScrollToMessage,
   onRetry,
@@ -1956,7 +1958,7 @@ export function MessageBubble({
       
       <div
         className={cn(
-          "max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 transition-all",
+          "relative max-w-[85%] min-w-0 rounded-2xl px-4 py-2.5 transition-all",
           "break-words [overflow-wrap:anywhere] [word-break:break-word] [hyphens:auto]",
           isRevoked
             ? "bg-muted/50 rounded-br-md opacity-70"
@@ -1969,7 +1971,8 @@ export function MessageBubble({
                     ? "bg-red-100 text-red-900 rounded-br-md dark:bg-red-900/30 dark:text-red-100 border border-red-300 dark:border-red-700"
                     : "bg-green-100 text-green-900 rounded-br-md dark:bg-green-900/30 dark:text-green-100"
                 : "bg-muted rounded-bl-md",
-          isHighlighted && "ring-2 ring-yellow-400 ring-offset-2"
+          isHighlighted && "ring-2 ring-yellow-400 ring-offset-2",
+          isFromMe && clientReaction && "mb-3" // Add margin for reaction badge
         )}
       >
         {/* Revoked message indicator */}
@@ -2097,6 +2100,16 @@ export function MessageBubble({
           </span>
           {renderStatusIcon()}
         </div>
+        
+        {/* Client reaction indicator (for outgoing messages) */}
+        {isFromMe && clientReaction && (
+          <div 
+            className="absolute -bottom-2.5 -left-1 bg-muted rounded-full px-1.5 py-0.5 border border-border shadow-sm text-sm z-10"
+            title="Reação do cliente"
+          >
+            {clientReaction}
+          </div>
+        )}
       </div>
       
       {/* Actions menu for incoming messages */}

@@ -3789,6 +3789,7 @@ export type Database = {
           ai_agent_id: string | null
           ai_agent_name: string | null
           ai_generated: boolean
+          client_reaction: string | null
           content: string | null
           conversation_id: string
           created_at: string
@@ -3816,6 +3817,7 @@ export type Database = {
           ai_agent_id?: string | null
           ai_agent_name?: string | null
           ai_generated?: boolean
+          client_reaction?: string | null
           content?: string | null
           conversation_id: string
           created_at?: string
@@ -3843,6 +3845,7 @@ export type Database = {
           ai_agent_id?: string | null
           ai_agent_name?: string | null
           ai_generated?: boolean
+          client_reaction?: string | null
           content?: string | null
           conversation_id?: string
           created_at?: string

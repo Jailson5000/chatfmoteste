@@ -5154,6 +5154,78 @@ serve(async (req) => {
         break;
       }
 
+      case 'messages.reaction': {
+        // ========================================================================
+        // CLIENT REACTION HANDLING
+        // ========================================================================
+        // When a client reacts to a message (e.g., with 👍), we capture this and
+        // save it to the message record so it can be displayed in the UI.
+        // ========================================================================
+        logDebug('REACTION', 'Processing messages.reaction event', { requestId, data: body.data });
+        
+        try {
+          const reactionData = body.data as Record<string, unknown>;
+          const keyObj = reactionData?.key as Record<string, unknown> | undefined;
+          const reactionObj = reactionData?.reaction as Record<string, unknown> | undefined;
+          const reactionKey = reactionObj?.key as Record<string, unknown> | undefined;
+          
+          // Extract reaction details
+          const emoji = (reactionObj?.text as string) || null; // Empty string = reaction removed
+          const reactedMessageId = reactionKey?.id as string;
+          const reacterIsClient = keyObj?.fromMe === false;
+          const reactedMessageIsFromMe = reactionKey?.fromMe === true;
+          
+          logDebug('REACTION', 'Parsed reaction data', { 
+            requestId, 
+            emoji,
+            reactedMessageId,
+            reacterIsClient,
+            reactedMessageIsFromMe,
+          });
+          
+          if (!reactedMessageId) {
+            logDebug('REACTION', 'Missing reacted message ID, skipping', { requestId });
+            break;
+          }
+          
+          // Only process: client reacted to our (outgoing) message
+          // Save as client_reaction on the message record
+          if (reacterIsClient && reactedMessageIsFromMe) {
+            const { error: updateError } = await supabaseClient
+              .from('messages')
+              .update({ client_reaction: emoji || null }) // Empty string becomes null (reaction removed)
+              .eq('whatsapp_message_id', reactedMessageId)
+              .eq('is_from_me', true);
+            
+            if (updateError) {
+              logDebug('REACTION', 'Failed to update client reaction', { 
+                requestId, 
+                error: updateError,
+                messageId: reactedMessageId,
+              });
+            } else {
+              logDebug('REACTION', 'Client reaction saved successfully', { 
+                requestId, 
+                messageId: reactedMessageId, 
+                emoji: emoji || '(removed)',
+              });
+            }
+          } else {
+            logDebug('REACTION', 'Skipping reaction (not client → our message)', { 
+              requestId, 
+              reacterIsClient, 
+              reactedMessageIsFromMe,
+            });
+          }
+        } catch (reactionError) {
+          logDebug('REACTION', 'Error processing reaction', { 
+            requestId, 
+            error: reactionError instanceof Error ? reactionError.message : String(reactionError)
+          });
+        }
+        break;
+      }
+
       default:
         logDebug('EVENT', `Unhandled event`, { requestId, event: body.event, normalized: normalizedEvent });
     }
