@@ -1,166 +1,9 @@
 
+# Plano: Suporte a Mensagens de Contato (vCard) no WhatsApp
 
-# Plano: Exibir Datas de Trial e Ciclo de Faturamento
+## Diagnóstico
 
-## Análise do Cenário
-
-### Situação Atual
-1. **Banco de dados** já tem as colunas necessárias: `current_period_start`, `current_period_end`, `next_payment_at`
-2. **Webhook do Stripe** não atualiza essas colunas quando há mudança de ciclo
-3. **Componente MyPlanSettings** não exibe essas informações
-4. **Stripe cuida automaticamente** de gerar faturas a cada 30 dias com base no `billing_cycle_anchor`
-
-### Como o Stripe Funciona
-Quando um cliente assina:
-- Se trial termina dia 8 de fevereiro → primeira cobrança no dia 8
-- Próxima fatura será dia 8 de março (30 dias depois)
-- Stripe define o `billing_cycle_anchor` como a data da primeira cobrança
-- `subscription.current_period_end` indica quando a próxima fatura será gerada
-
-### Risco de Quebrar o Sistema
-**Baixo risco** - As mudanças são:
-1. Atualização do webhook (apenas adiciona dados, não altera lógica existente)
-2. Exibição na UI (somente leitura, não afeta fluxos de pagamento)
-
----
-
-## Arquitetura da Solução
-
-```text
-┌────────────────────────────────────────────────────────────────────┐
-│                          STRIPE                                     │
-│  billing_cycle_anchor → determina dia do mês da cobrança           │
-│  current_period_end → próxima data de renovação                    │
-└───────────────────────────────────┬────────────────────────────────┘
-                                    │ webhook events
-                                    ▼
-┌────────────────────────────────────────────────────────────────────┐
-│            stripe-webhook Edge Function                            │
-│  customer.subscription.updated → atualiza current_period_*         │
-│  invoice.paid → atualiza last_payment_at                           │
-└───────────────────────────────────┬────────────────────────────────┘
-                                    │ UPDATE
-                                    ▼
-┌────────────────────────────────────────────────────────────────────┐
-│              company_subscriptions (banco)                         │
-│  current_period_start | current_period_end | next_payment_at       │
-└───────────────────────────────────┬────────────────────────────────┘
-                                    │ SELECT
-                                    ▼
-┌────────────────────────────────────────────────────────────────────┐
-│              MyPlanSettings (frontend)                             │
-│  Exibe: "Próximo vencimento: 08/03/2026" ou "Trial: 7 dias"        │
-└────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Mudanças Necessárias
-
-### 1. Webhook do Stripe (Backend)
-
-**Arquivo:** `supabase/functions/stripe-webhook/index.ts`
-
-Modificar os eventos `checkout.session.completed` e `customer.subscription.updated` para salvar as datas do ciclo:
-
-```typescript
-// No evento checkout.session.completed:
-// Buscar a subscription do Stripe para pegar current_period_*
-const subscription = await stripe.subscriptions.retrieve(session.subscription);
-
-await supabase.from("company_subscriptions").upsert({
-  // ... dados existentes ...
-  current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-  current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-  next_payment_at: new Date(subscription.current_period_end * 1000).toISOString(),
-});
-
-// No evento customer.subscription.updated:
-await supabase.from("company_subscriptions").update({
-  current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-  current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-  next_payment_at: new Date(subscription.current_period_end * 1000).toISOString(),
-});
-```
-
-### 2. Query de Billing (Frontend)
-
-**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
-
-Modificar a query de `company-billing` para incluir dados da subscription:
-
-```typescript
-const { data: companyData } = useQuery({
-  queryKey: ["company-billing", lawFirm?.id],
-  queryFn: async () => {
-    // ... busca company existente ...
-    
-    // Adicionar busca de subscription
-    const { data: subscription } = await supabase
-      .from("company_subscriptions")
-      .select("status, current_period_start, current_period_end, next_payment_at")
-      .eq("company_id", company.id)
-      .maybeSingle();
-      
-    return { ...company, subscription };
-  },
-});
-```
-
-### 3. Exibição na UI (Frontend)
-
-**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
-
-Adicionar seção visual no card "Resumo Mensal":
-
-| Cenário | Exibição |
-|---------|----------|
-| **Em Trial** | "⏱️ Trial termina em: 08/02/2026 (5 dias restantes)" |
-| **Assinante Ativo** | "📅 Próximo vencimento: 08/03/2026" + "Ciclo de 30 dias (dia 8)" |
-| **Trial Expirado** | "⚠️ Trial expirado - Assine para continuar" |
-
-Exemplo de UI no card:
-
-```tsx
-{/* Billing Cycle Info */}
-{isInTrial ? (
-  <div className="flex items-center gap-2 text-amber-600">
-    <Clock className="h-4 w-4" />
-    <span className="text-sm">Trial termina em {trialEndDate}</span>
-  </div>
-) : subscription?.next_payment_at && (
-  <div className="space-y-1">
-    <div className="flex items-center gap-2 text-muted-foreground">
-      <Calendar className="h-4 w-4" />
-      <span className="text-sm">Próximo vencimento: {nextPaymentDate}</span>
-    </div>
-    <p className="text-xs text-muted-foreground">
-      Ciclo de 30 dias (dia {billingDay} de cada mês)
-    </p>
-  </div>
-)}
-```
-
----
-
-## Exemplo de Fluxo Completo
-
-### Cenário: Cliente inicia trial dia 1 de fevereiro
-
-| Data | Evento | Banco de Dados | UI |
-|------|--------|----------------|-----|
-| 01/02 | Registro com trial | `trial_ends_at = 08/02` | "Trial: 7 dias restantes" |
-| 05/02 | Cliente acessa | - | "Trial: 3 dias restantes" |
-| 08/02 | Trial expira | `status = expired` | "Trial expirado" |
-| 08/02 | Cliente paga via Stripe | `current_period_end = 08/03`, `status = active` | "Próximo vencimento: 08/03" |
-| 08/03 | Stripe cobra automaticamente | `current_period_end = 08/04` | "Próximo vencimento: 08/04" |
-
-### Cenário: Cliente paga direto (sem trial) dia 15/02
-
-| Data | Evento | Banco de Dados | UI |
-|------|--------|----------------|-----|
-| 15/02 | Pagamento imediato | `current_period_end = 15/03`, `status = active` | "Próximo vencimento: 15/03" |
-| 15/03 | Stripe cobra | `current_period_end = 15/04` | "Próximo vencimento: 15/04" |
+O sistema não processa mensagens de contato compartilhadas pelo WhatsApp. Atualmente, quando um cliente envia um contato (como "Thierry Irmão" na imagem), o sistema mostra apenas "🎤 Mídia" sem informações úteis.
 
 ---
 
@@ -168,30 +11,206 @@ Exemplo de UI no card:
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `supabase/functions/stripe-webhook/index.ts` | Backend | Salvar datas de ciclo nos eventos |
-| `src/components/settings/MyPlanSettings.tsx` | Frontend | Query + UI para exibir datas |
+| `supabase/functions/evolution-webhook/index.ts` | Backend | Adicionar parsing de `contactMessage` e `contactsArrayMessage` |
+| `src/components/conversations/MessageBubble.tsx` | Frontend | Adicionar renderização visual para mensagens de contato |
+
+---
+
+## Solução
+
+### 1. Backend - Adicionar Interface de Contato
+
+Adicionar a definição do tipo `contactMessage` na interface `MessageData`:
+
+```typescript
+// Em MessageData.message
+contactMessage?: {
+  displayName?: string;
+  vcard?: string;
+  contextInfo?: ContextInfo;
+};
+contactsArrayMessage?: {
+  displayName?: string;
+  contacts?: Array<{
+    displayName?: string;
+    vcard?: string;
+  }>;
+  contextInfo?: ContextInfo;
+};
+```
+
+### 2. Backend - Extrair Conteúdo do vCard
+
+Adicionar lógica de extração na seção de parsing de mensagens (após `templateMessage`):
+
+```typescript
+} else if (data.message?.contactMessage) {
+  // Contato único compartilhado
+  messageType = 'contact';
+  const contact = data.message.contactMessage;
+  const displayName = contact.displayName || '';
+  
+  // Extrair telefone do vCard
+  const phoneMatch = contact.vcard?.match(/TEL[^:]*:([+\d\s\-()]+)/i);
+  const phone = phoneMatch ? phoneMatch[1].replace(/\s/g, '') : '';
+  
+  // Formatar conteúdo legível
+  messageContent = phone 
+    ? `📇 Contato: ${displayName}\n📞 ${phone}`
+    : `📇 Contato: ${displayName}`;
+    
+  logDebug('CONTACT', 'Contact message received', { 
+    requestId, 
+    displayName, 
+    hasVcard: !!contact.vcard,
+    phone 
+  });
+  
+} else if (data.message?.contactsArrayMessage) {
+  // Múltiplos contatos compartilhados
+  messageType = 'contact';
+  const contactsArray = data.message.contactsArrayMessage;
+  const contacts = contactsArray.contacts || [];
+  
+  if (contacts.length === 1) {
+    // Um contato no array
+    const contact = contacts[0];
+    const displayName = contact.displayName || contactsArray.displayName || '';
+    const phoneMatch = contact.vcard?.match(/TEL[^:]*:([+\d\s\-()]+)/i);
+    const phone = phoneMatch ? phoneMatch[1].replace(/\s/g, '') : '';
+    
+    messageContent = phone 
+      ? `📇 Contato: ${displayName}\n📞 ${phone}`
+      : `📇 Contato: ${displayName}`;
+  } else {
+    // Múltiplos contatos
+    const names = contacts.map(c => c.displayName || 'Contato').join(', ');
+    messageContent = `📇 ${contacts.length} contatos: ${names}`;
+  }
+  
+  logDebug('CONTACT', 'Contacts array message received', { 
+    requestId, 
+    count: contacts.length 
+  });
+}
+```
+
+### 3. Frontend - Renderização Visual
+
+Adicionar um componente `ContactCardViewer` em `MessageBubble.tsx`:
+
+```tsx
+// Componente para exibir contatos compartilhados
+function ContactCardViewer({ content }: { content: string }) {
+  // Parse do conteúdo formatado pelo backend
+  // Formato: "📇 Contato: Nome\n📞 +55..."
+  
+  const lines = content.split('\n');
+  const nameLine = lines.find(l => l.includes('Contato:'));
+  const phoneLine = lines.find(l => l.includes('📞'));
+  
+  const name = nameLine?.replace(/📇\s*Contato:\s*/i, '').trim() || 'Contato';
+  const phone = phoneLine?.replace(/📞\s*/g, '').trim() || '';
+  
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-primary-foreground/10 border border-border/50">
+      <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+        <User className="h-5 w-5 text-primary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{name}</p>
+        {phone && (
+          <p className="text-xs text-muted-foreground">{phone}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### 4. Frontend - Integrar no renderMedia()
+
+Adicionar condição para renderizar contatos:
+
+```tsx
+// Em renderMedia(), antes do return null final
+const isContact = messageType === 'contact';
+
+if (isContact && content) {
+  return <ContactCardViewer content={content} />;
+}
+```
+
+---
+
+## Exemplo Visual
+
+Após implementação, mensagens de contato aparecerão assim:
+
+```text
+┌──────────────────────────────────┐
+│  👤  Thierry Irmão               │
+│      +55 17 99600-1254           │
+└──────────────────────────────────┘
+                            16:35 ✓✓
+```
+
+---
+
+## Risco de Quebrar o Sistema
+
+**Baixo risco** - As mudanças são:
+
+1. **Backend**: Apenas adiciona novo `else if` para um tipo de mensagem não tratado. Não altera lógica existente de texto, imagem, áudio, vídeo ou documento.
+
+2. **Frontend**: Adiciona componente novo e condição adicional no `renderMedia()`. Não modifica renderização existente.
+
+3. **Compatibilidade**: Se o payload vier em formato diferente, o fallback existente trata como mensagem genérica.
+
+---
+
+## Fluxo de Dados
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│              WhatsApp (Cliente envia contato)                        │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │ contactMessage / contactsArrayMessage
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Evolution API                                    │
+│           Webhook: messages.upsert                                   │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              evolution-webhook Edge Function                         │
+│  - Detecta contactMessage ou contactsArrayMessage                    │
+│  - Define messageType = 'contact'                                    │
+│  - Extrai displayName e phone do vCard                               │
+│  - Formata: "📇 Contato: Nome\n📞 +55..."                             │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │ INSERT messages (type='contact')
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Supabase DB                                   │
+│  messages: { content, message_type: 'contact', ... }                 │
+└─────────────────────────────────┬───────────────────────────────────┘
+                                  │ Realtime
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              MessageBubble.tsx (Frontend)                            │
+│  - Detecta messageType === 'contact'                                 │
+│  - Renderiza ContactCardViewer com nome e telefone                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Validações Pós-Implementação
 
-- [ ] Webhook atualiza `current_period_end` após pagamento
-- [ ] UI mostra data correta do trial enquanto ativo
-- [ ] UI mostra data do próximo vencimento após assinatura
-- [ ] Nenhum erro ao carregar MyPlanSettings
-- [ ] Empresas sem subscription ainda funcionam (graceful handling)
-
----
-
-## Sobre o Stripe e Datas
-
-O Stripe gerencia automaticamente:
-1. **billing_cycle_anchor**: Data âncora (ex: dia 8 do mês)
-2. **current_period_start**: Início do ciclo atual
-3. **current_period_end**: Fim do ciclo / Próxima cobrança
-4. **Faturas automáticas**: Geradas no `current_period_end`
-
-Não precisamos fazer nada extra no Stripe - ele já cuida de tudo. Só precisamos:
-- Capturar essas datas via webhook
-- Exibi-las na UI
-
+- [ ] Receber contato único do WhatsApp → exibe nome e telefone
+- [ ] Receber múltiplos contatos → exibe contagem e nomes
+- [ ] Contato sem telefone no vCard → exibe apenas nome
+- [ ] Mensagens existentes (texto, imagem, áudio) continuam funcionando
+- [ ] Preview na lista de conversas mostra "📇 Contato: Nome"
