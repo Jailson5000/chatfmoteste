@@ -24,7 +24,7 @@ type RegistrationMode = 'trial' | 'pay_now';
 
 export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [paymentProvider, setPaymentProvider] = useState<"stripe" | "asaas">("stripe");
+  // Payment always uses Stripe
   const [paymentsDisabled, setPaymentsDisabled] = useState(false);
   const [manualRegistrationEnabled, setManualRegistrationEnabled] = useState(false);
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
@@ -49,23 +49,17 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
     }
   }, [open]);
 
-  // Fetch payment provider and disabled settings on mount
+  // Fetch payment settings on mount
   useEffect(() => {
     const fetchPaymentSettings = async () => {
       try {
         const { data, error } = await supabase
           .from("system_settings")
           .select("key, value")
-          .in("key", ["payment_provider", "payments_disabled", "manual_registration_enabled"]);
+          .in("key", ["payments_disabled", "manual_registration_enabled"]);
 
         if (!error && data) {
           for (const setting of data) {
-            if (setting.key === "payment_provider") {
-              const provider = String(setting.value).replace(/"/g, "");
-              if (provider === "stripe" || provider === "asaas") {
-                setPaymentProvider(provider);
-              }
-            }
             if (setting.key === "payments_disabled") {
               const disabled = String(setting.value).replace(/"/g, "") === "true";
               setPaymentsDisabled(disabled);
@@ -140,12 +134,8 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
         return;
       }
 
-      // PAY NOW FLOW: Redirect to ASAAS checkout
-      const functionName = paymentProvider === "asaas" 
-        ? "create-asaas-checkout" 
-        : "create-checkout-session";
-
-      const { data, error } = await supabase.functions.invoke(functionName, {
+      // PAY NOW FLOW: Redirect to Stripe checkout
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
           plan: plan.name,
           billingPeriod,
@@ -190,7 +180,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
   const yearlyMonthly = yearlyPrice / 12;
   const savings = monthlyPrice * 12 - yearlyPrice;
 
-  const providerLabel = paymentProvider === "asaas" ? "ASAAS" : "Stripe";
+  // Provider is always Stripe
 
   // SUCCESS STATE
   if (isSuccess) {
@@ -564,7 +554,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
           <p className="text-xs text-center text-white/40">
             {registrationMode === 'trial'
               ? 'Teste grátis por 7 dias. Cancele quando quiser.'
-              : `Você será redirecionado para o checkout seguro do ${providerLabel}`
+              : 'Você será redirecionado para o checkout seguro do Stripe'
             }
           </p>
         </form>
