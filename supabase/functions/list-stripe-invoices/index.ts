@@ -81,22 +81,40 @@ serve(async (req) => {
       );
     }
 
-    // Get company and subscription info
-    const { data: company } = await supabase
+    // Get company info
+    const { data: company, error: companyError } = await supabase
       .from("companies")
-      .select("id, name, company_subscriptions(stripe_customer_id)")
+      .select("id, name")
       .eq("law_firm_id", profile.law_firm_id)
       .single();
 
-    if (!company) {
+    if (companyError || !company) {
+      logStep("ERROR: Company not found", { error: companyError?.message, lawFirmId: profile.law_firm_id });
       return new Response(
         JSON.stringify({ error: "Company not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const subscription = company.company_subscriptions?.[0];
+    logStep("Company found", { companyId: company.id, companyName: company.name });
+
+    // Get subscription info separately (fixes nested query issue)
+    const { data: subscription, error: subError } = await supabase
+      .from("company_subscriptions")
+      .select("stripe_customer_id, stripe_subscription_id, status")
+      .eq("company_id", company.id)
+      .maybeSingle();
+
+    if (subError) {
+      logStep("ERROR: Failed to fetch subscription", { error: subError.message });
+    }
+
     const stripeCustomerId = subscription?.stripe_customer_id;
+    logStep("Subscription lookup", { 
+      hasSubscription: !!subscription, 
+      stripeCustomerId: stripeCustomerId || "none",
+      subscriptionStatus: subscription?.status || "none"
+    });
 
     if (!stripeCustomerId) {
       logStep("No Stripe customer ID found", { companyId: company.id });
