@@ -135,27 +135,36 @@ serve(async (req) => {
 
     logStep("Invoices fetched", { count: invoices.data.length });
 
-    // Format invoices for frontend
-    const formattedInvoices = invoices.data.map((invoice: Stripe.Invoice) => ({
-      id: invoice.id,
-      number: invoice.number,
-      status: invoice.status,
-      amount: invoice.amount_due / 100, // Convert from cents
-      currency: invoice.currency.toUpperCase(),
-      created_at: new Date(invoice.created * 1000).toISOString(),
-      due_date: invoice.due_date ? new Date(invoice.due_date * 1000).toISOString() : null,
-      paid_at: invoice.status_transitions?.paid_at 
-        ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() 
-        : null,
-      invoice_url: invoice.hosted_invoice_url,
-      pdf_url: invoice.invoice_pdf,
-      period_start: invoice.period_start 
-        ? new Date(invoice.period_start * 1000).toISOString() 
-        : null,
-      period_end: invoice.period_end 
-        ? new Date(invoice.period_end * 1000).toISOString() 
-        : null,
-    }));
+    // Map Stripe status to label and color (compatible with frontend)
+    const statusMap: Record<string, { label: string; color: string }> = {
+      draft: { label: "Rascunho", color: "gray" },
+      open: { label: "Pendente", color: "yellow" },
+      paid: { label: "Pago", color: "green" },
+      void: { label: "Cancelado", color: "gray" },
+      uncollectible: { label: "Inadimplente", color: "red" },
+    };
+
+    // Format invoices for frontend (camelCase format compatible with ASAAS)
+    const formattedInvoices = invoices.data.map((invoice: Stripe.Invoice) => {
+      const statusInfo = statusMap[invoice.status || "open"] || { label: "Pendente", color: "yellow" };
+      
+      return {
+        id: invoice.id,
+        value: invoice.amount_due / 100, // Convert from cents
+        statusLabel: statusInfo.label,
+        statusColor: statusInfo.color,
+        description: `Assinatura - ${invoice.number || invoice.id}`,
+        dueDate: invoice.due_date 
+          ? new Date(invoice.due_date * 1000).toISOString() 
+          : new Date(invoice.created * 1000).toISOString(), // Fallback to created date
+        paymentDate: invoice.status_transitions?.paid_at 
+          ? new Date(invoice.status_transitions.paid_at * 1000).toISOString() 
+          : null,
+        invoiceUrl: invoice.hosted_invoice_url,
+        bankSlipUrl: invoice.invoice_pdf, // PDF do Stripe
+        billingType: "Stripe",
+      };
+    });
 
     return new Response(
       JSON.stringify({ 
