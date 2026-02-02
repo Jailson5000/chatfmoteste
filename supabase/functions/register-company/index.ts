@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Stripe from "https://esm.sh/stripe@18.5.0";
 
 /**
  * Register Company - Self-Service Registration
@@ -421,6 +422,83 @@ serve(async (req) => {
       } catch (n8nError) {
         console.log(`[register-company] N8N workflow creation skipped/failed (non-critical):`, n8nError);
       }
+
+      // ============ CREATE STRIPE CUSTOMER FOR TRIAL ============
+      // This ensures the customer exists in Stripe from day 1 of the trial,
+      // so when they convert to paid, the registration date is preserved.
+      try {
+        const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+        if (stripeKey) {
+          console.log(`[register-company] Creating Stripe customer for trial...`);
+          const stripe = new Stripe(stripeKey, { apiVersion: "2025-08-27.basil" });
+          
+          // Check if customer already exists with this email
+          const existingCustomers = await stripe.customers.list({ 
+            email: admin_email, 
+            limit: 1 
+          });
+          
+          let stripeCustomerId: string;
+          
+          if (existingCustomers.data.length > 0) {
+            stripeCustomerId = existingCustomers.data[0].id;
+            console.log(`[register-company] Found existing Stripe customer: ${stripeCustomerId}`);
+            
+            // Update metadata with new trial info
+            await stripe.customers.update(stripeCustomerId, {
+              metadata: {
+                company_id: company.id,
+                law_firm_id: lawFirm.id,
+                trial_started_at: now,
+                trial_ends_at: trialEndsAt,
+                source: "self_service_trial",
+              },
+            });
+          } else {
+            // Create new Stripe customer
+            const customer = await stripe.customers.create({
+              email: admin_email,
+              name: company_name,
+              phone: phone || undefined,
+              metadata: {
+                company_id: company.id,
+                law_firm_id: lawFirm.id,
+                trial_started_at: now,
+                trial_ends_at: trialEndsAt,
+                source: "self_service_trial",
+              },
+            });
+            stripeCustomerId = customer.id;
+            console.log(`[register-company] Created Stripe customer: ${stripeCustomerId}`);
+          }
+          
+          // Save stripe_customer_id to company_subscriptions
+          const { error: subscriptionError } = await supabase
+            .from('company_subscriptions')
+            .upsert({
+              company_id: company.id,
+              stripe_customer_id: stripeCustomerId,
+              status: 'trialing',
+              current_period_start: now,
+              current_period_end: trialEndsAt,
+              billing_type: 'stripe',
+              created_at: now,
+              updated_at: now,
+            }, { onConflict: 'company_id' });
+          
+          if (subscriptionError) {
+            console.error('[register-company] Error saving Stripe customer ID:', subscriptionError);
+          } else {
+            console.log(`[register-company] Stripe customer ID saved to company_subscriptions`);
+          }
+        } else {
+          console.log(`[register-company] STRIPE_SECRET_KEY not configured, skipping Stripe customer creation`);
+        }
+      } catch (stripeError) {
+        // Don't fail the registration if Stripe fails - just log it
+        console.error('[register-company] Error creating Stripe customer (non-critical):', stripeError);
+      }
+      // ============ END STRIPE CUSTOMER CREATION ============
     }
 
     // Log audit event
