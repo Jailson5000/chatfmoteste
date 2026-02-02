@@ -2486,6 +2486,7 @@ export type Database = {
           asaas_customer_id: string | null
           asaas_subscription_id: string | null
           billing_type: string | null
+          cancelled_at: string | null
           company_id: string
           created_at: string | null
           current_period_end: string | null
@@ -2503,6 +2504,7 @@ export type Database = {
           asaas_customer_id?: string | null
           asaas_subscription_id?: string | null
           billing_type?: string | null
+          cancelled_at?: string | null
           company_id: string
           created_at?: string | null
           current_period_end?: string | null
@@ -2520,6 +2522,7 @@ export type Database = {
           asaas_customer_id?: string | null
           asaas_subscription_id?: string | null
           billing_type?: string | null
+          cancelled_at?: string | null
           company_id?: string
           created_at?: string | null
           current_period_end?: string | null
