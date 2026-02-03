@@ -188,19 +188,19 @@ export function AgendaProCalendar() {
               key={slot} 
               className={cn(
                 "flex border-b last:border-b-0 min-h-[50px]",
-                !isWorkingHour && "bg-muted/40"
+                !isWorkingHour && "bg-blue-100/40 dark:bg-blue-950/30"
               )}
             >
               <div className={cn(
                 "w-16 flex-shrink-0 p-2 text-xs border-r",
                 minute === 0 ? "text-muted-foreground font-medium" : "text-muted-foreground/60",
-                !isWorkingHour && "bg-muted/50"
+                !isWorkingHour && "bg-blue-100/50 dark:bg-blue-950/40"
               )}>
                 {slot}
               </div>
               <div className={cn(
                 "flex-1 p-1 relative",
-                !isWorkingHour && "bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--muted)/0.4)_5px,hsl(var(--muted)/0.4)_10px)]"
+                !isWorkingHour && "bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(147_197_253/0.4)_5px,rgb(147_197_253/0.4)_10px)] dark:bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(30_64_175/0.3)_5px,rgb(30_64_175/0.3)_10px)]"
               )}>
                 {slotAppointments.map((apt) => {
                   const isCancelled = apt.status === 'cancelled' || apt.status === 'no_show';
@@ -496,7 +496,7 @@ export function AgendaProCalendar() {
               <span>Cancelado</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded border border-muted-foreground/30 bg-[repeating-linear-gradient(135deg,hsl(var(--muted)),hsl(var(--muted))_2px,transparent_2px,transparent_5px)]" />
+              <div className="w-3 h-3 rounded border border-blue-300 dark:border-blue-800 bg-[repeating-linear-gradient(135deg,rgb(147_197_253/0.6),rgb(147_197_253/0.6)_2px,transparent_2px,transparent_5px)] dark:bg-[repeating-linear-gradient(135deg,rgb(30_64_175/0.5),rgb(30_64_175/0.5)_2px,transparent_2px,transparent_5px)]" />
               <span>Fora do expediente</span>
             </div>
           </div>
