@@ -12,8 +12,26 @@ export function useTimelineItems({ messages, inlineActivities }: UseTimelineItem
   return useMemo(() => {
     const items: TimelineItem[] = [];
     
-    // Add messages
-    messages.forEach(msg => {
+    // FIX: Deduplicate messages by whatsapp_message_id BEFORE adding to timeline
+    // This prevents duplicate messages from appearing in the UI even if they somehow
+    // made it past the backend deduplication (race conditions, etc.)
+    const seenWhatsAppIds = new Set<string>();
+    const deduplicatedMessages: PaginatedMessage[] = [];
+    
+    for (const msg of messages) {
+      const whatsappId = msg.whatsapp_message_id;
+      if (whatsappId) {
+        if (seenWhatsAppIds.has(whatsappId)) {
+          // Skip duplicate - keep the first occurrence (usually the one with correct metadata)
+          continue;
+        }
+        seenWhatsAppIds.add(whatsappId);
+      }
+      deduplicatedMessages.push(msg);
+    }
+    
+    // Add deduplicated messages
+    deduplicatedMessages.forEach(msg => {
       items.push({ type: 'message', data: msg });
     });
     
