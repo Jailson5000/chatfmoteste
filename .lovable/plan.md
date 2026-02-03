@@ -1,144 +1,234 @@
 
+# Análise Completa do Sistema MiauChat
 
-# Plano: Ocultar Botão "Enviar Agora" para Mensagens reminder_2
+## 📊 Resumo Executivo
 
-## Problema Identificado
-
-Na aba "Mensagens" da Agenda Pro, mensagens do tipo `reminder_2` (segundo lembrete automático) mostram o botão "Enviar Agora" que não funciona. Isso acontece porque:
-
-1. O botão aparece para qualquer mensagem com `appointment_id`
-2. A edge function `agenda-pro-notification` só suporta tipos: `created`, `reminder`, `cancelled`, `updated`, `no_show`
-3. Não há suporte para envio manual do `reminder_2`
-
-## Solução
-
-Ocultar o botão "Enviar Agora" para mensagens automáticas do sistema (`reminder_2`), deixando apenas para mensagens customizadas e tipos suportados.
+| Área | Status | Score |
+|------|--------|-------|
+| **Segurança** | ⚠️ Atenção | 7/10 |
+| **Funcionalidades Cliente** | ✅ Estável | 9/10 |
+| **Funcionalidades Admin** | ✅ Estável | 9/10 |
+| **Performance** | ⚠️ Atenção | 7/10 |
+| **Infraestrutura** | ⚠️ Parcial | 6/10 |
 
 ---
 
-## Mudanças Necessárias
+## 🔒 SEGURANÇA
 
-### Arquivo: `src/components/agenda-pro/AgendaProScheduledMessages.tsx`
+### Problemas Identificados pelo Linter
 
-| Mudança | Descrição |
-|---------|-----------|
-| Criar função `canSendNow` | Verificar se o tipo da mensagem suporta envio manual |
-| Atualizar condição do botão | Usar a nova função para controlar visibilidade |
-| Adicionar label para `reminder_2` | Mostrar "Lembrete 2" em vez de "reminder_2" |
+| Prioridade | Problema | Impacto | Status |
+|------------|----------|---------|--------|
+| 🔴 **CRÍTICO** | View `company_usage_summary` com SECURITY DEFINER | Bypass de RLS potencial | Precisa correção |
+| 🟡 **ALTO** | Leaked Password Protection desabilitada | Senhas vazadas podem ser usadas | Configuração manual |
 
-### Código Antes (linha 417-428)
+#### Detalhes da View SECURITY DEFINER
 
-```tsx
-<div className="flex items-center gap-1">
-  {message.appointment_id && (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => sendNow.mutate(message)}
-      disabled={sendNow.isPending}
-      title="Enviar agora"
-    >
-      <Send className="h-4 w-4" />
-    </Button>
-  )}
+A view `company_usage_summary` usa SECURITY DEFINER, o que significa que executa com permissões do **criador** da view (superuser), não do usuário autenticado. Isso pode expor dados de outras empresas se consultada incorretamente.
+
+```sql
+-- View atual consulta todas as companies
+SELECT c.id AS company_id, ...
+FROM companies c
+LEFT JOIN plans p ON c.plan_id = p.id;
 ```
 
-### Código Depois
+**Solução Proposta**: Recriar a view sem SECURITY DEFINER ou adicionar filtro por tenant.
 
-```tsx
-// Nova função para verificar se pode enviar manualmente
-const canSendNow = (message: ScheduledMessage) => {
-  // reminder_2 é gerado automaticamente pelo cron e não suporta envio manual
-  if (message.type === "reminder_2") return false;
-  // Mensagens com appointment_id e tipos suportados podem ser enviadas
-  return !!message.appointment_id && ["reminder", "pre_message"].includes(message.type);
-};
+### Proteções Funcionando ✅
 
-// No JSX:
-<div className="flex items-center gap-1">
-  {canSendNow(message) && (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => sendNow.mutate(message)}
-      disabled={sendNow.isPending}
-      title="Enviar agora"
-    >
-      <Send className="h-4 w-4" />
-    </Button>
-  )}
+| Proteção | Status |
+|----------|--------|
+| RLS em 85 tabelas | ✅ Ativo |
+| Isolamento multi-tenant | ✅ Funcional |
+| Controle de sessão (2 abas) | ✅ Implementado hoje |
+| Proteção de dispositivo único | ✅ Funcional |
+| RBAC por roles | ✅ Funcional |
+
+---
+
+## 📱 ÁREA CLIENTE
+
+### Status das Funcionalidades
+
+| Módulo | Páginas | Status | Observações |
+|--------|---------|--------|-------------|
+| Dashboard | 1 | ✅ OK | Métricas funcionando |
+| Conversas | 1 (4835 linhas) | ⚠️ Grande | Arquivo muito extenso |
+| Kanban | 1 | ✅ OK | - |
+| Contatos | 1 | ✅ OK | - |
+| Agenda Pro | 1 | ✅ OK | 6/7 instâncias conectadas |
+| Conexões WhatsApp | 1 | ✅ OK | 6 conectadas, 1 desconectada |
+| IA Agentes | 2 | ✅ OK | - |
+| Base de Conhecimento | 1 | ✅ OK | - |
+| Voz IA | 1 | ✅ OK | - |
+| Tarefas | 1 | ✅ OK | - |
+| Configurações | 1 | ✅ OK | - |
+| Perfil | 1 | ✅ OK | - |
+| Suporte | 1 | ✅ OK | - |
+| Tutoriais | 1 | ✅ OK | - |
+
+### Pontos de Atenção
+
+1. **Conversations.tsx com 4835 linhas** - Dificulta manutenção e aumenta risco de bugs
+2. **Mensagens agendadas** - 3 pending, 3 failed nos últimos 7 dias (precisa investigar falhas)
+
+---
+
+## 🛠️ ÁREA GLOBAL ADMIN
+
+### Status das Funcionalidades
+
+| Módulo | Status | Observações |
+|--------|--------|-------------|
+| Dashboard | ✅ OK | - |
+| Empresas | ✅ OK | 9 empresas cadastradas |
+| Conexões | ✅ OK | 7 instâncias totais |
+| Planos | ✅ OK | - |
+| Pagamentos | ✅ OK | - |
+| Usuários (super_admin) | ✅ OK | - |
+| Monitoramento | ✅ OK | - |
+| Configurações (super_admin) | ✅ OK | - |
+| N8N Settings | ✅ OK | - |
+| APIs IA | ✅ OK | - |
+| Audit Logs | ✅ OK | - |
+| Provisioning | ✅ OK | - |
+| Alertas | ✅ OK | - |
+| Template Base (super_admin) | ✅ OK | - |
+| Agent Templates | ✅ OK | - |
+| Tickets | ✅ OK | - |
+| Tutoriais | ✅ OK | - |
+
+### GlobalAdminCompanies.tsx
+
+- 1976 linhas - Grande mas gerenciável
+- Inclui: CRUD empresas, aprovação, suspensão, billing, n8n, health checks
+
+---
+
+## 🗄️ BANCO DE DADOS
+
+### Estatísticas
+
+| Métrica | Valor |
+|---------|-------|
+| Tabelas totais | 85 |
+| Views | 5 |
+| Profiles válidos | 14 |
+| Empresas | 9 |
+| Instâncias WhatsApp | 7 (6 conectadas) |
+
+### Views Existentes
+
+| View | Propósito | Segurança |
+|------|-----------|-----------|
+| `company_usage_summary` | Resumo de uso | ⚠️ SECURITY DEFINER |
+| `whatsapp_instances_safe` | Instâncias filtradas | ✅ Usa RLS |
+| `google_calendar_integrations_safe` | Calendar filtrado | ✅ Usa RLS |
+| `google_calendar_integration_status` | Status Calendar | ✅ Usa RLS |
+| `agenda_pro_professionals_public` | Profissionais públicos | ✅ Filtrado |
+
+---
+
+## 🏢 STATUS DAS EMPRESAS
+
+### Problemas de Provisioning
+
+| Empresa | Status | N8N | Problema |
+|---------|--------|-----|----------|
+| Instituto Neves | partial | error | Unauthorized |
+| Miau test | partial | error | Unauthorized |
+| PNH IMPORTAÇÃO | partial | error | Unauthorized |
+| Sarrabuio | partial | error | Unauthorized |
+| Liz importados | partial | error | Unauthorized |
+| Jr | partial | error | Unauthorized |
+| FMO Advogados | partial | error | Unauthorized |
+
+**Causa**: Todas as empresas têm `n8n_last_error: {"error":"Unauthorized","success":false}` - indica problema na conexão com o N8N (credenciais ou URL).
+
+### Trials Ativos
+
+| Empresa | Expira em | Status |
+|---------|-----------|--------|
+| Miau test | 04/02/2026 | active_trial |
+| Sarrabuio | 05/02/2026 | active_trial |
+| PNH | 06/02/2026 | active_trial |
+| Miau test (2) | 09/02/2026 | active_trial |
+| Instituto Neves | 10/02/2026 | active_trial |
+
+---
+
+## 📋 MELHORIAS RECOMENDADAS
+
+### 🔴 Prioridade Alta (Fazer Agora)
+
+| # | Tarefa | Impacto | Esforço |
+|---|--------|---------|---------|
+| 1 | Corrigir view `company_usage_summary` para SECURITY INVOKER | Segurança | Baixo |
+| 2 | Habilitar Leaked Password Protection | Segurança | Mínimo |
+| 3 | Investigar falhas de N8N (todas empresas com erro "Unauthorized") | Infraestrutura | Médio |
+| 4 | Verificar 3 mensagens agendadas com status "failed" | Funcionalidade | Baixo |
+
+### 🟡 Prioridade Média (Próxima Sprint)
+
+| # | Tarefa | Impacto | Esforço |
+|---|--------|---------|---------|
+| 5 | Componentizar `Conversations.tsx` (4835 linhas) | Manutenibilidade | Alto |
+| 6 | Verificar instância WhatsApp desconectada | Operacional | Baixo |
+| 7 | Criar logger centralizado com níveis | Debugging | Médio |
+
+### 🟢 Prioridade Baixa (Backlog)
+
+| # | Tarefa | Impacto | Esforço |
+|---|--------|---------|---------|
+| 8 | Documentar arquitetura de hooks (80 hooks) | Onboarding | Médio |
+| 9 | Criar testes E2E para fluxos críticos | Qualidade | Alto |
+
+---
+
+## ✅ PONTOS POSITIVOS
+
+1. **Arquitetura Sólida** - Separação clara entre cliente e admin
+2. **Multi-tenant Robusto** - RLS em 100% das tabelas
+3. **Auth Completo** - Refresh token, timeout de segurança, controle de sessão
+4. **Hooks Bem Organizados** - 80 hooks com responsabilidades claras
+5. **Edge Functions Funcionais** - 42+ functions cobrindo todos os casos
+6. **Realtime Funcionando** - Sincronização em tempo real via Supabase
+
+---
+
+## 🔧 CORREÇÃO RECOMENDADA: View SECURITY DEFINER
+
+Para corrigir a view `company_usage_summary`, precisamos recriá-la sem SECURITY DEFINER. A query será:
+
+```sql
+-- Drop e recria view com SECURITY INVOKER (padrão)
+DROP VIEW IF EXISTS public.company_usage_summary;
+
+CREATE VIEW public.company_usage_summary AS
+SELECT 
+  c.id AS company_id,
+  c.name AS company_name,
+  c.law_firm_id,
+  -- ... resto dos campos ...
+FROM companies c
+LEFT JOIN plans p ON c.plan_id = p.id
+WHERE c.law_firm_id = get_user_law_firm_id(auth.uid()) 
+   OR is_admin(auth.uid());
 ```
 
-### Adicionar Label para reminder_2 (linha 291-299)
-
-```tsx
-const getTypeLabel = (type: string) => {
-  switch (type) {
-    case "reminder": return "Lembrete 24h";
-    case "reminder_2": return "Lembrete 2";  // ADICIONAR
-    case "pre_message": return "Pré-atendimento";
-    case "confirmation": return "Confirmação";
-    case "birthday": return "Aniversário";
-    case "custom": return "Personalizada";
-    default: return type;
-  }
-};
-```
-
-### Adicionar Cor para Badge reminder_2 (linha 302-311)
-
-```tsx
-const getTypeBadgeColor = (type: string) => {
-  switch (type) {
-    case "reminder": return "bg-blue-500/10 text-blue-500";
-    case "reminder_2": return "bg-indigo-500/10 text-indigo-500";  // ADICIONAR
-    case "pre_message": return "bg-purple-500/10 text-purple-500";
-    case "confirmation": return "bg-green-500/10 text-green-500";
-    case "birthday": return "bg-pink-500/10 text-pink-500";
-    case "custom": return "bg-orange-500/10 text-orange-500";
-    default: return "";
-  }
-};
-```
+Isso garante que:
+- Usuários normais só veem dados da sua empresa
+- Global admins veem todos os dados
 
 ---
 
-## Resultado Visual - Antes vs Depois
+## 📊 CONCLUSÃO
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| Badge | `reminder_2` (texto cru) | `Lembrete 2` (label amigável) |
-| Cor da Badge | Sem cor (default) | Índigo (diferente do Lembrete 24h) |
-| Botão Enviar | Aparece mas não funciona | Não aparece |
-| Botão Editar | Não aparece (correto) | Não aparece (correto) |
-| Botão Cancelar | Aparece | Aparece |
+O sistema está **estável e funcional** para uso em produção. Os principais pontos de atenção são:
 
----
+1. **Segurança**: Corrigir view SECURITY DEFINER e habilitar proteção de senhas
+2. **Infraestrutura**: Resolver erro de conexão N8N (afeta 7/9 empresas)
+3. **Manutenibilidade**: Componentizar arquivo Conversations.tsx
 
-## Arquivos a Modificar
-
-| Arquivo | Mudança |
-|---------|---------|
-| `src/components/agenda-pro/AgendaProScheduledMessages.tsx` | Adicionar `canSendNow`, atualizar labels e cores |
-
----
-
-## Impacto em Outras Funcionalidades
-
-| Funcionalidade | Status |
-|----------------|--------|
-| Lembrete 24h manual | Continua funcionando |
-| Pré-atendimento manual | Continua funcionando |
-| reminder_2 automático | Continua sendo enviado pelo cron |
-| Cancelar mensagens | Continua funcionando para todos os tipos |
-| Criar mensagens custom | Continua funcionando |
-
----
-
-## Segurança da Mudança
-
-- Mudança é **somente visual** (oculta botão)
-- Não afeta a lógica de envio automático (cron job)
-- Não modifica edge functions ou banco de dados
-- Melhora UX ao remover botão que não funciona
-
+**Recomendação**: Priorizar os itens de segurança e infraestrutura antes de adicionar novas funcionalidades.
