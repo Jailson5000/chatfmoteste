@@ -30,9 +30,9 @@ export function DuplicateTabDialog({ open, onContinue, onCancel }: DuplicateTabD
             </AlertDialogTitle>
           </div>
           <AlertDialogDescription className="text-muted-foreground">
-            O MiauChat já está aberto em 2 abas neste navegador.
+            O MiauChat já está aberto em outra aba do navegador.
             <br /><br />
-            Se você continuar aqui, a aba mais antiga será desconectada para economizar recursos do sistema.
+            Se você continuar aqui, a outra aba será desconectada para economizar recursos do sistema.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:gap-0">

@@ -9,8 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock, Plus, Timer } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock, Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledMessageDialog } from "./ScheduledMessageDialog";
 
@@ -315,11 +314,6 @@ export function AgendaProScheduledMessages() {
     return !message.id.includes("_reminder") && !message.id.includes("_pre_message");
   };
 
-  // Auto-generated messages (reminder, pre_message) cannot be sent manually
-  const isAutoMessage = (message: ScheduledMessage) => {
-    return message.type === "reminder" || message.type === "pre_message";
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[300px]">
@@ -421,8 +415,7 @@ export function AgendaProScheduledMessages() {
                         </div>
 
                         <div className="flex items-center gap-1">
-                          {/* Show send now button only for custom messages with appointment */}
-                          {message.appointment_id && !isAutoMessage(message) && (
+                          {message.appointment_id && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -432,21 +425,6 @@ export function AgendaProScheduledMessages() {
                             >
                               <Send className="h-4 w-4" />
                             </Button>
-                          )}
-                          {/* Show tooltip for auto-generated messages */}
-                          {isAutoMessage(message) && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="p-2 cursor-help">
-                                    <Timer className="h-4 w-4 text-muted-foreground" />
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Envio automático agendado</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
                           )}
                           {isCustomMessage(message) && (
                             <Button

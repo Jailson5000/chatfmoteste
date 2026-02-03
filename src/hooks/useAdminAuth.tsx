@@ -1,11 +1,8 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 export type AdminRole = "super_admin" | "admin_operacional" | "admin_financeiro";
-
-// Timeout de segurança para evitar loading infinito
-const ADMIN_AUTH_INIT_TIMEOUT_MS = 10000;
 
 interface AdminProfile {
   id: string;
@@ -24,7 +21,6 @@ interface AdminAuthContextType {
   loading: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
-  error: string | null;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
@@ -37,20 +33,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null);
   const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Flag para garantir que loading só seja setado false uma vez
-  const initFinishedRef = useRef(false);
-
-  const finishInit = (errorMsg?: string) => {
-    if (initFinishedRef.current) return;
-    initFinishedRef.current = true;
-    if (errorMsg) {
-      setError(errorMsg);
-      console.error("[useAdminAuth] Init finished with error:", errorMsg);
-    }
-    setLoading(false);
-  };
 
   const fetchAdminData = async (userId: string) => {
     console.log("[useAdminAuth] fetchAdminData para userId:", userId);
@@ -101,14 +83,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     console.log("[useAdminAuth] Inicializando listener de auth...");
     
-    // Timeout de segurança para evitar loading infinito
-    const timeoutId = setTimeout(() => {
-      if (!initFinishedRef.current) {
-        console.warn("[useAdminAuth] Timeout atingido após", ADMIN_AUTH_INIT_TIMEOUT_MS, "ms");
-        finishInit("Tempo limite para verificar sessão. Tente recarregar a página.");
-      }
-    }, ADMIN_AUTH_INIT_TIMEOUT_MS);
-    
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
@@ -127,45 +101,35 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (event === "SIGNED_OUT") {
-          finishInit();
+          setLoading(false);
         }
       }
     );
 
     // THEN check for existing session
     console.log("[useAdminAuth] Verificando sessão existente...");
-    supabase.auth.getSession().then(({ data: { session }, error: sessionError }) => {
-      if (sessionError) {
-        console.error("[useAdminAuth] Erro getSession:", sessionError.message);
-        finishInit("Erro ao verificar sessão: " + sessionError.message);
-        return;
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error("[useAdminAuth] Erro getSession:", error.message);
       }
-      
       console.log("[useAdminAuth] getSession:", session ? "sessão encontrada" : "sem sessão");
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
         fetchAdminData(session.user.id).finally(() => {
-          finishInit();
+          setLoading(false);
         });
       } else {
-        finishInit();
+        setLoading(false);
       }
-    }).catch((err) => {
-      console.error("[useAdminAuth] Exceção em getSession:", err);
-      finishInit("Erro inesperado ao verificar sessão");
     });
 
-    return () => {
-      clearTimeout(timeoutId);
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      setError(null);
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -187,7 +151,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setAdminProfile(null);
     setAdminRole(null);
-    setError(null);
   };
 
   const value: AdminAuthContextType = {
@@ -198,7 +161,6 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     loading,
     isAdmin: !!adminRole,
     isSuperAdmin: adminRole === "super_admin",
-    error,
     signIn,
     signOut,
   };

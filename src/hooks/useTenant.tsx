@@ -77,15 +77,6 @@ const RESERVED_SUBDOMAINS = [
   'widget',   // Web chat widget
 ];
 
-// Preview/development domain suffixes - these are NOT client subdomains
-const PREVIEW_DOMAIN_SUFFIXES = [
-  '.lovable.app',
-  '.lovableproject.com',
-  '.lovable.dev',
-  '.vercel.app',
-  '.netlify.app',
-];
-
 /**
  * Extrai o subdomínio da URL atual
  * 
@@ -109,15 +100,6 @@ export function extractSubdomain(hostname: string): string | null {
   // Verifica se é um dos domínios principais
   if (MAIN_DOMAINS.includes(host)) {
     return null;
-  }
-  
-  // Verifica se é um domínio de preview/desenvolvimento
-  // Estes NÃO são subdomínios de clientes
-  for (const suffix of PREVIEW_DOMAIN_SUFFIXES) {
-    if (host.endsWith(suffix)) {
-      console.log('[useTenant] Preview domain detected, skipping subdomain extraction:', host);
-      return null;
-    }
   }
   
   // Extrai subdomínio para domínios .com.br (3 partes após o subdomínio)

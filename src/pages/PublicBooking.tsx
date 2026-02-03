@@ -275,10 +275,9 @@ export default function PublicBooking() {
           }
         }
         // @ts-ignore - Supabase type inference issue
-        // Include professional_id to properly check availability when no professional is selected
         let appointmentsQuery = supabase
           .from("agenda_pro_appointments")
-          .select("start_time, end_time, status, professional_id")
+          .select("start_time, end_time, status")
           .eq("law_firm_id", lawFirmId)
           .gte("start_time", `${dateStr}T00:00:00`)
           .lte("start_time", `${dateStr}T23:59:59`)
@@ -289,9 +288,6 @@ export default function PublicBooking() {
         }
 
         const { data: existingAppointments } = await appointmentsQuery;
-        
-        // Get the professional IDs for this service (for checking availability)
-        const serviceProfsIds = serviceProfessionals.map(p => p.id);
         
         // Generate time slots
         const slots: TimeSlot[] = [];
@@ -310,32 +306,14 @@ export default function PublicBooking() {
           // Check if slot is in the past or within minimum notice
           const isPast = currentTime < minNotice;
           
-          let hasConflict = false;
-          
-          if (selectedProfessional) {
-            // When a professional is selected, check if they have a conflict
-            hasConflict = existingAppointments?.some(apt => {
-              const aptStart = parseISO(apt.start_time);
-              const aptEnd = parseISO(apt.end_time);
-              return (currentTime >= aptStart && currentTime < aptEnd) ||
-                     (slotEnd > aptStart && slotEnd <= aptEnd) ||
-                     (currentTime <= aptStart && slotEnd >= aptEnd);
-            }) || false;
-          } else if (serviceProfsIds.length > 0) {
-            // When NO professional is selected, slot is available if AT LEAST ONE professional is free
-            // Check if ALL professionals linked to service have conflicts (then slot is unavailable)
-            hasConflict = serviceProfsIds.every(profId => {
-              // Check if this professional has a conflict in this slot
-              return existingAppointments?.some(apt => {
-                if (apt.professional_id !== profId) return false;
-                const aptStart = parseISO(apt.start_time);
-                const aptEnd = parseISO(apt.end_time);
-                return (currentTime >= aptStart && currentTime < aptEnd) ||
-                       (slotEnd > aptStart && slotEnd <= aptEnd) ||
-                       (currentTime <= aptStart && slotEnd >= aptEnd);
-              });
-            });
-          }
+          // Check if slot conflicts with existing appointments
+          const hasConflict = existingAppointments?.some(apt => {
+            const aptStart = parseISO(apt.start_time);
+            const aptEnd = parseISO(apt.end_time);
+            return (currentTime >= aptStart && currentTime < aptEnd) ||
+                   (slotEnd > aptStart && slotEnd <= aptEnd) ||
+                   (currentTime <= aptStart && slotEnd >= aptEnd);
+          });
           
           slots.push({
             time: timeStr,
