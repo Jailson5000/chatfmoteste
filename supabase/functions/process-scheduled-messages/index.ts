@@ -169,9 +169,9 @@ serve(async (req) => {
             // Get WhatsApp instance for this law firm
             const { data: instance, error: instanceError } = await supabase
               .from("whatsapp_instances")
-              .select("id, instance_name, connection_status")
+              .select("id, instance_name, status")
               .eq("law_firm_id", message.law_firm_id)
-              .eq("connection_status", "open")
+              .eq("status", "connected")
               .limit(1)
               .maybeSingle();
 
