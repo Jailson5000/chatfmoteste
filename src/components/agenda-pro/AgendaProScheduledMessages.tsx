@@ -17,7 +17,7 @@ interface ScheduledMessage {
   id: string;
   appointment_id: string | null;
   client_id: string | null;
-  type: "reminder" | "pre_message" | "confirmation" | "custom" | "birthday";
+  type: "reminder" | "pre_message" | "confirmation" | "custom" | "birthday" | "reminder_2";
   scheduled_for: string;
   message_content: string | null;
   status: "pending" | "sent" | "cancelled";
@@ -291,6 +291,7 @@ export function AgendaProScheduledMessages() {
   const getTypeLabel = (type: string) => {
     switch (type) {
       case "reminder": return "Lembrete 24h";
+      case "reminder_2": return "Lembrete 2";
       case "pre_message": return "Pré-atendimento";
       case "confirmation": return "Confirmação";
       case "birthday": return "Aniversário";
@@ -302,12 +303,20 @@ export function AgendaProScheduledMessages() {
   const getTypeBadgeColor = (type: string) => {
     switch (type) {
       case "reminder": return "bg-blue-500/10 text-blue-500";
+      case "reminder_2": return "bg-indigo-500/10 text-indigo-500";
       case "pre_message": return "bg-purple-500/10 text-purple-500";
       case "confirmation": return "bg-green-500/10 text-green-500";
       case "birthday": return "bg-pink-500/10 text-pink-500";
       case "custom": return "bg-orange-500/10 text-orange-500";
       default: return "";
     }
+  };
+
+  const canSendNow = (message: ScheduledMessage) => {
+    // reminder_2 é gerado automaticamente pelo cron e não suporta envio manual
+    if (message.type === "reminder_2") return false;
+    // Mensagens com appointment_id e tipos suportados podem ser enviadas
+    return !!message.appointment_id && ["reminder", "pre_message"].includes(message.type);
   };
 
   const isCustomMessage = (message: ScheduledMessage) => {
@@ -415,7 +424,7 @@ export function AgendaProScheduledMessages() {
                         </div>
 
                         <div className="flex items-center gap-1">
-                          {message.appointment_id && (
+                          {canSendNow(message) && (
                             <Button
                               variant="ghost"
                               size="icon"
