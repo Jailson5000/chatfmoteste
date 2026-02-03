@@ -5251,6 +5251,39 @@ export type Database = {
           },
         ]
       }
+      user_device_sessions: {
+        Row: {
+          created_at: string | null
+          device_id: string
+          device_name: string | null
+          id: string
+          ip_address: unknown
+          is_active: boolean | null
+          last_active_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          device_id: string
+          device_name?: string | null
+          id?: string
+          ip_address?: unknown
+          is_active?: boolean | null
+          last_active_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          device_id?: string
+          device_name?: string | null
+          id?: string
+          ip_address?: unknown
+          is_active?: boolean | null
+          last_active_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -5773,6 +5806,14 @@ export type Database = {
         Args: { _increment?: number; _law_firm_id: string; _limit_type: string }
         Returns: Json
       }
+      check_device_session: {
+        Args: { _device_id: string; _device_name?: string; _user_id: string }
+        Returns: Json
+      }
+      clear_device_session: {
+        Args: { _device_id: string; _user_id: string }
+        Returns: boolean
+      }
       clone_template_for_company: {
         Args: { _company_id: string; _law_firm_id: string }
         Returns: Json
@@ -5908,6 +5949,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      invalidate_other_sessions: {
+        Args: { _keep_device_id: string; _user_id: string }
+        Returns: number
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_subdomain_available: { Args: { _subdomain: string }; Returns: boolean }
