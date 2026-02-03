@@ -4832,11 +4832,10 @@ serve(async (req) => {
             }
           }
 
-          // FIX: Use upsert with onConflict to prevent race condition duplicates
-          // The index messages_whatsapp_message_id_per_tenant ensures uniqueness per tenant
+          // Insert new message (duplicate check already done above at line ~4742)
           const insertResult = await supabaseClient
             .from('messages')
-            .upsert({
+            .insert({
               conversation_id: conversation.id,
               law_firm_id: conversation.law_firm_id,
               whatsapp_message_id: data.key.id,
@@ -4848,9 +4847,6 @@ serve(async (req) => {
               sender_type: isFromMe ? 'system' : 'client',
               ai_generated: false,
               reply_to_message_id: replyToMessageId,
-            }, {
-              onConflict: 'law_firm_id,whatsapp_message_id',
-              ignoreDuplicates: true
             })
             .select()
             .maybeSingle();
