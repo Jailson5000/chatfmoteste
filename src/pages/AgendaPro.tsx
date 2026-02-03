@@ -7,7 +7,6 @@ import {
   Clock, 
   UserCheck, 
   Users, 
-  Building2, 
   Settings2,
   BarChart3,
   Link2,
@@ -20,7 +19,7 @@ import { AgendaProAppointmentsList } from "@/components/agenda-pro/AgendaProAppo
 import { AgendaProServices } from "@/components/agenda-pro/AgendaProServices";
 import { AgendaProProfessionals } from "@/components/agenda-pro/AgendaProProfessionals";
 import { AgendaProClients } from "@/components/agenda-pro/AgendaProClients";
-import { AgendaProResources } from "@/components/agenda-pro/AgendaProResources";
+
 import { AgendaProSettings } from "@/components/agenda-pro/AgendaProSettings";
 import { AgendaProReports } from "@/components/agenda-pro/AgendaProReports";
 import { AgendaProPublicLink } from "@/components/agenda-pro/AgendaProPublicLink";
@@ -121,10 +120,6 @@ export default function AgendaPro() {
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline text-sm">Clientes</span>
             </TabsTrigger>
-            <TabsTrigger value="resources" className="flex items-center gap-1.5 px-3 py-2">
-              <Building2 className="h-4 w-4" />
-              <span className="hidden sm:inline text-sm">Salas</span>
-            </TabsTrigger>
             <TabsTrigger value="public-link" className="flex items-center gap-1.5 px-3 py-2">
               <Link2 className="h-4 w-4" />
               <span className="hidden sm:inline text-sm">Link Público</span>
@@ -164,9 +159,6 @@ export default function AgendaPro() {
           <AgendaProClients />
         </TabsContent>
 
-        <TabsContent value="resources" className="mt-6">
-          <AgendaProResources />
-        </TabsContent>
 
         <TabsContent value="public-link" className="mt-6">
           <AgendaProPublicLink />
