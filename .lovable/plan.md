@@ -1,54 +1,21 @@
 
-# Plano: Corrigir Inconsistência de Datas + Adicionar Ciclo de Faturamento
+# Plano: Corrigir Dashboard de Pagamentos e Remover ASAAS
 
 ## Problemas Identificados
 
-### 1. Bug de Timezone nas Datas (01/02 vs 02/02)
+### Problema 1: Erro JavaScript (Tela Preta)
 
 **Causa Raiz:**
-- O Stripe retorna `dueDate` como timestamp Unix, convertido para ISO string (ex: `2026-02-02T00:00:00.000Z`)
-- Quando o frontend faz `new Date("2026-02-02T00:00:00.000Z")`, interpreta como **meia-noite UTC**
-- Para fuso horário Brasil (UTC-3), meia-noite UTC = 21:00 do dia **anterior** (01/02)
-- Resultado: Dashboard mostra "01/02" enquanto Stripe e faturas mostram "02/02"
+- A Edge Function `get-payment-metrics` retorna apenas o objeto `stripe`
+- O frontend (`GlobalAdminPayments.tsx`) espera **ambos** `stripe` e `asaas`
+- Quando tenta acessar `metrics.asaas.connected` (linha 399), `asaas` é `undefined`
+- Resultado: `Uncaught TypeError: Cannot read properties of undefined (reading 'connected')`
 
-**Locais Afetados:**
-- `BillingOverdueList.tsx` linha 111: `format(new Date(payment.dueDate), "dd/MM/yyyy")`
-- `MyPlanSettings.tsx` linha 745: `format(new Date(invoice.dueDate), "dd/MM/yyyy")`
+### Problema 2: Aba ASAAS Ainda Visível
 
-**Solução:**
-Usar a função `parseDateLocal()` do `src/lib/dateUtils.ts` que já existe no projeto:
-```typescript
-// Antes (bug de timezone)
-format(new Date(payment.dueDate), "dd/MM/yyyy")
-
-// Depois (correto)
-import { parseDateLocal } from "@/lib/dateUtils";
-format(parseDateLocal(payment.dueDate) || new Date(), "dd/MM/yyyy")
-```
-
-### 2. Falta do Ciclo de Faturamento (Início → Vencimento)
-
-**Causa Raiz:**
-Os campos `current_period_start`, `current_period_end`, `next_payment_at`, `last_payment_at` na tabela `company_subscriptions` estão **NULL** para todas as empresas.
-
-O webhook do Stripe provavelmente não está atualizando esses campos corretamente.
-
-**Verificação nos dados:**
-```sql
-SELECT current_period_start, current_period_end, next_payment_at 
-FROM company_subscriptions LIMIT 5;
--- Resultado: todos NULL
-```
-
-**Solução em 2 partes:**
-
-**Parte A:** Atualizar o `stripe-webhook` para sincronizar as datas do ciclo quando:
-- `invoice.paid` - Atualizar `last_payment_at`
-- `customer.subscription.created/updated` - Atualizar `current_period_start`, `current_period_end`
-
-**Parte B:** Atualizar `MyPlanSettings.tsx` para mostrar o ciclo completo:
-- Exibir "Assinatura iniciada em: {data_início}"
-- Exibir "Próximo vencimento: {data_fim} (dia X de cada mês)"
+- O frontend tem sub-tabs "Stripe" e "ASAAS" (linhas 388-430)
+- A interface TypeScript ainda define `asaas: ProviderMetrics` (linha 31)
+- Deveria ter sido removido na migração para Stripe-only
 
 ---
 
@@ -56,125 +23,110 @@ FROM company_subscriptions LIMIT 5;
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/components/global-admin/BillingOverdueList.tsx` | Usar `parseDateLocal()` para datas |
-| `src/components/settings/MyPlanSettings.tsx` | Usar `parseDateLocal()` + mostrar ciclo completo |
-| `supabase/functions/stripe-webhook/index.ts` | Sincronizar datas do ciclo |
+| `src/pages/global-admin/GlobalAdminPayments.tsx` | Remover aba ASAAS, simplificar interface |
+| `src/components/global-admin/CompanyLimitsEditor.tsx` | Corrigir texto que menciona ASAAS |
 
 ---
 
-## Detalhes da Implementação
+## Implementação Detalhada
 
-### 1. Corrigir `BillingOverdueList.tsx`
+### 1. Corrigir `GlobalAdminPayments.tsx`
+
+**A. Atualizar interface PaymentMetrics (linha 28-32):**
 
 ```typescript
-import { parseDateLocal } from "@/lib/dateUtils";
+// ANTES (com bug)
+interface PaymentMetrics {
+  activeProvider: string;
+  stripe: ProviderMetrics;
+  asaas: ProviderMetrics;  // ← REMOVER
+}
 
-// Linha 111 - antes:
-Venceu em: {format(new Date(payment.dueDate), "dd/MM/yyyy", { locale: ptBR })}
-
-// Depois:
-Venceu em: {format(parseDateLocal(payment.dueDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}
+// DEPOIS (corrigido)
+interface PaymentMetrics {
+  activeProvider: string;
+  stripe: ProviderMetrics;
+}
 ```
 
-### 2. Corrigir `MyPlanSettings.tsx`
+**B. Remover sub-tabs de provedores e mostrar apenas Stripe:**
 
-**Linha 745 - Diálogo de Faturas:**
+Remover as linhas 386-430 que contêm a estrutura de sub-tabs Stripe/ASAAS, substituindo por renderização direta dos dados do Stripe:
+
 ```typescript
-import { parseDateLocal } from "@/lib/dateUtils";
-
-// Antes:
-`Vence em ${format(new Date(invoice.dueDate), "dd/MM/yyyy")}`
-
-// Depois:
-`Vence em ${format(parseDateLocal(invoice.dueDate) || new Date(), "dd/MM/yyyy")}`
+{/* Overview Tab */}
+<TabsContent value="overview" className="space-y-6">
+  {metrics?.stripe && renderProviderMetrics(metrics.stripe, "Stripe")}
+  {metrics && !metrics.stripe && (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <XCircle className="h-12 w-12 text-muted-foreground mb-4" />
+      <h3 className="text-lg font-medium">Stripe não configurado</h3>
+      <p className="text-sm text-muted-foreground mt-2">
+        Configure a STRIPE_SECRET_KEY para ver as métricas
+      </p>
+    </div>
+  )}
+</TabsContent>
 ```
 
-**Linhas 514-528 - Adicionar info de ciclo completo:**
-```typescript
-// Se tiver current_period_start, mostrar quando iniciou
-{companyData?.subscription?.current_period_start && (
-  <p className="text-xs text-muted-foreground">
-    Ciclo iniciado em {format(parseDateLocal(companyData.subscription.current_period_start) || new Date(), "d 'de' MMMM", { locale: ptBR })}
-  </p>
-)}
-```
+### 2. Corrigir `CompanyLimitsEditor.tsx`
 
-### 3. Atualizar `stripe-webhook` para Sincronizar Ciclo
-
-No evento `invoice.paid` ou `customer.subscription.updated`:
+**Linha 238** - Trocar "ASAAS" por "Stripe":
 
 ```typescript
-// Atualizar campos de ciclo
-await supabase
-  .from("company_subscriptions")
-  .update({
-    current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-    current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-    next_payment_at: new Date(subscription.current_period_end * 1000).toISOString(),
-    last_payment_at: new Date().toISOString(),
-  })
-  .eq("stripe_subscription_id", subscription.id);
+// ANTES
+Isso reduzirá a cobrança mensal no ASAAS.
+
+// DEPOIS
+Isso reduzirá a cobrança mensal no Stripe.
 ```
 
 ---
 
-## Fluxo Esperado Após Correção
+## Resultado Esperado
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Dashboard Admin > Pagamentos > Inadimplência                       │
+│  Dashboard de Pagamentos                                            │
 │  ─────────────────────────────────────────────────────────────────  │
-│  Empresa X | R$ 197,00 | 0 dias em atraso                           │
-│  Venceu em: 02/02/2026  ← CORRETO (antes: 01/02)                    │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│  Configurações > Plano > Ver Faturas                                │
-│  ─────────────────────────────────────────────────────────────────  │
-│  R$ 197,00 | Pendente                                               │
-│  Vence em 02/02/2026 • Stripe  ← CORRETO (igual ao Admin)          │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│  Configurações > Plano > Resumo Mensal                              │
-│  ─────────────────────────────────────────────────────────────────  │
-│  📅 Ciclo de faturamento                                            │
-│  Iniciado em: 2 de janeiro de 2026                                  │
-│  Próximo vencimento: 2 de fevereiro de 2026 (dia 2 de cada mês)    │
+│  Provedor ativo: [STRIPE ✓]                                         │
+│                                                                     │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐                │
+│  │ Visão Geral  │ │ Inadimplência│ │ Vencimentos  │                │
+│  └──────────────┘ └──────────────┘ └──────────────┘                │
+│                                                                     │
+│  ❌ SEM ABA ASAAS - removida                                        │
+│                                                                     │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                   │
+│  │ MRR     │ │ ARR     │ │ Ativos  │ │ Clientes│                   │
+│  │ R$ X,XX │ │ R$ X,XX │ │    X    │ │    X    │                   │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘                   │
+│                                                                     │
+│  Pagamentos Recentes                                                │
+│  ┌───────────────────────────────────────────────────────────────┐ │
+│  │ R$ 197,00 | email@... | Pago | 02/02/2026                     │ │
+│  └───────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Dados Necessários (Query de Subscription)
+## Verificações de Segurança
 
-A query em `MyPlanSettings.tsx` (linha 96-100) já busca os campos corretos:
-```typescript
-const { data: subscription } = await supabase
-  .from("company_subscriptions")
-  .select("status, current_period_start, current_period_end, next_payment_at, last_payment_at")
-  .eq("company_id", company.id)
-  .maybeSingle();
-```
-
-O problema é que esses campos estão **NULL** porque o webhook não os popula.
+| Verificação | Status |
+|-------------|--------|
+| Funcionalidade de cobrança | Não afetada (usa outras funções) |
+| Aba Inadimplência | Preservada |
+| Aba Vencimentos | Preservada |
+| Refresh de dados | Preservado |
+| Formatação de valores | Preservada |
 
 ---
 
 ## Risco de Quebrar o Sistema
 
-**Baixo:**
-
-1. **parseDateLocal**: Função já existe e é usada em outras partes do sistema
-2. **Novo código de ciclo**: Apenas adiciona informação visual, com null-checks seguros
-3. **Webhook update**: Adiciona lógica extra sem remover a existente
-
----
-
-## Validações Pós-Implementação
-
-- [ ] Data de vencimento no Dashboard Admin = Data no Stripe
-- [ ] Data de vencimento nas Faturas do cliente = Data no Stripe
-- [ ] Ciclo de faturamento aparece no Resumo Mensal
-- [ ] Funcionalidade de cobrança continua funcionando
-- [ ] Suspensão/liberação de empresa continua funcionando
+**Mínimo:**
+- Apenas removemos código morto (referências ao ASAAS)
+- O backend já retorna apenas Stripe
+- As funcionalidades principais de inadimplência/vencimentos não são afetadas
+- Correção de texto é cosmética
