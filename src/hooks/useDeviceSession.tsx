@@ -5,7 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 // DEVICE SESSION HOOK
 // ============================================================================
 // Gerencia sessões por dispositivo para impedir login simultâneo em múltiplos
-// computadores/navegadores diferentes. Usa localStorage para device_id único.
+// computadores/navegadores diferentes DENTRO DA MESMA EMPRESA.
+// Um usuário pode logar em empresas diferentes em dispositivos diferentes.
 // ============================================================================
 
 const DEVICE_ID_KEY = "miauchat_device_id";
@@ -78,7 +79,10 @@ interface UseDeviceSessionReturn extends DeviceSessionState {
   recheckSession: () => Promise<void>;
 }
 
-export function useDeviceSession(userId: string | null): UseDeviceSessionReturn {
+export function useDeviceSession(
+  userId: string | null,
+  lawFirmId: string | null
+): UseDeviceSessionReturn {
   const [state, setState] = useState<DeviceSessionState>({
     hasConflict: false,
     conflictingDevice: null,
@@ -95,7 +99,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
     setState(prev => ({ ...prev, deviceId: deviceIdRef.current }));
   }, []);
 
-  // Verificar sessão no servidor
+  // Verificar sessão no servidor (agora filtrando por law_firm_id)
   const checkSession = useCallback(async () => {
     if (!userId || !deviceIdRef.current) {
       setState(prev => ({ ...prev, isChecking: false }));
@@ -107,6 +111,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
         _user_id: userId,
         _device_id: deviceIdRef.current,
         _device_name: getDeviceName(),
+        _law_firm_id: lawFirmId, // Passar law_firm_id para filtrar por empresa
       });
 
       if (error) {
@@ -137,17 +142,18 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
       console.error("[DeviceSession] Exception:", err);
       setState(prev => ({ ...prev, isChecking: false }));
     }
-  }, [userId]);
+  }, [userId, lawFirmId]);
 
-  // Forçar login neste dispositivo (invalidar outros)
+  // Forçar login neste dispositivo (invalidar outros da mesma empresa)
   const forceLoginHere = useCallback(async () => {
     if (!userId || !deviceIdRef.current) return;
 
     try {
-      // Invalidar sessões em outros dispositivos
+      // Invalidar sessões em outros dispositivos (mesma empresa)
       await supabase.rpc("invalidate_other_sessions", {
         _user_id: userId,
         _keep_device_id: deviceIdRef.current,
+        _law_firm_id: lawFirmId,
       });
 
       // Re-registrar esta sessão
@@ -155,6 +161,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
         _user_id: userId,
         _device_id: deviceIdRef.current,
         _device_name: getDeviceName(),
+        _law_firm_id: lawFirmId,
       });
 
       setState(prev => ({
@@ -167,7 +174,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
     } catch (err) {
       console.error("[DeviceSession] Error forcing login:", err);
     }
-  }, [userId]);
+  }, [userId, lawFirmId]);
 
   // Limpar sessão (logout)
   const clearSession = useCallback(async () => {
@@ -177,12 +184,13 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
       await supabase.rpc("clear_device_session", {
         _user_id: userId,
         _device_id: deviceIdRef.current,
+        _law_firm_id: lawFirmId,
       });
       console.log("[DeviceSession] Session cleared");
     } catch (err) {
       console.error("[DeviceSession] Error clearing session:", err);
     }
-  }, [userId]);
+  }, [userId, lawFirmId]);
 
   // Recheck manual
   const recheckSession = useCallback(async () => {
@@ -190,14 +198,14 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
     await checkSession();
   }, [checkSession]);
 
-  // Verificar sessão ao montar e quando userId mudar
+  // Verificar sessão ao montar e quando userId/lawFirmId mudar
   useEffect(() => {
     if (userId && deviceIdRef.current) {
       checkSession();
     } else {
       setState(prev => ({ ...prev, isChecking: false }));
     }
-  }, [userId, checkSession]);
+  }, [userId, lawFirmId, checkSession]);
 
   // Heartbeat para manter sessão ativa
   useEffect(() => {
@@ -218,6 +226,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
             _user_id: userId,
             _device_id: deviceIdRef.current,
             _device_name: getDeviceName(),
+            _law_firm_id: lawFirmId,
           });
         } catch (err) {
           console.error("[DeviceSession] Heartbeat error:", err);
@@ -231,7 +240,7 @@ export function useDeviceSession(userId: string | null): UseDeviceSessionReturn 
         heartbeatRef.current = null;
       }
     };
-  }, [userId, state.hasConflict]);
+  }, [userId, lawFirmId, state.hasConflict]);
 
   return {
     ...state,

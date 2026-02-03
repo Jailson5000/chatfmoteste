@@ -5260,6 +5260,7 @@ export type Database = {
           ip_address: unknown
           is_active: boolean | null
           last_active_at: string | null
+          law_firm_id: string | null
           user_id: string
         }
         Insert: {
@@ -5270,6 +5271,7 @@ export type Database = {
           ip_address?: unknown
           is_active?: boolean | null
           last_active_at?: string | null
+          law_firm_id?: string | null
           user_id: string
         }
         Update: {
@@ -5280,9 +5282,18 @@ export type Database = {
           ip_address?: unknown
           is_active?: boolean | null
           last_active_at?: string | null
+          law_firm_id?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_device_sessions_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
@@ -5806,14 +5817,34 @@ export type Database = {
         Args: { _increment?: number; _law_firm_id: string; _limit_type: string }
         Returns: Json
       }
-      check_device_session: {
-        Args: { _device_id: string; _device_name?: string; _user_id: string }
-        Returns: Json
-      }
-      clear_device_session: {
-        Args: { _device_id: string; _user_id: string }
-        Returns: boolean
-      }
+      check_device_session:
+        | {
+            Args: {
+              _device_id: string
+              _device_name?: string
+              _user_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              _device_id: string
+              _device_name?: string
+              _law_firm_id?: string
+              _user_id: string
+            }
+            Returns: Json
+          }
+      clear_device_session:
+        | { Args: { _device_id: string; _user_id: string }; Returns: boolean }
+        | {
+            Args: {
+              _device_id: string
+              _law_firm_id?: string
+              _user_id: string
+            }
+            Returns: boolean
+          }
       clone_template_for_company: {
         Args: { _company_id: string; _law_firm_id: string }
         Returns: Json
@@ -5950,10 +5981,19 @@ export type Database = {
         }
         Returns: boolean
       }
-      invalidate_other_sessions: {
-        Args: { _keep_device_id: string; _user_id: string }
-        Returns: number
-      }
+      invalidate_other_sessions:
+        | {
+            Args: { _keep_device_id: string; _user_id: string }
+            Returns: number
+          }
+        | {
+            Args: {
+              _keep_device_id: string
+              _law_firm_id?: string
+              _user_id: string
+            }
+            Returns: number
+          }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_subdomain_available: { Args: { _subdomain: string }; Returns: boolean }
       mark_messages_as_read: {

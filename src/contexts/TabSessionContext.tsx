@@ -10,7 +10,7 @@ import { useDeviceSession } from "@/hooks/useDeviceSession";
 // TAB SESSION CONTEXT
 // ============================================================================
 // Detects duplicate tabs using BroadcastChannel API (limit: 2 tabs)
-// Also integrates device session protection (1 device at a time)
+// Also integrates device session protection (1 device at a time PER COMPANY)
 // ============================================================================
 
 const CHANNEL_NAME = "miauchat-tab-session";
@@ -48,15 +48,16 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
   const [isTerminated, setIsTerminated] = useState(false);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentLawFirmId, setCurrentLawFirmId] = useState<string | null>(null);
   
-  // Device session hook
+  // Device session hook (now scoped by law_firm_id)
   const {
     hasConflict: hasDeviceConflict,
     conflictingDevice,
     isChecking: isCheckingDevice,
     forceLoginHere,
     clearSession,
-  } = useDeviceSession(currentUserId);
+  } = useDeviceSession(currentUserId, currentLawFirmId);
   
   // Get realtime sync context to disconnect channels
   const realtimeSync = useRealtimeSyncOptional();
@@ -101,7 +102,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
     window.location.href = "/auth";
   }, [clearSession]);
 
-  // Initialize BroadcastChannel
+  // Initialize BroadcastChannel and fetch user data
   useEffect(() => {
     // Check for BroadcastChannel support (graceful degradation)
     if (typeof BroadcastChannel === "undefined") {
@@ -109,7 +110,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
       return;
     }
 
-    // Get current user
+    // Get current user and their law_firm_id
     const initChannel = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -118,6 +119,18 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
       }
       
       setCurrentUserId(user.id);
+      
+      // Buscar law_firm_id do profile do usuário
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('law_firm_id')
+        .eq('id', user.id)
+        .single();
+      
+      if (profile?.law_firm_id) {
+        setCurrentLawFirmId(profile.law_firm_id);
+      }
+      
       activeTabsRef.current.clear();
       
       // Create broadcast channel
@@ -194,11 +207,23 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
     initChannel();
     
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
         setCurrentUserId(session.user.id);
+        
+        // Fetch law_firm_id when user signs in
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('law_firm_id')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (profile?.law_firm_id) {
+          setCurrentLawFirmId(profile.law_firm_id);
+        }
       } else if (event === "SIGNED_OUT") {
         setCurrentUserId(null);
+        setCurrentLawFirmId(null);
         activeTabsRef.current.clear();
       }
     });
@@ -233,7 +258,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
         onCancel={handleCancel}
       />
       
-      {/* Dialog for device conflict */}
+      {/* Dialog for device conflict (same company, different device) */}
       <DeviceConflictDialog
         open={hasDeviceConflict && !isCheckingDevice}
         conflictingDevice={conflictingDevice}
