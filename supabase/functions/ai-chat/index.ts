@@ -179,9 +179,10 @@ const TEMPLATE_TOOL = {
   }
 };
 
-// CRM/Internal actions tools definition for function calling
-const CRM_TOOLS = [
-  {
+// CRM/Internal actions tools definition for function calling - base structure
+// NOTE: Use getCrmToolsWithContext() to get tools with tenant-specific options injected
+const CRM_TOOLS_BASE = {
+  transfer_to_department: {
     type: "function",
     function: {
       name: "transfer_to_department",
@@ -191,7 +192,7 @@ const CRM_TOOLS = [
         properties: {
           department_name: {
             type: "string",
-            description: "Nome do departamento para transferir (ex: 'Suporte', 'Comercial', 'Financeiro')"
+            description: "Nome do departamento para transferir"
           },
           reason: {
             type: "string",
@@ -202,7 +203,7 @@ const CRM_TOOLS = [
       }
     }
   },
-  {
+  change_status: {
     type: "function",
     function: {
       name: "change_status",
@@ -212,7 +213,7 @@ const CRM_TOOLS = [
         properties: {
           status_name: {
             type: "string",
-            description: "Nome do novo status (ex: 'Qualificado', 'Proposta Enviada', 'Sucesso')"
+            description: "Nome do novo status"
           },
           reason: {
             type: "string",
@@ -223,24 +224,24 @@ const CRM_TOOLS = [
       }
     }
   },
-  {
+  add_tag: {
     type: "function",
     function: {
       name: "add_tag",
-      description: "Adiciona uma etiqueta/tag ao cliente para categorização. Use para marcar interesses, perfil ou situações específicas.",
+      description: "Adiciona uma etiqueta/tag EXISTENTE ao cliente para categorização. NÃO crie novas tags.",
       parameters: {
         type: "object",
         properties: {
           tag_name: {
             type: "string",
-            description: "Nome da tag a adicionar (ex: 'VIP', 'Urgente', 'Interessado em X')"
+            description: "Nome da tag a adicionar"
           }
         },
         required: ["tag_name"]
       }
     }
   },
-  {
+  remove_tag: {
     type: "function",
     function: {
       name: "remove_tag",
@@ -257,7 +258,7 @@ const CRM_TOOLS = [
       }
     }
   },
-  {
+  transfer_to_responsible: {
     type: "function",
     function: {
       name: "transfer_to_responsible",
@@ -283,7 +284,79 @@ const CRM_TOOLS = [
       }
     }
   }
-];
+};
+
+// Generate CRM tools with tenant-specific context injected into descriptions
+// This helps the AI know exactly which departments/statuses/tags are available
+async function getCrmToolsWithContext(supabase: any, lawFirmId: string): Promise<any[]> {
+  try {
+    // Fetch real options from the tenant's database in parallel
+    const [deptResult, statusResult, tagResult, membersResult] = await Promise.all([
+      supabase.from("departments").select("name").eq("law_firm_id", lawFirmId).eq("is_active", true),
+      supabase.from("custom_statuses").select("name").eq("law_firm_id", lawFirmId).eq("is_active", true),
+      supabase.from("tags").select("name").eq("law_firm_id", lawFirmId),
+      supabase.from("profiles").select("full_name").eq("law_firm_id", lawFirmId).eq("is_active", true),
+    ]);
+
+    const depts = deptResult.data?.map((d: any) => d.name).join(", ") || "nenhum disponível";
+    const statuses = statusResult.data?.map((s: any) => s.name).join(", ") || "nenhum disponível";
+    const tags = tagResult.data?.map((t: any) => t.name).join(", ") || "nenhuma disponível";
+    const members = membersResult.data?.map((m: any) => m.full_name).join(", ") || "nenhum disponível";
+
+    console.log(`[AI Chat] CRM Context - Depts: ${depts.substring(0, 100)}, Statuses: ${statuses.substring(0, 100)}, Tags: ${tags.substring(0, 100)}`);
+
+    // Build tools with injected context
+    return [
+      {
+        type: "function",
+        function: {
+          name: "transfer_to_department",
+          description: `Transfere a conversa para outro departamento. DEPARTAMENTOS DISPONÍVEIS: ${depts}. Use APENAS estes nomes exatos. NÃO transfira se já estiver no departamento correto.`,
+          parameters: CRM_TOOLS_BASE.transfer_to_department.function.parameters
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "change_status",
+          description: `Altera o status do cliente no funil/CRM. STATUS DISPONÍVEIS: ${statuses}. Use APENAS estes nomes exatos. NÃO altere se já estiver no status correto.`,
+          parameters: CRM_TOOLS_BASE.change_status.function.parameters
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "add_tag",
+          description: `Adiciona uma tag EXISTENTE ao cliente. TAGS DISPONÍVEIS: ${tags}. Use APENAS estas tags. NÃO CRIE novas tags - use somente as que existem.`,
+          parameters: CRM_TOOLS_BASE.add_tag.function.parameters
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "remove_tag",
+          description: `Remove uma tag do cliente. TAGS DISPONÍVEIS: ${tags}.`,
+          parameters: CRM_TOOLS_BASE.remove_tag.function.parameters
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "transfer_to_responsible",
+          description: `Transfere para outro responsável. ATENDENTES DISPONÍVEIS: ${members}. Use APENAS estes nomes exatos.`,
+          parameters: CRM_TOOLS_BASE.transfer_to_responsible.function.parameters
+        }
+      }
+    ];
+  } catch (err) {
+    console.error("[AI Chat] Error fetching CRM context, using base tools:", err);
+    // Fallback to base tools without context
+    return Object.values(CRM_TOOLS_BASE);
+  }
+}
+
+// Legacy static CRM_TOOLS for backwards compatibility (deprecated - use getCrmToolsWithContext)
+const CRM_TOOLS = Object.values(CRM_TOOLS_BASE);
 
 // Scheduling/Appointment tools for intelligent booking
 const SCHEDULING_TOOLS = [
@@ -511,6 +584,22 @@ async function executeCrmTool(
           });
         }
         
+        // NEW: Check if conversation is already in this department to avoid redundant transfers
+        const { data: currentConv } = await supabase
+          .from("conversations")
+          .select("department_id")
+          .eq("id", conversationId)
+          .single();
+        
+        if (currentConv?.department_id === targetDept.id) {
+          console.log(`[AI Chat] Skipping redundant transfer - already in department ${targetDept.name}`);
+          return JSON.stringify({ 
+            success: true, 
+            message: `Conversa já está no departamento "${targetDept.name}". Nenhuma transferência necessária.`,
+            already_set: true
+          });
+        }
+        
         // Update conversation and client department
         await supabase
           .from("conversations")
@@ -600,6 +689,16 @@ async function executeCrmTool(
         
         const fromStatus = (client?.custom_statuses as any)?.name || "Sem status";
         
+        // NEW: Check if already in target status to avoid redundant changes
+        if (client?.custom_status_id === targetStatus.id) {
+          console.log(`[AI Chat] Skipping redundant status change - already in status ${targetStatus.name}`);
+          return JSON.stringify({ 
+            success: true, 
+            message: `Cliente já está no status "${targetStatus.name}". Nenhuma alteração necessária.`,
+            already_set: true
+          });
+        }
+        
         // Update client status
         await supabase
           .from("clients")
@@ -630,8 +729,9 @@ async function executeCrmTool(
           return JSON.stringify({ success: false, error: "Cliente não identificado para adicionar tag" });
         }
         
-        // Find or create tag by name
-        let { data: tag } = await supabase
+        // IMPORTANT: Only find EXISTING tags - do NOT create new ones
+        // The AI should only use tags that already exist in the system
+        const { data: tag } = await supabase
           .from("tags")
           .select("id, name")
           .eq("law_firm_id", lawFirmId)
@@ -639,21 +739,18 @@ async function executeCrmTool(
           .maybeSingle();
         
         if (!tag) {
-          // Create new tag
-          const { data: newTag, error } = await supabase
+          // List available tags so AI can learn what's available
+          const { data: allTags } = await supabase
             .from("tags")
-            .insert({
-              law_firm_id: lawFirmId,
-              name: args.tag_name,
-              color: "#6366f1" // Default purple
-            })
-            .select()
-            .single();
+            .select("name")
+            .eq("law_firm_id", lawFirmId);
+          const availableTags = allTags?.map((t: any) => t.name).join(", ") || "nenhuma";
           
-          if (error) {
-            return JSON.stringify({ success: false, error: "Erro ao criar tag" });
-          }
-          tag = newTag;
+          console.log(`[AI Chat] Tag "${args.tag_name}" not found. Available: ${availableTags}`);
+          return JSON.stringify({ 
+            success: false, 
+            error: `Tag "${args.tag_name}" não existe. Tags disponíveis: ${availableTags}. Você só pode usar tags que já existem no sistema.`
+          });
         }
         
         // Check if client already has this tag
@@ -667,7 +764,8 @@ async function executeCrmTool(
         if (existingTag) {
           return JSON.stringify({ 
             success: true, 
-            message: `Cliente já possui a tag ${tag.name}` 
+            message: `Cliente já possui a tag ${tag.name}`,
+            already_set: true
           });
         }
         
@@ -3127,12 +3225,15 @@ serve(async (req) => {
     // Add current message (wrapped for injection protection)
     messages.push({ role: "user", content: wrapUserInput(message) });
 
-    // Get available tools (CRM, Scheduling, Templates)
-    const tools = getAllAvailableTools(
-      true, // CRM tools
-      isSchedulingAgent, // Scheduling tools only for scheduling agents (Agenda Pro)
-      true // Template tools
-    );
+    // Get available tools with tenant-specific context injected
+    // This ensures the AI knows exactly which departments/statuses/tags are available
+    const crmToolsWithContext = await getCrmToolsWithContext(supabase, agentLawFirmId);
+    
+    const tools: any[] = [
+      ...crmToolsWithContext, // CRM tools with injected context
+      ...(isSchedulingAgent ? SCHEDULING_TOOLS : []), // Scheduling tools if enabled
+      TEMPLATE_TOOL // Template sending tool
+    ];
 
     // Call AI with provider selection and fallback logic
     let aiResponse: string;
