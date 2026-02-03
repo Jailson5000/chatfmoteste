@@ -235,7 +235,7 @@ export function CompanyLimitsEditor({
                 ))}
               </ul>
               <p className="mt-2 text-xs opacity-80">
-                Isso reduzirá a cobrança mensal no ASAAS. O cliente receberá apenas o valor do plano base.
+                Isso reduzirá a cobrança mensal no Stripe. O cliente receberá apenas o valor do plano base.
               </p>
             </AlertDescription>
           </Alert>
