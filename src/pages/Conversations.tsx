@@ -2073,6 +2073,7 @@ export default function Conversations() {
     if (!selectedConversationId || !selectedConversation) return;
     
     setIsSending(true);
+    handleMediaPreviewClose(); // Close immediately for better UX (upload continues in background)
     
     try {
       // Auto-assign conversation to current user if handler is AI or no responsible assigned
@@ -2274,7 +2275,6 @@ export default function Conversations() {
       }
 
       // Don't add optimistic message - it's already added above for WhatsApp path
-      handleMediaPreviewClose();
       
       toast({
         title: "Mídia enviada",
