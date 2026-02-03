@@ -604,8 +604,8 @@ serve(async (req) => {
           }
 
           // Send notification to business owner/professional for new appointments
-          // Accept both "online" (legacy) and "public_booking" (current) sources
-          if (type === "created" && (appointment.source === "online" || appointment.source === "public_booking")) {
+          // Accept "online" (legacy), "public_booking" (current), and "manual" sources
+          if (type === "created" && (appointment.source === "online" || appointment.source === "public_booking" || appointment.source === "manual")) {
             try {
               // Get professional phone for notification
               const { data: professional } = await supabase
