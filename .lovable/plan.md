@@ -1,167 +1,85 @@
 
 
-# Plano: Adicionar Aba "Enviadas" nas Mensagens Agendadas
+# Plano: Melhorar Visibilidade do "Fora do Expediente"
 
-## Objetivo
+## Problema Identificado
 
-Adicionar um novo botão/aba "Enviadas" ao lado de "Pendentes" para visualizar as mensagens que foram enviadas nos últimos 7 dias, permitindo controle e acompanhamento do histórico de envios.
+No tema claro (light mode), as linhas diagonais que indicam "Fora do Expediente" usam `hsl(var(--muted)/0.4)` que resulta em um cinza muito claro, quase branco, tornando praticamente invisível contra o fundo branco.
+
+**Evidência no código:**
+```tsx
+// Linha 203 - células fora do expediente
+bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,hsl(var(--muted)/0.4)_5px,hsl(var(--muted)/0.4)_10px)]
+
+// Linha 499 - legenda
+bg-[repeating-linear-gradient(135deg,hsl(var(--muted)),hsl(var(--muted))_2px,transparent_2px,transparent_5px)]
+```
 
 ---
 
-## Análise do Componente Atual
+## Solução Proposta
 
-| Elemento | Status |
-|----------|--------|
-| Tabs implementadas | Sim - usando Radix UI Tabs |
-| Aba "Pendentes" | Funcional - mostra `status = 'pending'` |
-| Query de mensagens | Filtra apenas `status = 'pending'` |
-| Dados disponíveis no banco | 8 enviadas, 3 pendentes, 5 canceladas, 3 falhas |
+Trocar a cor do padrão listrado de `muted` (cinza) para um **azul claro suave** que:
+- É visível tanto no tema claro quanto escuro
+- Transmite visualmente a ideia de "bloqueado/indisponível"
+- Não compete visualmente com as cores de status dos agendamentos
+
+**Cor escolhida:** `hsl(210 50% 70% / 0.3)` - azul claro com transparência
 
 ---
 
 ## Mudanças Necessárias
 
-### 1. Nova Query para Mensagens Enviadas
+### Arquivo: `AgendaProCalendar.tsx`
 
-```typescript
-// Fetch sent messages from last 7 days
-const { data: sentMessages = [], isLoading: loadingSent } = useQuery({
-  queryKey: ["agenda-pro-sent-messages", lawFirm?.id],
-  queryFn: async () => {
-    if (!lawFirm?.id) return [];
+| Linha | Atual | Novo |
+|-------|-------|------|
+| 191 | `!isWorkingHour && "bg-muted/40"` | `!isWorkingHour && "bg-blue-100/30 dark:bg-blue-900/20"` |
+| 197 | `!isWorkingHour && "bg-muted/50"` | `!isWorkingHour && "bg-blue-100/40 dark:bg-blue-900/30"` |
+| 203 | `hsl(var(--muted)/0.4)` | `hsl(210 70% 70% / 0.25)` para claro, ajuste para escuro |
+| 499 | `hsl(var(--muted))` na legenda | Mesma cor azul clara |
 
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+---
 
-    const { data, error } = await supabase
-      .from("agenda_pro_scheduled_messages")
-      .select(`
-        *,
-        agenda_pro_clients(name, phone),
-        agenda_pro_appointments(
-          id, start_time, client_name, client_phone, status,
-          agenda_pro_services(name),
-          agenda_pro_professionals(name)
-        )
-      `)
-      .eq("law_firm_id", lawFirm.id)
-      .eq("status", "sent")
-      .gte("sent_at", sevenDaysAgo.toISOString())
-      .order("sent_at", { ascending: false });
+## Visualização Comparativa
 
-    if (error) throw error;
+| Tema | Antes | Depois |
+|------|-------|--------|
+| **Claro** | Linhas brancas invisíveis | Linhas azul-claras visíveis |
+| **Escuro** | Linhas cinza sutis | Linhas azul-escuras sutis |
 
-    return (data || []).map((msg: any) => ({
-      // ... mesmo mapeamento existente
-      sent_at: msg.sent_at, // adicionar campo de envio
-    }));
-  },
-  enabled: !!lawFirm?.id && activeTab === "sent", // só busca quando aba ativa
-});
-```
+---
 
-### 2. Nova Aba na Interface
+## Código Final
 
 ```tsx
-<TabsList>
-  <TabsTrigger value="pending" className="gap-2">
-    <Clock className="h-4 w-4" />
-    Pendentes ({pendingMessages.length})
-  </TabsTrigger>
-  <TabsTrigger value="sent" className="gap-2">
-    <Send className="h-4 w-4" />
-    Enviadas ({sentMessages.length})
-  </TabsTrigger>
-</TabsList>
+// Linha 191 - Background base do slot
+!isWorkingHour && "bg-blue-100/40 dark:bg-blue-950/30"
+
+// Linha 197 - Background da coluna de hora
+!isWorkingHour && "bg-blue-100/50 dark:bg-blue-950/40"
+
+// Linha 203 - Padrão listrado das células
+!isWorkingHour && "bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(147_197_253/0.4)_5px,rgb(147_197_253/0.4)_10px)] dark:bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(30_64_175/0.3)_5px,rgb(30_64_175/0.3)_10px)]"
+
+// Linha 499 - Legenda
+bg-[repeating-linear-gradient(135deg,rgb(147_197_253/0.6),rgb(147_197_253/0.6)_2px,transparent_2px,transparent_5px)] dark:bg-[repeating-linear-gradient(135deg,rgb(30_64_175/0.5),rgb(30_64_175/0.5)_2px,transparent_2px,transparent_5px)]
 ```
-
-### 3. Conteúdo da Nova Aba
-
-```tsx
-<TabsContent value="sent" className="mt-4">
-  {sentMessages.length === 0 ? (
-    <Card>
-      <CardContent className="flex flex-col items-center justify-center h-[200px]">
-        <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-        <h3 className="font-medium">Nenhuma mensagem enviada</h3>
-        <p className="text-sm text-muted-foreground">
-          Mensagens enviadas nos últimos 7 dias aparecerão aqui
-        </p>
-      </CardContent>
-    </Card>
-  ) : (
-    <div className="space-y-3">
-      {sentMessages.map((message) => (
-        // Card similar ao de pendentes, mas com:
-        // - Badge verde "Enviada" 
-        // - Data/hora de envio (sent_at)
-        // - Sem botões de ação (já foi enviada)
-      ))}
-    </div>
-  )}
-</TabsContent>
-```
-
----
-
-## Diferenças Visuais: Pendentes vs Enviadas
-
-| Aspecto | Pendentes | Enviadas |
-|---------|-----------|----------|
-| Badge de status | ⏰ Amarelo | ✅ Verde |
-| Data mostrada | `scheduled_for` | `sent_at` |
-| Botão Enviar | Sim (para alguns tipos) | Não |
-| Botão Editar | Sim (custom) | Não |
-| Botão Cancelar | Sim | Não |
-| Ordenação | Próximas primeiro | Mais recentes primeiro |
-
----
-
-## Arquivos a Modificar
-
-| Arquivo | Mudança |
-|---------|---------|
-| `src/components/agenda-pro/AgendaProScheduledMessages.tsx` | Adicionar query, aba e conteúdo |
-
----
-
-## Interface Final
-
-```text
-┌────────────────────────────────────────────────────────────┐
-│ Mensagens Agendadas                    [+ Nova Mensagem]   │
-│ Gerencie lembretes e mensagens...           3 pendentes    │
-├────────────────────────────────────────────────────────────┤
-│ ┌──────────────────┐ ┌──────────────────┐                  │
-│ │ ⏰ Pendentes (3) │ │ ✅ Enviadas (8)  │ ← NOVA ABA       │
-│ └──────────────────┘ └──────────────────┘                  │
-├────────────────────────────────────────────────────────────┤
-│                                                            │
-│  [Lista de mensagens conforme aba selecionada]             │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Segurança da Implementação
-
-| Verificação | Status |
-|-------------|--------|
-| Mantém funcionalidade de Pendentes | ✅ Intacta |
-| Mantém query existente de customMessages | ✅ Intacta |
-| Mantém query existente de autoMessages | ✅ Intacta |
-| Lazy loading (só busca quando aba ativa) | ✅ Otimizado |
-| Filtro por law_firm_id | ✅ RLS + filtro explícito |
-| Sem modificação no banco | ✅ Apenas leitura |
 
 ---
 
 ## Benefícios
 
-1. **Controle**: Ver histórico de mensagens enviadas
-2. **Performance**: Query só executa quando aba está ativa
-3. **UX**: Filtro automático de 7 dias evita excesso de dados
-4. **Consistência**: Mesmo visual das mensagens pendentes
-5. **Zero Regressão**: Funcionalidade existente não é alterada
+1. **Visibilidade**: Claramente visível em ambos os temas
+2. **Consistência**: Mesma cor na grade e na legenda
+3. **Profissionalismo**: Azul claro é uma cor padrão para indicar "indisponível" em calendários
+4. **Zero Regressão**: Não afeta nenhuma outra funcionalidade do calendário
+
+---
+
+## Arquivos Modificados
+
+| Arquivo | Linhas Alteradas |
+|---------|------------------|
+| `src/components/agenda-pro/AgendaProCalendar.tsx` | 191, 197, 203, 499 |
 
