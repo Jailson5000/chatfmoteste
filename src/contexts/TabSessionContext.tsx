@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeSyncOptional } from "@/contexts/RealtimeSyncContext";
 import { DuplicateTabDialog } from "@/components/session/DuplicateTabDialog";
@@ -11,6 +12,7 @@ import { useDeviceSession } from "@/hooks/useDeviceSession";
 // ============================================================================
 // Detects duplicate tabs using BroadcastChannel API (limit: 2 tabs)
 // Also integrates device session protection (1 device at a time PER COMPANY)
+// NOTE: This protection is DISABLED for /global-admin routes
 // ============================================================================
 
 const CHANNEL_NAME = "miauchat-tab-session";
@@ -50,14 +52,24 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentLawFirmId, setCurrentLawFirmId] = useState<string | null>(null);
   
+  // Detectar se estamos em rota do Global Admin
+  const location = useLocation();
+  const isGlobalAdminRoute = location.pathname.startsWith("/global-admin");
+  
   // Device session hook (now scoped by law_firm_id)
+  // IMPORTANTE: Só usa o hook se NÃO estiver em rota de admin global
+  const deviceSession = useDeviceSession(
+    isGlobalAdminRoute ? null : currentUserId, 
+    isGlobalAdminRoute ? null : currentLawFirmId
+  );
+  
   const {
     hasConflict: hasDeviceConflict,
     conflictingDevice,
     isChecking: isCheckingDevice,
     forceLoginHere,
     clearSession,
-  } = useDeviceSession(currentUserId, currentLawFirmId);
+  } = deviceSession;
   
   // Get realtime sync context to disconnect channels
   const realtimeSync = useRealtimeSyncOptional();
@@ -104,6 +116,12 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
 
   // Initialize BroadcastChannel and fetch user data
   useEffect(() => {
+    // BYPASS: Se estiver em rota de admin global, não inicializa proteção de sessão
+    if (isGlobalAdminRoute) {
+      console.log("[TabSession] Global admin route detected, skipping session protection");
+      return;
+    }
+    
     // Check for BroadcastChannel support (graceful degradation)
     if (typeof BroadcastChannel === "undefined") {
       console.log("[TabSession] BroadcastChannel not supported, skipping duplicate detection");
@@ -239,7 +257,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
       }
       subscription.unsubscribe();
     };
-  }, [terminateSession]);
+  }, [terminateSession, isGlobalAdminRoute]);
 
   const value: TabSessionContextType = {
     tabId: tabIdRef.current,
@@ -247,27 +265,34 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
     isTerminated,
   };
 
+  // Se estiver em rota de admin global, não mostra diálogos de conflito
+  const showConflictDialogs = !isGlobalAdminRoute;
+
   return (
     <TabSessionContext.Provider value={value}>
       {children}
       
-      {/* Dialog for tab limit exceeded */}
-      <DuplicateTabDialog
-        open={showDuplicateDialog && !hasDeviceConflict}
-        onContinue={handleTakeover}
-        onCancel={handleCancel}
-      />
+      {/* Dialog for tab limit exceeded - só mostra fora do admin global */}
+      {showConflictDialogs && (
+        <DuplicateTabDialog
+          open={showDuplicateDialog && !hasDeviceConflict}
+          onContinue={handleTakeover}
+          onCancel={handleCancel}
+        />
+      )}
       
-      {/* Dialog for device conflict (same company, different device) */}
-      <DeviceConflictDialog
-        open={hasDeviceConflict && !isCheckingDevice}
-        conflictingDevice={conflictingDevice}
-        onContinueHere={forceLoginHere}
-        onLogout={handleLogout}
-      />
+      {/* Dialog for device conflict (same company, different device) - só mostra fora do admin global */}
+      {showConflictDialogs && (
+        <DeviceConflictDialog
+          open={hasDeviceConflict && !isCheckingDevice}
+          conflictingDevice={conflictingDevice}
+          onContinueHere={forceLoginHere}
+          onLogout={handleLogout}
+        />
+      )}
       
-      {/* Overlay for terminated tab */}
-      {isTerminated && <SessionTerminatedOverlay />}
+      {/* Overlay for terminated tab - só mostra fora do admin global */}
+      {showConflictDialogs && isTerminated && <SessionTerminatedOverlay />}
     </TabSessionContext.Provider>
   );
 }
