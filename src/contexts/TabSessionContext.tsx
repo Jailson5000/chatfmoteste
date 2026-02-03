@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
-import { useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeSyncOptional } from "@/contexts/RealtimeSyncContext";
 import { DuplicateTabDialog } from "@/components/session/DuplicateTabDialog";
@@ -18,6 +17,12 @@ import { useDeviceSession } from "@/hooks/useDeviceSession";
 const CHANNEL_NAME = "miauchat-tab-session";
 const PING_TIMEOUT_MS = 500;
 const MAX_TABS = 2; // Limite de abas simultâneas
+
+// Helper para detectar rota de admin global (funciona fora do Router)
+const isGlobalAdminPath = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.startsWith("/global-admin");
+};
 
 interface TabMessage {
   type: "PING" | "PONG" | "TAKEOVER";
@@ -52,9 +57,8 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentLawFirmId, setCurrentLawFirmId] = useState<string | null>(null);
   
-  // Detectar se estamos em rota do Global Admin
-  const location = useLocation();
-  const isGlobalAdminRoute = location.pathname.startsWith("/global-admin");
+  // Detectar se estamos em rota do Global Admin (usando window.location, não useLocation)
+  const [isGlobalAdminRoute] = useState(() => isGlobalAdminPath());
   
   // Device session hook (now scoped by law_firm_id)
   // IMPORTANTE: Só usa o hook se NÃO estiver em rota de admin global
