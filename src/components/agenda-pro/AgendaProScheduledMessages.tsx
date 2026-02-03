@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock, Plus } from "lucide-react";
+import { Loader2, MessageSquare, Clock, User, Pencil, XCircle, Send, CalendarClock, Plus, CheckCircle2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledMessageDialog } from "./ScheduledMessageDialog";
 
@@ -22,6 +22,7 @@ interface ScheduledMessage {
   message_content: string | null;
   status: "pending" | "sent" | "cancelled";
   channel: string;
+  sent_at?: string | null;
   appointment?: {
     id: string;
     start_time: string;
@@ -89,6 +90,54 @@ export function AgendaProScheduledMessages() {
       }));
     },
     enabled: !!lawFirm?.id,
+  });
+
+  // Fetch sent messages from last 7 days
+  const { data: sentMessages = [], isLoading: loadingSent } = useQuery({
+    queryKey: ["agenda-pro-sent-messages", lawFirm?.id, activeTab],
+    queryFn: async () => {
+      if (!lawFirm?.id) return [];
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { data, error } = await supabase
+        .from("agenda_pro_scheduled_messages")
+        .select(`
+          *,
+          agenda_pro_clients(name, phone),
+          agenda_pro_appointments(
+            id,
+            start_time,
+            client_name,
+            client_phone,
+            status,
+            agenda_pro_services(name),
+            agenda_pro_professionals(name)
+          )
+        `)
+        .eq("law_firm_id", lawFirm.id)
+        .eq("status", "sent")
+        .gte("sent_at", sevenDaysAgo.toISOString())
+        .order("sent_at", { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((msg: any) => ({
+        id: msg.id,
+        appointment_id: msg.appointment_id,
+        client_id: msg.client_id,
+        type: msg.message_type as any,
+        scheduled_for: msg.scheduled_at,
+        message_content: msg.message_content,
+        status: msg.status,
+        channel: msg.channel,
+        sent_at: msg.sent_at,
+        client: msg.agenda_pro_clients,
+        appointment: msg.agenda_pro_appointments,
+      }));
+    },
+    enabled: !!lawFirm?.id && activeTab === "sent",
   });
 
   // Fetch auto-generated messages from appointments
@@ -177,12 +226,12 @@ export function AgendaProScheduledMessages() {
     refetchInterval: 60000,
   });
 
-  // Combine all messages
+  // Combine all pending messages
   const allMessages = [...customMessages, ...autoMessages].sort((a, b) =>
     new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime()
   );
 
-  const isLoading = loadingCustom || loadingAuto;
+  const isLoading = loadingCustom || loadingAuto || (activeTab === "sent" && loadingSent);
   const pendingMessages = allMessages.filter(m => m.status === "pending");
 
   // Cancel a scheduled message
@@ -357,6 +406,10 @@ export function AgendaProScheduledMessages() {
             <Clock className="h-4 w-4" />
             Pendentes ({pendingMessages.length})
           </TabsTrigger>
+          <TabsTrigger value="sent" className="gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            Enviadas ({sentMessages.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending" className="mt-4">
@@ -453,6 +506,83 @@ export function AgendaProScheduledMessages() {
                           >
                             <XCircle className="h-4 w-4 text-destructive" />
                           </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="sent" className="mt-4">
+          {loadingSent ? (
+            <div className="flex items-center justify-center h-[200px]">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : sentMessages.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center h-[200px] text-center">
+                <CheckCircle2 className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="font-medium">Nenhuma mensagem enviada</h3>
+                <p className="text-sm text-muted-foreground">
+                  Mensagens enviadas nos últimos 7 dias aparecerão aqui
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {sentMessages.map((message) => {
+                const apt = message.appointment;
+                const clientName = apt?.agenda_pro_clients?.name || apt?.client_name || message.client?.name || "Cliente";
+                const clientPhone = apt?.agenda_pro_clients?.phone || apt?.client_phone || message.client?.phone || "";
+                const serviceName = apt?.agenda_pro_services?.name || "Serviço";
+                const professionalName = apt?.agenda_pro_professionals?.name;
+
+                return (
+                  <Card key={message.id}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                              ✓ Enviada
+                            </Badge>
+                            <Badge className={getTypeBadgeColor(message.type)}>
+                              {getTypeLabel(message.type)}
+                            </Badge>
+                            {message.sent_at && (
+                              <Badge variant="outline" className="gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                {format(parseISO(message.sent_at), "dd/MM HH:mm", { locale: ptBR })}
+                              </Badge>
+                            )}
+                            <Badge variant="secondary" className="text-xs">
+                              {message.channel === "whatsapp" ? "WhatsApp" : "E-mail"}
+                            </Badge>
+                          </div>
+
+                          <div className="text-sm space-y-1">
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium">{clientName}</span>
+                              {clientPhone && <span className="text-muted-foreground">{clientPhone}</span>}
+                            </div>
+                            {apt && (
+                              <div className="text-muted-foreground">
+                                {serviceName} • {format(parseISO(apt.start_time), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                                {professionalName && ` • ${professionalName}`}
+                              </div>
+                            )}
+                          </div>
+
+                          {message.message_content && (
+                            <div className="mt-2 p-2 bg-muted rounded text-sm">
+                              <p className="text-muted-foreground text-xs mb-1">Mensagem:</p>
+                              <p className="line-clamp-2">{message.message_content}</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </CardContent>
