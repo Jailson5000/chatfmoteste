@@ -1,175 +1,144 @@
 
 
-# Plano: Fechar Dialog de Mídia Imediatamente ao Clicar em Enviar
+# Plano: Ocultar Botão "Enviar Agora" para Mensagens reminder_2
 
 ## Problema Identificado
 
-Atualmente no **Conversations.tsx**, quando o usuário clica em "Enviar" no dialog de mídia:
-1. O botão mostra um spinner de loading
-2. O usuário fica preso esperando o upload terminar
-3. Só depois o dialog fecha
+Na aba "Mensagens" da Agenda Pro, mensagens do tipo `reminder_2` (segundo lembrete automático) mostram o botão "Enviar Agora" que não funciona. Isso acontece porque:
 
-**O usuário quer**: que o dialog feche imediatamente ao clicar em "Enviar", liberando-o para continuar navegando ou digitando.
+1. O botão aparece para qualquer mensagem com `appointment_id`
+2. A edge function `agenda-pro-notification` só suporta tipos: `created`, `reminder`, `cancelled`, `updated`, `no_show`
+3. Não há suporte para envio manual do `reminder_2`
 
-## Análise de Segurança
+## Solução
 
-| Aspecto | Status | Observação |
-|---------|--------|------------|
-| Já implementado no Kanban | ✅ Sim | Linha 2161 - fecha dialog antes do upload |
-| Mensagem otimista | ✅ Funciona | Mensagem aparece imediatamente com status "sending" |
-| Feedback de erro | ✅ Mantido | Toast de erro é exibido mesmo com dialog fechado |
-| Feedback de sucesso | ✅ Mantido | Toast de sucesso é exibido |
-| Realtime update | ✅ Funciona | Mensagem atualiza para "sent" via Realtime |
+Ocultar o botão "Enviar Agora" para mensagens automáticas do sistema (`reminder_2`), deixando apenas para mensagens customizadas e tipos suportados.
 
-**Conclusão**: A mudança é **segura** pois já está funcionando corretamente no Kanban.
+---
 
-## Mudança Necessária
+## Mudanças Necessárias
 
-**Arquivo:** `src/pages/Conversations.tsx`
+### Arquivo: `src/components/agenda-pro/AgendaProScheduledMessages.tsx`
 
-### Antes (Código Atual)
+| Mudança | Descrição |
+|---------|-----------|
+| Criar função `canSendNow` | Verificar se o tipo da mensagem suporta envio manual |
+| Atualizar condição do botão | Usar a nova função para controlar visibilidade |
+| Adicionar label para `reminder_2` | Mostrar "Lembrete 2" em vez de "reminder_2" |
 
-```typescript
-const handleMediaPreviewSend = async (caption: string) => {
-  // ...validações...
-  
-  setIsSending(true);  // ← Bloqueia UI
-  
-  try {
-    // ...todo o código de upload...
-    
-    handleMediaPreviewClose();  // ← Fecha SÓ NO FINAL
-    
-    toast({ title: "Mídia enviada" });
-  } catch (error) {
-    // ...erro...
-  } finally {
-    setIsSending(false);  // ← Desbloqueia UI
+### Código Antes (linha 417-428)
+
+```tsx
+<div className="flex items-center gap-1">
+  {message.appointment_id && (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => sendNow.mutate(message)}
+      disabled={sendNow.isPending}
+      title="Enviar agora"
+    >
+      <Send className="h-4 w-4" />
+    </Button>
+  )}
+```
+
+### Código Depois
+
+```tsx
+// Nova função para verificar se pode enviar manualmente
+const canSendNow = (message: ScheduledMessage) => {
+  // reminder_2 é gerado automaticamente pelo cron e não suporta envio manual
+  if (message.type === "reminder_2") return false;
+  // Mensagens com appointment_id e tipos suportados podem ser enviadas
+  return !!message.appointment_id && ["reminder", "pre_message"].includes(message.type);
+};
+
+// No JSX:
+<div className="flex items-center gap-1">
+  {canSendNow(message) && (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => sendNow.mutate(message)}
+      disabled={sendNow.isPending}
+      title="Enviar agora"
+    >
+      <Send className="h-4 w-4" />
+    </Button>
+  )}
+```
+
+### Adicionar Label para reminder_2 (linha 291-299)
+
+```tsx
+const getTypeLabel = (type: string) => {
+  switch (type) {
+    case "reminder": return "Lembrete 24h";
+    case "reminder_2": return "Lembrete 2";  // ADICIONAR
+    case "pre_message": return "Pré-atendimento";
+    case "confirmation": return "Confirmação";
+    case "birthday": return "Aniversário";
+    case "custom": return "Personalizada";
+    default: return type;
   }
 };
 ```
 
-### Depois (Código Corrigido)
+### Adicionar Cor para Badge reminder_2 (linha 302-311)
 
-```typescript
-const handleMediaPreviewSend = async (caption: string) => {
-  // ...validações...
-  
-  setIsSending(true);
-  handleMediaPreviewClose();  // ← FECHAR IMEDIATAMENTE (igual ao Kanban)
-  
-  try {
-    // ...todo o código de upload...
-    
-    // handleMediaPreviewClose() - REMOVIDO DAQUI
-    
-    toast({ title: "Mídia enviada" });
-  } catch (error) {
-    // ...erro...
-  } finally {
-    setIsSending(false);
+```tsx
+const getTypeBadgeColor = (type: string) => {
+  switch (type) {
+    case "reminder": return "bg-blue-500/10 text-blue-500";
+    case "reminder_2": return "bg-indigo-500/10 text-indigo-500";  // ADICIONAR
+    case "pre_message": return "bg-purple-500/10 text-purple-500";
+    case "confirmation": return "bg-green-500/10 text-green-500";
+    case "birthday": return "bg-pink-500/10 text-pink-500";
+    case "custom": return "bg-orange-500/10 text-orange-500";
+    default: return "";
   }
 };
 ```
 
-## Fluxo Visual - Antes vs Depois
+---
 
-```text
-ANTES:                              DEPOIS:
-┌──────────────────┐                ┌──────────────────┐
-│ Clica "Enviar"   │                │ Clica "Enviar"   │
-└────────┬─────────┘                └────────┬─────────┘
-         │                                   │
-         ▼                                   ▼
-┌──────────────────┐                ┌──────────────────┐
-│ Dialog com       │                │ Dialog FECHA     │  ← Imediato!
-│ spinner...       │                │ imediatamente    │
-│ (usuário preso)  │                └────────┬─────────┘
-└────────┬─────────┘                         │
-         │ (espera upload)                   ▼
-         ▼                          ┌──────────────────┐
-┌──────────────────┐                │ Mensagem aparece │
-│ Upload completo  │                │ no chat com      │
-│ Dialog fecha     │                │ status "sending" │
-└────────┬─────────┘                └────────┬─────────┘
-         ▼                                   │
-┌──────────────────┐                         ▼ (background)
-│ Mensagem aparece │                ┌──────────────────┐
-│ no chat          │                │ Upload acontece  │
-└──────────────────┘                │ em background    │
-                                    └────────┬─────────┘
-                                             ▼
-                                    ┌──────────────────┐
-                                    │ Toast "Sucesso"  │
-                                    │ ou "Erro"        │
-                                    └──────────────────┘
-```
+## Resultado Visual - Antes vs Depois
 
-## Benefícios da Mudança
+| Aspecto | Antes | Depois |
+|---------|-------|--------|
+| Badge | `reminder_2` (texto cru) | `Lembrete 2` (label amigável) |
+| Cor da Badge | Sem cor (default) | Índigo (diferente do Lembrete 24h) |
+| Botão Enviar | Aparece mas não funciona | Não aparece |
+| Botão Editar | Não aparece (correto) | Não aparece (correto) |
+| Botão Cancelar | Aparece | Aparece |
 
-| Benefício | Descrição |
-|-----------|-----------|
-| **UX Melhor** | Usuário fica livre imediatamente |
-| **Consistência** | Mesmo comportamento do Kanban |
-| **Feedback Visual** | Mensagem com spinner no chat indica "enviando" |
-| **Zero Regressão** | Lógica de upload não muda, só ordem das chamadas |
+---
 
 ## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/pages/Conversations.tsx` | Mover `handleMediaPreviewClose()` para logo após `setIsSending(true)` |
+| `src/components/agenda-pro/AgendaProScheduledMessages.tsx` | Adicionar `canSendNow`, atualizar labels e cores |
 
-## Detalhes Técnicos
-
-### Linha Exata da Mudança
-
-**Localização:** Função `handleMediaPreviewSend` (linha ~2070-2293)
-
-**Antes:**
-- Linha 2075: `setIsSending(true);`
-- Linha 2277: `handleMediaPreviewClose();` ← muito tarde
-
-**Depois:**
-- Linha 2075: `setIsSending(true);`
-- Linha 2076: `handleMediaPreviewClose();` ← NOVO - fecha imediatamente
-- Linha 2277: ~~`handleMediaPreviewClose();`~~ ← REMOVER
-
-### Código Final
-
-```typescript
-const handleMediaPreviewSend = async (caption: string) => {
-  if (!mediaPreview.file && !mediaPreview.previewUrl) return;
-  if (!selectedConversationId || !selectedConversation) return;
-  
-  setIsSending(true);
-  handleMediaPreviewClose();  // ← ADICIONAR AQUI
-  
-  try {
-    // ... todo o código de upload permanece igual ...
-    
-    // handleMediaPreviewClose(); ← REMOVER DAQUI (era linha 2277)
-    
-    toast({
-      title: "Mídia enviada",
-      description: `${fileName} enviado com sucesso!`,
-    });
-  } catch (error) {
-    // ... tratamento de erro permanece igual ...
-  } finally {
-    setIsSending(false);
-  }
-};
-```
+---
 
 ## Impacto em Outras Funcionalidades
 
-| Funcionalidade | Impacto |
-|----------------|---------|
-| Chat de texto | ✅ Nenhum |
-| Envio de áudio | ✅ Nenhum |
-| Kanban | ✅ Nenhum (já funciona assim) |
-| Templates | ✅ Nenhum |
-| Realtime | ✅ Nenhum |
-| UI Otimista | ✅ Continua funcionando |
+| Funcionalidade | Status |
+|----------------|--------|
+| Lembrete 24h manual | Continua funcionando |
+| Pré-atendimento manual | Continua funcionando |
+| reminder_2 automático | Continua sendo enviado pelo cron |
+| Cancelar mensagens | Continua funcionando para todos os tipos |
+| Criar mensagens custom | Continua funcionando |
+
+---
+
+## Segurança da Mudança
+
+- Mudança é **somente visual** (oculta botão)
+- Não afeta a lógica de envio automático (cron job)
+- Não modifica edge functions ou banco de dados
+- Melhora UX ao remover botão que não funciona
 
