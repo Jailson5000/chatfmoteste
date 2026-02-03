@@ -3953,6 +3953,46 @@ serve(async (req) => {
           );
         }
 
+        // ========================================
+        // FIX: BLOCK INTER-INSTANCE MESSAGES (Cross-tenant contamination prevention)
+        // ========================================
+        // When multiple tenants have WhatsApp instances, a message sent from one tenant's
+        // instance to a phone number that is ALSO another tenant's instance will arrive
+        // at the second instance with fromMe=false (because it came from a different number).
+        // This causes the same message to appear in BOTH tenants - one as "sent by AI" and 
+        // one as "received from client". We must ignore these messages.
+        // ========================================
+        const senderPhoneClean = phoneNumber.replace(/\D/g, '');
+        
+        const { data: senderIsSystemInstance } = await supabaseClient
+          .from('whatsapp_instances')
+          .select('id, law_firm_id')
+          .or(`phone_number.eq.${senderPhoneClean},phone_number.ilike.%${senderPhoneClean}`)
+          .neq('id', instance.id)
+          .limit(1)
+          .maybeSingle();
+        
+        if (senderIsSystemInstance) {
+          logDebug('MESSAGE', `🚫 INTER-INSTANCE: Ignoring message from another system instance`, {
+            requestId,
+            senderPhone: phoneNumber,
+            senderInstanceId: senderIsSystemInstance.id,
+            senderTenantId: senderIsSystemInstance.law_firm_id,
+            receiverInstanceId: instance.id,
+            receiverTenantId: lawFirmId,
+            reason: 'Message already processed by sender tenant - prevents cross-tenant duplication'
+          });
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              action: 'ignored',
+              reason: 'inter_instance_message_blocked',
+              message: 'Messages from other system instances are processed by the sender tenant only'
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         logDebug('MESSAGE', `Processing message`, { requestId, phoneNumber, isFromMe });
 
         // Get or create conversation
@@ -4792,9 +4832,11 @@ serve(async (req) => {
             }
           }
 
+          // FIX: Use upsert with onConflict to prevent race condition duplicates
+          // The index messages_whatsapp_message_id_per_tenant ensures uniqueness per tenant
           const insertResult = await supabaseClient
             .from('messages')
-            .insert({
+            .upsert({
               conversation_id: conversation.id,
               law_firm_id: conversation.law_firm_id,
               whatsapp_message_id: data.key.id,
@@ -4806,9 +4848,12 @@ serve(async (req) => {
               sender_type: isFromMe ? 'system' : 'client',
               ai_generated: false,
               reply_to_message_id: replyToMessageId,
+            }, {
+              onConflict: 'law_firm_id,whatsapp_message_id',
+              ignoreDuplicates: true
             })
             .select()
-            .single();
+            .maybeSingle();
           
           savedMessage = insertResult.data;
           msgError = insertResult.error;
