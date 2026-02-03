@@ -8,16 +8,19 @@ import { SessionTerminatedOverlay } from "@/components/session/SessionTerminated
 // TAB SESSION CONTEXT
 // ============================================================================
 // Detects duplicate tabs using BroadcastChannel API
-// When a new tab opens, it can "take over" and disconnect older tabs
+// Allows up to MAX_TABS simultaneous tabs per user
+// When limit is exceeded, user can "take over" and disconnect the oldest tab
 // ============================================================================
 
 const CHANNEL_NAME = "miauchat-tab-session";
 const PING_TIMEOUT_MS = 500;
+const MAX_TABS = 2; // Maximum allowed simultaneous tabs
 
 interface TabMessage {
   type: "PING" | "PONG" | "TAKEOVER";
   tabId: string;
   userId?: string;
+  timestamp: number; // Tab creation timestamp for ordering
 }
 
 interface TabSessionContextType {
@@ -33,10 +36,12 @@ interface TabSessionProviderProps {
 }
 
 export function TabSessionProvider({ children }: TabSessionProviderProps) {
-  // Generate unique tab ID on mount
+  // Generate unique tab ID and timestamp on mount
   const tabIdRef = useRef<string>(crypto.randomUUID());
+  const tabCreatedAtRef = useRef<number>(Date.now());
   const channelRef = useRef<BroadcastChannel | null>(null);
   const pingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeTabsRef = useRef<Map<string, number>>(new Map()); // tabId -> timestamp
   
   const [isPrimaryTab, setIsPrimaryTab] = useState(true);
   const [isTerminated, setIsTerminated] = useState(false);
@@ -61,7 +66,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
     console.log("[TabSession] Session terminated in this tab");
   }, [realtimeSync]);
 
-  // Handle takeover - this tab becomes primary
+  // Handle takeover - this tab becomes primary, oldest tab is disconnected
   const handleTakeover = useCallback(() => {
     if (!channelRef.current) return;
     
@@ -69,10 +74,13 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
       type: "TAKEOVER",
       tabId: tabIdRef.current,
       userId: currentUserId,
+      timestamp: tabCreatedAtRef.current,
     } as TabMessage);
     
     setShowDuplicateDialog(false);
     setIsPrimaryTab(true);
+    // Clear active tabs tracking for fresh start
+    activeTabsRef.current.clear();
   }, [currentUserId]);
 
   // Handle cancel - close dialog, do nothing
@@ -119,37 +127,53 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
               type: "PONG",
               tabId: tabIdRef.current,
               userId: user.id,
+              timestamp: tabCreatedAtRef.current,
             } as TabMessage);
             break;
             
           case "PONG":
-            // Another tab responded - show duplicate dialog
-            if (pingTimeoutRef.current) {
-              clearTimeout(pingTimeoutRef.current);
-              pingTimeoutRef.current = null;
-            }
-            setShowDuplicateDialog(true);
+            // Another tab responded - track it
+            activeTabsRef.current.set(message.tabId, message.timestamp);
+            // Don't show dialog immediately - wait for timeout to count all tabs
             break;
             
           case "TAKEOVER":
-            // Another tab is taking over - terminate this session
-            terminateSession();
+            // Another tab is taking over
+            // Only terminate if this tab is older than the requesting tab
+            const myCreatedAt = tabCreatedAtRef.current;
+            const requestingTabCreatedAt = message.timestamp;
+            
+            if (myCreatedAt < requestingTabCreatedAt) {
+              // This tab is older, so it gets terminated
+              terminateSession();
+            }
             break;
         }
       };
+      
+      // Clear previous tracking
+      activeTabsRef.current.clear();
       
       // Send PING to check for existing tabs
       channelRef.current.postMessage({
         type: "PING",
         tabId: tabIdRef.current,
         userId: user.id,
+        timestamp: tabCreatedAtRef.current,
       } as TabMessage);
       
-      // Set timeout - if no PONG received, we're the only tab
+      // Set timeout - count PONGs received and decide
       pingTimeoutRef.current = setTimeout(() => {
         pingTimeoutRef.current = null;
-        // No response means we're the primary tab
-        setIsPrimaryTab(true);
+        const tabCount = activeTabsRef.current.size;
+        
+        if (tabCount >= MAX_TABS) {
+          // Limit reached - show dialog
+          setShowDuplicateDialog(true);
+        } else {
+          // Under limit - allow this tab
+          setIsPrimaryTab(true);
+        }
       }, PING_TIMEOUT_MS);
     };
     
