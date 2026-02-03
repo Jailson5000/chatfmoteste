@@ -1,192 +1,207 @@
 
-# Plano: Análise de Erros, Remoção de Salas e Otimização de Performance
 
-## 1. Análise de Erros no Projeto
+# Plano: Permitir 2 Abas Simultâneas por Usuário
 
-### Erros Identificados
+## Problema Atual
 
-| Severidade | Problema | Local |
-|------------|----------|-------|
-| **Info** | N8N workflow com erro "Unauthorized" | Empresa "Instituto Neves" - não é bug do código |
-| **Info** | Warning do TailwindCSS CDN | Preview apenas (cdn.tailwindcss.com) |
-| **OK** | Autenticação funcionando | Logs mostram fluxo correto |
-| **OK** | Mensagens sendo salvas | Correção do `upsert → insert` funcionou |
-| **OK** | Validações de CRM | `already_set: true` funcionando |
+Quando um usuário abre uma segunda aba, o sistema mostra imediatamente o diálogo de "aba duplicada" e força a escolha de qual aba manter. O limite atual é **1 aba**.
 
-**Resumo**: Não há erros críticos no frontend. O warning do Tailwind CDN aparece apenas no preview do Lovable e não afeta produção.
+## Solução
+
+Modificar o `TabSessionContext` para permitir **até 2 abas simultâneas**, mostrando o diálogo apenas quando a terceira aba for aberta.
 
 ---
 
-## 2. Remoção de "Salas" da Agenda Pro
+## Mudanças Necessárias
 
-### Arquivos Afetados
+### Arquivo 1: `src/contexts/TabSessionContext.tsx`
 
-| Arquivo | Mudança |
-|---------|---------|
-| `src/pages/AgendaPro.tsx` | Remover import, tab e TabsContent |
-| `src/components/agenda-pro/AgendaProResources.tsx` | Manter (pode ser útil no futuro) |
-| `src/hooks/useAgendaProResources.tsx` | Manter (pode ser útil no futuro) |
+| Mudança | Descrição |
+|---------|-----------|
+| Adicionar `MAX_TABS = 2` | Constante configurável para limite de abas |
+| Adicionar `timestamp` às mensagens | Para identificar a aba mais antiga |
+| Contar PONGs recebidos | Em vez de mostrar diálogo no primeiro PONG |
+| Modificar lógica de TAKEOVER | Desconectar apenas a aba mais antiga |
 
-### Detalhes da Mudança
-
-**Arquivo:** `src/pages/AgendaPro.tsx`
-
-**Remover:**
-1. Import do `AgendaProResources` (linha 23)
-2. Import do ícone `Building2` (linha 10 - já usado em outro lugar, verificar se pode remover)
-3. TabTrigger "Salas" (linhas 124-127)
-4. TabsContent "resources" (linhas 167-169)
-
-**Código a remover:**
-
-```tsx
-// Linha 23 - Remover import
-import { AgendaProResources } from "@/components/agenda-pro/AgendaProResources";
-
-// Linhas 124-127 - Remover tab
-<TabsTrigger value="resources" className="flex items-center gap-1.5 px-3 py-2">
-  <Building2 className="h-4 w-4" />
-  <span className="hidden sm:inline text-sm">Salas</span>
-</TabsTrigger>
-
-// Linhas 167-169 - Remover conteúdo
-<TabsContent value="resources" className="mt-6">
-  <AgendaProResources />
-</TabsContent>
+**Código Atual:**
+```typescript
+case "PONG":
+  // Mostra diálogo imediatamente ao receber qualquer PONG
+  setShowDuplicateDialog(true);
+  break;
 ```
 
-**Nota sobre o ícone `Building2`**: Este ícone é importado mas só era usado na aba de Salas. Pode ser removido do import também.
-
-### Impacto
-
-- Nenhum impacto em funcionalidades existentes
-- A tabela `agenda_pro_resources` no banco permanece (sem necessidade de migração)
-- Hook e componente permanecem no código (podem ser reativados no futuro)
-
----
-
-## 3. Análise de Performance do Frontend
-
-### Diagnóstico Atual
-
-| Aspecto | Status | Detalhes |
-|---------|--------|----------|
-| **Code Splitting** | Ausente | Todas as páginas carregam juntas |
-| **Lazy Loading** | Ausente | Sem `React.lazy()` |
-| **Bundle Size** | Grande | recharts, xlsx, jspdf carregam no bundle principal |
-| **Realtime** | Otimizado | Consolidação para 4 canais já implementada |
-| **Query Caching** | Sem staleTime | Queries refetcham sempre que componente monta |
-| **Auth Flow** | OK | Timeout de 10s para evitar loading infinito |
-
-### Recomendações de Performance (Não Implementar Agora)
-
-Para referência futura, estas otimizações podem melhorar significativamente o tempo de carregamento:
-
-**1. Lazy Loading de Rotas (Alto Impacto)**
+**Código Novo:**
 ```typescript
-// Exemplo de como poderia ser implementado no futuro
-const Dashboard = React.lazy(() => import('./pages/Dashboard'));
-const Conversations = React.lazy(() => import('./pages/Conversations'));
-const Kanban = React.lazy(() => import('./pages/Kanban'));
-// etc...
-```
+const MAX_TABS = 2;
+const activeTabsRef = useRef<Map<string, number>>(new Map()); // tabId -> timestamp
+const tabCreatedAtRef = useRef<number>(Date.now());
 
-**2. StaleTime nas Queries (Médio Impacto)**
-```typescript
-// Adicionar staleTime nas queries que não precisam refetch constante
-const { data } = useQuery({
-  queryKey: ["law_firm"],
-  queryFn: async () => {...},
-  staleTime: 5 * 60 * 1000, // 5 minutos
-});
-```
-
-**3. Vite Code Splitting (Médio Impacto)**
-```typescript
-// vite.config.ts
-build: {
-  rollupOptions: {
-    output: {
-      manualChunks: {
-        'vendor': ['react', 'react-dom', 'react-router-dom'],
-        'charts': ['recharts'],
-        'export': ['xlsx', 'jspdf'],
-      }
-    }
+case "PONG":
+  // Adiciona aba à contagem
+  activeTabsRef.current.set(message.tabId, message.timestamp || Date.now());
+  // Só mostra diálogo se atingir o limite
+  if (activeTabsRef.current.size >= MAX_TABS) {
+    setShowDuplicateDialog(true);
   }
+  break;
+
+case "TAKEOVER":
+  // Só termina se for a aba mais antiga
+  if (tabCreatedAtRef.current < (message.timestamp || Date.now())) {
+    terminateSession();
+  }
+  break;
+```
+
+### Arquivo 2: `src/components/session/DuplicateTabDialog.tsx`
+
+Atualizar o texto para refletir o limite de 2 abas:
+
+**Atual:**
+> "O MiauChat já está aberto em outra aba do navegador."
+
+**Novo:**
+> "O MiauChat já está aberto em 2 abas. Se você continuar aqui, a aba mais antiga será desconectada."
+
+---
+
+## Fluxo Visual
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                    USUÁRIO ABRE ABA                          │
+└──────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Envia PING     │
+                    └─────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+              ▼                               ▼
+     ┌─────────────────┐             ┌─────────────────┐
+     │ 0 PONGs         │             │ 1 PONG          │
+     │ (nenhuma aba)   │             │ (1 aba existe)  │
+     └─────────────────┘             └─────────────────┘
+              │                               │
+              ▼                               ▼
+     ┌─────────────────┐             ┌─────────────────┐
+     │ ✓ OK            │             │ ✓ OK            │  ← NOVO
+     │ Acesso liberado │             │ (< 2 abas)      │
+     └─────────────────┘             └─────────────────┘
+                                              │
+                                              ▼
+                                   ┌─────────────────┐
+                                   │ 2+ PONGs        │
+                                   │ (2+ abas)       │
+                                   └─────────────────┘
+                                              │
+                                              ▼
+                                   ┌─────────────────────┐
+                                   │ Mostrar Diálogo     │
+                                   │ "Limite atingido"   │
+                                   │                     │
+                                   │ [Cancelar]          │
+                                   │ [Continuar aqui]    │
+                                   └─────────────────────┘
+                                              │
+                    ┌─────────────────────────┴─────────────────────────┐
+                    │                                                   │
+                    ▼                                                   ▼
+         ┌──────────────────┐                             ┌──────────────────┐
+         │ Cancelar         │                             │ Continuar        │
+         │ → Fecha diálogo  │                             │ → TAKEOVER       │
+         │ → Usuário decide │                             │ → Aba mais antiga│
+         └──────────────────┘                             │   é desconectada │
+                                                          └──────────────────┘
+```
+
+---
+
+## Arquivos a Modificar
+
+| Arquivo | Ação |
+|---------|------|
+| `src/contexts/TabSessionContext.tsx` | Implementar contagem de abas e limite de 2 |
+| `src/components/session/DuplicateTabDialog.tsx` | Atualizar texto do diálogo |
+
+---
+
+## Detalhes Técnicos da Implementação
+
+### Interface TabMessage Atualizada
+
+```typescript
+interface TabMessage {
+  type: "PING" | "PONG" | "TAKEOVER";
+  tabId: string;
+  userId?: string;
+  timestamp: number;  // NOVO: para ordenar abas por idade
 }
 ```
 
-### Por que o Frontend Pode Parecer Lento
+### Lógica de Contagem
 
-1. **Carregamento Inicial**: Todo o bundle JavaScript carrega de uma vez (~2-4MB estimado)
-2. **Múltiplas Queries Paralelas**: Ao entrar em uma página, várias queries disparam simultaneamente
-3. **Realtime Channels**: 4 WebSockets abertos constantemente (já otimizado de 18+)
-4. **Sem Skeleton Loading**: Algumas páginas mostram apenas spinner em vez de skeleton
+```typescript
+const MAX_TABS = 2;
+const activeTabsRef = useRef<Map<string, number>>(new Map());
+const tabCreatedAtRef = useRef<number>(Date.now());
 
-### Métricas Atuais (Estimativa)
+// No handler de mensagens:
+case "PONG":
+  activeTabsRef.current.set(message.tabId, message.timestamp);
+  // Continua esperando mais PONGs até o timeout
+  break;
 
-| Métrica | Valor Estimado | Meta Ideal |
-|---------|----------------|------------|
-| First Contentful Paint | ~1.5-2.5s | <1.5s |
-| Time to Interactive | ~3-5s | <3s |
-| Bundle Size (gzip) | ~800KB-1.2MB | <500KB |
-
----
-
-## Resumo das Mudanças a Implementar
-
-| # | Mudança | Risco | Impacto |
-|---|---------|-------|---------|
-| 1 | Remover aba "Salas" do AgendaPro.tsx | Nenhum | Visual apenas |
-| 2 | Remover import não utilizado | Nenhum | Cleanup |
-
-### Arquivos a Modificar
-
-- `src/pages/AgendaPro.tsx` - Remover referências a "Salas/Resources"
-
-### Arquivos a NÃO Modificar (Manter para Futuro)
-
-- `src/components/agenda-pro/AgendaProResources.tsx`
-- `src/hooks/useAgendaProResources.tsx`
-
----
-
-## Detalhes Técnicos - Mudanças Específicas
-
-### AgendaPro.tsx - Antes
-
-```tsx
-import { Building2, ... } from "lucide-react";
-import { AgendaProResources } from "@/components/agenda-pro/AgendaProResources";
-...
-<TabsTrigger value="resources">
-  <Building2 />
-  <span>Salas</span>
-</TabsTrigger>
-...
-<TabsContent value="resources">
-  <AgendaProResources />
-</TabsContent>
+// Após o timeout (PING_TIMEOUT_MS):
+pingTimeoutRef.current = setTimeout(() => {
+  const tabCount = activeTabsRef.current.size;
+  if (tabCount >= MAX_TABS) {
+    setShowDuplicateDialog(true);
+  } else {
+    setIsPrimaryTab(true);
+  }
+}, PING_TIMEOUT_MS);
 ```
 
-### AgendaPro.tsx - Depois
+### Lógica de Takeover Inteligente
 
-```tsx
-// Building2 removido do import
-// AgendaProResources removido do import
-// Tab "resources" removido
-// TabsContent "resources" removido
+Quando o usuário clica "Continuar aqui", enviamos TAKEOVER com o timestamp da aba atual. Apenas a aba mais antiga (menor timestamp) será desconectada:
+
+```typescript
+case "TAKEOVER":
+  // Compara timestamps - apenas a aba mais antiga é terminada
+  const myCreatedAt = tabCreatedAtRef.current;
+  const requestingTabCreatedAt = message.timestamp;
+  
+  // Se esta aba é mais antiga que a aba que está pedindo takeover
+  if (myCreatedAt < requestingTabCreatedAt) {
+    terminateSession();
+  }
+  break;
 ```
 
 ---
 
-## Sobre Performance - Próximos Passos Sugeridos
+## Impacto
 
-Se quiser melhorar a performance no futuro, sugiro focar em:
+| Aspecto | Status |
+|---------|--------|
+| Funcionalidades existentes | ✅ Nenhum impacto |
+| Performance | ✅ Mesmo overhead |
+| Realtime/WebSockets | ⚠️ 2x recursos (aceitável) |
+| UX | ✅ Mais flexibilidade |
 
-1. **Lazy Loading** - Maior impacto com menor risco
-2. **Code Splitting no Vite** - Configuração simples
-3. **StaleTime nas queries** - Reduz refetches desnecessários
+---
 
-Posso criar um plano separado para otimizações de performance quando desejar.
+## Resultado Esperado
+
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| 1 aba aberta | ✅ OK | ✅ OK |
+| 2 abas abertas | ❌ Diálogo aparece | ✅ OK |
+| 3 abas abertas | ❌ Diálogo aparece | ❌ Diálogo aparece |
+| Takeover | Desconecta outra aba | Desconecta aba mais antiga |
+
