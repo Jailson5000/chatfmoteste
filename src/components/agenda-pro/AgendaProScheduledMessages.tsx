@@ -92,7 +92,29 @@ export function AgendaProScheduledMessages() {
     enabled: !!lawFirm?.id,
   });
 
-  // Fetch sent messages from last 7 days
+  // Fetch sent messages count (always runs for tab badge)
+  const { data: sentMessagesCount = 0 } = useQuery({
+    queryKey: ["agenda-pro-sent-messages-count", lawFirm?.id],
+    queryFn: async () => {
+      if (!lawFirm?.id) return 0;
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { count, error } = await supabase
+        .from("agenda_pro_scheduled_messages")
+        .select("*", { count: "exact", head: true })
+        .eq("law_firm_id", lawFirm.id)
+        .eq("status", "sent")
+        .gte("sent_at", sevenDaysAgo.toISOString());
+
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!lawFirm?.id,
+  });
+
+  // Fetch sent messages from last 7 days (lazy load on tab switch)
   const { data: sentMessages = [], isLoading: loadingSent } = useQuery({
     queryKey: ["agenda-pro-sent-messages", lawFirm?.id, activeTab],
     queryFn: async () => {
@@ -408,7 +430,7 @@ export function AgendaProScheduledMessages() {
           </TabsTrigger>
           <TabsTrigger value="sent" className="gap-2">
             <CheckCircle2 className="h-4 w-4" />
-            Enviadas ({sentMessages.length})
+            Enviadas ({sentMessagesCount})
           </TabsTrigger>
         </TabsList>
 
