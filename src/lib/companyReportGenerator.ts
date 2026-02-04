@@ -13,6 +13,11 @@ interface CompanyReportData {
   trialDaysRemaining: number | null;
   openInvoicesCount: number;
   openInvoicesTotal: number;
+  // Novos campos de billing
+  hasActiveSubscription: boolean;
+  subscriptionStatus: string | null;
+  lastPaymentAt: string | null;
+  nextInvoiceAt: string | null;
 }
 
 interface ReportConfig {
@@ -26,15 +31,26 @@ const MUTED_COLOR: [number, number, number] = [100, 100, 100];
 const HEADER_BG: [number, number, number] = [245, 245, 245];
 
 function getStatusText(company: CompanyReportData): string {
+  // 1. Status de bloqueio tem prioridade máxima
   if (company.status === "suspended") return "Suspenso";
   if (company.status === "blocked") return "Bloqueado";
   if (company.approvalStatus === "pending") return "Pendente";
-  if (company.trialDaysRemaining !== null && company.trialDaysRemaining > 0) {
-    return `Trial (${company.trialDaysRemaining}d)`;
+  
+  // 2. Se tem subscription ativa = é pagante (ignora trial_ends_at)
+  if (company.hasActiveSubscription) {
+    return "Ativo";
   }
-  if (company.trialDaysRemaining !== null && company.trialDaysRemaining <= 0) {
-    return "Trial Expirado";
+  
+  // 3. Se está em trial
+  if (company.trialDaysRemaining !== null) {
+    if (company.trialDaysRemaining > 0) {
+      return `Trial (${company.trialDaysRemaining}d)`;
+    } else {
+      return "Trial Expirado";
+    }
   }
+  
+  // 4. Fallback
   if (company.status === "active") return "Ativo";
   return company.status;
 }
@@ -44,6 +60,15 @@ function formatCurrency(value: number): string {
     style: "currency",
     currency: "BRL",
   }).format(value / 100); // Stripe returns cents
+}
+
+function formatDateBR(dateStr: string | null): string {
+  if (!dateStr) return "-";
+  try {
+    return format(new Date(dateStr), "dd/MM/yyyy", { locale: ptBR });
+  } catch {
+    return "-";
+  }
 }
 
 export function generateCompanyReportPDF(config: ReportConfig): void {
@@ -83,14 +108,15 @@ export function generateCompanyReportPDF(config: ReportConfig): void {
 
   // Table header
   const startY = 45;
-  const colWidths = [55, 40, 35, 30, 22, 35, 30, 35];
-  const headers = ["Nome", "CPF/CNPJ", "Plano", "Status", "Ativo", "Ativação", "Faturas", "Valor Pendente"];
+  // Updated column widths for 9 columns (adjusted to fit landscape A4)
+  const colWidths = [50, 38, 32, 28, 18, 28, 28, 28, 32];
+  const headers = ["Nome", "CPF/CNPJ", "Plano", "Status", "Ativo", "Ativação", "Últ. Pgto", "Próx. Fat.", "Faturas"];
 
   doc.setFillColor(...HEADER_BG);
   doc.rect(margin, startY, pageWidth - margin * 2, 8, "F");
 
   doc.setTextColor(...TEXT_COLOR);
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
 
   let xPos = margin + 2;
@@ -168,28 +194,23 @@ export function generateCompanyReportPDF(config: ReportConfig): void {
     doc.text(company.isActive ? "Sim" : "Não", xPos, yPos);
     xPos += colWidths[4];
 
-    // Approved at
-    doc.text(
-      company.approvedAt 
-        ? format(new Date(company.approvedAt), "dd/MM/yyyy", { locale: ptBR })
-        : "-",
-      xPos,
-      yPos
-    );
+    // Approved at (Ativação)
+    doc.text(formatDateBR(company.approvedAt), xPos, yPos);
     xPos += colWidths[5];
 
-    // Open invoices count
-    if (company.openInvoicesCount > 0) {
-      doc.setTextColor(220, 38, 38);
-    }
-    doc.text(company.openInvoicesCount.toString(), xPos, yPos);
-    doc.setTextColor(...TEXT_COLOR);
+    // Last Payment (Últ. Pgto)
+    doc.text(formatDateBR(company.lastPaymentAt), xPos, yPos);
     xPos += colWidths[6];
 
-    // Open invoices total
-    if (company.openInvoicesTotal > 0) {
+    // Next Invoice (Próx. Fat.)
+    doc.text(formatDateBR(company.nextInvoiceAt), xPos, yPos);
+    xPos += colWidths[7];
+
+    // Faturas (combined count + total)
+    if (company.openInvoicesCount > 0) {
       doc.setTextColor(220, 38, 38);
-      doc.text(formatCurrency(company.openInvoicesTotal), xPos, yPos);
+      const invoiceText = `${company.openInvoicesCount} (${formatCurrency(company.openInvoicesTotal)})`;
+      doc.text(invoiceText, xPos, yPos);
       doc.setTextColor(...TEXT_COLOR);
     } else {
       doc.text("-", xPos, yPos);

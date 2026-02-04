@@ -578,51 +578,69 @@ export default function GlobalAdminCompanies() {
                   onClick={async () => {
                     setIsExportingPDF(true);
                     try {
-                      // Build report data
-                      const reportData: CompanyReportData[] = await Promise.all(
-                        companies.map(async (company) => {
-                          const plan = plans.find(p => p.id === company.plan_id);
-                          
-                          // Calculate trial days remaining
-                          let trialDaysRemaining: number | null = null;
-                          if (company.trial_ends_at) {
-                            const trialEnd = new Date(company.trial_ends_at);
-                            trialDaysRemaining = differenceInDays(trialEnd, new Date());
-                          }
-                          
-                          // Get open invoices from Stripe
-                          let openInvoicesCount = 0;
-                          let openInvoicesTotal = 0;
-                          
-                          const stripeCustomerId = (company as any).stripe_customer_id;
-                          if (stripeCustomerId) {
-                            try {
-                              const { data: invoicesData } = await supabase.functions.invoke('list-stripe-invoices', {
-                                body: { customer_id: stripeCustomerId, status: 'open' }
-                              });
-                              if (invoicesData?.invoices) {
-                                openInvoicesCount = invoicesData.invoices.length;
-                                openInvoicesTotal = invoicesData.invoices.reduce((sum: number, inv: any) => sum + (inv.amount_due || 0), 0);
-                              }
-                            } catch (e) {
-                              console.warn('Could not fetch invoices for', company.name);
-                            }
-                          }
-                          
-                          return {
-                            name: company.name,
-                            document: company.document,
-                            planName: plan?.name || 'Sem plano',
-                            status: company.status,
-                            approvalStatus: company.approval_status || 'approved',
-                            isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
-                            approvedAt: company.approved_at,
-                            trialDaysRemaining,
-                            openInvoicesCount,
-                            openInvoicesTotal,
-                          };
-                        })
-                      );
+                      // Fetch billing data for all companies in batch
+                      const companyIds = companies.map(c => c.id);
+                      let billingData: Record<string, {
+                        hasActiveSubscription: boolean;
+                        subscriptionStatus: string | null;
+                        lastPaymentAt: string | null;
+                        nextInvoiceAt: string | null;
+                        openInvoicesCount: number;
+                        openInvoicesTotal: number;
+                      }> = {};
+                      
+                      try {
+                        const { data: billingSummary, error: billingError } = await supabase.functions.invoke('get-company-billing-summary', {
+                          body: { company_ids: companyIds }
+                        });
+                        
+                        if (billingError) {
+                          console.warn('Could not fetch billing summary:', billingError);
+                        } else if (billingSummary?.data) {
+                          billingData = billingSummary.data;
+                        }
+                      } catch (e) {
+                        console.warn('Error fetching billing summary:', e);
+                      }
+                      
+                      // Build report data with billing info
+                      const reportData: CompanyReportData[] = companies.map((company) => {
+                        const plan = plans.find(p => p.id === company.plan_id);
+                        
+                        // Calculate trial days remaining
+                        let trialDaysRemaining: number | null = null;
+                        if (company.trial_ends_at) {
+                          const trialEnd = new Date(company.trial_ends_at);
+                          trialDaysRemaining = differenceInDays(trialEnd, new Date());
+                        }
+                        
+                        // Get billing data for this company
+                        const billing = billingData[company.id] || {
+                          hasActiveSubscription: false,
+                          subscriptionStatus: null,
+                          lastPaymentAt: null,
+                          nextInvoiceAt: null,
+                          openInvoicesCount: 0,
+                          openInvoicesTotal: 0,
+                        };
+                        
+                        return {
+                          name: company.name,
+                          document: company.document,
+                          planName: plan?.name || 'Sem plano',
+                          status: company.status,
+                          approvalStatus: company.approval_status || 'approved',
+                          isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
+                          approvedAt: company.approved_at,
+                          trialDaysRemaining,
+                          openInvoicesCount: billing.openInvoicesCount,
+                          openInvoicesTotal: billing.openInvoicesTotal,
+                          hasActiveSubscription: billing.hasActiveSubscription,
+                          subscriptionStatus: billing.subscriptionStatus,
+                          lastPaymentAt: billing.lastPaymentAt,
+                          nextInvoiceAt: billing.nextInvoiceAt,
+                        };
+                      });
                       
                       generateCompanyReportPDF({
                         companies: reportData,
