@@ -88,10 +88,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <CompanySuspended reason={suspended_reason} planName={plan_name} planPrice={plan_price} />;
   }
 
-  // BLOCK: Trial expired
-  if (trial_type && trial_type !== 'none' && trial_expired) {
-    console.log('[ProtectedRoute] Blocking: Trial expired at', trial_ends_at);
-    return <TrialExpired trialEndsAt={trial_ends_at || undefined} planName={plan_name || undefined} />;
+  // BLOCK: Trial expired (only if company is not yet active/paid)
+  if (trial_type && trial_type !== 'none' && trial_expired && company_status !== 'active') {
+    console.log('[ProtectedRoute] Blocking: Trial expired at', trial_ends_at, 'and status is:', company_status);
+    return <TrialExpired trialEndsAt={trial_ends_at || undefined} planName={plan_name || undefined} planPrice={plan_price ?? undefined} />;
   }
 
   // ========================================
