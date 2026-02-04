@@ -91,7 +91,7 @@ export default function Dashboard() {
   const { messageMetrics, attendantMetrics, timeSeriesData, isLoading: metricsLoading, refetch: refetchMetrics } = useDashboardMetrics(dashboardFilters);
 
   // Onboarding progress
-  const { progress: onboardingProgress, completedCount, totalCount, isComplete: onboardingComplete } = useOnboarding();
+  const { progress: onboardingProgress, completedCount, totalCount, isLoading: onboardingLoading } = useOnboarding();
 
   const handleClearAllFilters = useCallback(() => {
     setSelectedAttendants([]);
@@ -369,8 +369,8 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
-      {/* Onboarding Progress Card */}
-      {!onboardingComplete && (
+      {/* Onboarding Progress Card - Sempre visível após carregar */}
+      {!onboardingLoading && (
         <OnboardingProgressCard
           progress={onboardingProgress}
           completedSteps={completedCount}
