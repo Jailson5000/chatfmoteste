@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { checkRateLimit, getClientIP, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 /**
  * widget-messages
@@ -19,6 +20,14 @@ Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  // Rate limit: 100 req/min per IP
+  const clientIP = getClientIP(req);
+  const { allowed, retryAfter } = checkRateLimit(clientIP, { maxRequests: 100, windowMs: 60000 });
+  if (!allowed) {
+    console.warn(`[widget-messages] Rate limit exceeded: ${clientIP}`);
+    return rateLimitResponse(retryAfter, corsHeaders);
   }
 
   try {
