@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { 
   Building2, 
   CheckCircle2,
-  Clock, 
   ArrowUpRight,
   ArrowDownRight,
   FileText,
@@ -28,6 +27,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { CompanyUsageTable } from "@/components/global-admin/CompanyUsageTable";
+import { InfrastructureMonitor } from "@/components/global-admin/InfrastructureMonitor";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useRef, useState } from "react";
@@ -387,6 +387,9 @@ export default function GlobalAdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Infrastructure Monitoring */}
+      <InfrastructureMonitor />
 
       {/* Companies Usage Table */}
       <div ref={tableRef} className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] overflow-hidden">

@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.customer-portal]
 verify_jwt = false
+
+[functions.check-infrastructure-alerts]
+verify_jwt = false
