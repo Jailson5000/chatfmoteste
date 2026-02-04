@@ -288,7 +288,7 @@ export default function GlobalAdminOnboarding() {
             URL de Agendamento
           </CardTitle>
           <CardDescription>
-            Link para agendamento de reunião de onboarding (Calendly, Google Calendar, etc.)
+            Link da Agenda Pro para agendamento de reunião de onboarding
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -299,7 +299,7 @@ export default function GlobalAdminOnboarding() {
               <Input
                 value={localMeetingUrl || (typeof meetingUrl === "string" ? meetingUrl : "") || ""}
                 onChange={(e) => setLocalMeetingUrl(e.target.value)}
-                placeholder="https://calendly.com/seu-link"
+                placeholder="https://suporte.miauchat.com.br/agendar/reuniao"
                 className="flex-1"
               />
             )}
