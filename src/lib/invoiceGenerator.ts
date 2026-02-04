@@ -53,29 +53,20 @@ export function generateInvoicePDF(data: InvoiceData): void {
   
   let yPos = 15;
 
-  // ====== HEADER com logo e título ======
+  // ====== HEADER com título ======
   // Fundo do header
   doc.setFillColor(...BRAND_COLORS.primary);
   doc.rect(0, 0, pageWidth, 40, 'F');
   
-  // Logo
-  try {
-    doc.addImage(MIAUCHAT_LOGO_BASE64, 'PNG', margin, 6, 28, 28);
-  } catch (e) {
-    // Fallback se logo não carregar
-    doc.setFillColor(...BRAND_COLORS.white);
-    doc.circle(margin + 14, 20, 12, 'F');
-  }
-  
-  // Nome e tagline
+  // Nome e tagline (sem logo - mais limpo e profissional)
   doc.setTextColor(...BRAND_COLORS.white);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text(COMPANY_INFO.name, margin + 35, 20);
+  doc.text(COMPANY_INFO.name, margin, 20);
   
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(COMPANY_INFO.tagline, margin + 35, 28);
+  doc.text(COMPANY_INFO.tagline, margin, 28);
 
   // Título do documento
   doc.setFontSize(14);

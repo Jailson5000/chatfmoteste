@@ -54,6 +54,8 @@ import { MessageMetricsCards } from "@/components/dashboard/MessageMetricsCards"
 import { AttendantPerformanceTable } from "@/components/dashboard/AttendantPerformanceTable";
 import { MessageVolumeChart } from "@/components/dashboard/MessageVolumeChart";
 import { ConversationOriginCard } from "@/components/dashboard/ConversationOriginCard";
+import { OnboardingProgressCard } from "@/components/onboarding/OnboardingProgressCard";
+import { useOnboarding } from "@/hooks/useOnboarding";
 import { DateRange } from "react-day-picker";
 import { getStateFromPhone } from "@/lib/dddToState";
 
@@ -87,6 +89,9 @@ export default function Dashboard() {
 
   // Use the new metrics hook
   const { messageMetrics, attendantMetrics, timeSeriesData, isLoading: metricsLoading, refetch: refetchMetrics } = useDashboardMetrics(dashboardFilters);
+
+  // Onboarding progress
+  const { progress: onboardingProgress, completedCount, totalCount, isComplete: onboardingComplete } = useOnboarding();
 
   const handleClearAllFilters = useCallback(() => {
     setSelectedAttendants([]);
@@ -364,6 +369,15 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 bg-background min-h-screen">
+      {/* Onboarding Progress Card */}
+      {!onboardingComplete && (
+        <OnboardingProgressCard
+          progress={onboardingProgress}
+          completedSteps={completedCount}
+          totalSteps={totalCount}
+        />
+      )}
+
       {/* Header with Filters */}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
