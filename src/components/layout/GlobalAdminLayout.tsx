@@ -20,6 +20,7 @@ import {
   HeartPulse,
   Bot,
   Sparkles,
+  Rocket,
   Ticket,
   PlayCircle
 } from "lucide-react";
@@ -67,6 +68,7 @@ const adminNavItems = [
   { icon: Settings, label: "Config. Pagamentos", path: "/global-admin/settings", roles: ["super_admin", "admin_financeiro"] },
   { icon: Ticket, label: "Tickets", path: "/global-admin/tickets", roles: ["super_admin", "admin_operacional"] },
   { icon: PlayCircle, label: "Tutoriais", path: "/global-admin/tutorials", roles: ["super_admin", "admin_operacional"] },
+  { icon: Rocket, label: "Onboarding", path: "/global-admin/onboarding", roles: ["super_admin", "admin_operacional"] },
   { icon: Bell, label: "Histórico de Alertas", path: "/global-admin/alert-history", roles: ["super_admin", "admin_operacional"] },
   { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
 ];
@@ -95,6 +97,7 @@ const breadcrumbMap: Record<string, string> = {
   "agent-templates": "Templates de Agentes",
   tickets: "Tickets",
   tutorials: "Tutoriais",
+  onboarding: "Onboarding",
 };
 
 export function GlobalAdminLayout() {

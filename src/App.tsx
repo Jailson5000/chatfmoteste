@@ -57,6 +57,7 @@ import {
   GlobalAdminAgentTemplates,
   GlobalAdminTickets,
   GlobalAdminTutorials,
+  GlobalAdminOnboarding,
 } from "./pages/global-admin";
 import Support from "./pages/Support";
 import Tutorials from "./pages/Tutorials";
@@ -333,6 +334,7 @@ const App = () => (
             <Route path="agent-templates" element={<GlobalAdminAgentTemplates />} />
             <Route path="tickets" element={<GlobalAdminTickets />} />
             <Route path="tutorials" element={<GlobalAdminTutorials />} />
+            <Route path="onboarding" element={<GlobalAdminOnboarding />} />
           </Route>
           
               {/* Catch-all route */}
