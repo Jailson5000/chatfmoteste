@@ -1,152 +1,134 @@
 
+# Correção do Sistema de Notificações de Mensagens
 
-# Rate Limiting Anti-DDoS nas Edge Functions Públicas
+## Problema Identificado
 
-## Escopo da Implementação
-
-**APENAS proteção contra flood/DDoS** - Não afeta criação de contas (você já tem controle).
-
----
-
-## O Que Será Implementado
-
-### Módulo Compartilhado (Novo Arquivo)
-
-**`supabase/functions/_shared/rate-limit.ts`**
+O hook `useMessageNotifications` cria um canal Realtime **sem filtro de tenant**:
 
 ```typescript
-// Rate limiter in-memory simples
-// Limita requisições por IP em uma janela de tempo
+// ATUAL - PROBLEMÁTICO (linha 67-79)
+const channel = supabase
+  .channel("messages-notifications")
+  .on("postgres_changes", {
+    event: "INSERT",
+    schema: "public",
+    table: "messages",
+    // ❌ SEM FILTRO law_firm_id!
+  }, handleNewMessage)
 ```
 
-**Características:**
-- **In-memory**: Sem dependência de banco ou Redis
-- **Por IP**: Identifica via headers `x-forwarded-for`, `cf-connecting-ip`
-- **Auto-limpeza**: Remove entradas expiradas automaticamente
-- **Resposta 429**: HTTP padrão com header `Retry-After`
+**Consequência**: O Supabase Realtime não entrega eventos porque:
+1. RLS bloqueia a validação do filtro (tabela `messages` tem RLS)
+2. Canal duplicado conflita com `tenant-messages-{lawFirmId}` do `RealtimeSyncContext`
 
 ---
 
-## Funções a Proteger
+## Solução: Integrar com RealtimeSyncContext
 
-| Função | Limite | Janela | Motivo |
-|--------|--------|--------|--------|
-| `widget-messages` | 100 req | /min | Widget pode fazer polling, limite alto |
-| `customer-portal` | 30 req | /min | Portal de billing, requer auth |
-| `agenda-pro-confirmation` | 60 req | /min | Confirmações de agendamento |
+O `RealtimeSyncContext` já:
+- ✅ Recebe eventos de `messages` com filtro `law_firm_id`
+- ✅ Expõe `registerMessageCallback` para receber payloads
+- ✅ Está montado no `App.tsx` envolvendo toda a aplicação
 
-### Funções que **NÃO** precisam de rate limit:
-- `stripe-webhook` → Validado por assinatura Stripe
-- `evolution-webhook` → Validado por token secreto
-- `register-company` → **JÁ TEM** rate limit implementado
-- `create-checkout-session` → Você já controla criação de conta
-- Funções `process-*` → Chamadas apenas por cron interno
+**Mudança**: Remover o canal próprio e usar o callback do contexto consolidado.
 
 ---
 
-## Como Ficará o Código
+## Código Antes vs Depois
 
-### Antes (widget-messages):
+### ANTES (não funciona):
 ```typescript
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+// Cria canal separado sem filtro
+const channel = supabase
+  .channel("messages-notifications")
+  .on("postgres_changes", {
+    event: "INSERT",
+    schema: "public",
+    table: "messages",
+  }, handleNewMessage)
+  .subscribe();
+```
+
+### DEPOIS (integrado):
+```typescript
+import { useRealtimeSyncOptional } from "@/hooks/useRealtimeSync";
+
+// Usa o callback do contexto consolidado
+const realtimeSync = useRealtimeSyncOptional();
+
+useEffect(() => {
+  if (!enabled || !lawFirm?.id) return;
+  
+  // Solicitar permissão de notificação browser
+  if (browserEnabled && "Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
   }
-  // ... lógica normal
-});
-```
 
-### Depois:
-```typescript
-import { checkRateLimit, getClientIP, rateLimitResponse } from "../_shared/rate-limit.ts";
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders });
+  // Registrar callback no sistema consolidado
+  if (realtimeSync?.registerMessageCallback) {
+    const unregister = realtimeSync.registerMessageCallback((payload) => {
+      if (payload.eventType === "INSERT") {
+        handleNewMessage({ new: payload.new as Message });
+      }
+    });
+    return unregister;
   }
-
-  // +3 linhas de proteção DDoS
-  const clientIP = getClientIP(req);
-  const { allowed, retryAfter } = checkRateLimit(clientIP, { maxRequests: 100, windowMs: 60000 });
-  if (!allowed) return rateLimitResponse(retryAfter);
-
-  // ... lógica normal (inalterada)
-});
+}, [enabled, lawFirm?.id, browserEnabled, realtimeSync, handleNewMessage]);
 ```
 
 ---
 
-## Impacto Zero no Sistema
+## Análise de Risco
 
-### Por que NÃO vai quebrar:
+| Aspecto | Avaliação |
+|---------|-----------|
+| **Pode quebrar?** | **NÃO** - Apenas substitui a fonte do evento |
+| **Afeta outras funcionalidades?** | **NÃO** - Mudança isolada no hook |
+| **Eventos serão recebidos?** | **SIM** - `RealtimeSyncContext` já funciona corretamente |
+| **Performance?** | **MELHORA** - Remove canal duplicado (1 WebSocket a menos) |
+| **Reversível?** | **SIM** - Basta restaurar o código original |
 
-| Aspecto | Garantia |
-|---------|----------|
-| **Limites altos** | 100 req/min = 1.6 req/seg (uso normal é ~10 req/min) |
-| **Apenas 3 linhas** | Código mínimo adicionado no início da função |
-| **Fallback gracioso** | Se rate limit falhar, requisição passa normalmente |
-| **Lógica preservada** | Todo código existente permanece inalterado |
-| **Reversível em 1 minuto** | Basta remover as 3 linhas |
+### Por que é seguro:
 
-### Usuários afetados?
-- **Normais**: NÃO - Nunca atingem 100 req/min
-- **Atacantes**: SIM - Bloqueados após 100 req/min por IP
-
-### Comportamento do usuário bloqueado:
-```json
-{
-  "error": "Muitas requisições. Tente novamente em alguns segundos.",
-  "status": 429,
-  "headers": { "Retry-After": "45" }
-}
-```
+1. **Fallback automático**: `useRealtimeSyncOptional` retorna `null` se não estiver no Provider (mas está)
+2. **Lógica de notificação preservada**: `handleNewMessage` permanece idêntico
+3. **Preferências respeitadas**: `soundEnabled` e `browserEnabled` continuam funcionando
+4. **Sem dependências novas**: Usa hooks que já existem no projeto
 
 ---
 
-## Arquivos a Criar/Modificar
+## Arquivo a Modificar
 
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/_shared/rate-limit.ts` | **CRIAR** - Módulo compartilhado |
-| `supabase/functions/widget-messages/index.ts` | Adicionar 3 linhas |
-| `supabase/functions/customer-portal/index.ts` | Adicionar 3 linhas |
-| `supabase/functions/agenda-pro-confirmation/index.ts` | Adicionar 3 linhas |
-
----
-
-## Limites Escolhidos (Conservadores)
-
-```text
-┌─────────────────────────────┬──────────────┬──────────────┐
-│ Função                      │ Limite       │ Uso Normal   │
-├─────────────────────────────┼──────────────┼──────────────┤
-│ widget-messages             │ 100 req/min  │ ~10 req/min  │
-│ customer-portal             │ 30 req/min   │ ~2 req/min   │
-│ agenda-pro-confirmation     │ 60 req/min   │ ~5 req/min   │
-└─────────────────────────────┴──────────────┴──────────────┘
-
-Margem de segurança: 10x acima do uso normal
-```
+| Arquivo | Mudança |
+|---------|---------|
+| `src/hooks/useMessageNotifications.tsx` | Remover canal próprio, usar `registerMessageCallback` |
 
 ---
 
 ## Validação Pós-Deploy
 
-1. ✅ Acessar widget normalmente → Deve funcionar
-2. ✅ Acessar portal de cliente → Deve funcionar
-3. ✅ Confirmar agendamento → Deve funcionar
-4. ✅ Fazer 101 requisições em 1 minuto → Deve bloquear
+1. ✅ Acessar página de conversas
+2. ✅ Receber mensagem de um cliente WhatsApp
+3. ✅ Verificar se som toca (se ativado nas preferências)
+4. ✅ Verificar se notificação browser aparece (se ativada)
+5. ✅ Conferir console para logs de erro
 
 ---
 
-## Resumo Executivo
+## Plano de Rollback (se necessário)
 
-| Pergunta | Resposta |
-|----------|----------|
-| **Pode quebrar?** | **NÃO** - Apenas adiciona 3 linhas no início |
-| **Afeta usuários normais?** | **NÃO** - Limites 10x acima do uso normal |
-| **Protege contra DDoS?** | **SIM** - Bloqueia flood por IP |
-| **Complexidade?** | **MÍNIMA** - 1 arquivo novo + 3 linhas em cada função |
-| **Reversível?** | **SIM** - Remove as 3 linhas e volta ao normal |
-| **Afeta criação de conta?** | **NÃO** - Você já controla isso |
+Se algo der errado, basta restaurar o arquivo original:
 
+```typescript
+// Restaurar canal direto (código atual)
+const channel = supabase
+  .channel("messages-notifications")
+  .on("postgres_changes", {
+    event: "INSERT",
+    schema: "public",
+    table: "messages",
+  }, handleNewMessage)
+  .subscribe();
+```
+
+Mas isso não será necessário porque a mudança é conservadora e usa infraestrutura já testada.
