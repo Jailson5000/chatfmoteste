@@ -1,334 +1,183 @@
 
-# Plano: Dashboard de Monitoramento + Alertas + Exportação PDF de Empresas
 
-## Resumo das 3 Funcionalidades
+# Plano: Melhorar Relatório PDF de Empresas com Dados de Faturamento Stripe
 
-### 1. Dashboard de Monitoramento de Uso (Banco, Storage, IA)
-Adicionar seção no painel admin global mostrando métricas de infraestrutura em tempo real.
+## Problema Identificado
 
-### 2. Alertas Automáticos de Capacidade (70% do limite)
-Sistema que verifica periodicamente o uso e notifica o admin quando atingir thresholds críticos.
+No PDF atual, a empresa "Miau test" aparece como "Trial Expirado" quando na verdade ela:
+1. **Pagou a fatura** (subscription `sub_1Sx89k...` status: `active`)
+2. **Está ativa** (company status: `active`, subscription status: `active`)
+3. O trial expirou, mas ela **converteu para pagante**
 
-### 3. Botão de Exportação PDF de Empresas
-PDF profissional com todas as empresas cadastradas e seus dados fiscais/operacionais.
+A lógica atual no `getStatusText()` verifica `trial_ends_at` sem considerar se há uma assinatura ativa.
 
 ---
 
-## Arquitetura Técnica
+## Mudanças Necessárias
 
-### Dados Disponíveis no Sistema
+### 1. Corrigir Lógica de Status
 
-| Métrica | Query Atual | Limite Supabase Pro |
-|---------|-------------|---------------------|
-| **Banco de dados** | `pg_database_size()` → 316 MB | 8 GB |
-| **Storage** | `SUM(metadata->>'size')` → 17.7 MB | 100 GB |
-| **Conversas IA/mês** | `usage_records` → por tenant | Por plano |
-| **TTS minutos** | `usage_records` → por tenant | Por plano |
-| **Webhook logs** | Tabela já tem cleanup automático | - |
+**Arquivo:** `src/lib/companyReportGenerator.ts`
 
-### Cálculo de Thresholds
-
+A função `getStatusText()` precisa considerar:
 ```text
-Banco de Dados:
-- 70% de 8 GB = 5.6 GB → Alerta WARNING
-- 85% de 8 GB = 6.8 GB → Alerta CRITICAL
-
-Storage:
-- 70% de 100 GB = 70 GB → Alerta WARNING
-- 85% de 100 GB = 85 GB → Alerta CRITICAL
+PRIORIDADE DE STATUS:
+1. suspended/blocked → Mostrar status
+2. pending_approval → "Pendente"
+3. subscription_status === 'active' → "Ativo (Pagante)" ← NOVO
+4. trial ativo (trial_ends_at > hoje) → "Trial (Xd)"
+5. trial expirado SEM subscription → "Trial Expirado"
+6. status === 'active' → "Ativo"
 ```
 
----
+### 2. Adicionar Novos Campos ao Relatório
 
-## Implementação Detalhada
+**Campos atuais no PDF:**
+- Nome, CPF/CNPJ, Plano, Status, Ativo, Ativação, Faturas, Valor Pendente
 
-### Parte 1: Hook de Métricas de Infraestrutura
+**Novos campos a adicionar:**
+| Campo | Origem | Descrição |
+|-------|--------|-----------|
+| **Data do Pagamento** | `last_payment_at` ou Stripe `status_transitions.paid_at` | Quando pagou a última fatura |
+| **Próxima Fatura** | `current_period_end` ou Stripe subscription | Data do próximo vencimento |
 
-**Novo arquivo: `src/hooks/useInfrastructureMetrics.tsx`**
+### 3. Atualizar Interface de Dados
+
+**Arquivo:** `src/lib/companyReportGenerator.ts`
 
 ```typescript
-// Hook que consulta métricas de infraestrutura
-// - Tamanho do banco de dados via RPC
-// - Tamanho do storage via consulta storage.objects
-// - Uso de IA agregado de todas as empresas
-// - Cálculo de percentuais e status de alerta
+interface CompanyReportData {
+  name: string;
+  document: string | null;
+  planName: string;
+  status: string;
+  approvalStatus: string;
+  isActive: boolean;
+  approvedAt: string | null;
+  trialDaysRemaining: number | null;
+  openInvoicesCount: number;
+  openInvoicesTotal: number;
+  // NOVOS CAMPOS:
+  hasActiveSubscription: boolean;      // Se tem subscription ativa
+  lastPaymentAt: string | null;        // Data do último pagamento
+  nextInvoiceAt: string | null;        // Data da próxima fatura
+  subscriptionStatus: string | null;   // Status da subscription Stripe
+}
 ```
 
-**Funcionalidades:**
-- Consulta `pg_database_size()` via RPC seguro
-- Consulta storage.objects para calcular uso total
-- Agrega uso de IA de todas as empresas
-- Calcula percentuais e status (ok/warning/critical)
-- Polling a cada 5 minutos
+### 4. Modificar Busca de Dados
 
----
+**Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
 
-### Parte 2: Componente de Monitoramento no Dashboard
-
-**Modificar: `src/pages/global-admin/GlobalAdminDashboard.tsx`**
-
-Nova seção "Monitoramento de Infraestrutura" com:
-
-1. **Card: Banco de Dados**
-   - Barra de progresso com cores (verde/amarelo/vermelho)
-   - Valor atual e limite (ex: "316 MB / 8 GB")
-   - Percentual de uso
-   - Ícone de alerta se > 70%
-
-2. **Card: Storage**
-   - Barra de progresso com cores
-   - Valor atual e limite
-   - Breakdown por bucket (logos, chat-media, etc.)
-
-3. **Card: Uso IA Global**
-   - Total de conversas IA no mês
-   - Total de minutos TTS no mês
-   - Comparativo com mês anterior
-
-4. **Card: Status do Sistema**
-   - Último cleanup de webhook_logs
-   - Conexões Realtime ativas
-   - Edge Functions (status)
-
----
-
-### Parte 3: Sistema de Alertas Automáticos
-
-**Estratégia: Edge Function + Cron Job**
-
-**Novo arquivo: `supabase/functions/check-infrastructure-alerts/index.ts`**
+Na função de exportação PDF, adicionar:
 
 ```typescript
-// Edge Function que:
-// 1. Consulta tamanho do banco via SQL direto
-// 2. Consulta tamanho do storage
-// 3. Compara com thresholds (70%, 85%)
-// 4. Se threshold atingido, cria notificação em `notifications`
-// 5. Evita spam: só notifica 1x por dia por tipo de alerta
+// Buscar dados da subscription junto com company
+const { data: subscription } = await supabase
+  .from("company_subscriptions")
+  .select("stripe_subscription_id, status, last_payment_at, current_period_end")
+  .eq("company_id", company.id)
+  .maybeSingle();
+
+// Se tem subscription ativa no Stripe, buscar datas do Stripe
+if (subscription?.stripe_subscription_id) {
+  // Chamar Stripe API para pegar current_period_end atualizado
+}
 ```
 
-**Cron Job (via pg_cron):**
-```sql
--- Executar a cada 6 horas
-SELECT cron.schedule(
-  'check-infrastructure-alerts',
-  '0 */6 * * *',
-  $$
-  SELECT net.http_post(
-    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/check-infrastructure-alerts',
-    headers:='{"Authorization": "Bearer <service_key>"}'::jsonb
-  );
-  $$
-);
-```
+### 5. Criar Edge Function para Dados Completos (Opcional)
 
-**Notificações criadas:**
-- Tipo: `INFRASTRUCTURE_WARNING` ou `INFRASTRUCTURE_CRITICAL`
-- Aparece no painel admin global
-- Inclui métricas atuais e recomendações
+Se os dados do banco não estiverem atualizados, criar uma edge function:
 
----
+**Novo arquivo:** `supabase/functions/get-company-billing-summary/index.ts`
 
-### Parte 4: PDF de Empresas
-
-**Novo arquivo: `src/lib/companyReportGenerator.ts`**
-
-PDF profissional com:
-
-**Cabeçalho:**
-- Logo MiauChat
-- Título: "Relatório de Empresas Cadastradas"
-- Data de geração
-
-**Tabela de Empresas:**
-| Coluna | Origem |
-|--------|--------|
-| Nome | `companies.name` |
-| CPF/CNPJ | `companies.document` |
-| Plano | `plans.name` |
-| Status | `companies.status` + `approval_status` |
-| Ativa? | Sim/Não baseado em status |
-| Data Ativação | `companies.approved_at` |
-| Trial | Dias restantes ou "Expirado" |
-| Faturas em Aberto | Via `list-stripe-invoices` (status=open) |
-
-**Rodapé:**
-- Total de empresas
-- Data/hora de geração
-- "MiauChat - Relatório Confidencial"
-
-**Modificar: `src/pages/global-admin/GlobalAdminCompanies.tsx`**
-
-Adicionar botão "Exportar Relatório PDF" no header que:
-1. Busca todas as empresas
-2. Para cada empresa com Stripe, consulta faturas pendentes
-3. Gera PDF formatado
-4. Faz download automático
-
----
-
-## Arquivos a Criar/Modificar
-
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `src/hooks/useInfrastructureMetrics.tsx` | **Criar** | Hook para métricas de infra |
-| `src/components/global-admin/InfrastructureMonitor.tsx` | **Criar** | Componente visual do dashboard |
-| `src/lib/companyReportGenerator.ts` | **Criar** | Gerador de PDF de empresas |
-| `src/pages/global-admin/GlobalAdminDashboard.tsx` | **Modificar** | Adicionar seção de monitoramento |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | **Modificar** | Adicionar botão PDF |
-| `supabase/functions/check-infrastructure-alerts/index.ts` | **Criar** | Edge function de alertas |
-| `supabase/functions/get-infrastructure-metrics/index.ts` | **Criar** | Edge function para métricas |
-| Migração SQL | **Criar** | RPC para consultar tamanho do banco |
-
----
-
-## Migração SQL Necessária
-
-```sql
--- 1. Função RPC segura para consultar tamanho do banco (apenas admin global)
-CREATE OR REPLACE FUNCTION get_database_metrics()
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $$
-DECLARE
-  result jsonb;
-BEGIN
-  -- Validar que é admin global
-  IF NOT is_admin(auth.uid()) THEN
-    RETURN jsonb_build_object('error', 'access_denied');
-  END IF;
-
-  SELECT jsonb_build_object(
-    'database_size_bytes', pg_database_size(current_database()),
-    'database_size_pretty', pg_size_pretty(pg_database_size(current_database())),
-    'database_limit_bytes', 8589934592, -- 8 GB
-    'database_limit_pretty', '8 GB',
-    'percent_used', ROUND((pg_database_size(current_database())::numeric / 8589934592) * 100, 2)
-  ) INTO result;
-
-  RETURN result;
-END;
-$$;
-
--- 2. Função RPC para consultar tamanho do storage
-CREATE OR REPLACE FUNCTION get_storage_metrics()
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $$
-DECLARE
-  result jsonb;
-  total_bytes bigint;
-BEGIN
-  -- Validar que é admin global
-  IF NOT is_admin(auth.uid()) THEN
-    RETURN jsonb_build_object('error', 'access_denied');
-  END IF;
-
-  SELECT COALESCE(SUM((metadata->>'size')::bigint), 0)
-  INTO total_bytes
-  FROM storage.objects;
-
-  SELECT jsonb_build_object(
-    'storage_size_bytes', total_bytes,
-    'storage_size_pretty', pg_size_pretty(total_bytes),
-    'storage_limit_bytes', 107374182400, -- 100 GB
-    'storage_limit_pretty', '100 GB',
-    'percent_used', ROUND((total_bytes::numeric / 107374182400) * 100, 2),
-    'buckets', (
-      SELECT jsonb_agg(jsonb_build_object(
-        'bucket', bucket_id,
-        'size_bytes', bucket_size,
-        'size_pretty', pg_size_pretty(bucket_size),
-        'file_count', file_count
-      ))
-      FROM (
-        SELECT 
-          bucket_id,
-          COALESCE(SUM((metadata->>'size')::bigint), 0) as bucket_size,
-          COUNT(*) as file_count
-        FROM storage.objects
-        GROUP BY bucket_id
-      ) buckets
-    )
-  ) INTO result;
-
-  RETURN result;
-END;
-$$;
-
--- 3. Tabela para tracking de alertas enviados (evita spam)
-CREATE TABLE IF NOT EXISTS infrastructure_alert_history (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  alert_type text NOT NULL,
-  threshold_level text NOT NULL, -- 'warning' ou 'critical'
-  metric_value numeric,
-  metric_limit numeric,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(alert_type, threshold_level, (created_at::date))
-);
-
--- RLS
-ALTER TABLE infrastructure_alert_history ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Global admins can manage alerts"
-ON infrastructure_alert_history
-FOR ALL
-TO authenticated
-USING (is_admin(auth.uid()));
+```typescript
+// Busca dados de billing resumidos para o relatório:
+// - subscription status
+// - last payment date (da última fatura paga)
+// - next invoice date (current_period_end)
+// - open invoices count/total
 ```
 
 ---
 
-## Fluxo do Usuário
+## Layout do Novo PDF
 
-### Dashboard de Monitoramento
-1. Admin global acessa `/global-admin`
-2. Nova seção "Infraestrutura" mostra métricas
-3. Cards com barras de progresso coloridas
-4. Se houver alerta, badge vermelho pisca
+### Antes (8 colunas):
+```text
+Nome | CPF/CNPJ | Plano | Status | Ativo | Ativação | Faturas | Valor Pendente
+```
 
-### Alertas Automáticos
-1. Cron job executa a cada 6 horas
-2. Verifica thresholds de banco e storage
-3. Se > 70%, cria notificação no sistema
-4. Admin vê badge no ícone de notificações
-5. Clica e vê "Banco de dados atingiu 75% (6 GB)"
+### Depois (9 colunas - layout otimizado):
+```text
+Nome | CPF/CNPJ | Plano | Status | Ativo | Ativação | Últ. Pgto | Próx. Fat. | Faturas Abertas
+```
 
-### Exportação PDF de Empresas
-1. Admin vai em "Empresas" → clica "Exportar PDF"
-2. Sistema busca todos os dados + faturas Stripe
-3. Gera PDF profissional
-4. Download automático: `empresas-miauchat-2026-02-04.pdf`
+**Observações:**
+- Combinar "Faturas" e "Valor Pendente" em uma coluna: "2 (R$ 179,40)"
+- "Últ. Pgto" = Data do último pagamento
+- "Próx. Fat." = Data da próxima fatura
 
 ---
 
-## Segurança
+## Arquivos a Modificar
 
-- Funções RPC com `SECURITY DEFINER` e validação `is_admin()`
-- Edge functions verificam token JWT
-- Dados sensíveis (faturas) só via APIs autorizadas
-- PDF não salvo em servidor, gerado no cliente
-
----
-
-## Testes Recomendados
-
-1. Verificar se métricas aparecem corretamente no dashboard
-2. Testar export PDF com empresas que têm/não têm faturas Stripe
-3. Simular alerta: temporariamente reduzir threshold para 5%
-4. Verificar que notificações não são duplicadas
-
----
-
-## Estimativa de Impacto
-
-| Aspecto | Impacto |
+| Arquivo | Mudança |
 |---------|---------|
-| **Performance** | Mínimo - queries leves, cache 5 min |
-| **Segurança** | Zero risco - funções protegidas por RLS |
-| **UX** | Positivo - visibilidade total do sistema |
-| **Manutenção** | Baixa - alertas automáticos |
+| `src/lib/companyReportGenerator.ts` | Adicionar novos campos na interface, corrigir `getStatusText()`, ajustar layout |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Buscar dados de subscription e enriquecer relatório |
+| (Opcional) `supabase/functions/get-company-billing-summary/index.ts` | Nova função para buscar dados consolidados |
+
+---
+
+## Lógica de Status Corrigida
+
+```typescript
+function getStatusText(company: CompanyReportData): string {
+  // 1. Status de bloqueio tem prioridade máxima
+  if (company.status === "suspended") return "Suspenso";
+  if (company.status === "blocked") return "Bloqueado";
+  if (company.approvalStatus === "pending") return "Pendente";
+  
+  // 2. Se tem subscription ativa = é pagante
+  if (company.hasActiveSubscription) {
+    return "Ativo";  // ← Ignora trial_ends_at
+  }
+  
+  // 3. Se está em trial
+  if (company.trialDaysRemaining !== null) {
+    if (company.trialDaysRemaining > 0) {
+      return `Trial (${company.trialDaysRemaining}d)`;
+    } else {
+      return "Trial Expirado";
+    }
+  }
+  
+  // 4. Fallback
+  if (company.status === "active") return "Ativo";
+  return company.status;
+}
+```
+
+---
+
+## Resultado Esperado
+
+**Antes (errado):**
+| Nome | Status | Ativação | Faturas |
+|------|--------|----------|---------|
+| Miau test | Trial Expirado | 28/01/2026 | 0 |
+
+**Depois (correto):**
+| Nome | Status | Ativação | Últ. Pgto | Próx. Fat. | Faturas |
+|------|--------|----------|-----------|------------|---------|
+| Miau test | Ativo | 28/01/2026 | 04/02/2026 | 04/03/2026 | - |
+
+---
+
+## Impacto
+
+- **Zero quebra**: Apenas adiciona informações ao PDF
+- **Melhora UX**: Status mais preciso e informativo
+- **Valor comercial**: Relatório completo para gestão financeira
+
