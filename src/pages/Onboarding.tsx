@@ -1,8 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Calendar, Play, MessageCircle, HelpCircle, Sparkles } from "lucide-react";
+import { ArrowLeft, Calendar, Play, MessageCircle, HelpCircle, Sparkles, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { OnboardingStepItem } from "@/components/onboarding/OnboardingStepItem";
 import { useTutorials } from "@/hooks/useTutorials";
@@ -12,7 +13,7 @@ import miauchatLogo from "@/assets/miauchat-logo.png";
 export default function Onboarding() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { steps, progress, completedCount, totalCount, isComplete, isLoading, markComplete, meetingUrl } = useOnboarding();
+  const { steps, progress, completedCount, totalCount, isComplete, isLoading, markComplete, meetingUrl, meetingStatus, setMeetingStatus } = useOnboarding();
   const { data: tutorials = [] } = useTutorials();
   
   // Get featured tutorials or first 3
@@ -67,27 +68,75 @@ export default function Onboarding() {
         </CardContent>
       </Card>
 
-      {/* Meeting Scheduling Section */}
+      {/* Meeting Scheduling Section - Always show if URL configured */}
       {meetingUrl && (
-        <Card>
+        <Card className={meetingStatus === 'scheduled' ? 'border-primary/30 bg-primary/5' : meetingStatus === 'declined' ? 'border-muted' : ''}>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <Calendar className="h-5 w-5 text-primary" />
               Seus Agendamentos
+              {meetingStatus === 'scheduled' && (
+                <span className="ml-2 text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Agendado
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">
-              Agende uma reunião com nossa equipe de suporte para tirar suas dúvidas ao vivo.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => window.open(meetingUrl, '_blank')}
-              className="gap-2"
-            >
-              <Calendar className="h-4 w-4" />
-              Agendar Reunião
-            </Button>
+            {meetingStatus === 'declined' ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Você optou por não agendar uma reunião. Caso mude de ideia, o link está disponível abaixo.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMeetingStatus('scheduled');
+                    window.open(meetingUrl, '_blank');
+                  }}
+                  className="gap-2"
+                >
+                  <Calendar className="h-4 w-4" />
+                  Agendar Agora
+                </Button>
+              </div>
+            ) : meetingStatus === 'scheduled' ? (
+              <p className="text-sm text-muted-foreground">
+                Você já agendou sua reunião de onboarding. Caso precise reagendar, entre em contato com o suporte.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Agende uma reunião com nossa equipe de suporte para tirar suas dúvidas ao vivo.
+                </p>
+                <div className="flex flex-wrap items-center gap-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setMeetingStatus('scheduled');
+                      window.open(meetingUrl, '_blank');
+                    }}
+                    className="gap-2"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Agendar Reunião
+                  </Button>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                    <Checkbox
+                      checked={false}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setMeetingStatus('declined');
+                        }
+                      }}
+                    />
+                    Não desejo agendar no momento
+                  </label>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

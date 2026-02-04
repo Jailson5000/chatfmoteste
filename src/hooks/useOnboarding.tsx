@@ -14,6 +14,8 @@ export interface OnboardingStep {
   is_completed: boolean;
 }
 
+export type MeetingStatus = 'scheduled' | 'declined' | null;
+
 export interface UseOnboardingReturn {
   steps: OnboardingStep[];
   progress: number;
@@ -23,6 +25,8 @@ export interface UseOnboardingReturn {
   isLoading: boolean;
   markComplete: (stepId: string) => Promise<void>;
   meetingUrl: string | null;
+  meetingStatus: MeetingStatus;
+  setMeetingStatus: (status: 'scheduled' | 'declined') => Promise<void>;
 }
 
 export function useOnboarding(): UseOnboardingReturn {
@@ -111,6 +115,24 @@ export function useOnboarding(): UseOnboardingReturn {
     },
   });
 
+  // Fetch meeting status from company
+  const { data: meetingStatus } = useQuery({
+    queryKey: ["onboarding-meeting-status", companyId],
+    queryFn: async () => {
+      if (!companyId) return null;
+      
+      const { data, error } = await supabase
+        .from("companies")
+        .select("onboarding_meeting_status")
+        .eq("id", companyId)
+        .maybeSingle();
+
+      if (error) throw error;
+      return (data?.onboarding_meeting_status as MeetingStatus) || null;
+    },
+    enabled: !!companyId,
+  });
+
   // Combine steps with progress
   const completedStepIds = new Set(progressData.map(p => p.step_id));
   
@@ -161,8 +183,34 @@ export function useOnboarding(): UseOnboardingReturn {
     },
   });
 
+  // Set meeting status mutation
+  const setMeetingStatusMutation = useMutation({
+    mutationFn: async (status: 'scheduled' | 'declined') => {
+      if (!companyId) {
+        throw new Error("Empresa não identificada");
+      }
+
+      const { error } = await supabase
+        .from("companies")
+        .update({ onboarding_meeting_status: status })
+        .eq("id", companyId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["onboarding-meeting-status", companyId] });
+    },
+    onError: (error) => {
+      toast.error("Erro ao salvar preferência: " + error.message);
+    },
+  });
+
   const markComplete = async (stepId: string) => {
     await markCompleteMutation.mutateAsync(stepId);
+  };
+
+  const setMeetingStatus = async (status: 'scheduled' | 'declined') => {
+    await setMeetingStatusMutation.mutateAsync(status);
   };
 
   return {
@@ -174,5 +222,7 @@ export function useOnboarding(): UseOnboardingReturn {
     isLoading: stepsLoading || progressLoading || companyLoading,
     markComplete,
     meetingUrl: meetingUrl || null,
+    meetingStatus: meetingStatus || null,
+    setMeetingStatus,
   };
 }

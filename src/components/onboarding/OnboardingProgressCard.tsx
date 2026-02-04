@@ -17,9 +17,33 @@ export function OnboardingProgressCard({
 }: OnboardingProgressCardProps) {
   const navigate = useNavigate();
 
-  // Don't show if complete
+  // Show compact version when complete
   if (progress >= 100) {
-    return null;
+    return (
+      <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+              <span className="font-semibold text-foreground">Progresso do onboarding</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <Progress value={100} className="w-32 h-2" />
+              <span className="text-sm text-primary font-medium">✓ Completo</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-primary hover:text-primary/80"
+                onClick={() => navigate("/onboarding")}
+              >
+                Ver guia
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

@@ -2343,6 +2343,7 @@ export type Database = {
           n8n_workflow_name: string | null
           n8n_workflow_status: string | null
           name: string
+          onboarding_meeting_status: string | null
           phone: string | null
           plan_id: string | null
           provisioning_status: string
@@ -2395,6 +2396,7 @@ export type Database = {
           n8n_workflow_name?: string | null
           n8n_workflow_status?: string | null
           name: string
+          onboarding_meeting_status?: string | null
           phone?: string | null
           plan_id?: string | null
           provisioning_status?: string
@@ -2447,6 +2449,7 @@ export type Database = {
           n8n_workflow_name?: string | null
           n8n_workflow_status?: string | null
           name?: string
+          onboarding_meeting_status?: string | null
           phone?: string | null
           plan_id?: string | null
           provisioning_status?: string
