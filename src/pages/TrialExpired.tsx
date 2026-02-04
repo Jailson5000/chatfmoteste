@@ -52,7 +52,7 @@ export default function TrialExpired({ trialEndsAt, planName, planPrice }: Trial
 
   const formattedPrice = planPrice 
     ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(planPrice)
-    : "R$ 497,00";
+    : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -89,7 +89,7 @@ export default function TrialExpired({ trialEndsAt, planName, planPrice }: Trial
             ) : (
               <CreditCard className="h-5 w-5" />
             )}
-            Pagar Agora - {formattedPrice}/mês
+            {formattedPrice ? `Pagar Agora - ${formattedPrice}/mês` : "Pagar Agora"}
           </Button>
 
           <div className="rounded-lg border bg-muted/50 p-4">
