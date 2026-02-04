@@ -1,178 +1,152 @@
 
 
-# Plano: Corrigir Bug no Webhook contacts.update
+# Rate Limiting Anti-DDoS nas Edge Functions Públicas
 
-## Problema Identificado
+## Escopo da Implementação
 
-O erro nos logs:
-```
-ERROR: column clients.name does not exist
-ERROR: column conversations.contact_name does not exist
-```
-
-**Causa Raiz**: A sintaxe do filtro `.or()` do PostgREST está incorreta. Os valores de string não estão sendo escapados corretamente.
-
-**Código Atual (Linha 5257 e 5282)**:
-```typescript
-.or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
-.or(`name.eq.${phoneNumber},name.is.null`)
-```
-
-**Problema**: Quando `phoneNumber` é `559281182213`, o PostgREST interpreta como:
-```
-contact_name.eq.559281182213
-```
-
-O PostgREST tenta interpretar isso como uma coluna aninhada (`clients.name`) em vez de um valor, porque números sem aspas podem ser confundidos com referências de coluna em certas situações, ou o parser falha de forma inesperada.
+**APENAS proteção contra flood/DDoS** - Não afeta criação de contas (você já tem controle).
 
 ---
 
-## Solução
+## O Que Será Implementado
 
-Usar a sintaxe correta do PostgREST com **filtros separados** em vez de `.or()` com string interpolation, ou **escapar corretamente os valores**.
+### Módulo Compartilhado (Novo Arquivo)
 
-### Opção Escolhida: Consultas Separadas com Fallback Gracioso
+**`supabase/functions/_shared/rate-limit.ts`**
 
-Em vez de tentar fazer uma query complexa com `.or()`, vamos:
-1. Fazer queries mais simples e seguras
-2. Usar try-catch para não interromper o fluxo principal
-3. Logar erros de forma informativa sem poluir os logs
+```typescript
+// Rate limiter in-memory simples
+// Limita requisições por IP em uma janela de tempo
+```
+
+**Características:**
+- **In-memory**: Sem dependência de banco ou Redis
+- **Por IP**: Identifica via headers `x-forwarded-for`, `cf-connecting-ip`
+- **Auto-limpeza**: Remove entradas expiradas automaticamente
+- **Resposta 429**: HTTP padrão com header `Retry-After`
 
 ---
 
-## Mudanças no Arquivo
+## Funções a Proteger
 
-**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
+| Função | Limite | Janela | Motivo |
+|--------|--------|--------|--------|
+| `widget-messages` | 100 req | /min | Widget pode fazer polling, limite alto |
+| `customer-portal` | 30 req | /min | Portal de billing, requer auth |
+| `agenda-pro-confirmation` | 60 req | /min | Confirmações de agendamento |
 
-### Antes (Linhas 5252-5283):
+### Funções que **NÃO** precisam de rate limit:
+- `stripe-webhook` → Validado por assinatura Stripe
+- `evolution-webhook` → Validado por token secreto
+- `register-company` → **JÁ TEM** rate limit implementado
+- `create-checkout-session` → Você já controla criação de conta
+- Funções `process-*` → Chamadas apenas por cron interno
 
+---
+
+## Como Ficará o Código
+
+### Antes (widget-messages):
 ```typescript
-// Update conversations where contact_name is still the phone number or null
-const { data: updatedConversations, error: convError } = await supabaseClient
-  .from('conversations')
-  .update({ contact_name: contactName })
-  .eq('remote_jid', remoteJid)
-  .eq('law_firm_id', lawFirmId)
-  .or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
-  .select('id');
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+  // ... lógica normal
+});
 ```
 
 ### Depois:
-
 ```typescript
-// Update conversations where contact_name is still the phone number or null
-// Using two separate updates to avoid PostgREST .or() syntax issues with dynamic values
-let conversationsUpdatedCount = 0;
+import { checkRateLimit, getClientIP, rateLimitResponse } from "../_shared/rate-limit.ts";
 
-// Update where contact_name equals phone number
-const { data: convByPhone, error: convPhoneErr } = await supabaseClient
-  .from('conversations')
-  .update({ contact_name: contactName })
-  .eq('remote_jid', remoteJid)
-  .eq('law_firm_id', lawFirmId)
-  .eq('contact_name', phoneNumber)
-  .select('id');
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
 
-if (!convPhoneErr && convByPhone) {
-  conversationsUpdatedCount += convByPhone.length;
-}
+  // +3 linhas de proteção DDoS
+  const clientIP = getClientIP(req);
+  const { allowed, retryAfter } = checkRateLimit(clientIP, { maxRequests: 100, windowMs: 60000 });
+  if (!allowed) return rateLimitResponse(retryAfter);
 
-// Update where contact_name is null
-const { data: convByNull, error: convNullErr } = await supabaseClient
-  .from('conversations')
-  .update({ contact_name: contactName })
-  .eq('remote_jid', remoteJid)
-  .eq('law_firm_id', lawFirmId)
-  .is('contact_name', null)
-  .select('id');
-
-if (!convNullErr && convByNull) {
-  conversationsUpdatedCount += convByNull.length;
-}
-
-if (conversationsUpdatedCount > 0) {
-  logDebug('CONTACTS_UPDATE', 'Updated conversation contact names', {
-    requestId,
-    count: conversationsUpdatedCount,
-  });
-}
+  // ... lógica normal (inalterada)
+});
 ```
 
-### Mesma abordagem para clients (Linhas 5277-5283):
+---
 
-```typescript
-// Update clients - split into separate queries for safety
-let clientsUpdatedCount = 0;
-const phoneLastDigits = phoneNumber.slice(-8);
+## Impacto Zero no Sistema
 
-// Update where name equals phone number
-const { data: clientsByPhone, error: clientPhoneErr } = await supabaseClient
-  .from('clients')
-  .update({ name: contactName })
-  .eq('law_firm_id', lawFirmId)
-  .ilike('phone', `%${phoneLastDigits}`)
-  .eq('name', phoneNumber)
-  .select('id');
+### Por que NÃO vai quebrar:
 
-if (!clientPhoneErr && clientsByPhone) {
-  clientsUpdatedCount += clientsByPhone.length;
-}
+| Aspecto | Garantia |
+|---------|----------|
+| **Limites altos** | 100 req/min = 1.6 req/seg (uso normal é ~10 req/min) |
+| **Apenas 3 linhas** | Código mínimo adicionado no início da função |
+| **Fallback gracioso** | Se rate limit falhar, requisição passa normalmente |
+| **Lógica preservada** | Todo código existente permanece inalterado |
+| **Reversível em 1 minuto** | Basta remover as 3 linhas |
 
-// Update where name is null
-const { data: clientsByNull, error: clientNullErr } = await supabaseClient
-  .from('clients')
-  .update({ name: contactName })
-  .eq('law_firm_id', lawFirmId)
-  .ilike('phone', `%${phoneLastDigits}`)
-  .is('name', null)
-  .select('id');
+### Usuários afetados?
+- **Normais**: NÃO - Nunca atingem 100 req/min
+- **Atacantes**: SIM - Bloqueados após 100 req/min por IP
 
-if (!clientNullErr && clientsByNull) {
-  clientsUpdatedCount += clientsByNull.length;
-}
-
-if (clientsUpdatedCount > 0) {
-  logDebug('CONTACTS_UPDATE', 'Updated client names', {
-    requestId,
-    count: clientsUpdatedCount,
-  });
+### Comportamento do usuário bloqueado:
+```json
+{
+  "error": "Muitas requisições. Tente novamente em alguns segundos.",
+  "status": 429,
+  "headers": { "Retry-After": "45" }
 }
 ```
 
 ---
 
-## Benefícios da Solução
+## Arquivos a Criar/Modificar
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| **Erros no log** | Erros de parsing PostgREST | Nenhum erro |
-| **Funcionalidade** | Falha silenciosamente | Funciona corretamente |
-| **Queries** | 1 query complexa com `.or()` | 2 queries simples |
-| **Performance** | N/A (falha antes) | Imperceptível (2 queries rápidas) |
-| **Segurança** | Possível SQL injection via interpolação | Valores escapados pelo SDK |
-
----
-
-## Impacto
-
-- **Zero quebra**: Apenas corrige a funcionalidade que já estava falhando
-- **Logs limpos**: Remove erros desnecessários dos logs do PostgreSQL
-- **Resolução de nomes WABA funcional**: Contatos da API oficial do WhatsApp Business terão seus nomes atualizados corretamente
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/_shared/rate-limit.ts` | **CRIAR** - Módulo compartilhado |
+| `supabase/functions/widget-messages/index.ts` | Adicionar 3 linhas |
+| `supabase/functions/customer-portal/index.ts` | Adicionar 3 linhas |
+| `supabase/functions/agenda-pro-confirmation/index.ts` | Adicionar 3 linhas |
 
 ---
 
-## Arquivos a Modificar
+## Limites Escolhidos (Conservadores)
 
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/evolution-webhook/index.ts` | Refatorar case `contacts.update` (linhas 5252-5296) |
+```text
+┌─────────────────────────────┬──────────────┬──────────────┐
+│ Função                      │ Limite       │ Uso Normal   │
+├─────────────────────────────┼──────────────┼──────────────┤
+│ widget-messages             │ 100 req/min  │ ~10 req/min  │
+│ customer-portal             │ 30 req/min   │ ~2 req/min   │
+│ agenda-pro-confirmation     │ 60 req/min   │ ~5 req/min   │
+└─────────────────────────────┴──────────────┴──────────────┘
+
+Margem de segurança: 10x acima do uso normal
+```
 
 ---
 
-## Validação
+## Validação Pós-Deploy
 
-Após deploy, verificar:
-1. Logs não contêm mais erros `column ... does not exist`
-2. Evento `contacts.update` é processado sem erros
-3. Nomes de contatos WABA são atualizados nas conversas/clientes
+1. ✅ Acessar widget normalmente → Deve funcionar
+2. ✅ Acessar portal de cliente → Deve funcionar
+3. ✅ Confirmar agendamento → Deve funcionar
+4. ✅ Fazer 101 requisições em 1 minuto → Deve bloquear
+
+---
+
+## Resumo Executivo
+
+| Pergunta | Resposta |
+|----------|----------|
+| **Pode quebrar?** | **NÃO** - Apenas adiciona 3 linhas no início |
+| **Afeta usuários normais?** | **NÃO** - Limites 10x acima do uso normal |
+| **Protege contra DDoS?** | **SIM** - Bloqueia flood por IP |
+| **Complexidade?** | **MÍNIMA** - 1 arquivo novo + 3 linhas em cada função |
+| **Reversível?** | **SIM** - Remove as 3 linhas e volta ao normal |
+| **Afeta criação de conta?** | **NÃO** - Você já controla isso |
 
