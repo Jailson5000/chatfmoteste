@@ -23,7 +23,8 @@ import {
   ExternalLink,
   X,
   History,
-  Calendar
+  Calendar,
+  Settings
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -58,6 +59,7 @@ export function MyPlanSettings() {
   const [showInvoicesDialog, setShowInvoicesDialog] = useState(false);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
+  const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [isSubmittingAddon, setIsSubmittingAddon] = useState(false);
   const [addonRequest, setAddonRequest] = useState({
     users: 0,
@@ -222,6 +224,26 @@ export function MyPlanSettings() {
   const handleOpenInvoices = () => {
     setShowInvoicesDialog(true);
     refetchInvoices();
+  };
+
+  const handleOpenCustomerPortal = async () => {
+    setIsPortalLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("customer-portal");
+
+      if (error) throw error;
+
+      if (data?.url) {
+        window.open(data.url, "_blank");
+      } else {
+        throw new Error("Não foi possível abrir o portal");
+      }
+    } catch (err: any) {
+      console.error("[MyPlanSettings] Error opening customer portal:", err);
+      toast.error(err?.message || "Erro ao abrir portal de assinatura. Entre em contato com o suporte.");
+    } finally {
+      setIsPortalLoading(false);
+    }
   };
 
   const handlePayNow = async () => {
@@ -422,6 +444,24 @@ export function MyPlanSettings() {
               <Download className="h-3 w-3" />
               Demonstrativo
             </Button>
+            {/* Botão para gerenciar assinatura via Stripe Portal */}
+            {!isInTrial && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-1.5 text-xs h-8" 
+                onClick={handleOpenCustomerPortal}
+                disabled={isPortalLoading}
+                title="Gerencie sua assinatura, métodos de pagamento e cupons"
+              >
+                {isPortalLoading ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Settings className="h-3 w-3" />
+                )}
+                Gerenciar Assinatura
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 text-green-600 border-green-300 hover:bg-green-50" onClick={handleContactSupport}>
               <MessageCircle className="h-3 w-3" />
               Solicitar Upgrade
@@ -765,7 +805,7 @@ export function MyPlanSettings() {
                           size="sm"
                           className="h-8 gap-1.5 text-xs"
                           onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
-                          title="Pagar com cartão ou boleto"
+                          title="Pagar fatura online"
                         >
                           <CreditCard className="h-3.5 w-3.5" />
                           Pagar
@@ -777,7 +817,13 @@ export function MyPlanSettings() {
                           variant="ghost" 
                           size="icon" 
                           className="h-8 w-8"
-                          onClick={() => window.open(invoice.bankSlipUrl!, "_blank")}
+                          onClick={() => {
+                            const link = document.createElement('a');
+                            link.href = invoice.bankSlipUrl!;
+                            link.download = `fatura-${invoice.id}.pdf`;
+                            link.target = '_blank';
+                            link.click();
+                          }}
                           title="Baixar PDF"
                         >
                           <Download className="h-4 w-4" />
