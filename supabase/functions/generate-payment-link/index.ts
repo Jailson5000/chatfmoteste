@@ -255,6 +255,7 @@ serve(async (req) => {
       customer_email: customerId ? undefined : company.email,
       line_items: lineItems,
       mode: "subscription",
+      payment_method_types: ['card', 'boleto'],
       success_url: `${origin}/payment-success?provider=stripe&company_id=${company.id}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/settings?tab=meu-plano`,
       metadata: {

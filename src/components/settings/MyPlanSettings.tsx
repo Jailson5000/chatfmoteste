@@ -758,26 +758,29 @@ export function MyPlanSettings() {
                       </div>
                     </div>
                     <div className="flex gap-1">
-                      {invoice.invoiceUrl && (
+                      {/* Botão para pagar - apenas faturas pendentes */}
+                      {invoice.statusLabel === 'Pendente' && invoice.invoiceUrl && (
                         <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8"
+                          variant="default" 
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs"
                           onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
-                          title="Ver nota fiscal"
+                          title="Pagar com cartão ou boleto"
                         >
-                          <FileText className="h-4 w-4" />
+                          <CreditCard className="h-3.5 w-3.5" />
+                          Pagar
                         </Button>
                       )}
+                      {/* Botão para baixar PDF da fatura */}
                       {invoice.bankSlipUrl && (
                         <Button 
                           variant="ghost" 
                           size="icon" 
                           className="h-8 w-8"
                           onClick={() => window.open(invoice.bankSlipUrl!, "_blank")}
-                          title="Ver boleto"
+                          title="Baixar PDF"
                         >
-                          <ExternalLink className="h-4 w-4" />
+                          <Download className="h-4 w-4" />
                         </Button>
                       )}
                     </div>

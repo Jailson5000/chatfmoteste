@@ -105,6 +105,7 @@ serve(async (req) => {
         },
       ],
       mode: "subscription",
+      payment_method_types: ['card', 'boleto'],
       success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/#planos`,
       metadata: {
