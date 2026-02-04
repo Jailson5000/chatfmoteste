@@ -5926,6 +5926,7 @@ export type Database = {
             }
             Returns: Json
           }
+      cleanup_old_webhook_logs: { Args: never; Returns: number }
       clear_device_session:
         | { Args: { _device_id: string; _user_id: string }; Returns: boolean }
         | {
