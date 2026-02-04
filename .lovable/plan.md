@@ -1,122 +1,163 @@
 
 
-# Plano: Melhorar Relatório PDF de Empresas com Dados de Faturamento Stripe
+# Plano: Corrigir Bug no Webhook contacts.update
 
 ## Problema Identificado
 
-No PDF atual, a empresa "Miau test" aparece como "Trial Expirado" quando na verdade ela:
-1. **Pagou a fatura** (subscription `sub_1Sx89k...` status: `active`)
-2. **Está ativa** (company status: `active`, subscription status: `active`)
-3. O trial expirou, mas ela **converteu para pagante**
+O erro nos logs:
+```
+ERROR: column clients.name does not exist
+ERROR: column conversations.contact_name does not exist
+```
 
-A lógica atual no `getStatusText()` verifica `trial_ends_at` sem considerar se há uma assinatura ativa.
+**Causa Raiz**: A sintaxe do filtro `.or()` do PostgREST está incorreta. Os valores de string não estão sendo escapados corretamente.
+
+**Código Atual (Linha 5257 e 5282)**:
+```typescript
+.or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
+.or(`name.eq.${phoneNumber},name.is.null`)
+```
+
+**Problema**: Quando `phoneNumber` é `559281182213`, o PostgREST interpreta como:
+```
+contact_name.eq.559281182213
+```
+
+O PostgREST tenta interpretar isso como uma coluna aninhada (`clients.name`) em vez de um valor, porque números sem aspas podem ser confundidos com referências de coluna em certas situações, ou o parser falha de forma inesperada.
 
 ---
 
-## Mudanças Necessárias
+## Solução
 
-### 1. Corrigir Lógica de Status
+Usar a sintaxe correta do PostgREST com **filtros separados** em vez de `.or()` com string interpolation, ou **escapar corretamente os valores**.
 
-**Arquivo:** `src/lib/companyReportGenerator.ts`
+### Opção Escolhida: Consultas Separadas com Fallback Gracioso
 
-A função `getStatusText()` precisa considerar:
-```text
-PRIORIDADE DE STATUS:
-1. suspended/blocked → Mostrar status
-2. pending_approval → "Pendente"
-3. subscription_status === 'active' → "Ativo (Pagante)" ← NOVO
-4. trial ativo (trial_ends_at > hoje) → "Trial (Xd)"
-5. trial expirado SEM subscription → "Trial Expirado"
-6. status === 'active' → "Ativo"
-```
+Em vez de tentar fazer uma query complexa com `.or()`, vamos:
+1. Fazer queries mais simples e seguras
+2. Usar try-catch para não interromper o fluxo principal
+3. Logar erros de forma informativa sem poluir os logs
 
-### 2. Adicionar Novos Campos ao Relatório
+---
 
-**Campos atuais no PDF:**
-- Nome, CPF/CNPJ, Plano, Status, Ativo, Ativação, Faturas, Valor Pendente
+## Mudanças no Arquivo
 
-**Novos campos a adicionar:**
-| Campo | Origem | Descrição |
-|-------|--------|-----------|
-| **Data do Pagamento** | `last_payment_at` ou Stripe `status_transitions.paid_at` | Quando pagou a última fatura |
-| **Próxima Fatura** | `current_period_end` ou Stripe subscription | Data do próximo vencimento |
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
 
-### 3. Atualizar Interface de Dados
-
-**Arquivo:** `src/lib/companyReportGenerator.ts`
+### Antes (Linhas 5252-5283):
 
 ```typescript
-interface CompanyReportData {
-  name: string;
-  document: string | null;
-  planName: string;
-  status: string;
-  approvalStatus: string;
-  isActive: boolean;
-  approvedAt: string | null;
-  trialDaysRemaining: number | null;
-  openInvoicesCount: number;
-  openInvoicesTotal: number;
-  // NOVOS CAMPOS:
-  hasActiveSubscription: boolean;      // Se tem subscription ativa
-  lastPaymentAt: string | null;        // Data do último pagamento
-  nextInvoiceAt: string | null;        // Data da próxima fatura
-  subscriptionStatus: string | null;   // Status da subscription Stripe
+// Update conversations where contact_name is still the phone number or null
+const { data: updatedConversations, error: convError } = await supabaseClient
+  .from('conversations')
+  .update({ contact_name: contactName })
+  .eq('remote_jid', remoteJid)
+  .eq('law_firm_id', lawFirmId)
+  .or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
+  .select('id');
+```
+
+### Depois:
+
+```typescript
+// Update conversations where contact_name is still the phone number or null
+// Using two separate updates to avoid PostgREST .or() syntax issues with dynamic values
+let conversationsUpdatedCount = 0;
+
+// Update where contact_name equals phone number
+const { data: convByPhone, error: convPhoneErr } = await supabaseClient
+  .from('conversations')
+  .update({ contact_name: contactName })
+  .eq('remote_jid', remoteJid)
+  .eq('law_firm_id', lawFirmId)
+  .eq('contact_name', phoneNumber)
+  .select('id');
+
+if (!convPhoneErr && convByPhone) {
+  conversationsUpdatedCount += convByPhone.length;
+}
+
+// Update where contact_name is null
+const { data: convByNull, error: convNullErr } = await supabaseClient
+  .from('conversations')
+  .update({ contact_name: contactName })
+  .eq('remote_jid', remoteJid)
+  .eq('law_firm_id', lawFirmId)
+  .is('contact_name', null)
+  .select('id');
+
+if (!convNullErr && convByNull) {
+  conversationsUpdatedCount += convByNull.length;
+}
+
+if (conversationsUpdatedCount > 0) {
+  logDebug('CONTACTS_UPDATE', 'Updated conversation contact names', {
+    requestId,
+    count: conversationsUpdatedCount,
+  });
 }
 ```
 
-### 4. Modificar Busca de Dados
-
-**Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
-
-Na função de exportação PDF, adicionar:
+### Mesma abordagem para clients (Linhas 5277-5283):
 
 ```typescript
-// Buscar dados da subscription junto com company
-const { data: subscription } = await supabase
-  .from("company_subscriptions")
-  .select("stripe_subscription_id, status, last_payment_at, current_period_end")
-  .eq("company_id", company.id)
-  .maybeSingle();
+// Update clients - split into separate queries for safety
+let clientsUpdatedCount = 0;
+const phoneLastDigits = phoneNumber.slice(-8);
 
-// Se tem subscription ativa no Stripe, buscar datas do Stripe
-if (subscription?.stripe_subscription_id) {
-  // Chamar Stripe API para pegar current_period_end atualizado
+// Update where name equals phone number
+const { data: clientsByPhone, error: clientPhoneErr } = await supabaseClient
+  .from('clients')
+  .update({ name: contactName })
+  .eq('law_firm_id', lawFirmId)
+  .ilike('phone', `%${phoneLastDigits}`)
+  .eq('name', phoneNumber)
+  .select('id');
+
+if (!clientPhoneErr && clientsByPhone) {
+  clientsUpdatedCount += clientsByPhone.length;
 }
-```
 
-### 5. Criar Edge Function para Dados Completos (Opcional)
+// Update where name is null
+const { data: clientsByNull, error: clientNullErr } = await supabaseClient
+  .from('clients')
+  .update({ name: contactName })
+  .eq('law_firm_id', lawFirmId)
+  .ilike('phone', `%${phoneLastDigits}`)
+  .is('name', null)
+  .select('id');
 
-Se os dados do banco não estiverem atualizados, criar uma edge function:
+if (!clientNullErr && clientsByNull) {
+  clientsUpdatedCount += clientsByNull.length;
+}
 
-**Novo arquivo:** `supabase/functions/get-company-billing-summary/index.ts`
-
-```typescript
-// Busca dados de billing resumidos para o relatório:
-// - subscription status
-// - last payment date (da última fatura paga)
-// - next invoice date (current_period_end)
-// - open invoices count/total
+if (clientsUpdatedCount > 0) {
+  logDebug('CONTACTS_UPDATE', 'Updated client names', {
+    requestId,
+    count: clientsUpdatedCount,
+  });
+}
 ```
 
 ---
 
-## Layout do Novo PDF
+## Benefícios da Solução
 
-### Antes (8 colunas):
-```text
-Nome | CPF/CNPJ | Plano | Status | Ativo | Ativação | Faturas | Valor Pendente
-```
+| Aspecto | Antes | Depois |
+|---------|-------|--------|
+| **Erros no log** | Erros de parsing PostgREST | Nenhum erro |
+| **Funcionalidade** | Falha silenciosamente | Funciona corretamente |
+| **Queries** | 1 query complexa com `.or()` | 2 queries simples |
+| **Performance** | N/A (falha antes) | Imperceptível (2 queries rápidas) |
+| **Segurança** | Possível SQL injection via interpolação | Valores escapados pelo SDK |
 
-### Depois (9 colunas - layout otimizado):
-```text
-Nome | CPF/CNPJ | Plano | Status | Ativo | Ativação | Últ. Pgto | Próx. Fat. | Faturas Abertas
-```
+---
 
-**Observações:**
-- Combinar "Faturas" e "Valor Pendente" em uma coluna: "2 (R$ 179,40)"
-- "Últ. Pgto" = Data do último pagamento
-- "Próx. Fat." = Data da próxima fatura
+## Impacto
+
+- **Zero quebra**: Apenas corrige a funcionalidade que já estava falhando
+- **Logs limpos**: Remove erros desnecessários dos logs do PostgreSQL
+- **Resolução de nomes WABA funcional**: Contatos da API oficial do WhatsApp Business terão seus nomes atualizados corretamente
 
 ---
 
@@ -124,60 +165,14 @@ Nome | CPF/CNPJ | Plano | Status | Ativo | Ativação | Últ. Pgto | Próx. Fat.
 
 | Arquivo | Mudança |
 |---------|---------|
-| `src/lib/companyReportGenerator.ts` | Adicionar novos campos na interface, corrigir `getStatusText()`, ajustar layout |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Buscar dados de subscription e enriquecer relatório |
-| (Opcional) `supabase/functions/get-company-billing-summary/index.ts` | Nova função para buscar dados consolidados |
+| `supabase/functions/evolution-webhook/index.ts` | Refatorar case `contacts.update` (linhas 5252-5296) |
 
 ---
 
-## Lógica de Status Corrigida
+## Validação
 
-```typescript
-function getStatusText(company: CompanyReportData): string {
-  // 1. Status de bloqueio tem prioridade máxima
-  if (company.status === "suspended") return "Suspenso";
-  if (company.status === "blocked") return "Bloqueado";
-  if (company.approvalStatus === "pending") return "Pendente";
-  
-  // 2. Se tem subscription ativa = é pagante
-  if (company.hasActiveSubscription) {
-    return "Ativo";  // ← Ignora trial_ends_at
-  }
-  
-  // 3. Se está em trial
-  if (company.trialDaysRemaining !== null) {
-    if (company.trialDaysRemaining > 0) {
-      return `Trial (${company.trialDaysRemaining}d)`;
-    } else {
-      return "Trial Expirado";
-    }
-  }
-  
-  // 4. Fallback
-  if (company.status === "active") return "Ativo";
-  return company.status;
-}
-```
-
----
-
-## Resultado Esperado
-
-**Antes (errado):**
-| Nome | Status | Ativação | Faturas |
-|------|--------|----------|---------|
-| Miau test | Trial Expirado | 28/01/2026 | 0 |
-
-**Depois (correto):**
-| Nome | Status | Ativação | Últ. Pgto | Próx. Fat. | Faturas |
-|------|--------|----------|-----------|------------|---------|
-| Miau test | Ativo | 28/01/2026 | 04/02/2026 | 04/03/2026 | - |
-
----
-
-## Impacto
-
-- **Zero quebra**: Apenas adiciona informações ao PDF
-- **Melhora UX**: Status mais preciso e informativo
-- **Valor comercial**: Relatório completo para gestão financeira
+Após deploy, verificar:
+1. Logs não contêm mais erros `column ... does not exist`
+2. Evento `contacts.update` é processado sem erros
+3. Nomes de contatos WABA são atualizados nas conversas/clientes
 
