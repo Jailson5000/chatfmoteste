@@ -1,76 +1,151 @@
 
-# Plano: Trocar Cor do "Fora do Expediente" para Branco/Vermelho
+# Plano: Adicionar Opções de Pagamento (Cartão, PIX e Boleto) + Cupom de Desconto
 
-## Situação Atual
+## Problema Identificado
 
-O padrão listrado de "Fora do Expediente" usa cores azuis:
-- **Light mode**: `rgb(147_197_253)` (azul claro)
-- **Dark mode**: `rgb(30_64_175)` (azul escuro)
+Atualmente, ao visualizar faturas pendentes, o usuário só vê a opção de boleto (PDF). A página de checkout do Stripe já suporta múltiplos métodos de pagamento, mas:
 
-## Nova Paleta
+1. O botão de pagamento direciona apenas para o PDF do boleto
+2. Não há configuração explícita de `payment_method_types` nas Edge Functions
+3. Cupons já estão habilitados (`allow_promotion_codes: true`), porém não há indicação visual disso para o usuário
 
-Trocar para branco com vermelho, combinando com as cores primárias do sistema (`--primary: 0 72% 51%` = vermelho).
+## Análise Técnica
 
-| Elemento | Cor Atual | Nova Cor |
-|----------|-----------|----------|
-| Listras (light) | Azul claro `rgb(147_197_253)` | Vermelho claro `rgb(252_165_165)` (red-300) |
-| Listras (dark) | Azul escuro `rgb(30_64_175)` | Vermelho escuro `rgb(153_27_27)` (red-800) |
-| Background base (light) | `bg-blue-100/40` | `bg-red-50/40` |
-| Background base (dark) | `bg-blue-950/30` | `bg-red-950/30` |
-| Borda da legenda | `border-blue-300/800` | `border-red-300/800` |
+### Arquivos Envolvidos
 
-## Mudanças no Código
+| Arquivo | Situação Atual | Alteração Necessária |
+|---------|----------------|---------------------|
+| `supabase/functions/generate-payment-link/index.ts` | Sem `payment_method_types` explícito | Adicionar `payment_method_types: ['card', 'pix', 'boleto']` |
+| `supabase/functions/create-checkout-session/index.ts` | Sem `payment_method_types` explícito | Adicionar `payment_method_types: ['card', 'pix', 'boleto']` |
+| `src/components/settings/MyPlanSettings.tsx` | Botão genérico para boleto | Adicionar botão "Pagar Agora" que abre página Stripe com todas as opções |
 
-### Arquivo: `AgendaProCalendar.tsx`
+---
 
-**Linha 191** - Background base do slot:
-```tsx
-// De:
-!isWorkingHour && "bg-blue-100/40 dark:bg-blue-950/30"
-// Para:
-!isWorkingHour && "bg-red-50/40 dark:bg-red-950/30"
+## Solução Proposta
+
+### 1. Edge Function: generate-payment-link
+
+Adicionar configuração explícita de métodos de pagamento na criação da sessão de checkout:
+
+```typescript
+const session = await stripe.checkout.sessions.create({
+  // ... existing config
+  payment_method_types: ['card', 'pix', 'boleto'],
+  allow_promotion_codes: true, // já existe - cupons funcionam
+  // ...
+});
 ```
 
-**Linha 197** - Background da coluna de hora:
-```tsx
-// De:
-!isWorkingHour && "bg-blue-100/50 dark:bg-blue-950/40"
-// Para:
-!isWorkingHour && "bg-red-50/50 dark:bg-red-950/40"
+### 2. Edge Function: create-checkout-session
+
+Mesma alteração para garantir consistência em todos os fluxos de checkout:
+
+```typescript
+const session = await stripe.checkout.sessions.create({
+  // ... existing config
+  payment_method_types: ['card', 'pix', 'boleto'],
+  allow_promotion_codes: true, // já existe
+  // ...
+});
 ```
 
-**Linha 203** - Padrão listrado diagonal:
+### 3. Frontend: MyPlanSettings.tsx - Diálogo de Faturas
+
+**Situação Atual:**
+- Botão `FileText` → Nota fiscal
+- Botão `ExternalLink` → PDF do boleto
+
+**Nova Estrutura:**
+- Botão `FileText` → Nota fiscal (PDF)
+- Botão `CreditCard` → **Pagar Agora** (abre página Stripe com cartão/PIX/boleto) - apenas para faturas pendentes
+
+A URL `invoice.invoiceUrl` do Stripe (`hosted_invoice_url`) já direciona para uma página onde o cliente pode escolher entre cartão, PIX ou boleto.
+
+**Código atualizado:**
+
 ```tsx
-// De:
-bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(147_197_253/0.4)_5px,rgb(147_197_253/0.4)_10px)] dark:bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(30_64_175/0.3)_5px,rgb(30_64_175/0.3)_10px)]
-// Para:
-bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(252_165_165/0.5)_5px,rgb(252_165_165/0.5)_10px)] dark:bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgb(153_27_27/0.4)_5px,rgb(153_27_27/0.4)_10px)]
+<div className="flex gap-1">
+  {/* Botão para pagar - apenas faturas pendentes */}
+  {invoice.statusLabel === 'Pendente' && invoice.invoiceUrl && (
+    <Button 
+      variant="default" 
+      size="sm"
+      className="h-8 gap-1.5 text-xs"
+      onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
+      title="Pagar com cartão, PIX ou boleto"
+    >
+      <CreditCard className="h-3.5 w-3.5" />
+      Pagar
+    </Button>
+  )}
+  {/* Botão para baixar PDF da fatura */}
+  {invoice.bankSlipUrl && (
+    <Button 
+      variant="ghost" 
+      size="icon" 
+      className="h-8 w-8"
+      onClick={() => window.open(invoice.bankSlipUrl!, "_blank")}
+      title="Baixar PDF"
+    >
+      <Download className="h-4 w-4" />
+    </Button>
+  )}
+</div>
 ```
 
-**Linha 499** - Ícone da legenda:
-```tsx
-// De:
-border-blue-300 dark:border-blue-800 bg-[repeating-linear-gradient(135deg,rgb(147_197_253/0.6),...)]
-// Para:
-border-red-300 dark:border-red-800 bg-[repeating-linear-gradient(135deg,rgb(252_165_165/0.7),...)]
+---
+
+## Fluxo do Usuário
+
+```text
+1. Usuário clica em "Ver Faturas"
+   ↓
+2. Diálogo mostra lista de faturas
+   ↓
+3. Fatura pendente exibe:
+   - Valor + Badge "Pendente"
+   - Data de vencimento
+   - [Botão PAGAR] [Botão PDF]
+   ↓
+4. Ao clicar em "Pagar":
+   - Abre página do Stripe
+   - Usuário escolhe: Cartão / PIX / Boleto
+   - Campo de cupom disponível automaticamente
+   ↓
+5. Pagamento processado → Webhook atualiza status
 ```
 
-## Resultado Visual
+---
 
-| Tema | Aparência |
-|------|-----------|
-| **Claro** | Fundo branco rosado com listras vermelhas suaves |
-| **Escuro** | Fundo vermelho escuro com listras vermelhas sutis |
+## Cupons de Desconto
+
+O parâmetro `allow_promotion_codes: true` já está configurado em ambas as Edge Functions. Isso significa:
+
+- Na página de checkout do Stripe, aparece automaticamente um campo "Código promocional"
+- Cupons criados no dashboard do Stripe serão aplicados
+- Nenhuma mudança adicional necessária
+
+---
+
+## Resumo das Alterações
+
+| Arquivo | Tipo | Descrição |
+|---------|------|-----------|
+| `generate-payment-link/index.ts` | Edge Function | Adicionar `payment_method_types` |
+| `create-checkout-session/index.ts` | Edge Function | Adicionar `payment_method_types` |
+| `MyPlanSettings.tsx` | Frontend | Reorganizar botões no diálogo de faturas |
+
+---
 
 ## Benefícios
 
-1. **Consistência de marca**: Vermelho é a cor primária do sistema
-2. **Clareza visual**: Vermelho transmite "bloqueado/indisponível" intuitivamente
-3. **Contraste**: Visível em ambos os temas
-4. **Harmonização**: Combina com o ícone de "Cancelado" que já é vermelho
+1. **Flexibilidade**: Cliente escolhe entre cartão, PIX ou boleto
+2. **Cupons**: Funcionalidade já ativa, campo visível no checkout
+3. **UX Melhorada**: Botão "Pagar" destacado para faturas pendentes
+4. **Zero Regressão**: Apenas adiciona opções, não remove funcionalidades existentes
 
-## Arquivo Modificado
+---
 
-| Arquivo | Linhas |
-|---------|--------|
-| `src/components/agenda-pro/AgendaProCalendar.tsx` | 191, 197, 203, 499 |
+## Consideração de Segurança
+
+Nenhuma alteração de RLS ou banco de dados necessária. As mudanças são apenas na camada de apresentação e configuração do Stripe Checkout.
