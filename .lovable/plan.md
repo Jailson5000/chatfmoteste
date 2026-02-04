@@ -1,143 +1,88 @@
 
-# Plano: Corrigir Liberação de Empresas + Erro de Cupom 100%
+# Plano: Correções no Fluxo de Pagamento e Faturas
 
 ## Problemas Identificados
 
-### 1. Cupom 100% de Desconto - Erro no `verify-payment`
+### 1. Página de Fatura só mostra Boleto
+**Causa raiz:** A página hospedada de fatura do Stripe (`hosted_invoice_url`) exibe os métodos de pagamento configurados **no dashboard do Stripe**, não via código. Diferente do Checkout Session (que usa `payment_method_types`), as faturas de subscription usam as configurações do portal de billing.
 
-**Log do erro:**
-```
-[VERIFY-PAYMENT] Metadata: { planKey: "starter", companyName: undefined, adminEmail: undefined }
-```
+**Solução:** 
+- O texto do botão "Pagar com cartão ou boleto" está incorreto para faturas - a disponibilidade depende da configuração no Stripe Dashboard
+- Alterar o texto do botão para "Pagar Fatura" (sem especificar método)
+- Adicionar uma nota na documentação interna sobre configurar métodos no Stripe Dashboard
 
-**Causa raiz:** Quando o cupom é de 100%, o Stripe pode marcar a sessão como `complete` mas o `payment_status` pode ser `no_payment_required` em vez de `paid`. A função `verify-payment` só aceita `payment_status === "paid"`.
+### 2. Botão de Download baixa link em vez do PDF
+**Causa raiz:** Analisando o código, o `bankSlipUrl` recebe `invoice.invoice_pdf` que é a URL correta do PDF. Preciso verificar se a URL está sendo passada corretamente.
 
-**Verificação adicional:** Os metadados `company_name` e `admin_email` não estão vindo porque o fluxo de checkout do landing page (`create-checkout-session`) não está sendo reconhecido, ou existe uma empresa já provisionada.
+**Solução:** Verificar se o comportamento está correto - o PDF do Stripe já baixa o documento. Se estiver mostrando outra página, pode ser um problema de cache ou o PDF ainda não gerado.
 
-### 2. Liberação de Empresa Não Funciona
+### 3. Sem opção de cupom para assinaturas existentes
+**Causa raiz:** 
+- Para novas assinaturas → Checkout Session com `allow_promotion_codes: true` ✅ (já implementado)
+- Para assinaturas existentes → O cupom precisa ser aplicado via **Customer Portal** ou via API administrativa
 
-**Causa raiz:** A função `unsuspendCompany` funciona corretamente (status mudou para `active` no DB), mas:
-
-1. O hook `useCompanyApproval` no cliente mantém cache do estado antigo
-2. O usuário precisa recarregar a página ou fazer novo login para o `ProtectedRoute` liberar acesso
+**Solução:** Criar/usar o Customer Portal do Stripe que já permite aplicar cupons em assinaturas existentes.
 
 ---
 
-## Solução Proposta
+## Mudanças Propostas
 
-### Alteração 1: `verify-payment` - Suportar Cupom 100%
+### Alteração 1: Simplificar texto do botão de pagamento de faturas
 
-**Arquivo:** `supabase/functions/verify-payment/index.ts`
+**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
 
-Adicionar verificação para sessões com cupom de 100% onde `payment_status === "no_payment_required"`:
+```tsx
+// Linha 768 - Remover menção a métodos específicos
+<Button 
+  variant="default" 
+  size="sm"
+  className="h-8 gap-1.5 text-xs"
+  onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
+  title="Pagar fatura online"
+>
+  <CreditCard className="h-3.5 w-3.5" />
+  Pagar
+</Button>
+```
+
+### Alteração 2: Criar função de Customer Portal
+
+**Arquivo:** `supabase/functions/customer-portal/index.ts`
+
+Criar edge function que abre o Stripe Customer Portal, onde o cliente pode:
+- Gerenciar métodos de pagamento
+- Ver e pagar faturas
+- Aplicar cupons em assinaturas existentes
+- Cancelar ou alterar plano
 
 ```typescript
-// Linha 79-89 - ANTES:
-if (session.payment_status !== "paid") {
-  return new Response(...);
-}
-
-// DEPOIS:
-const isPaid = session.payment_status === "paid";
-const isNoPaymentRequired = session.payment_status === "no_payment_required" && session.status === "complete";
-
-if (!isPaid && !isNoPaymentRequired) {
-  return new Response(
-    JSON.stringify({ 
-      success: false, 
-      error: "Pagamento não confirmado",
-      status: session.payment_status,
-      session_status: session.status,
-    }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-  );
-}
-
-console.log("[VERIFY-PAYMENT] Payment verified:", { 
-  isPaid, 
-  isNoPaymentRequired, 
-  paymentStatus: session.payment_status 
+// Pseudocódigo
+const portalSession = await stripe.billingPortal.sessions.create({
+  customer: customerId,
+  return_url: `${origin}/settings?tab=meu-plano`,
 });
+return { url: portalSession.url };
 ```
 
-### Alteração 2: `verify-payment` - Melhorar extração de metadados
+### Alteração 3: Adicionar botão "Gerenciar Assinatura" no frontend
 
-Garantir que os metadados sejam extraídos corretamente:
+**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
 
-```typescript
-// Linha 93-98 - Melhorar extração
-const metadata = session.metadata || {};
-const planKey = metadata.plan || metadata.plan_name || "starter";
-const companyName = metadata.company_name;
-const adminName = metadata.admin_name;
-const adminEmail = metadata.admin_email || session.customer_email || session.customer_details?.email;
-const adminPhone = metadata.admin_phone;
-const document = metadata.document;
-```
+Adicionar botão que leva ao Customer Portal do Stripe para:
+- Clientes ativos gerenciarem sua assinatura
+- Aplicar cupons
+- Atualizar método de pagamento
 
-### Alteração 3: `useCompanyApproval` - Força refresh após liberação
-
-**Arquivo:** `src/hooks/useCompanyApproval.tsx`
-
-Adicionar um trigger para refresh quando o usuário tenta acessar:
-
-```typescript
-// Adicionar refetch interval quando status é suspended
-// Isso fará com que, ao ser liberado, o hook detecte automaticamente
-```
-
-### Alteração 4: `GlobalAdminCompanies` - Feedback visual após liberação
-
-**Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
-
-Adicionar mensagem de orientação ao liberar empresa:
-
-```typescript
-// Na função unsuspendCompany.onSuccess:
-toast.success("Empresa liberada com sucesso!", {
-  description: "O cliente precisa atualizar a página ou fazer login novamente para acessar."
-});
-```
-
-### Alteração 5: Adicionar botão "Liberar Empresa" mais visível
-
-Tornar a opção de "Liberar Empresa" mais proeminente quando a empresa está suspensa, adicionando um indicador visual na tabela e/ou um botão direto.
-
----
-
-## Fluxo Corrigido - Cupom 100%
-
-```text
-1. Usuário aplica cupom de 100% no checkout
-   ↓
-2. Stripe completa sessão sem pagamento
-   - payment_status: "no_payment_required"
-   - session.status: "complete"
-   ↓
-3. verify-payment detecta condição especial
-   - Aceita (paid || no_payment_required + complete)
-   ↓
-4. Provisionamento da empresa ocorre normalmente
-   ↓
-5. Email enviado ao cliente com credenciais
-```
-
----
-
-## Fluxo Corrigido - Liberação de Empresa
-
-```text
-1. Admin Global clica em "Liberar Empresa"
-   ↓
-2. unsuspendCompany atualiza status para 'active'
-   ↓
-3. Toast informa: "Cliente precisa atualizar a página"
-   ↓
-4. Cliente atualiza página ou faz login
-   ↓
-5. useCompanyApproval busca status atualizado
-   ↓
-6. ProtectedRoute permite acesso
+```tsx
+<Button 
+  variant="outline" 
+  size="sm" 
+  onClick={handleOpenCustomerPortal}
+  disabled={isPortalLoading || !hasActiveSubscription}
+>
+  <Settings className="h-4 w-4" />
+  Gerenciar Assinatura
+</Button>
 ```
 
 ---
@@ -146,26 +91,59 @@ Tornar a opção de "Liberar Empresa" mais proeminente quando a empresa está su
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `supabase/functions/verify-payment/index.ts` | Aceitar `no_payment_required` + melhorar extração de metadados |
-| `src/hooks/useCompanyApproval.tsx` | (Opcional) Adicionar polling para detectar mudanças de status |
-| `src/hooks/useCompanies.tsx` | Melhorar mensagem de sucesso do unsuspendCompany |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar indicador visual para empresas suspensas |
+| `src/components/settings/MyPlanSettings.tsx` | Atualizar texto dos botões + adicionar botão Customer Portal |
+| `supabase/functions/customer-portal/index.ts` | **NOVO** - Edge function para abrir portal |
 
 ---
 
-## Benefícios
+## Fluxo Corrigido
 
-1. **Cupom 100%**: Fluxo de provisionamento funciona mesmo sem pagamento real
-2. **Liberação**: Admin tem feedback claro sobre próximos passos
-3. **UX**: Cliente entende que precisa atualizar a página
-4. **Segurança**: Nenhuma alteração em RLS ou permissões
-5. **Retrocompatibilidade**: Fluxos existentes continuam funcionando
+```text
+CENÁRIO 1: Cliente quer pagar fatura pendente
+1. Clica em "Ver Faturas"
+2. Clica em "Pagar" na fatura pendente
+3. Abre página do Stripe com opções configuradas no dashboard
+
+CENÁRIO 2: Cliente ativo quer usar cupom
+1. Clica em "Gerenciar Assinatura" (NOVO)
+2. Abre Stripe Customer Portal
+3. Aplica cupom na assinatura existente
+4. Retorna ao sistema
+
+CENÁRIO 3: Cliente quer baixar fatura
+1. Clica em ícone de download
+2. Baixa PDF direto (já funciona)
+```
 
 ---
 
-## Considerações de Segurança
+## Configuração Necessária no Stripe Dashboard
 
-- A lógica de `no_payment_required` só é aceita quando `session.status === "complete"`
-- Isso garante que a sessão foi legitimamente concluída pelo Stripe
-- Os webhooks do Stripe continuam funcionando normalmente para atualizar status
+Para habilitar cartão nas faturas, o administrador deve:
 
+1. Acessar: **Stripe Dashboard → Settings → Billing → Invoice**
+2. Em "Payment methods", habilitar:
+   - Card
+   - Boleto
+3. Em "Customer Portal", habilitar:
+   - Allow customers to apply promotion codes
+
+---
+
+## Considerações
+
+1. **Sem quebra de funcionalidade**: Apenas adiciona opções, não remove nada
+2. **Cupons funcionam via Portal**: O Customer Portal já suporta aplicação de cupons
+3. **Métodos de pagamento**: Dependem de configuração no dashboard, não no código
+4. **Compatibilidade**: O botão de portal só aparece para clientes com assinatura ativa
+
+---
+
+## Resumo das Mudanças de Código
+
+| Tipo | Descrição |
+|------|-----------|
+| Frontend | Atualizar texto do botão "Pagar" removendo menção a métodos |
+| Frontend | Adicionar botão "Gerenciar Assinatura" |
+| Edge Function | Criar `customer-portal` para abrir Stripe Portal |
+| Documentação | Instruções sobre configurar métodos no Stripe Dashboard |
