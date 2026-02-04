@@ -435,7 +435,10 @@ export function useCompanies() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      toast.success("Empresa liberada com sucesso");
+      toast.success("Empresa liberada com sucesso!", {
+        description: "O cliente precisa atualizar a página ou fazer login novamente para acessar o sistema.",
+        duration: 8000,
+      });
     },
     onError: (error) => {
       toast.error("Erro ao liberar empresa: " + error.message);
