@@ -1,210 +1,334 @@
 
+# Plano: Dashboard de Monitoramento + Alertas + Exportação PDF de Empresas
 
-# Análise: Job de Limpeza de webhook_logs
+## Resumo das 3 Funcionalidades
 
-## Situação Atual
+### 1. Dashboard de Monitoramento de Uso (Banco, Storage, IA)
+Adicionar seção no painel admin global mostrando métricas de infraestrutura em tempo real.
 
-### Métricas da Tabela
-| Métrica | Valor |
-|---------|-------|
-| **Tamanho Total** | 93 MB (29% do banco de dados) |
-| **Total de Registros** | 88.740 logs |
-| **Últimos 7 dias** | 39.940 logs (45%) |
-| **Últimos 30 dias** | 88.698 logs (99.9%) |
-| **Log mais antigo** | 05/01/2026 |
-| **Log mais recente** | 04/02/2026 |
+### 2. Alertas Automáticos de Capacidade (70% do limite)
+Sistema que verifica periodicamente o uso e notifica o admin quando atingir thresholds críticos.
 
-### Volume Diário
+### 3. Botão de Exportação PDF de Empresas
+PDF profissional com todas as empresas cadastradas e seus dados fiscais/operacionais.
+
+---
+
+## Arquitetura Técnica
+
+### Dados Disponíveis no Sistema
+
+| Métrica | Query Atual | Limite Supabase Pro |
+|---------|-------------|---------------------|
+| **Banco de dados** | `pg_database_size()` → 316 MB | 8 GB |
+| **Storage** | `SUM(metadata->>'size')` → 17.7 MB | 100 GB |
+| **Conversas IA/mês** | `usage_records` → por tenant | Por plano |
+| **TTS minutos** | `usage_records` → por tenant | Por plano |
+| **Webhook logs** | Tabela já tem cleanup automático | - |
+
+### Cálculo de Thresholds
+
 ```text
-Dia             | Logs    | Erros
-----------------|---------|-------
-04/02 (hoje)    | 6.955   | 0
-03/02           | 10.907  | 0
-02/02           | 10.246  | 0
-01/02           | 2.526   | 0
-...média        | ~5.500  | 0
+Banco de Dados:
+- 70% de 8 GB = 5.6 GB → Alerta WARNING
+- 85% de 8 GB = 6.8 GB → Alerta CRITICAL
+
+Storage:
+- 70% de 100 GB = 70 GB → Alerta WARNING
+- 85% de 100 GB = 85 GB → Alerta CRITICAL
 ```
 
-### Distribuição por Tipo
-| Direção | Quantidade | Erros | Últimos 7 dias |
-|---------|------------|-------|----------------|
-| incoming | 88.398 | 0 | 39.868 |
-| internal | 336 | 0 | 72 |
-| outgoing | 6 | 6 | 0 |
+---
+
+## Implementação Detalhada
+
+### Parte 1: Hook de Métricas de Infraestrutura
+
+**Novo arquivo: `src/hooks/useInfrastructureMetrics.tsx`**
+
+```typescript
+// Hook que consulta métricas de infraestrutura
+// - Tamanho do banco de dados via RPC
+// - Tamanho do storage via consulta storage.objects
+// - Uso de IA agregado de todas as empresas
+// - Cálculo de percentuais e status de alerta
+```
+
+**Funcionalidades:**
+- Consulta `pg_database_size()` via RPC seguro
+- Consulta storage.objects para calcular uso total
+- Agrega uso de IA de todas as empresas
+- Calcula percentuais e status (ok/warning/critical)
+- Polling a cada 5 minutos
 
 ---
 
-## Para Que Serve a Tabela
+### Parte 2: Componente de Monitoramento no Dashboard
 
-### Uso Principal
-A tabela `webhook_logs` é usada para **auditoria e debug** de:
+**Modificar: `src/pages/global-admin/GlobalAdminDashboard.tsx`**
 
-1. **Webhooks recebidos** do Evolution API (mensagens WhatsApp)
-2. **Processamento de IA** (respostas do agente)
-3. **Sincronização com N8N** (prompts)
+Nova seção "Monitoramento de Infraestrutura" com:
 
-### Onde é Lida
-| Local | Propósito | Período Necessário |
-|-------|-----------|-------------------|
-| `GlobalAdminConnections.tsx` | Visualizar últimos 50 logs por instância | Últimos dias |
-| Edge Functions | Apenas escrita, não leitura | N/A |
+1. **Card: Banco de Dados**
+   - Barra de progresso com cores (verde/amarelo/vermelho)
+   - Valor atual e limite (ex: "316 MB / 8 GB")
+   - Percentual de uso
+   - Ícone de alerta se > 70%
 
----
+2. **Card: Storage**
+   - Barra de progresso com cores
+   - Valor atual e limite
+   - Breakdown por bucket (logos, chat-media, etc.)
 
-## Impacto da Limpeza
+3. **Card: Uso IA Global**
+   - Total de conversas IA no mês
+   - Total de minutos TTS no mês
+   - Comparativo com mês anterior
 
-### Zero Risco de Quebra
-A limpeza de logs antigos **NÃO quebra nenhuma funcionalidade** porque:
-
-1. **Logs são apenas para auditoria** - não afetam o funcionamento do sistema
-2. **Única leitura usa LIMIT 50** - só mostra os logs mais recentes
-3. **Nenhum relatório depende de histórico** - não há dashboards de longo prazo
-4. **Não há foreign keys críticas** - automation_id é opcional
-
-### Benefícios
-| Benefício | Impacto |
-|-----------|---------|
-| **Redução de 45-55 MB** | Libera ~30% do espaço do banco |
-| **Queries mais rápidas** | Menos registros para varrer |
-| **Backups menores** | Restauração mais rápida |
-| **Custo de storage** | Menor no longo prazo |
+4. **Card: Status do Sistema**
+   - Último cleanup de webhook_logs
+   - Conexões Realtime ativas
+   - Edge Functions (status)
 
 ---
 
-## Proposta de Implementação
+### Parte 3: Sistema de Alertas Automáticos
 
-### Opção 1: Cron Job com pg_cron (Recomendado)
+**Estratégia: Edge Function + Cron Job**
+
+**Novo arquivo: `supabase/functions/check-infrastructure-alerts/index.ts`**
+
+```typescript
+// Edge Function que:
+// 1. Consulta tamanho do banco via SQL direto
+// 2. Consulta tamanho do storage
+// 3. Compara com thresholds (70%, 85%)
+// 4. Se threshold atingido, cria notificação em `notifications`
+// 5. Evita spam: só notifica 1x por dia por tipo de alerta
+```
+
+**Cron Job (via pg_cron):**
+```sql
+-- Executar a cada 6 horas
+SELECT cron.schedule(
+  'check-infrastructure-alerts',
+  '0 */6 * * *',
+  $$
+  SELECT net.http_post(
+    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/check-infrastructure-alerts',
+    headers:='{"Authorization": "Bearer <service_key>"}'::jsonb
+  );
+  $$
+);
+```
+
+**Notificações criadas:**
+- Tipo: `INFRASTRUCTURE_WARNING` ou `INFRASTRUCTURE_CRITICAL`
+- Aparece no painel admin global
+- Inclui métricas atuais e recomendações
+
+---
+
+### Parte 4: PDF de Empresas
+
+**Novo arquivo: `src/lib/companyReportGenerator.ts`**
+
+PDF profissional com:
+
+**Cabeçalho:**
+- Logo MiauChat
+- Título: "Relatório de Empresas Cadastradas"
+- Data de geração
+
+**Tabela de Empresas:**
+| Coluna | Origem |
+|--------|--------|
+| Nome | `companies.name` |
+| CPF/CNPJ | `companies.document` |
+| Plano | `plans.name` |
+| Status | `companies.status` + `approval_status` |
+| Ativa? | Sim/Não baseado em status |
+| Data Ativação | `companies.approved_at` |
+| Trial | Dias restantes ou "Expirado" |
+| Faturas em Aberto | Via `list-stripe-invoices` (status=open) |
+
+**Rodapé:**
+- Total de empresas
+- Data/hora de geração
+- "MiauChat - Relatório Confidencial"
+
+**Modificar: `src/pages/global-admin/GlobalAdminCompanies.tsx`**
+
+Adicionar botão "Exportar Relatório PDF" no header que:
+1. Busca todas as empresas
+2. Para cada empresa com Stripe, consulta faturas pendentes
+3. Gera PDF formatado
+4. Faz download automático
+
+---
+
+## Arquivos a Criar/Modificar
+
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/hooks/useInfrastructureMetrics.tsx` | **Criar** | Hook para métricas de infra |
+| `src/components/global-admin/InfrastructureMonitor.tsx` | **Criar** | Componente visual do dashboard |
+| `src/lib/companyReportGenerator.ts` | **Criar** | Gerador de PDF de empresas |
+| `src/pages/global-admin/GlobalAdminDashboard.tsx` | **Modificar** | Adicionar seção de monitoramento |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | **Modificar** | Adicionar botão PDF |
+| `supabase/functions/check-infrastructure-alerts/index.ts` | **Criar** | Edge function de alertas |
+| `supabase/functions/get-infrastructure-metrics/index.ts` | **Criar** | Edge function para métricas |
+| Migração SQL | **Criar** | RPC para consultar tamanho do banco |
+
+---
+
+## Migração SQL Necessária
 
 ```sql
--- Criar função de limpeza
-CREATE OR REPLACE FUNCTION cleanup_old_webhook_logs()
-RETURNS integer
+-- 1. Função RPC segura para consultar tamanho do banco (apenas admin global)
+CREATE OR REPLACE FUNCTION get_database_metrics()
+RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  deleted_count integer;
+  result jsonb;
 BEGIN
-  DELETE FROM webhook_logs
-  WHERE created_at < now() - interval '7 days';
-  
-  GET DIAGNOSTICS deleted_count = ROW_COUNT;
-  
-  -- Log opcional da limpeza
-  INSERT INTO system_settings (key, value, updated_at)
-  VALUES (
-    'last_webhook_cleanup',
-    jsonb_build_object(
-      'deleted', deleted_count,
-      'ran_at', now()
-    ),
-    now()
-  )
-  ON CONFLICT (key) DO UPDATE 
-  SET value = EXCLUDED.value, updated_at = now();
-  
-  RETURN deleted_count;
+  -- Validar que é admin global
+  IF NOT is_admin(auth.uid()) THEN
+    RETURN jsonb_build_object('error', 'access_denied');
+  END IF;
+
+  SELECT jsonb_build_object(
+    'database_size_bytes', pg_database_size(current_database()),
+    'database_size_pretty', pg_size_pretty(pg_database_size(current_database())),
+    'database_limit_bytes', 8589934592, -- 8 GB
+    'database_limit_pretty', '8 GB',
+    'percent_used', ROUND((pg_database_size(current_database())::numeric / 8589934592) * 100, 2)
+  ) INTO result;
+
+  RETURN result;
 END;
 $$;
 
--- Agendar execução diária às 3h da manhã
-SELECT cron.schedule(
-  'cleanup-webhook-logs-daily',
-  '0 3 * * *',
-  'SELECT cleanup_old_webhook_logs()'
+-- 2. Função RPC para consultar tamanho do storage
+CREATE OR REPLACE FUNCTION get_storage_metrics()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  result jsonb;
+  total_bytes bigint;
+BEGIN
+  -- Validar que é admin global
+  IF NOT is_admin(auth.uid()) THEN
+    RETURN jsonb_build_object('error', 'access_denied');
+  END IF;
+
+  SELECT COALESCE(SUM((metadata->>'size')::bigint), 0)
+  INTO total_bytes
+  FROM storage.objects;
+
+  SELECT jsonb_build_object(
+    'storage_size_bytes', total_bytes,
+    'storage_size_pretty', pg_size_pretty(total_bytes),
+    'storage_limit_bytes', 107374182400, -- 100 GB
+    'storage_limit_pretty', '100 GB',
+    'percent_used', ROUND((total_bytes::numeric / 107374182400) * 100, 2),
+    'buckets', (
+      SELECT jsonb_agg(jsonb_build_object(
+        'bucket', bucket_id,
+        'size_bytes', bucket_size,
+        'size_pretty', pg_size_pretty(bucket_size),
+        'file_count', file_count
+      ))
+      FROM (
+        SELECT 
+          bucket_id,
+          COALESCE(SUM((metadata->>'size')::bigint), 0) as bucket_size,
+          COUNT(*) as file_count
+        FROM storage.objects
+        GROUP BY bucket_id
+      ) buckets
+    )
+  ) INTO result;
+
+  RETURN result;
+END;
+$$;
+
+-- 3. Tabela para tracking de alertas enviados (evita spam)
+CREATE TABLE IF NOT EXISTS infrastructure_alert_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_type text NOT NULL,
+  threshold_level text NOT NULL, -- 'warning' ou 'critical'
+  metric_value numeric,
+  metric_limit numeric,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(alert_type, threshold_level, (created_at::date))
 );
-```
 
-### Opção 2: Edge Function com Cron
+-- RLS
+ALTER TABLE infrastructure_alert_history ENABLE ROW LEVEL SECURITY;
 
-```typescript
-// supabase/functions/cleanup-webhook-logs/index.ts
-serve(async (req) => {
-  const supabase = createClient(url, serviceKey);
-  
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  
-  const { count, error } = await supabase
-    .from('webhook_logs')
-    .delete()
-    .lt('created_at', sevenDaysAgo.toISOString())
-    .select('*', { count: 'exact', head: true });
-  
-  return new Response(JSON.stringify({ deleted: count }));
-});
+CREATE POLICY "Global admins can manage alerts"
+ON infrastructure_alert_history
+FOR ALL
+TO authenticated
+USING (is_admin(auth.uid()));
 ```
 
 ---
 
-## Comparação das Opções
+## Fluxo do Usuário
 
-| Aspecto | pg_cron (SQL) | Edge Function |
-|---------|---------------|---------------|
-| **Performance** | ⭐⭐⭐ Mais rápido | ⭐⭐ Boa |
-| **Manutenção** | ⭐⭐⭐ Menos código | ⭐⭐ Mais código |
-| **Monitoramento** | ⭐⭐ Via SQL | ⭐⭐⭐ Via dashboard |
-| **Custo** | ⭐⭐⭐ Zero | ⭐⭐ Consumo de função |
-| **Recomendado** | ✅ Sim | Para casos especiais |
+### Dashboard de Monitoramento
+1. Admin global acessa `/global-admin`
+2. Nova seção "Infraestrutura" mostra métricas
+3. Cards com barras de progresso coloridas
+4. Se houver alerta, badge vermelho pisca
 
----
+### Alertas Automáticos
+1. Cron job executa a cada 6 horas
+2. Verifica thresholds de banco e storage
+3. Se > 70%, cria notificação no sistema
+4. Admin vê badge no ícone de notificações
+5. Clica e vê "Banco de dados atingiu 75% (6 GB)"
 
-## Estimativa de Economia
-
-### Se implementar retenção de 7 dias:
-```text
-Hoje:          93 MB (88.740 logs)
-Após limpeza:  ~45 MB (~40.000 logs)
-Economia:      ~48 MB (52% de redução)
-```
-
-### Se implementar retenção de 30 dias:
-```text
-Hoje:          93 MB (88.740 logs)
-Após limpeza:  ~93 MB (quase tudo é dos últimos 30 dias)
-Economia:      Mínima agora, mas evita crescimento futuro
-```
+### Exportação PDF de Empresas
+1. Admin vai em "Empresas" → clica "Exportar PDF"
+2. Sistema busca todos os dados + faturas Stripe
+3. Gera PDF profissional
+4. Download automático: `empresas-miauchat-2026-02-04.pdf`
 
 ---
 
-## Recomendação Final
+## Segurança
 
-**Implementar retenção de 7 dias** porque:
-
-1. ✅ Logs antigos não são consultados
-2. ✅ 7 dias é tempo suficiente para debug
-3. ✅ Economia imediata de ~50 MB
-4. ✅ Previne crescimento descontrolado
-5. ✅ Zero impacto em funcionalidades
+- Funções RPC com `SECURITY DEFINER` e validação `is_admin()`
+- Edge functions verificam token JWT
+- Dados sensíveis (faturas) só via APIs autorizadas
+- PDF não salvo em servidor, gerado no cliente
 
 ---
 
-## Plano de Segurança
+## Testes Recomendados
 
-### Antes de Implementar
-1. Fazer backup da tabela (opcional, logs não são críticos)
-2. Validar que não há queries dependendo de histórico longo
-
-### Rollback se Necessário
-```sql
--- Desabilitar o cron job
-SELECT cron.unschedule('cleanup-webhook-logs-daily');
-
--- Ou deletar a função
-DROP FUNCTION IF EXISTS cleanup_old_webhook_logs();
-```
-
-### Monitoramento
-- Verificar `system_settings` para ver última execução
-- Acompanhar tamanho da tabela após algumas execuções
+1. Verificar se métricas aparecem corretamente no dashboard
+2. Testar export PDF com empresas que têm/não têm faturas Stripe
+3. Simular alerta: temporariamente reduzir threshold para 5%
+4. Verificar que notificações não são duplicadas
 
 ---
 
-## Próximos Passos
+## Estimativa de Impacto
 
-Aprovar para implementar:
-1. Criar função `cleanup_old_webhook_logs()`
-2. Agendar cron job para execução diária
-3. Executar primeira limpeza manual para ver resultado
-
+| Aspecto | Impacto |
+|---------|---------|
+| **Performance** | Mínimo - queries leves, cache 5 min |
+| **Segurança** | Zero risco - funções protegidas por RLS |
+| **UX** | Positivo - visibilidade total do sistema |
+| **Manutenção** | Baixa - alertas automáticos |
