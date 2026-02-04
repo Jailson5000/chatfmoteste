@@ -3341,6 +3341,36 @@ export type Database = {
         }
         Relationships: []
       }
+      infrastructure_alert_history: {
+        Row: {
+          alert_date: string
+          alert_type: string
+          created_at: string | null
+          id: string
+          metric_limit: number | null
+          metric_value: number | null
+          threshold_level: string
+        }
+        Insert: {
+          alert_date?: string
+          alert_type: string
+          created_at?: string | null
+          id?: string
+          metric_limit?: number | null
+          metric_value?: number | null
+          threshold_level: string
+        }
+        Update: {
+          alert_date?: string
+          alert_type?: string
+          created_at?: string | null
+          id?: string
+          metric_limit?: number | null
+          metric_value?: number | null
+          threshold_level?: string
+        }
+        Relationships: []
+      }
       instance_status_history: {
         Row: {
           changed_at: string
@@ -6022,6 +6052,8 @@ export type Database = {
               whatsapp_instance_id: string
             }[]
           }
+      get_database_metrics: { Args: never; Returns: Json }
+      get_global_ai_usage: { Args: never; Returns: Json }
       get_law_firm_by_subdomain: {
         Args: { _subdomain: string }
         Returns: string
@@ -6047,6 +6079,7 @@ export type Database = {
           specialty: string
         }[]
       }
+      get_storage_metrics: { Args: never; Returns: Json }
       get_user_law_firm_id: { Args: { _user_id: string }; Returns: string }
       get_widget_config: {
         Args: { p_widget_key: string }

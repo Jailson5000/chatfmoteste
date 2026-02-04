@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle } from "lucide-react";
+import { Plus, MoreHorizontal, Search, Building2, Pencil, Trash2, ExternalLink, Globe, Settings, RefreshCw, Workflow, AlertCircle, CheckCircle2, Clock, Copy, Link, Play, Server, Zap, Activity, Heart, Mail, MailX, Send, KeyRound, UserCheck, UserX, Hourglass, Check, X, Filter, Users, Wifi, CalendarDays, CreditCard, Bot, BarChart3, Lock, Unlock, Layers, MessageSquare, Volume2, AlertTriangle, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { SuspendCompanyDialog } from "@/components/global-admin/SuspendCompanyDialog";
 import { Switch } from "@/components/ui/switch";
@@ -59,6 +59,8 @@ import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSec
 import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { generateCompanyReportPDF, CompanyReportData } from "@/lib/companyReportGenerator";
+import { differenceInDays } from "date-fns";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany, suspendCompany, unsuspendCompany } = useCompanies();
@@ -81,6 +83,7 @@ export default function GlobalAdminCompanies() {
   const [billingType, setBillingType] = useState<"monthly" | "yearly">("monthly");
   const [isGeneratingBilling, setIsGeneratingBilling] = useState(false);
   const [suspendingCompany, setSuspendingCompany] = useState<typeof companies[0] | null>(null);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -566,6 +569,84 @@ export default function GlobalAdminCompanies() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Export PDF Button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    setIsExportingPDF(true);
+                    try {
+                      // Build report data
+                      const reportData: CompanyReportData[] = await Promise.all(
+                        companies.map(async (company) => {
+                          const plan = plans.find(p => p.id === company.plan_id);
+                          
+                          // Calculate trial days remaining
+                          let trialDaysRemaining: number | null = null;
+                          if (company.trial_ends_at) {
+                            const trialEnd = new Date(company.trial_ends_at);
+                            trialDaysRemaining = differenceInDays(trialEnd, new Date());
+                          }
+                          
+                          // Get open invoices from Stripe
+                          let openInvoicesCount = 0;
+                          let openInvoicesTotal = 0;
+                          
+                          const stripeCustomerId = (company as any).stripe_customer_id;
+                          if (stripeCustomerId) {
+                            try {
+                              const { data: invoicesData } = await supabase.functions.invoke('list-stripe-invoices', {
+                                body: { customer_id: stripeCustomerId, status: 'open' }
+                              });
+                              if (invoicesData?.invoices) {
+                                openInvoicesCount = invoicesData.invoices.length;
+                                openInvoicesTotal = invoicesData.invoices.reduce((sum: number, inv: any) => sum + (inv.amount_due || 0), 0);
+                              }
+                            } catch (e) {
+                              console.warn('Could not fetch invoices for', company.name);
+                            }
+                          }
+                          
+                          return {
+                            name: company.name,
+                            document: company.document,
+                            planName: plan?.name || 'Sem plano',
+                            status: company.status,
+                            approvalStatus: company.approval_status || 'approved',
+                            isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
+                            approvedAt: company.approved_at,
+                            trialDaysRemaining,
+                            openInvoicesCount,
+                            openInvoicesTotal,
+                          };
+                        })
+                      );
+                      
+                      generateCompanyReportPDF({
+                        companies: reportData,
+                        generatedAt: new Date(),
+                      });
+                      
+                      toast.success('Relatório PDF exportado com sucesso!');
+                    } catch (error) {
+                      console.error('Error exporting PDF:', error);
+                      toast.error('Erro ao exportar PDF');
+                    } finally {
+                      setIsExportingPDF(false);
+                    }
+                  }}
+                  disabled={isExportingPDF || companies.length === 0}
+                >
+                  <FileText className={`mr-2 h-4 w-4 ${isExportingPDF ? 'animate-pulse' : ''}`} />
+                  {isExportingPDF ? 'Exportando...' : 'Exportar PDF'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Exportar relatório PDF de todas as empresas</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           {/* Health Check Button */}
           <TooltipProvider>
             <Tooltip>
