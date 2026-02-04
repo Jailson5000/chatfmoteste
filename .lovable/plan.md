@@ -1,88 +1,119 @@
 
-# Plano: Correções no Fluxo de Pagamento e Faturas
+# Plano: Melhorar Área de Faturas e Demonstrativo PDF
 
 ## Problemas Identificados
 
-### 1. Página de Fatura só mostra Boleto
-**Causa raiz:** A página hospedada de fatura do Stripe (`hosted_invoice_url`) exibe os métodos de pagamento configurados **no dashboard do Stripe**, não via código. Diferente do Checkout Session (que usa `payment_method_types`), as faturas de subscription usam as configurações do portal de billing.
+### 1. Botão "Ver Faturas" redundante
+Na imagem enviada pelo usuário, há dois botões que fazem coisas similares:
+- **Ver Faturas** (linha 439-442): Abre diálogo com lista de faturas do Stripe
+- **Gerenciar Assinatura** (linha 447-464): Abre o Stripe Customer Portal (que já inclui faturas)
 
-**Solução:** 
-- O texto do botão "Pagar com cartão ou boleto" está incorreto para faturas - a disponibilidade depende da configuração no Stripe Dashboard
-- Alterar o texto do botão para "Pagar Fatura" (sem especificar método)
-- Adicionar uma nota na documentação interna sobre configurar métodos no Stripe Dashboard
+O usuário quer remover "Ver Faturas" porque "Gerenciar Assinatura" já cobre essa funcionalidade.
 
-### 2. Botão de Download baixa link em vez do PDF
-**Causa raiz:** Analisando o código, o `bankSlipUrl` recebe `invoice.invoice_pdf` que é a URL correta do PDF. Preciso verificar se a URL está sendo passada corretamente.
-
-**Solução:** Verificar se o comportamento está correto - o PDF do Stripe já baixa o documento. Se estiver mostrando outra página, pode ser um problema de cache ou o PDF ainda não gerado.
-
-### 3. Sem opção de cupom para assinaturas existentes
-**Causa raiz:** 
-- Para novas assinaturas → Checkout Session com `allow_promotion_codes: true` ✅ (já implementado)
-- Para assinaturas existentes → O cupom precisa ser aplicado via **Customer Portal** ou via API administrativa
-
-**Solução:** Criar/usar o Customer Portal do Stripe que já permite aplicar cupons em assinaturas existentes.
+### 2. Demonstrativo PDF muito básico
+O PDF gerado pelo `invoiceGenerator.ts` está funcional, mas precisa de melhorias visuais:
+- Adicionar logo real do MiauChat (base64)
+- Usar cores da marca (vermelho/rosa #E11D48 ou similar)
+- Incluir dados completos da empresa emissora (MiauChat)
+- Melhorar formatação para parecer uma fatura profissional
+- Incluir dados fiscais da empresa (CNPJ, endereço, etc.)
 
 ---
 
-## Mudanças Propostas
+## Alterações Propostas
 
-### Alteração 1: Simplificar texto do botão de pagamento de faturas
+### 1. Frontend: `MyPlanSettings.tsx`
 
-**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
-
+**Remover botão "Ver Faturas"** (linhas 439-442):
 ```tsx
-// Linha 768 - Remover menção a métodos específicos
-<Button 
-  variant="default" 
-  size="sm"
-  className="h-8 gap-1.5 text-xs"
-  onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
-  title="Pagar fatura online"
->
-  <CreditCard className="h-3.5 w-3.5" />
-  Pagar
+// REMOVER:
+<Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={handleOpenInvoices}>
+  <FileText className="h-3 w-3" />
+  Ver Faturas
 </Button>
 ```
 
-### Alteração 2: Criar função de Customer Portal
+**Também remover/comentar o diálogo de faturas** (linhas 734-845) que não será mais usado, ou deixar para uso futuro pelo hook.
 
-**Arquivo:** `supabase/functions/customer-portal/index.ts`
+**Resultado: Mantém apenas 3 botões principais:**
+1. "Demonstrativo" → Baixa PDF melhorado
+2. "Gerenciar Assinatura" → Abre Stripe Portal (faturas, pagamentos, cupons)
+3. "Solicitar Upgrade" → WhatsApp
+4. "Contratar Adicionais" → Modal interno
 
-Criar edge function que abre o Stripe Customer Portal, onde o cliente pode:
-- Gerenciar métodos de pagamento
-- Ver e pagar faturas
-- Aplicar cupons em assinaturas existentes
-- Cancelar ou alterar plano
+### 2. Melhorar PDF do Demonstrativo: `invoiceGenerator.ts`
 
-```typescript
-// Pseudocódigo
-const portalSession = await stripe.billingPortal.sessions.create({
-  customer: customerId,
-  return_url: `${origin}/settings?tab=meu-plano`,
-});
-return { url: portalSession.url };
+Transformar o PDF em um documento mais profissional com:
+
+**Dados da empresa emissora (MiauChat):**
+```
+MiauChat - Sistema de Atendimento Inteligente
+CNPJ: XX.XXX.XXX/0001-XX (pegar do sistema)
+E-mail: suporte@miauchat.com.br
+Site: www.miauchat.com.br
 ```
 
-### Alteração 3: Adicionar botão "Gerenciar Assinatura" no frontend
+**Melhorias visuais:**
+- Logo MiauChat no header (converter para base64)
+- Cor primária da marca (#E11D48 - vermelho/rosa)
+- Boxes com bordas arredondadas
+- Separadores visuais claros
+- Título "DEMONSTRATIVO DE FATURAMENTO"
+- Nota clara: "Este documento é um demonstrativo. Para fins fiscais, utilize a Nota Fiscal."
 
-**Arquivo:** `src/components/settings/MyPlanSettings.tsx`
+**Estrutura atualizada do PDF:**
 
-Adicionar botão que leva ao Customer Portal do Stripe para:
-- Clientes ativos gerenciarem sua assinatura
-- Aplicar cupons
-- Atualizar método de pagamento
+```text
++--------------------------------------------------+
+|  [LOGO]  MiauChat                    DEMONSTRATIVO|
+|          Sistema de Atendimento         DE        |
+|          Inteligente                FATURAMENTO   |
++--------------------------------------------------+
 
-```tsx
-<Button 
-  variant="outline" 
-  size="sm" 
-  onClick={handleOpenCustomerPortal}
-  disabled={isPortalLoading || !hasActiveSubscription}
->
-  <Settings className="h-4 w-4" />
-  Gerenciar Assinatura
-</Button>
++--------------------------------------------------+
+| DADOS DO PRESTADOR DE SERVIÇO                    |
+| MiauChat - Sistema de Atendimento Inteligente    |
+| CNPJ: XX.XXX.XXX/0001-XX                         |
+| E-mail: suporte@miauchat.com.br                  |
+| www.miauchat.com.br                              |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| DADOS DA FATURA                                  |
+| Número: DEM-12345678    |  Período: fevereiro 2026|
+| Emissão: 04/02/2026     |  Vencimento: 06/03/2026 |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| CLIENTE                                          |
+| Nome: Suporte MiauChat                           |
+| CNPJ/CPF: 64.774.567/0001-06                     |
+| E-mail: suporte@miauchat.com.br                  |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| DESCRIÇÃO                    |  QTD  |  VALOR    |
++--------------------------------------------------+
+| Plano BASIC                  |   1   | R$ 197,00 |
+| Agentes IA adicionais        |   1   | R$   0,00 |
++--------------------------------------------------+
+|                              | TOTAL | R$ 197,00 |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| CONSUMO DO PERÍODO                               |
+| Usuários: 2/2   WhatsApp: 1/1   Agentes: 1/2    |
+| Conversas IA: 3/200    Áudio: 0/10 min          |
++--------------------------------------------------+
+
++--------------------------------------------------+
+| * Este documento é apenas um demonstrativo de    |
+|   consumo. Para fins fiscais, utilize a Nota     |
+|   Fiscal Eletrônica (NFS-e) emitida mensalmente. |
++--------------------------------------------------+
+
+MiauChat - Sistema de Atendimento Inteligente
+Gerado em 04/02/2026 às 12:54:47
 ```
 
 ---
@@ -91,59 +122,69 @@ Adicionar botão que leva ao Customer Portal do Stripe para:
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/settings/MyPlanSettings.tsx` | Atualizar texto dos botões + adicionar botão Customer Portal |
-| `supabase/functions/customer-portal/index.ts` | **NOVO** - Edge function para abrir portal |
+| `src/components/settings/MyPlanSettings.tsx` | Remover botão "Ver Faturas" e dialog associado |
+| `src/lib/invoiceGenerator.ts` | Redesign completo do PDF com logo, cores e dados da empresa |
 
 ---
 
-## Fluxo Corrigido
+## Detalhes Técnicos
 
-```text
-CENÁRIO 1: Cliente quer pagar fatura pendente
-1. Clica em "Ver Faturas"
-2. Clica em "Pagar" na fatura pendente
-3. Abre página do Stripe com opções configuradas no dashboard
+### Conversão da Logo para Base64
 
-CENÁRIO 2: Cliente ativo quer usar cupom
-1. Clica em "Gerenciar Assinatura" (NOVO)
-2. Abre Stripe Customer Portal
-3. Aplica cupom na assinatura existente
-4. Retorna ao sistema
+O jsPDF não suporta importar imagens via URL diretamente. A solução é:
+1. Converter `miauchat-logo.png` para base64
+2. Embutir no código como string
+3. Usar `doc.addImage(base64Logo, 'PNG', x, y, width, height)`
 
-CENÁRIO 3: Cliente quer baixar fatura
-1. Clica em ícone de download
-2. Baixa PDF direto (já funciona)
+### Cores da Marca
+
+```typescript
+// Cores MiauChat
+const BRAND_COLORS = {
+  primary: [225, 29, 72],    // #E11D48 - Rosa/Vermelho
+  dark: [31, 41, 55],        // #1F2937 - Cinza escuro
+  light: [248, 250, 252],    // #F8FAFC - Cinza claro
+  white: [255, 255, 255],
+};
+```
+
+### Dados da Empresa
+
+```typescript
+const COMPANY_INFO = {
+  name: 'MiauChat',
+  tagline: 'Sistema de Atendimento Inteligente',
+  cnpj: 'XX.XXX.XXX/0001-XX', // Substituir pelo CNPJ real
+  email: 'suporte@miauchat.com.br',
+  website: 'www.miauchat.com.br',
+  phone: '(63) 99954-0484',
+};
 ```
 
 ---
 
-## Configuração Necessária no Stripe Dashboard
+## Fluxo Após Alterações
 
-Para habilitar cartão nas faturas, o administrador deve:
+```text
+ANTES:
+[Ver Faturas] [Demonstrativo] [Gerenciar Assinatura] [Solicitar Upgrade] [+ Contratar Adicionais]
 
-1. Acessar: **Stripe Dashboard → Settings → Billing → Invoice**
-2. Em "Payment methods", habilitar:
-   - Card
-   - Boleto
-3. Em "Customer Portal", habilitar:
-   - Allow customers to apply promotion codes
+DEPOIS:
+[Demonstrativo] [Gerenciar Assinatura] [Solicitar Upgrade] [+ Contratar Adicionais]
+```
 
----
-
-## Considerações
-
-1. **Sem quebra de funcionalidade**: Apenas adiciona opções, não remove nada
-2. **Cupons funcionam via Portal**: O Customer Portal já suporta aplicação de cupons
-3. **Métodos de pagamento**: Dependem de configuração no dashboard, não no código
-4. **Compatibilidade**: O botão de portal só aparece para clientes com assinatura ativa
+**Funcionalidades:**
+- **Demonstrativo**: Baixa PDF bonito com dados da empresa e cliente
+- **Gerenciar Assinatura**: Abre Stripe Portal onde pode ver faturas, pagar, usar cupons
+- **Solicitar Upgrade**: Abre WhatsApp do suporte
+- **Contratar Adicionais**: Modal interno para solicitar recursos extras
 
 ---
 
-## Resumo das Mudanças de Código
+## Benefícios
 
-| Tipo | Descrição |
-|------|-----------|
-| Frontend | Atualizar texto do botão "Pagar" removendo menção a métodos |
-| Frontend | Adicionar botão "Gerenciar Assinatura" |
-| Edge Function | Criar `customer-portal` para abrir Stripe Portal |
-| Documentação | Instruções sobre configurar métodos no Stripe Dashboard |
+1. **Interface mais limpa**: Remove botão redundante
+2. **PDF profissional**: Demonstrativo com logo, cores e dados completos
+3. **UX melhorada**: Cliente tem experiência consistente com a marca
+4. **Sem regressão**: Funcionalidades de fatura continuam via Stripe Portal
+5. **Documentação clara**: Diferencia "demonstrativo" de "nota fiscal"
