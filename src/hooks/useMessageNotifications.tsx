@@ -1,9 +1,8 @@
-import { useEffect, useRef, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useEffect, useCallback } from "react";
 import { useLawFirm } from "./useLawFirm";
 import { useNotificationSound } from "./useNotificationSound";
 import { useNotificationPreferences } from "./useNotificationPreferences";
+import { useRealtimeSyncOptional } from "@/hooks/useRealtimeSync";
 
 interface Message {
   id: string;
@@ -21,11 +20,10 @@ interface UseMessageNotificationsOptions {
 
 export function useMessageNotifications(options: UseMessageNotificationsOptions = {}) {
   const { enabled = true, onNewMessage } = options;
-  const { toast } = useToast();
   const { lawFirm } = useLawFirm();
   const { playNotification } = useNotificationSound();
   const { soundEnabled, browserEnabled } = useNotificationPreferences();
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const realtimeSync = useRealtimeSyncOptional();
 
   const handleNewMessage = useCallback(
     (payload: { new: Message }) => {
@@ -39,8 +37,6 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
         playNotification();
       }
 
-      // Toast notification removed - only use sound and browser notification
-
       // Show browser notification if enabled and permission granted
       if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
         new Notification("Nova mensagem do WhatsApp", {
@@ -53,7 +49,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       // Call custom handler if provided
       onNewMessage?.(message);
     },
-    [toast, playNotification, onNewMessage, soundEnabled, browserEnabled]
+    [playNotification, onNewMessage, soundEnabled, browserEnabled]
   );
 
   useEffect(() => {
@@ -64,29 +60,17 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       Notification.requestPermission();
     }
 
-    // Subscribe to realtime messages
-    const channel = supabase
-      .channel("messages-notifications")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-        },
-        handleNewMessage
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [enabled, lawFirm?.id, handleNewMessage, browserEnabled]);
+    // Register callback with the consolidated realtime system
+    // This uses the tenant-filtered channel from RealtimeSyncContext
+    if (realtimeSync?.registerMessageCallback) {
+      const unregister = realtimeSync.registerMessageCallback((payload) => {
+        if (payload.eventType === "INSERT") {
+          handleNewMessage({ new: payload.new as Message });
+        }
+      });
+      return unregister;
+    }
+  }, [enabled, lawFirm?.id, browserEnabled, realtimeSync, handleNewMessage]);
 
   return {
     requestNotificationPermission: () => {
