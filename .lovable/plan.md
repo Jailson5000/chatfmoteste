@@ -1,132 +1,106 @@
 
 
-# Plano: Corrigir Card de Onboarding que Desaparece
+# Plano: Corrigir Acesso à URL de Agendamento para Clientes Normais
 
 ## Diagnóstico
 
-### Problema Encontrado
-O card de progresso do onboarding desaparece quando o cliente completa todas as etapas devido a uma **condição de renderização no Dashboard**:
+### Problema Confirmado
+O cliente `miautest02@gmail.com` **não consegue ver** a seção "Seus Agendamentos" porque:
 
-```tsx
-// Dashboard.tsx - linha 373
-{!onboardingComplete && (
-  <OnboardingProgressCard ... />
-)}
-```
+1. **Política RLS atual** em `system_settings` permite leitura pública apenas para:
+   - `payment_provider`
+   - `payments_disabled`
+   - `manual_registration_enabled`
 
-### Por que "pisca e some"
-1. Ao atualizar a página, os dados ainda não carregaram
-2. `isComplete` começa como `false` (padrão)
-3. Card aparece momentaneamente
-4. Dados carregam do banco, `isComplete` vira `true`
-5. Card desaparece
+2. O `onboarding_meeting_url` **não está incluído** nessa lista
+
+3. Os clientes que funcionam (Jailson e Suporte) são **super_admin** na `admin_user_roles`, então conseguem ler TODAS as configurações através da política `is_admin()`
+
+### Por que os outros clientes veem
+| Cliente | Está em admin_user_roles? | Pode ler onboarding_meeting_url? |
+|---------|---------------------------|----------------------------------|
+| Jailson | Sim (super_admin) | Sim - via is_admin() |
+| Suporte MiauChat | Sim (super_admin) | Sim - via is_admin() |
+| miautest02@gmail.com | Não | Não - RLS bloqueia |
 
 ---
 
 ## Solução
 
-### 1. Remover condição no Dashboard
+### Atualizar Política RLS em system_settings
 
-**Arquivo:** `src/pages/Dashboard.tsx`
+Adicionar `onboarding_meeting_url` à lista de keys que podem ser lidas publicamente.
 
-| Linha | Antes | Depois |
-|-------|-------|--------|
-| 373-379 | `{!onboardingComplete && (<OnboardingProgressCard .../>)}` | `<OnboardingProgressCard ... />` (sempre renderiza) |
+**Migração SQL:**
+```sql
+-- Drop existing policy
+DROP POLICY IF EXISTS "Allow public read for payment and registration settings" ON system_settings;
 
-O card **sempre** será renderizado, independente do progresso. O próprio `OnboardingProgressCard` já sabe como se exibir quando completo (versão compacta).
-
-### 2. Evitar Flash Durante Loading
-
-**Arquivo:** `src/pages/Dashboard.tsx`
-
-Adicionar verificação de `isLoading` para não mostrar o card antes dos dados carregarem:
-
-```tsx
-// Adicionar isLoading ao destructuring
-const { 
-  progress: onboardingProgress, 
-  completedCount, 
-  totalCount, 
-  isComplete: onboardingComplete,
-  isLoading: onboardingLoading  // Adicionar
-} = useOnboarding();
-
-// Renderizar com verificação de loading
-{!onboardingLoading && (
-  <OnboardingProgressCard
-    progress={onboardingProgress}
-    completedSteps={completedCount}
-    totalSteps={totalCount}
-  />
-)}
-```
-
-Dessa forma:
-- Card não aparece durante o carregamento (evita o "flash")
-- Card sempre aparece após carregar (mesmo quando 100%)
-- Versão compacta é exibida quando completo
-
----
-
-## Arquivos a Modificar
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Dashboard.tsx` | Remover `!onboardingComplete`, adicionar `!onboardingLoading` |
-
----
-
-## Código Final
-
-```tsx
-// Dashboard.tsx - linhas 93-95
-const { 
-  progress: onboardingProgress, 
-  completedCount, 
-  totalCount, 
-  isComplete: onboardingComplete,
-  isLoading: onboardingLoading  // Adicionar isLoading
-} = useOnboarding();
-
-// Dashboard.tsx - linhas 371-380
-<div className="p-6 space-y-6 bg-background min-h-screen">
-  {/* Onboarding Progress Card - Sempre visível após carregar */}
-  {!onboardingLoading && (
-    <OnboardingProgressCard
-      progress={onboardingProgress}
-      completedSteps={completedCount}
-      totalSteps={totalCount}
-    />
-  )}
-  ...
+-- Create updated policy including onboarding_meeting_url
+CREATE POLICY "Allow public read for public settings"
+  ON system_settings FOR SELECT
+  USING (
+    key IN (
+      'payment_provider', 
+      'payments_disabled', 
+      'manual_registration_enabled',
+      'onboarding_meeting_url'
+    )
+  );
 ```
 
 ---
 
-## Fluxo Corrigido
+## Detalhes Técnicos
+
+| Item | Valor |
+|------|-------|
+| Tabela | `public.system_settings` |
+| Política removida | `Allow public read for payment and registration settings` |
+| Nova política | `Allow public read for public settings` |
+| Key adicionada | `onboarding_meeting_url` |
+
+---
+
+## Por que é Seguro
+
+- A URL de agendamento é informação **pública** (como Calendly/Cal.com)
+- Não contém dados sensíveis
+- Apenas adiciona uma key específica à lista de leitura pública
+- Todas as outras configurações do sistema continuam protegidas
+
+---
+
+## Fluxo Após Correção
 
 ```text
-1. Usuário abre Dashboard
+1. Cliente miautest02@gmail.com abre /onboarding
    ↓
-2. isLoading = true → Card não aparece (sem flash)
+2. Hook useOnboarding busca meetingUrl de system_settings
    ↓
-3. Dados carregam → isLoading = false
+3. RLS PERMITE leitura (onboarding_meeting_url na lista pública)
    ↓
-4. progress < 100% → Card normal com barra de progresso
-   OU
-   progress = 100% → Card compacto "✓ Completo" + "Ver guia"
+4. meetingUrl retorna "https://suporte.miauchat.com.br/agendar/reuniao"
    ↓
-5. Card SEMPRE visível para o cliente acessar o guia
+5. Condição {meetingUrl && ...} é TRUE
+   ↓
+6. Seção "Seus Agendamentos" aparece normalmente
 ```
+
+---
+
+## Arquivo a Criar
+
+| Tipo | Descrição |
+|------|-----------|
+| Migração SQL | Atualizar política RLS para incluir `onboarding_meeting_url` |
 
 ---
 
 ## Resultado Esperado
 
-| Cenário | Antes | Depois |
+| Cliente | Antes | Depois |
 |---------|-------|--------|
-| Progresso < 100% | ✅ Card aparece | ✅ Card aparece |
-| Progresso = 100% | ❌ Card some | ✅ Card compacto aparece |
-| Durante loading | ⚡ Flash | ✅ Nada (aguarda carregar) |
-| Após atualizar página | ⚡ Pisca e some | ✅ Aparece estável |
+| Super admins (Jailson, Suporte) | Vê agendamento | Vê agendamento (sem mudança) |
+| Clientes normais (miautest02) | Não vê agendamento | Vê agendamento normalmente |
 
