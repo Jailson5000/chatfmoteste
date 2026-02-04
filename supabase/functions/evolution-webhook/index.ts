@@ -5248,50 +5248,78 @@ serve(async (req) => {
             });
             
             // Update conversations where contact_name is still the phone number or null
-            // This is a conditional update that won't overwrite manually edited names
-            const { data: updatedConversations, error: convError } = await supabaseClient
+            // Using two separate updates to avoid PostgREST .or() syntax issues with dynamic values
+            let conversationsUpdatedCount = 0;
+            
+            // Update where contact_name equals phone number
+            const { data: convByPhone, error: convPhoneErr } = await supabaseClient
               .from('conversations')
               .update({ contact_name: contactName })
               .eq('remote_jid', remoteJid)
               .eq('law_firm_id', lawFirmId)
-              .or(`contact_name.eq.${phoneNumber},contact_name.is.null`)
+              .eq('contact_name', phoneNumber)
               .select('id');
             
-            if (convError) {
-              logDebug('CONTACTS_UPDATE', 'Error updating conversations', { 
-                requestId, 
-                error: convError.message 
-              });
-            } else if (updatedConversations && updatedConversations.length > 0) {
+            if (!convPhoneErr && convByPhone) {
+              conversationsUpdatedCount += convByPhone.length;
+            }
+            
+            // Update where contact_name is null
+            const { data: convByNull, error: convNullErr } = await supabaseClient
+              .from('conversations')
+              .update({ contact_name: contactName })
+              .eq('remote_jid', remoteJid)
+              .eq('law_firm_id', lawFirmId)
+              .is('contact_name', null)
+              .select('id');
+            
+            if (!convNullErr && convByNull) {
+              conversationsUpdatedCount += convByNull.length;
+            }
+            
+            if (conversationsUpdatedCount > 0) {
               logDebug('CONTACTS_UPDATE', 'Updated conversation contact names', {
                 requestId,
-                count: updatedConversations.length,
-                conversationIds: updatedConversations.map(c => c.id),
+                count: conversationsUpdatedCount,
               });
             }
             
             // Also update clients that have matching phone number and name = phone or null
             // Uses flexible phone matching (last 8 digits) for format variations
+            // Using two separate updates for safety
             const phoneLastDigits = phoneNumber.slice(-8);
+            let clientsUpdatedCount = 0;
             
-            const { data: updatedClients, error: clientError } = await supabaseClient
+            // Update where name equals phone number
+            const { data: clientsByPhone, error: clientPhoneErr } = await supabaseClient
               .from('clients')
               .update({ name: contactName })
               .eq('law_firm_id', lawFirmId)
               .ilike('phone', `%${phoneLastDigits}`)
-              .or(`name.eq.${phoneNumber},name.is.null`)
+              .eq('name', phoneNumber)
               .select('id');
             
-            if (clientError) {
-              logDebug('CONTACTS_UPDATE', 'Error updating clients', { 
-                requestId, 
-                error: clientError.message 
-              });
-            } else if (updatedClients && updatedClients.length > 0) {
+            if (!clientPhoneErr && clientsByPhone) {
+              clientsUpdatedCount += clientsByPhone.length;
+            }
+            
+            // Update where name is null
+            const { data: clientsByNull, error: clientNullErr } = await supabaseClient
+              .from('clients')
+              .update({ name: contactName })
+              .eq('law_firm_id', lawFirmId)
+              .ilike('phone', `%${phoneLastDigits}`)
+              .is('name', null)
+              .select('id');
+            
+            if (!clientNullErr && clientsByNull) {
+              clientsUpdatedCount += clientsByNull.length;
+            }
+            
+            if (clientsUpdatedCount > 0) {
               logDebug('CONTACTS_UPDATE', 'Updated client names', {
                 requestId,
-                count: updatedClients.length,
-                clientIds: updatedClients.map(c => c.id),
+                count: clientsUpdatedCount,
               });
             }
             
@@ -5299,8 +5327,8 @@ serve(async (req) => {
               requestId,
               remoteJid,
               contactName,
-              conversationsUpdated: updatedConversations?.length || 0,
-              clientsUpdated: updatedClients?.length || 0,
+              conversationsUpdated: conversationsUpdatedCount,
+              clientsUpdated: clientsUpdatedCount,
             });
           }
         } catch (contactUpdateError) {
