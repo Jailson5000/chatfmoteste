@@ -56,7 +56,7 @@ export function MyPlanSettings() {
   const queryClient = useQueryClient();
   const { requests, createRequest, cancelRequest, pendingRequests } = useAddonRequests();
   const [showAddonsDialog, setShowAddonsDialog] = useState(false);
-  const [showInvoicesDialog, setShowInvoicesDialog] = useState(false);
+  
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
@@ -66,16 +66,6 @@ export function MyPlanSettings() {
     instances: 0,
   });
 
-  // Fetch Stripe invoices
-  const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useQuery({
-    queryKey: ["stripe-invoices", lawFirm?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("list-stripe-invoices");
-      if (error) throw error;
-      return data;
-    },
-    enabled: false, // Only fetch when dialog opens
-  });
 
   // Fetch company and plan data
   const { data: companyData, isLoading } = useQuery({
@@ -221,10 +211,6 @@ export function MyPlanSettings() {
     window.open(getWhatsAppSupportLink(message), "_blank");
   };
 
-  const handleOpenInvoices = () => {
-    setShowInvoicesDialog(true);
-    refetchInvoices();
-  };
 
   const handleOpenCustomerPortal = async () => {
     setIsPortalLoading(true);
@@ -436,10 +422,6 @@ export function MyPlanSettings() {
             </div>
           </CardContent>
           <CardFooter className="flex flex-wrap gap-2 pt-3 border-t">
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={handleOpenInvoices}>
-              <FileText className="h-3 w-3" />
-              Ver Faturas
-            </Button>
             <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={handleDownloadInvoice}>
               <Download className="h-3 w-3" />
               Demonstrativo
@@ -731,118 +713,6 @@ export function MyPlanSettings() {
         </DialogContent>
       </Dialog>
 
-      {/* Invoices Dialog */}
-      <Dialog open={showInvoicesDialog} onOpenChange={setShowInvoicesDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Faturas
-            </DialogTitle>
-            <DialogDescription>
-              Histórico de faturas da sua assinatura
-            </DialogDescription>
-          </DialogHeader>
-          
-          <ScrollArea className="max-h-[400px]">
-            {isLoadingInvoices ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : invoicesData?.invoices?.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                <p>Nenhuma fatura encontrada.</p>
-                <p className="text-xs mt-1">
-                  {invoicesData?.message || "Você ainda não possui uma assinatura ativa."}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {invoicesData?.invoices?.map((invoice: {
-                  id: string;
-                  value: number;
-                  statusLabel: string;
-                  statusColor: string;
-                  description: string;
-                  dueDate: string;
-                  paymentDate: string | null;
-                  invoiceUrl: string | null;
-                  bankSlipUrl: string | null;
-                  billingType: string;
-                }) => (
-                  <div key={invoice.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">
-                          {formatCurrency(invoice.value)}
-                        </span>
-                        <Badge 
-                          variant="outline" 
-                          className={`text-xs ${
-                            invoice.statusColor === 'green' ? 'bg-green-100 text-green-700 border-green-300' :
-                            invoice.statusColor === 'yellow' ? 'bg-yellow-100 text-yellow-700 border-yellow-300' :
-                            invoice.statusColor === 'red' ? 'bg-red-100 text-red-700 border-red-300' :
-                            'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {invoice.statusLabel}
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {invoice.paymentDate 
-                          ? `Pago em ${format(parseDateLocal(invoice.paymentDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}`
-                          : `Vence em ${format(parseDateLocal(invoice.dueDate) || new Date(), "dd/MM/yyyy", { locale: ptBR })}`
-                        }
-                        {invoice.billingType && ` • ${invoice.billingType}`}
-                      </div>
-                    </div>
-                    <div className="flex gap-1">
-                      {/* Botão para pagar - apenas faturas pendentes */}
-                      {invoice.statusLabel === 'Pendente' && invoice.invoiceUrl && (
-                        <Button 
-                          variant="default" 
-                          size="sm"
-                          className="h-8 gap-1.5 text-xs"
-                          onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
-                          title="Pagar fatura online"
-                        >
-                          <CreditCard className="h-3.5 w-3.5" />
-                          Pagar
-                        </Button>
-                      )}
-                      {/* Botão para baixar PDF da fatura */}
-                      {invoice.bankSlipUrl && (
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8"
-                          onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = invoice.bankSlipUrl!;
-                            link.download = `fatura-${invoice.id}.pdf`;
-                            link.target = '_blank';
-                            link.click();
-                          }}
-                          title="Baixar PDF"
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setShowInvoicesDialog(false)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
