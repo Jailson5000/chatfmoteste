@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.2";
+import { checkRateLimit, getClientIP, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +16,14 @@ const logStep = (step: string, details?: unknown) => {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Rate limit: 30 req/min per IP
+  const clientIP = getClientIP(req);
+  const { allowed, retryAfter } = checkRateLimit(clientIP, { maxRequests: 30, windowMs: 60000 });
+  if (!allowed) {
+    logStep("Rate limit exceeded", { ip: clientIP });
+    return rateLimitResponse(retryAfter, corsHeaders);
   }
 
   try {

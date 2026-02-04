@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { checkRateLimit, getClientIP, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +22,14 @@ interface RequestBody {
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Rate limit: 60 req/min per IP
+  const clientIP = getClientIP(req);
+  const { allowed, retryAfter } = checkRateLimit(clientIP, { maxRequests: 60, windowMs: 60000 });
+  if (!allowed) {
+    console.warn(`[agenda-pro-confirmation] Rate limit exceeded: ${clientIP}`);
+    return rateLimitResponse(retryAfter, corsHeaders);
   }
 
   try {
