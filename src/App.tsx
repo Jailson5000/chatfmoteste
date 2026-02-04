@@ -36,6 +36,7 @@ import AgendaPro from "./pages/AgendaPro";
 import PublicBooking from "./pages/PublicBooking";
 import ConfirmAppointment from "./pages/ConfirmAppointment";
 import Tasks from "./pages/Tasks";
+import Onboarding from "./pages/Onboarding";
 // Admin pages removed - functionality moved to Settings
 import {
   GlobalAdminAuth,
@@ -256,8 +257,20 @@ const App = () => (
               </ProtectedRoute>
             }
           >
-            <Route index element={<Tasks />} />
+          <Route index element={<Tasks />} />
           </Route>
+          
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Onboarding />} />
+          </Route>
+          
           {/* Redirect /admin to /settings for backwards compatibility */}
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
           <Route path="/admin/*" element={<Navigate to="/settings" replace />} />

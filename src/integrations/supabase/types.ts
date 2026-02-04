@@ -3945,6 +3945,94 @@ export type Database = {
         }
         Relationships: []
       }
+      onboarding_progress: {
+        Row: {
+          company_id: string
+          completed_at: string
+          completed_by: string | null
+          created_at: string | null
+          id: string
+          step_id: string
+        }
+        Insert: {
+          company_id: string
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string | null
+          id?: string
+          step_id: string
+        }
+        Update: {
+          company_id?: string
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string | null
+          id?: string
+          step_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_progress_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "onboarding_progress_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_usage_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "onboarding_progress_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "onboarding_steps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      onboarding_steps: {
+        Row: {
+          action_label: string | null
+          action_route: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          position: number
+          title: string
+          updated_at: string | null
+          youtube_id: string | null
+        }
+        Insert: {
+          action_label?: string | null
+          action_route?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          position?: number
+          title: string
+          updated_at?: string | null
+          youtube_id?: string | null
+        }
+        Update: {
+          action_label?: string | null
+          action_route?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          position?: number
+          title?: string
+          updated_at?: string | null
+          youtube_id?: string | null
+        }
+        Relationships: []
+      }
       plans: {
         Row: {
           billing_period: string
