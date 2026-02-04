@@ -1,151 +1,171 @@
 
-# Plano: Adicionar Opções de Pagamento (Cartão, PIX e Boleto) + Cupom de Desconto
+# Plano: Corrigir Liberação de Empresas + Erro de Cupom 100%
 
-## Problema Identificado
+## Problemas Identificados
 
-Atualmente, ao visualizar faturas pendentes, o usuário só vê a opção de boleto (PDF). A página de checkout do Stripe já suporta múltiplos métodos de pagamento, mas:
+### 1. Cupom 100% de Desconto - Erro no `verify-payment`
 
-1. O botão de pagamento direciona apenas para o PDF do boleto
-2. Não há configuração explícita de `payment_method_types` nas Edge Functions
-3. Cupons já estão habilitados (`allow_promotion_codes: true`), porém não há indicação visual disso para o usuário
+**Log do erro:**
+```
+[VERIFY-PAYMENT] Metadata: { planKey: "starter", companyName: undefined, adminEmail: undefined }
+```
 
-## Análise Técnica
+**Causa raiz:** Quando o cupom é de 100%, o Stripe pode marcar a sessão como `complete` mas o `payment_status` pode ser `no_payment_required` em vez de `paid`. A função `verify-payment` só aceita `payment_status === "paid"`.
 
-### Arquivos Envolvidos
+**Verificação adicional:** Os metadados `company_name` e `admin_email` não estão vindo porque o fluxo de checkout do landing page (`create-checkout-session`) não está sendo reconhecido, ou existe uma empresa já provisionada.
 
-| Arquivo | Situação Atual | Alteração Necessária |
-|---------|----------------|---------------------|
-| `supabase/functions/generate-payment-link/index.ts` | Sem `payment_method_types` explícito | Adicionar `payment_method_types: ['card', 'pix', 'boleto']` |
-| `supabase/functions/create-checkout-session/index.ts` | Sem `payment_method_types` explícito | Adicionar `payment_method_types: ['card', 'pix', 'boleto']` |
-| `src/components/settings/MyPlanSettings.tsx` | Botão genérico para boleto | Adicionar botão "Pagar Agora" que abre página Stripe com todas as opções |
+### 2. Liberação de Empresa Não Funciona
+
+**Causa raiz:** A função `unsuspendCompany` funciona corretamente (status mudou para `active` no DB), mas:
+
+1. O hook `useCompanyApproval` no cliente mantém cache do estado antigo
+2. O usuário precisa recarregar a página ou fazer novo login para o `ProtectedRoute` liberar acesso
 
 ---
 
 ## Solução Proposta
 
-### 1. Edge Function: generate-payment-link
+### Alteração 1: `verify-payment` - Suportar Cupom 100%
 
-Adicionar configuração explícita de métodos de pagamento na criação da sessão de checkout:
+**Arquivo:** `supabase/functions/verify-payment/index.ts`
+
+Adicionar verificação para sessões com cupom de 100% onde `payment_status === "no_payment_required"`:
 
 ```typescript
-const session = await stripe.checkout.sessions.create({
-  // ... existing config
-  payment_method_types: ['card', 'pix', 'boleto'],
-  allow_promotion_codes: true, // já existe - cupons funcionam
-  // ...
+// Linha 79-89 - ANTES:
+if (session.payment_status !== "paid") {
+  return new Response(...);
+}
+
+// DEPOIS:
+const isPaid = session.payment_status === "paid";
+const isNoPaymentRequired = session.payment_status === "no_payment_required" && session.status === "complete";
+
+if (!isPaid && !isNoPaymentRequired) {
+  return new Response(
+    JSON.stringify({ 
+      success: false, 
+      error: "Pagamento não confirmado",
+      status: session.payment_status,
+      session_status: session.status,
+    }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+  );
+}
+
+console.log("[VERIFY-PAYMENT] Payment verified:", { 
+  isPaid, 
+  isNoPaymentRequired, 
+  paymentStatus: session.payment_status 
 });
 ```
 
-### 2. Edge Function: create-checkout-session
+### Alteração 2: `verify-payment` - Melhorar extração de metadados
 
-Mesma alteração para garantir consistência em todos os fluxos de checkout:
+Garantir que os metadados sejam extraídos corretamente:
 
 ```typescript
-const session = await stripe.checkout.sessions.create({
-  // ... existing config
-  payment_method_types: ['card', 'pix', 'boleto'],
-  allow_promotion_codes: true, // já existe
-  // ...
+// Linha 93-98 - Melhorar extração
+const metadata = session.metadata || {};
+const planKey = metadata.plan || metadata.plan_name || "starter";
+const companyName = metadata.company_name;
+const adminName = metadata.admin_name;
+const adminEmail = metadata.admin_email || session.customer_email || session.customer_details?.email;
+const adminPhone = metadata.admin_phone;
+const document = metadata.document;
+```
+
+### Alteração 3: `useCompanyApproval` - Força refresh após liberação
+
+**Arquivo:** `src/hooks/useCompanyApproval.tsx`
+
+Adicionar um trigger para refresh quando o usuário tenta acessar:
+
+```typescript
+// Adicionar refetch interval quando status é suspended
+// Isso fará com que, ao ser liberado, o hook detecte automaticamente
+```
+
+### Alteração 4: `GlobalAdminCompanies` - Feedback visual após liberação
+
+**Arquivo:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
+
+Adicionar mensagem de orientação ao liberar empresa:
+
+```typescript
+// Na função unsuspendCompany.onSuccess:
+toast.success("Empresa liberada com sucesso!", {
+  description: "O cliente precisa atualizar a página ou fazer login novamente para acessar."
 });
 ```
 
-### 3. Frontend: MyPlanSettings.tsx - Diálogo de Faturas
+### Alteração 5: Adicionar botão "Liberar Empresa" mais visível
 
-**Situação Atual:**
-- Botão `FileText` → Nota fiscal
-- Botão `ExternalLink` → PDF do boleto
-
-**Nova Estrutura:**
-- Botão `FileText` → Nota fiscal (PDF)
-- Botão `CreditCard` → **Pagar Agora** (abre página Stripe com cartão/PIX/boleto) - apenas para faturas pendentes
-
-A URL `invoice.invoiceUrl` do Stripe (`hosted_invoice_url`) já direciona para uma página onde o cliente pode escolher entre cartão, PIX ou boleto.
-
-**Código atualizado:**
-
-```tsx
-<div className="flex gap-1">
-  {/* Botão para pagar - apenas faturas pendentes */}
-  {invoice.statusLabel === 'Pendente' && invoice.invoiceUrl && (
-    <Button 
-      variant="default" 
-      size="sm"
-      className="h-8 gap-1.5 text-xs"
-      onClick={() => window.open(invoice.invoiceUrl!, "_blank")}
-      title="Pagar com cartão, PIX ou boleto"
-    >
-      <CreditCard className="h-3.5 w-3.5" />
-      Pagar
-    </Button>
-  )}
-  {/* Botão para baixar PDF da fatura */}
-  {invoice.bankSlipUrl && (
-    <Button 
-      variant="ghost" 
-      size="icon" 
-      className="h-8 w-8"
-      onClick={() => window.open(invoice.bankSlipUrl!, "_blank")}
-      title="Baixar PDF"
-    >
-      <Download className="h-4 w-4" />
-    </Button>
-  )}
-</div>
-```
+Tornar a opção de "Liberar Empresa" mais proeminente quando a empresa está suspensa, adicionando um indicador visual na tabela e/ou um botão direto.
 
 ---
 
-## Fluxo do Usuário
+## Fluxo Corrigido - Cupom 100%
 
 ```text
-1. Usuário clica em "Ver Faturas"
+1. Usuário aplica cupom de 100% no checkout
    ↓
-2. Diálogo mostra lista de faturas
+2. Stripe completa sessão sem pagamento
+   - payment_status: "no_payment_required"
+   - session.status: "complete"
    ↓
-3. Fatura pendente exibe:
-   - Valor + Badge "Pendente"
-   - Data de vencimento
-   - [Botão PAGAR] [Botão PDF]
+3. verify-payment detecta condição especial
+   - Aceita (paid || no_payment_required + complete)
    ↓
-4. Ao clicar em "Pagar":
-   - Abre página do Stripe
-   - Usuário escolhe: Cartão / PIX / Boleto
-   - Campo de cupom disponível automaticamente
+4. Provisionamento da empresa ocorre normalmente
    ↓
-5. Pagamento processado → Webhook atualiza status
+5. Email enviado ao cliente com credenciais
 ```
 
 ---
 
-## Cupons de Desconto
+## Fluxo Corrigido - Liberação de Empresa
 
-O parâmetro `allow_promotion_codes: true` já está configurado em ambas as Edge Functions. Isso significa:
-
-- Na página de checkout do Stripe, aparece automaticamente um campo "Código promocional"
-- Cupons criados no dashboard do Stripe serão aplicados
-- Nenhuma mudança adicional necessária
+```text
+1. Admin Global clica em "Liberar Empresa"
+   ↓
+2. unsuspendCompany atualiza status para 'active'
+   ↓
+3. Toast informa: "Cliente precisa atualizar a página"
+   ↓
+4. Cliente atualiza página ou faz login
+   ↓
+5. useCompanyApproval busca status atualizado
+   ↓
+6. ProtectedRoute permite acesso
+```
 
 ---
 
-## Resumo das Alterações
+## Arquivos a Modificar
 
-| Arquivo | Tipo | Descrição |
-|---------|------|-----------|
-| `generate-payment-link/index.ts` | Edge Function | Adicionar `payment_method_types` |
-| `create-checkout-session/index.ts` | Edge Function | Adicionar `payment_method_types` |
-| `MyPlanSettings.tsx` | Frontend | Reorganizar botões no diálogo de faturas |
+| Arquivo | Alteração |
+|---------|-----------|
+| `supabase/functions/verify-payment/index.ts` | Aceitar `no_payment_required` + melhorar extração de metadados |
+| `src/hooks/useCompanyApproval.tsx` | (Opcional) Adicionar polling para detectar mudanças de status |
+| `src/hooks/useCompanies.tsx` | Melhorar mensagem de sucesso do unsuspendCompany |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar indicador visual para empresas suspensas |
 
 ---
 
 ## Benefícios
 
-1. **Flexibilidade**: Cliente escolhe entre cartão, PIX ou boleto
-2. **Cupons**: Funcionalidade já ativa, campo visível no checkout
-3. **UX Melhorada**: Botão "Pagar" destacado para faturas pendentes
-4. **Zero Regressão**: Apenas adiciona opções, não remove funcionalidades existentes
+1. **Cupom 100%**: Fluxo de provisionamento funciona mesmo sem pagamento real
+2. **Liberação**: Admin tem feedback claro sobre próximos passos
+3. **UX**: Cliente entende que precisa atualizar a página
+4. **Segurança**: Nenhuma alteração em RLS ou permissões
+5. **Retrocompatibilidade**: Fluxos existentes continuam funcionando
 
 ---
 
-## Consideração de Segurança
+## Considerações de Segurança
 
-Nenhuma alteração de RLS ou banco de dados necessária. As mudanças são apenas na camada de apresentação e configuração do Stripe Checkout.
+- A lógica de `no_payment_required` só é aceita quando `session.status === "complete"`
+- Isso garante que a sessão foi legitimamente concluída pelo Stripe
+- Os webhooks do Stripe continuam funcionando normalmente para atualizar status
+
