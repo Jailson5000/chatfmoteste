@@ -76,31 +76,40 @@ serve(async (req) => {
       expand: ["subscription", "customer"],
     });
 
-    console.log("[VERIFY-PAYMENT] Session retrieved:", session.id, "Status:", session.payment_status);
+    console.log("[VERIFY-PAYMENT] Session retrieved:", session.id, "Status:", session.payment_status, "Session status:", session.status);
 
-    if (session.payment_status !== "paid") {
+    // Accept both paid and no_payment_required (for 100% discount coupons)
+    const isPaid = session.payment_status === "paid";
+    const isNoPaymentRequired = session.payment_status === "no_payment_required" && session.status === "complete";
+
+    if (!isPaid && !isNoPaymentRequired) {
       return new Response(
         JSON.stringify({ 
           success: false, 
           error: "Pagamento não confirmado",
-          status: session.payment_status 
+          status: session.payment_status,
+          session_status: session.status,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
     }
 
-    // Extract metadata
+    console.log("[VERIFY-PAYMENT] Payment verified:", { isPaid, isNoPaymentRequired, paymentStatus: session.payment_status });
+
+    // Extract metadata with fallbacks for customer details
     const metadata = session.metadata || {};
-    const planKey = metadata.plan || "starter";
+    const planKey = metadata.plan || metadata.plan_name || "starter";
     const companyName = metadata.company_name;
     const adminName = metadata.admin_name;
-    const adminEmail = metadata.admin_email;
-    const adminPhone = metadata.admin_phone;
+    // Fallback to customer email if not in metadata
+    const adminEmail = metadata.admin_email || session.customer_email || (session.customer_details as any)?.email;
+    const adminPhone = metadata.admin_phone || (session.customer_details as any)?.phone;
     const document = metadata.document;
 
-    console.log("[VERIFY-PAYMENT] Metadata:", { planKey, companyName, adminEmail });
+    console.log("[VERIFY-PAYMENT] Metadata:", { planKey, companyName, adminEmail, source: metadata.admin_email ? "metadata" : "customer_details" });
 
     if (!companyName || !adminEmail) {
+      console.error("[VERIFY-PAYMENT] Missing required data:", { companyName, adminEmail, metadata, customer_email: session.customer_email });
       return new Response(
         JSON.stringify({ error: "Dados da empresa não encontrados na sessão" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
