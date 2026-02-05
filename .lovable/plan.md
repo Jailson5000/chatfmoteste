@@ -1,85 +1,59 @@
 
-# Plano de Correção: Layout de Preços da Landing Page
+
+# Plano de Correção: Destaque do Preço PRIME e Alinhamento do BASIC
 
 ## Problemas Identificados
 
-### 1. Cards de Planos Desalinhados
-- Existem 5 planos (PRIME, BASIC, STARTER, PROFESSIONAL, ENTERPRISE)
-- Grid atual é `lg:grid-cols-4` - não comporta 5 cards alinhados
-- ENTERPRISE está "caindo" para linha de baixo
+### 1. Preço do PRIME sem destaque
+- O preço R$ 97,90 precisa de um destaque visual para chamar atenção
+- Sugestão: adicionar uma borda ou background especial ao redor do preço
 
-### 2. Preço do PRIME mostrando "98" em vez de "97,90"
-- Função `formatPrice` (linha 102-104) usa `maximumFractionDigits: 0`
-- Isso arredonda R$ 97,90 → R$ 98
-- Precisa mostrar centavos quando existirem
-
-### 3. Seção "Consumo Adicional" Desalinhada
-- Grid é `lg:grid-cols-4` mas são 5 itens
-- O 5º item (Agente de IA adicional) cai para nova linha
+### 2. Desalinhamento no BASIC
+- A descrição do BASIC é mais longa que os outros planos
+- O `min-h-[40px]` na descrição não é suficiente para acomodar textos maiores
+- Isso empurra o preço para baixo, desalinhando com os outros cards
 
 ---
 
 ## Solução Proposta
 
-### Correção 1: Grid de 5 Colunas para os Planos
-```typescript
-// Linha 692: Mudar de grid-cols-4 para grid-cols-5
-<div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">
-```
-- Diminuir `gap-4` para `gap-3` para economizar espaço
-- Reduzir padding interno dos cards de `p-6` para `p-4`
+### Correção 1: Destaque no Preço do PRIME
+Adicionar lógica condicional para aplicar um estilo especial ao preço do plano PRIME:
 
-### Correção 2: Formatação de Preço com Decimais
 ```typescript
-// Linha 102-104: Atualizar formatPrice
-const formatPrice = (price: number): string => {
-  // Se o preço tem centavos, mostrar com 2 casas decimais
-  const hasDecimals = price % 1 !== 0;
-  return price.toLocaleString("pt-BR", { 
-    minimumFractionDigits: hasDecimals ? 2 : 0,
-    maximumFractionDigits: hasDecimals ? 2 : 0 
-  });
+// Linha 117-135: Adicionar flag isPrime
+const isPrime = plan.name.toUpperCase() === "PRIME";
+return {
+  ...
+  isPrime,
 };
-```
-- R$ 97,90 → "97,90" (mostra centavos)
-- R$ 197,00 → "197" (sem centavos)
-- R$ 1.297,00 → "1.297" (sem centavos)
 
-### Correção 3: Grid de 5 Colunas para Consumo Adicional
+// Linha 717-724: Adicionar classe especial ao container do preço
+<div className={`mt-3 mb-3 ${plan.isPrime ? "bg-red-500/20 rounded-lg px-2 py-1 inline-block border border-red-500/40" : ""}`}>
+```
+
+### Correção 2: Aumentar altura mínima da descrição
+Aumentar o `min-h` da descrição de `40px` para `56px` (ou mais) para garantir que todas as descrições caibam sem empurrar o preço:
+
 ```typescript
-// Linha 759: Mudar para grid-cols-5
-<div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+// Linha 713: Aumentar min-height
+<p className="text-xs text-white/40 mt-1 min-h-[56px]">
 ```
-- Acomodar os 5 itens em uma única linha
-
----
-
-## Ajustes de Estilo nos Cards
-
-Para os cards caberem em 5 colunas:
-
-| Propriedade | Antes | Depois |
-|-------------|-------|--------|
-| Gap do grid | `gap-4` | `gap-3` |
-| Padding dos cards | `p-6` | `p-4` |
-| Tamanho do preço | `text-3xl` | `text-2xl` |
-| Descrição min-height | `min-h-[32px]` | `min-h-[40px]` |
 
 ---
 
 ## Arquivos a Modificar
 
 - `src/pages/landing/LandingPage.tsx`
-  - Linha 102-104: Função `formatPrice`
-  - Linha 692: Grid dos planos
-  - Linha 696: Padding dos cards
-  - Linha 718: Tamanho do preço
-  - Linha 759: Grid do consumo adicional
+  - Linha 117-135: Adicionar flag `isPrime` ao objeto do plano
+  - Linha 713: Aumentar `min-h-[40px]` para `min-h-[56px]`
+  - Linha 717-724: Adicionar container com destaque para o preço do PRIME
 
 ---
 
 ## Resultado Esperado
 
-- 5 cards de planos alinhados na mesma linha em desktop
-- Preço do PRIME: "97,90" (correto)
-- 5 itens de consumo adicional alinhados na mesma linha
+- PRIME terá o preço R$ 97,90 destacado com fundo vermelho translúcido e borda
+- Todos os cards terão os preços alinhados na mesma altura
+- O texto mais longo do BASIC não causará mais desalinhamento
+
