@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { 
   X, 
   ZoomIn, 
@@ -35,6 +35,14 @@ export function ImageViewerDialog({
 
   const currentImage = images[currentIndex];
   const hasMultiple = images.length > 1;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-focus when dialog opens to capture keyboard events
+  useEffect(() => {
+    if (open && containerRef.current) {
+      containerRef.current.focus();
+    }
+  }, [open]);
 
   const handleZoomIn = useCallback(() => {
     setZoom(prev => Math.min(prev + 0.25, 3));
@@ -126,7 +134,8 @@ export function ImageViewerDialog({
 
   return (
     <div 
-      className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+      ref={containerRef}
+      className="fixed inset-0 z-50 bg-black/95 flex flex-col outline-none"
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="dialog"

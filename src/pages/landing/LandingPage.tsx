@@ -142,6 +142,7 @@ export function LandingPage() {
     { item: "Minuto adicional de áudio", price: "R$ 0,97 / minuto" },
     { item: "WhatsApp adicional", price: "R$ 57,90 / mês" },
     { item: "Atendente adicional", price: "R$ 29,90 / mês" },
+    { item: "Agente de IA adicional", price: "R$ 19,00 / mês" },
   ];
 
   const faqs = [

@@ -9,6 +9,10 @@ const corsHeaders = {
 
 // Map plan names to Stripe price IDs (Production)
 const PLAN_PRICES = {
+  prime: {
+    monthly: "price_1SxTFEPssGNUXxgnjmVW3vRd",
+    yearly: "price_1SxTGcPssGNUXxgnpCeUC2OV"
+  },
   basic: {
     monthly: "price_1SwDgnPssGNUXxgnH6kyepNO",
     yearly: "price_1SwAujPssGNUXxgnEFJL0T6l"
@@ -22,8 +26,8 @@ const PLAN_PRICES = {
     yearly: "price_1SwAyyPssGNUXxgnNEbvcWuw"
   },
   enterprise: {
-    monthly: "price_1SwAzXPssGNUXxgnfHklx8Qx",
-    yearly: "price_1SwAzuPssGNUXxgn3SbEka4n"
+    monthly: "price_1SxTGxPssGNUXxgnSxQdCPRA",
+    yearly: "price_1SxTHhPssGNUXxgnYdCD8656"
   }
 };
 
