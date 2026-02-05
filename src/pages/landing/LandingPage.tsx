@@ -700,23 +700,23 @@ export function LandingPage() {
               <div
                 key={plan.name}
                 className={`relative p-4 rounded-2xl border transition-all duration-300 flex flex-col ${
-                  plan.popular
+                  plan.popular || plan.isPrime
                     ? "border-red-500/40 bg-gradient-to-b from-red-500/10 to-transparent shadow-xl shadow-red-500/5"
                     : "border-white/[0.06] bg-white/[0.02] hover:border-white/10"
                 }`}
               >
                 {plan.popular && (
-                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
                     ⭐ Mais Escolhido
                   </div>
                 )}
                 <div>
                   <p className="text-sm font-bold tracking-wide">{plan.name}</p>
-                <p className="text-xs text-white/40 mt-1 min-h-[56px]">
+                <p className="text-xs text-white/40 mt-1 min-h-[72px]">
                     {plan.description}
                   </p>
                 </div>
-                <div className={`mt-3 mb-3 ${plan.isPrime ? "bg-red-500/20 rounded-lg px-2 py-1 inline-block border border-red-500/40" : ""}`}>
+                <div className="mt-3 mb-3">
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
