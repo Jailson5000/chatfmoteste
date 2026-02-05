@@ -117,6 +117,7 @@ export function LandingPage() {
     return dbPlans.map((plan) => {
       const isEnterprise = plan.name.toUpperCase() === "ENTERPRISE";
       const isProfessional = plan.name.toUpperCase() === "PROFESSIONAL";
+      const isPrime = plan.name.toUpperCase() === "PRIME";
       
       return {
         name: plan.name.toUpperCase(),
@@ -131,6 +132,7 @@ export function LandingPage() {
         popular: isProfessional,
         isEnterprise,
         startingFrom: isEnterprise,
+        isPrime,
       };
     });
   }, [dbPlans]);
@@ -710,11 +712,11 @@ export function LandingPage() {
                 )}
                 <div>
                   <p className="text-sm font-bold tracking-wide">{plan.name}</p>
-                  <p className="text-xs text-white/40 mt-1 min-h-[40px]">
+                <p className="text-xs text-white/40 mt-1 min-h-[56px]">
                     {plan.description}
                   </p>
                 </div>
-                <div className="mt-3 mb-3">
+                <div className={`mt-3 mb-3 ${plan.isPrime ? "bg-red-500/20 rounded-lg px-2 py-1 inline-block border border-red-500/40" : ""}`}>
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
