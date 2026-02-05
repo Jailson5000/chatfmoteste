@@ -12,6 +12,8 @@ export const ADDITIONAL_PRICING = {
   aiConversation: 0.27,
   // Preço por minuto adicional de áudio TTS
   ttsMinute: 0.97,
+  // Preço por agente IA adicional (mensal)
+  aiAgent: 19.00,
 } as const;
 
 export interface PlanLimits {

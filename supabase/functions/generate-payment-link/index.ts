@@ -16,6 +16,10 @@ const corsHeaders = {
 
 // Price IDs from Stripe Dashboard (LIVE MODE)
 const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
+  "PRIME": {
+    monthly: "price_1SxTFEPssGNUXxgnjmVW3vRd", // R$ 97,90
+    yearly: "price_1SxTGcPssGNUXxgnpCeUC2OV",  // R$ 1.076,90
+  },
   "BASIC": {
     monthly: "price_1SwDgnPssGNUXxgnH6kyepNO", // R$ 197 recurring monthly
     yearly: "price_1SwAujPssGNUXxgnEFJL0T6l",  // R$ 2.167
@@ -29,8 +33,8 @@ const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
     yearly: "price_1SwAyyPssGNUXxgnNEbvcWuw",  // R$ 9.867
   },
   "ENTERPRISE": {
-    monthly: "price_1SwAzXPssGNUXxgnfHklx8Qx", // R$ 1.697
-    yearly: "price_1SwAzuPssGNUXxgn3SbEka4n",  // R$ 18.667
+    monthly: "price_1SxTGxPssGNUXxgnSxQdCPRA", // R$ 1.297
+    yearly: "price_1SxTHhPssGNUXxgnYdCD8656",  // R$ 14.267
   },
 };
 
