@@ -17,7 +17,7 @@ const corsHeaders = {
 // Price IDs from Stripe Dashboard (LIVE MODE)
 const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
   "PRIME": {
-    monthly: "price_1SxTFEPssGNUXxgnjmVW3vRd", // R$ 97,90
+    monthly: "price_1SxTPmPssGNUXxgnznft9KJf", // R$ 97,90
     yearly: "price_1SxTGcPssGNUXxgnpCeUC2OV",  // R$ 1.076,90
   },
   "BASIC": {
