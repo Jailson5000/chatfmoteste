@@ -100,7 +100,11 @@ export function LandingPage() {
 
   // Format price for display (e.g., 1697 -> "1.697")
   const formatPrice = (price: number): string => {
-    return price.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    const hasDecimals = price % 1 !== 0;
+    return price.toLocaleString("pt-BR", { 
+      minimumFractionDigits: hasDecimals ? 2 : 0,
+      maximumFractionDigits: hasDecimals ? 2 : 0 
+    });
   };
 
   // Transform database plans into display format
@@ -689,11 +693,11 @@ export function LandingPage() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">
             {plans.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative p-6 rounded-2xl border transition-all duration-300 flex flex-col ${
+                className={`relative p-4 rounded-2xl border transition-all duration-300 flex flex-col ${
                   plan.popular
                     ? "border-red-500/40 bg-gradient-to-b from-red-500/10 to-transparent shadow-xl shadow-red-500/5"
                     : "border-white/[0.06] bg-white/[0.02] hover:border-white/10"
@@ -705,18 +709,18 @@ export function LandingPage() {
                   </div>
                 )}
                 <div>
-                  <p className="text-base font-bold tracking-wide">{plan.name}</p>
-                  <p className="text-xs text-white/40 mt-1 min-h-[32px]">
+                  <p className="text-sm font-bold tracking-wide">{plan.name}</p>
+                  <p className="text-xs text-white/40 mt-1 min-h-[40px]">
                     {plan.description}
                   </p>
                 </div>
-                <div className="mt-4 mb-4">
+                <div className="mt-3 mb-3">
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
                   <span className="text-white/40 text-xs">R$</span>
-                  <span className="text-3xl font-bold">{plan.price}</span>
-                  <span className="text-white/40 text-sm"> / mês</span>
+                  <span className="text-2xl font-bold">{plan.price}</span>
+                  <span className="text-white/40 text-xs"> / mês</span>
                 </div>
                 <ul className="space-y-2 mb-6 flex-1">
                   {plan.items.map((item) => (
@@ -756,10 +760,10 @@ export function LandingPage() {
                 Se sua operação crescer, você continua usando a plataforma normalmente. O consumo adicional é cobrado apenas pelo que for excedido.
               </p>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
               {additionalPricing.map((item, i) => (
-                <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
-                  <span className="text-sm text-white/70">{item.item}</span>
+                <div key={i} className="flex flex-col gap-1 p-3 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+                  <span className="text-xs text-white/70">{item.item}</span>
                   <span className="text-sm font-semibold text-red-400">{item.price}</span>
                 </div>
               ))}
