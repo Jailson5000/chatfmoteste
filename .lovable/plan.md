@@ -1,146 +1,179 @@
 
 
-# Plano: Corrigir Agendamento via IA - Horários e Notificações
+# Plano: Criar Mensagens Agendadas (Lembretes 1 e 2) via IA
 
-## Problemas Identificados
+## Problema Identificado
 
-### Problema 1: Notificações não são enviadas ao cliente
-**Causa**: O código em `ai-chat/index.ts` (linha 1401) está passando `type: "confirmation"`, mas a função `agenda-pro-notification` só aceita os tipos: `created`, `reminder`, `cancelled`, `updated`, `no_show`.
+Quando a IA cria um agendamento, **não são criadas as mensagens agendadas de lembrete** na tabela `agenda_pro_scheduled_messages`. 
 
-```typescript
-// ATUAL - ERRADO (linha 1401)
-body: JSON.stringify({
-  appointment_id: appointment.id,
-  type: "confirmation"  // ❌ Tipo inválido
-}),
+O código atual do `ai-chat/index.ts`:
+1. Cria o agendamento na tabela `agenda_pro_appointments`
+2. Chama a função `agenda-pro-notification` com `type: "created"` (notificação imediata)
+3. ❌ **NÃO cria as mensagens agendadas de lembrete**
 
-// CORRETO
-body: JSON.stringify({
-  appointment_id: appointment.id,
-  type: "created"  // ✅ Tipo correto
-}),
-```
-
-### Problema 2: Horários não respeitam a configuração da empresa
-**Causa**: A função `get_available_slots` busca horários diretamente da tabela `agenda_pro_working_hours` (configuração individual dos profissionais), mas **ignora** as configurações padrão de `agenda_pro_settings` (10:00-16:30).
-
-**Situação atual no banco**:
-- `agenda_pro_settings`: `default_start_time: 10:00`, `default_end_time: 16:30`, sábado: `08:00-12:00`
-- `agenda_pro_working_hours` (profissionais): `08:00-18:00`
-
-A IA usa os horários dos profissionais (08:00-18:00) ao invés de respeitar o `respect_business_hours` das configurações.
+Enquanto o código do frontend (`useAgendaProAppointments.tsx` e `PublicBooking.tsx`):
+1. Cria o agendamento
+2. ✅ **Cria as mensagens agendadas** (lembrete 1, lembrete 2, pre_message)
+3. Chama a notificação de confirmação
 
 ---
 
-## Correções Propostas
+## Solução
 
-### Correção 1: Tipo de notificação (CRÍTICO)
-**Arquivo**: `supabase/functions/ai-chat/index.ts`
-**Linha**: 1401
+Adicionar a lógica de criação de mensagens agendadas no `ai-chat/index.ts`, logo após a criação do agendamento e antes de chamar a notificação.
 
-Alterar `type: "confirmation"` para `type: "created"`.
+### Mensagens a serem criadas:
 
-### Correção 2: Respeitar horário comercial nas consultas de disponibilidade
-**Arquivo**: `supabase/functions/ai-chat/index.ts`
-**Local**: Função `get_available_slots` (linhas 1100-1215)
-
-Modificar para:
-1. Buscar as configurações da empresa (`agenda_pro_settings`)
-2. Se `respect_business_hours = true`, filtrar slots para respeitar `default_start_time` e `default_end_time`
-3. Verificar se sábado/domingo estão habilitados antes de mostrar horários
+| Tipo | Quando é enviada | Condição |
+|------|------------------|----------|
+| `reminder` | X horas antes (configurável, padrão 24h) | Sempre (se `scheduled_at > now`) |
+| `reminder_2` | X minutos antes (configurável) | Se `reminder_2_enabled = true` |
+| `pre_message` | X horas antes | Se serviço tem `pre_message_enabled = true` |
 
 ---
 
-## Detalhes Técnicos das Correções
+## Alterações no Arquivo
 
-### Correção 1 - Alterar tipo de notificação
+### `supabase/functions/ai-chat/index.ts`
+
+Adicionar após a linha que cria o agendamento (após linha ~1444) e antes de chamar a notificação:
+
 ```typescript
-// Linha 1399-1402 de ai-chat/index.ts
-body: JSON.stringify({
-  appointment_id: appointment.id,
-  type: "created"  // Alterado de "confirmation" para "created"
-}),
+// Create scheduled reminder messages
+try {
+  const startTime = new Date(appointment.start_time || startTime.toISOString());
+  const now = new Date();
+  
+  // Get settings for reminder configuration
+  const { data: reminderSettings } = await supabase
+    .from("agenda_pro_settings")
+    .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit, reminder_message_template, business_name")
+    .eq("law_firm_id", lawFirmId)
+    .single();
+  
+  const scheduledMessages: any[] = [];
+  
+  // Helper function to format message template
+  const formatReminderMessage = (template: string | null, defaultMsg: string): string => {
+    if (!template) return defaultMsg;
+    const dateStr = startTime.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const timeStr = startTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+    
+    return template
+      .replace(/{client_name}/g, client_name)
+      .replace(/{service_name}/g, service.name)
+      .replace(/{professional_name}/g, professionalData?.name || "Profissional")
+      .replace(/{date}/g, dateStr)
+      .replace(/{time}/g, timeStr)
+      .replace(/{business_name}/g, reminderSettings?.business_name || companyName || "");
+  };
+  
+  const defaultReminderTemplate = "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!";
+  
+  // First reminder (configurable hours, default 24h)
+  const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
+  const reminderTime = new Date(startTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+  
+  if (reminderTime > now) {
+    scheduledMessages.push({
+      law_firm_id: lawFirmId,
+      appointment_id: appointment.id,
+      client_id: agendaProClientId,
+      message_type: "reminder",
+      message_content: formatReminderMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
+      scheduled_at: reminderTime.toISOString(),
+      channel: "whatsapp",
+      status: "pending",
+    });
+  }
+
+  // Second reminder (configurable)
+  if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
+    const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
+      ? reminderSettings.reminder_2_value * 60 
+      : reminderSettings.reminder_2_value;
+    const reminder2Time = new Date(startTime.getTime() - reminder2Minutes * 60 * 1000);
+    
+    if (reminder2Time > now) {
+      scheduledMessages.push({
+        law_firm_id: lawFirmId,
+        appointment_id: appointment.id,
+        client_id: agendaProClientId,
+        message_type: "reminder_2",
+        message_content: formatReminderMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
+        scheduled_at: reminder2Time.toISOString(),
+        channel: "whatsapp",
+        status: "pending",
+      });
+    }
+  }
+
+  // Pre-message if service has it enabled
+  if (service.pre_message_enabled && service.pre_message_hours_before) {
+    const preMessageTime = new Date(startTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
+    
+    if (preMessageTime > now) {
+      scheduledMessages.push({
+        law_firm_id: lawFirmId,
+        appointment_id: appointment.id,
+        client_id: agendaProClientId,
+        message_type: "pre_message",
+        message_content: service.pre_message_text || "Mensagem pré-atendimento",
+        scheduled_at: preMessageTime.toISOString(),
+        channel: "whatsapp",
+        status: "pending",
+      });
+    }
+  }
+
+  // Insert all scheduled messages at once
+  if (scheduledMessages.length > 0) {
+    const { error: msgError } = await supabase
+      .from("agenda_pro_scheduled_messages")
+      .insert(scheduledMessages);
+    
+    if (msgError) {
+      console.error("[Scheduling] Error creating scheduled messages:", msgError);
+    } else {
+      console.log(`[Scheduling] Created ${scheduledMessages.length} scheduled messages for appointment ${appointment.id}`);
+    }
+  }
+} catch (scheduledMsgError) {
+  console.error("[Scheduling] Error in scheduled messages creation:", scheduledMsgError);
+}
 ```
 
-### Correção 2 - Respeitar horário comercial
-Adicionar após linha 1087 (busca do dayOfWeek):
+Também preciso atualizar a query do serviço para incluir os campos de pre_message:
 
 ```typescript
-// Get business settings to respect business hours
-const { data: businessSettings } = await supabase
-  .from("agenda_pro_settings")
-  .select("default_start_time, default_end_time, respect_business_hours, saturday_enabled, saturday_start_time, saturday_end_time, sunday_enabled, sunday_start_time, sunday_end_time")
-  .eq("law_firm_id", lawFirmId)
-  .maybeSingle();
-
-// Check if day is enabled based on settings
-if (dayOfWeek === 0 && (!businessSettings?.sunday_enabled)) {
-  return JSON.stringify({
-    success: true,
-    message: `Não atendemos aos domingos.`,
-    available_slots: []
-  });
-}
-if (dayOfWeek === 6 && (!businessSettings?.saturday_enabled)) {
-  return JSON.stringify({
-    success: true,
-    message: `Não atendemos aos sábados.`,
-    available_slots: []
-  });
-}
-
-// Determine effective business hours for this day
-let effectiveStartTime = "08:00:00";
-let effectiveEndTime = "18:00:00";
-
-if (businessSettings?.respect_business_hours) {
-  if (dayOfWeek === 6) {
-    effectiveStartTime = businessSettings.saturday_start_time || "08:00:00";
-    effectiveEndTime = businessSettings.saturday_end_time || "12:00:00";
-  } else if (dayOfWeek === 0) {
-    effectiveStartTime = businessSettings.sunday_start_time || "08:00:00";
-    effectiveEndTime = businessSettings.sunday_end_time || "12:00:00";
-  } else {
-    effectiveStartTime = businessSettings.default_start_time || "08:00:00";
-    effectiveEndTime = businessSettings.default_end_time || "18:00:00";
-  }
-}
-```
-
-E modificar o loop de geração de slots (linha 1119-1132) para filtrar pelos horários comerciais:
-
-```typescript
-for (const wh of workingHours) {
-  // Apply business hours filter if respect_business_hours is enabled
-  let whStartTime = wh.start_time;
-  let whEndTime = wh.end_time;
-  
-  if (businessSettings?.respect_business_hours) {
-    // Use the later of professional start or business start
-    if (whStartTime < effectiveStartTime) {
-      whStartTime = effectiveStartTime;
-    }
-    // Use the earlier of professional end or business end
-    if (whEndTime > effectiveEndTime) {
-      whEndTime = effectiveEndTime;
-    }
-  }
-  
-  const startParts = whStartTime.split(":");
-  const endParts = whEndTime.split(":");
-  // ... resto do código
-}
+// Na busca do serviço (linha ~1270), adicionar campos:
+.select("id, name, duration_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
 ```
 
 ---
 
 ## Resumo das Alterações
 
-| Arquivo | Alteração | Impacto |
-|---------|-----------|---------|
-| `ai-chat/index.ts` linha 1401 | `"confirmation"` → `"created"` | Notificações WhatsApp funcionarão |
-| `ai-chat/index.ts` linhas 1087+ | Buscar e aplicar `agenda_pro_settings` | Horários corretos (10:00-16:30) |
-| `ai-chat/index.ts` loop 1119 | Filtrar slots por horário comercial | Só mostra horários disponíveis reais |
+| Local | Alteração |
+|-------|-----------|
+| `ai-chat/index.ts` linha ~1270 | Adicionar campos `pre_message_*` na busca do serviço |
+| `ai-chat/index.ts` linhas ~1445-1510 | Adicionar lógica de criação das mensagens agendadas |
+
+---
+
+## Fluxo Após Correção
+
+```
+IA recebe pedido de agendamento
+       ↓
+Cria agendamento na tabela agenda_pro_appointments
+       ↓
+✅ Cria mensagens agendadas (reminder, reminder_2, pre_message)
+       ↓
+Chama agenda-pro-notification (confirmação imediata)
+       ↓
+Cliente recebe confirmação agora + lembretes automáticos depois
+```
 
 ---
 
@@ -148,18 +181,18 @@ for (const wh of workingHours) {
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Horários mostrados | 08:00 às 18:00 | 10:00 às 16:30 (dias de semana) |
-| Sábado | 08:00 às 18:00 | 08:00 às 12:00 |
-| Domingo | Mostra horários | "Não atendemos aos domingos" |
-| Notificação WhatsApp | Não enviada | Enviada ao cliente |
-| Notificação profissional | Não enviada | Enviada (se configurado) |
+| Agendamento via IA | Sem lembretes | ✅ Lembrete 1 (24h antes) |
+| | | ✅ Lembrete 2 (55min antes, se configurado) |
+| | | ✅ Pre-message (se serviço tiver) |
+| Mensagens na aba "Mensagens Agendadas" | Não aparece | ✅ Aparece |
 
 ---
 
 ## Risco de Quebra
 
-**Baixo**
-- Correção 1: Mudança simples de string
-- Correção 2: Adiciona filtro de horário sem alterar lógica existente
-- Não afeta outros fluxos de agendamento (manual, público)
+**Muito Baixo**
+- Código adicional, não altera lógica existente
+- Mesma estrutura já usada no frontend
+- Fallbacks para configurações padrão
+- Erros são capturados e logados sem interromper o fluxo
 
