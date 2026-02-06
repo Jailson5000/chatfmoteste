@@ -1,204 +1,156 @@
 
-# Plano: Forçar IA a Mostrar TODOS os Serviços
+# Plano: Corrigir Repetição de Serviços e Erro de Data
 
-## Problema Identificado
+## Problemas Identificados
 
-A query do banco retorna corretamente **4 serviços**:
-- Consulta (30 min, R$ 150)
-- Reunião de Prompt (60 min)
-- Atendimento Inicial (45 min)
-- Head Spa (60 min, R$ 150)
+### Problema 1: IA Lista Serviços Múltiplas Vezes
+Na imagem:
+- 16:44 → IA lista os 4 serviços
+- 16:46 → IA lista os 4 serviços **novamente** (desnecessário)
 
-Mas a IA está decidindo por conta própria mostrar apenas **2 ou 3** serviços ao cliente. Isso acontece porque:
-1. A IA tenta ser "concisa" e resume a lista
-2. O hint atual é tratado como sugestão, não como obrigação
-3. Não há instrução no sistema que force a IA a não omitir itens
+**Causa**: Não há instrução para evitar repetir a lista se já foi apresentada na conversa.
 
-## Análise Técnica
+### Problema 2: Data Errada no Agendamento
+- Cliente pediu: **quarta-feira**
+- IA confirmou: **quarta-feira, 11/02** às 13:00
+- Mas agendou: **quinta-feira, 12/02** às 13:00
 
-O fluxo atual:
-```
-Cliente: "Quais serviços vocês têm?"
-         ↓
-IA chama list_services()
-         ↓
-Função retorna JSON com 4 serviços + hint
-         ↓
-IA processa e decide mostrar apenas 2-3 ❌
-```
+**Causa Raiz**: A IA não recebe a data atual de Brasília no prompt de agendamento. Isso faz com que ela calcule as datas incorretamente (offset de 1 dia). Hoje é **06/02/2026** (quinta-feira), então:
+- Próxima quarta-feira = **11/02/2026** ✓
+- Mas a IA passou **12/02** para a função
 
-O problema é que o **hint** está no nível de "sugestão" e a IA pode ignorar.
+O problema está na **instrução da IA**, não na função em si. A função `book_appointment` recebe a data que a IA passa - e a IA está passando a data errada porque não sabe qual é a data atual.
 
-## Solução Proposta
+---
 
-### Correção 1: Tornar o retorno da função `list_services` mais enfático
+## Soluções Propostas
 
-Mudar a estrutura do retorno para deixar absolutamente claro que a IA **NÃO PODE** omitir nenhum serviço:
+### Correção 1: Evitar Repetir Lista de Serviços
+
+Adicionar regra nas instruções de agendamento para não repetir a lista se já foi apresentada:
 
 ```typescript
-return JSON.stringify({
-  success: true,
-  total_count: services.length,
-  message: `ATENÇÃO: Existem exatamente ${services.length} serviço(s). Você DEVE apresentar TODOS ao cliente, sem omitir nenhum.`,
-  services: formattedServices,
-  instruction: `OBRIGATÓRIO: Liste cada um dos ${services.length} serviços abaixo para o cliente. NÃO resuma, NÃO agrupe, NÃO omita. O cliente PRECISA conhecer todas as opções disponíveis.`,
-  services_list_for_response: formattedServices.map(s => 
-    `• ${s.name} - ${s.duration}${s.price !== "Sob consulta" ? ` - ${s.price}` : ""}`
-  ).join("\n")
-});
+### REGRAS CRÍTICAS DE AGENDAMENTO ###
+...
+5. Não repita a lista de serviços se já a apresentou na conversa atual. Se o cliente já conhece os serviços, prossiga diretamente com o agendamento.
 ```
 
-### Correção 2: Adicionar o campo `services_list_for_response` 
+### Correção 2: Injetar Data Atual no Prompt de Agendamento
 
-Incluir uma string pré-formatada que a IA pode copiar diretamente, reduzindo a chance de ela decidir "resumir":
-
-```typescript
-services_list_for_response: formattedServices.map(s => {
-  const priceText = s.price !== "Sob consulta" ? ` - ${s.price}` : "";
-  const descText = s.description ? ` (${s.description})` : "";
-  return `• ${s.name}${descText} - ${s.duration}${priceText}`;
-}).join("\n")
-```
-
-### Correção 3: Melhorar a descrição do tool `list_services`
-
-Atualizar a descrição para deixar claro que a IA **NUNCA** deve omitir serviços:
-
-```typescript
-description: "Lista todos os serviços disponíveis para agendamento. REGRA CRÍTICA: Você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados ao cliente, sem omitir nenhum. O cliente tem o direito de conhecer todas as opções. Use o campo 'services_list_for_response' para copiar a lista formatada."
-```
-
-### Correção 4: Adicionar instrução de sistema adicional para scheduling agents
-
-Injetar uma instrução adicional no prompt quando o agente é de agendamento:
+Modificar a seção `isSchedulingAgent` para incluir **explicitamente** a data atual do Brasil:
 
 ```typescript
 if (isSchedulingAgent) {
-  systemPrompt += `\n\n### REGRAS DE AGENDAMENTO ###
-- Ao listar serviços, você DEVE apresentar TODOS os serviços retornados, sem exceção.
-- NUNCA resuma ou agrupe serviços. Cada serviço deve ser mencionado individualmente.
-- Use o campo 'services_list_for_response' quando disponível para garantir que nenhum serviço seja omitido.`;
-}
-```
-
-## Resumo das Alterações
-
-| Arquivo | Local | Alteração |
-|---------|-------|-----------|
-| `ai-chat/index.ts` | Tool description `list_services` (~linha 367) | Atualizar descrição com regra crítica |
-| `ai-chat/index.ts` | Retorno do `list_services` (~linha 1024-1040) | Adicionar `total_count`, `instruction`, `services_list_for_response` |
-| `ai-chat/index.ts` | System prompt (~linha 3210-3216) | Adicionar regras de agendamento para scheduling agents |
-
-## Fluxo Após Correção
-
-```
-Cliente: "Quais serviços vocês têm?"
-         ↓
-IA chama list_services()
-         ↓
-Função retorna:
-{
-  total_count: 4,
-  message: "ATENÇÃO: Existem exatamente 4 serviços...",
-  instruction: "OBRIGATÓRIO: Liste cada um...",
-  services: [...],
-  services_list_for_response: "• Consulta - 30 min - R$ 150,00\n• Reunião de Prompt - 60 min\n• Atendimento Inicial - 45 min\n• Head Spa - 60 min - R$ 150,00"
-}
-         ↓
-IA vê instrução OBRIGATÓRIA + lista pronta
-         ↓
-IA responde: "Temos 4 serviços disponíveis:
-• Consulta - 30 min - R$ 150,00
-• Reunião de Prompt - 60 min
-• Atendimento Inicial - 45 min
-• Head Spa - 60 min - R$ 150,00"
-```
-
-## Resultado Esperado
-
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| 4 serviços no banco | IA mostra 2-3 | ✅ IA mostra 4 |
-| Cliente pergunta serviços | Resposta incompleta | ✅ Lista completa formatada |
-| Debug | Sem log detalhado | ✅ Log com total e nomes |
-
-## Risco de Quebra
-
-**Muito Baixo**
-- Apenas adiciona campos extras ao retorno JSON
-- A estrutura existente (`success`, `services`) permanece igual
-- A instrução adicional no system prompt não conflita com prompts existentes
-- Código de fallback não é afetado
-
-## Detalhes Técnicos
-
-A alteração principal será no case `list_services`:
-
-```typescript
-case "list_services": {
-  const { data: services, error } = await supabase
-    .from("agenda_pro_services")
-    .select("id, name, description, duration_minutes, price, color")
-    .eq("law_firm_id", lawFirmId)
-    .eq("is_active", true)
-    .eq("is_public", true)
-    .order("position", { ascending: true });
-
-  if (error) {
-    console.error("[Scheduling] Error listing services:", error);
-    return JSON.stringify({ success: false, error: "Erro ao buscar serviços" });
-  }
-
-  if (!services || services.length === 0) {
-    return JSON.stringify({
-      success: true,
-      total_count: 0,
-      message: "Nenhum serviço disponível para agendamento",
-      services: []
-    });
-  }
-
-  const formattedServices = services.map((s: any) => ({
-    service_id: s.id,
-    name: s.name,
-    description: s.description || "",
-    duration: `${s.duration_minutes} minutos`,
-    price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
-  }));
-
-  // Pre-formatted list for AI to copy directly
-  const servicesListForResponse = formattedServices.map(s => {
-    const priceText = s.price !== "Sob consulta" ? ` - ${s.price}` : "";
-    const descText = s.description ? ` (${s.description})` : "";
-    return `• ${s.name}${descText} - ${s.duration}${priceText}`;
-  }).join("\n");
-
-  console.log(`[list_services] Returning ${services.length} services: ${formattedServices.map(s => s.name).join(", ")}`);
-
-  return JSON.stringify({
-    success: true,
-    total_count: services.length,
-    message: `Encontrados ${services.length} serviço(s) disponível(is). Apresente TODOS ao cliente.`,
-    instruction: `OBRIGATÓRIO: Apresente cada um dos ${services.length} serviços listados abaixo. NÃO omita nenhum. O cliente deve conhecer TODAS as opções.`,
-    services: formattedServices,
-    services_list_for_response: servicesListForResponse,
-    hint: "Use o campo services_list_for_response para mostrar a lista formatada ao cliente."
+  // Get current date/time in Brazil timezone
+  const nowBrazil = new Date();
+  const brazilDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    weekday: "long",
+    day: "2-digit", 
+    month: "2-digit",
+    year: "numeric"
   });
-}
-```
-
-E a instrução adicional no system prompt para scheduling agents:
-
-```typescript
-// Após linha 3216, antes do processamento de mentions
-if (isSchedulingAgent) {
+  const brazilTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  
+  const currentDateBrazil = brazilDateFormatter.format(nowBrazil);
+  const currentTimeBrazil = brazilTimeFormatter.format(nowBrazil);
+  
+  // Calculate weekday names for reference
+  const weekdayCalc = new Intl.DateTimeFormat("en-US", { 
+    timeZone: "America/Sao_Paulo", 
+    weekday: "long" 
+  }).format(nowBrazil);
+  
   systemPrompt += `
+
+### DATA E HORA ATUAIS (Brasília) ###
+Hoje é ${currentDateBrazil}, ${currentTimeBrazil}.
 
 ### REGRAS CRÍTICAS DE AGENDAMENTO ###
 1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
 2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
 3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
 4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
+5. NÃO repita a lista de serviços se já a apresentou na conversa atual.
+6. CÁLCULO DE DATAS: Use a data atual acima como referência. Se o cliente pede "quarta-feira" e hoje é quinta-feira dia 06/02, a próxima quarta-feira é dia 11/02.
+7. SEMPRE confirme a data exata (dia da semana + data numérica) antes de criar o agendamento.
 `;
 }
 ```
+
+### Correção 3: Adicionar Informação de Referência nas Ferramentas
+
+Atualizar a descrição das ferramentas para enfatizar o uso correto de datas:
+
+**get_available_slots**:
+```typescript
+description: "Obtém os horários disponíveis para agendamento em uma data específica. Use a data atual fornecida no contexto como referência para calcular datas futuras. Formato de data: YYYY-MM-DD (ex: 2026-02-11)"
+```
+
+**book_appointment**:
+```typescript
+description: "Cria um novo agendamento. ANTES de chamar: 1) Confirme a data exata com dia da semana (ex: 'quarta-feira, 11/02'). 2) Use a data atual do sistema como referência. 3) NÃO agende sem confirmação do cliente."
+```
+
+---
+
+## Resumo das Alterações
+
+| Arquivo | Local | Alteração |
+|---------|-------|-----------|
+| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Injetar data/hora atual de Brasília |
+| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Adicionar regra para não repetir serviços |
+| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Adicionar regra de cálculo de datas |
+| `ai-chat/index.ts` | `get_available_slots` (~linha 378) | Atualizar descrição com referência à data atual |
+| `ai-chat/index.ts` | `book_appointment` (~linha 399) | Reforçar confirmação de data antes de agendar |
+
+---
+
+## Fluxo Após Correção
+
+```text
+PROMPT DA IA recebe:
+"### DATA E HORA ATUAIS (Brasília) ###
+Hoje é quinta-feira, 06/02/2026, 16:45."
+
+Cliente: "Quero marcar uma consulta pra quarta-feira"
+     ↓
+IA calcula: Hoje é quinta 06/02 → próxima quarta = 11/02
+     ↓
+IA responde: "Posso agendar para quarta-feira, 11/02. Qual horário prefere?"
+     ↓
+Cliente: "13:00"
+     ↓
+IA confirma: "Confirmo: Consulta para quarta-feira, 11/02 às 13:00?"
+     ↓
+Cliente: "Sim"
+     ↓
+IA chama book_appointment(date: "2026-02-11", time: "13:00", ...)
+     ↓
+Agendamento criado para quarta-feira, 11/02 ✅
+```
+
+---
+
+## Resultado Esperado
+
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Lista de serviços | Repete 2x na conversa | ✅ Lista 1x só |
+| Cliente pede "quarta-feira" | Agenda quinta-feira 12/02 (erro) | ✅ Agenda quarta 11/02 |
+| Referência de data | IA não sabe a data atual | ✅ IA recebe "Hoje é 06/02/2026" |
+| Confirmação de data | Confirma mas data errada | ✅ Confirma data correta |
+
+---
+
+## Risco de Quebra
+
+**Muito Baixo**
+- Adiciona informações ao prompt, não remove nada
+- Regras são aditivas (não conflitam com existentes)
+- Descrições de ferramentas são apenas mais detalhadas
+- Nenhuma mudança na lógica de agendamento real
