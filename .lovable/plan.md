@@ -1,113 +1,99 @@
 
-# Plano de Correção: PDF Comercial - Remover Emojis e Melhorar Layout
 
-## Problema Identificado
+# Plano de Correção: Persistência de Agendamento e Acesso a PDFs
 
-O jsPDF não suporta emojis Unicode nativamente. Todos os emojis no PDF estão aparecendo como caracteres corrompidos (ex: "Ø=Ý", "Ø<ß"", "&™þ").
+## Problema 1: scheduling_enabled Não Persiste
 
-## Solução
+### Diagnóstico
+No arquivo `src/hooks/useAutomations.tsx`, a função `updateAutomation` não está incluindo o campo `scheduling_enabled` no payload de atualização.
 
-Substituir todos os emojis por:
-1. **Símbolos ASCII simples** (•, -, >, ★)
-2. **Texto descritivo** quando necessário
-3. **Elementos visuais puros** (linhas, retângulos coloridos)
-
-## Alterações no Arquivo `src/lib/commercialPdfGenerator.ts`
-
-### 1. Remover Logo e Emoji da Capa (função `addCoverPage`)
-- Remover o círculo branco com emoji 🐱
-- Remover os boxes com emojis (🤖, 💬, 📊)
-- Manter layout limpo apenas com texto
-
-**Antes (linhas 389-445):**
+**Código atual (linha 161):**
 ```typescript
-// Logo circle + emoji 🐱 + boxes com emojis
+if ((updateData as any).notify_on_transfer !== undefined) 
+  updatePayload.notify_on_transfer = (updateData as any).notify_on_transfer;
+// scheduling_enabled NÃO está sendo salvo!
 ```
 
-**Depois:**
+### Solução
+Adicionar a linha para incluir `scheduling_enabled` no payload de atualização:
+
 ```typescript
-// Sem logo, sem boxes com emojis
-// Apenas título e subtítulo elegantes
+if ((updateData as any).scheduling_enabled !== undefined) 
+  updatePayload.scheduling_enabled = (updateData as any).scheduling_enabled;
 ```
 
-### 2. Substituir Emojis nas Seções de Features (FEATURE_SECTIONS)
-- Remover a propriedade `icon` com emoji
-- Os títulos das seções ficam sem ícone ou com marcador simples
-
-**Antes:**
-```typescript
-{ icon: '📊', title: 'Dashboard', features: [...] }
-```
-
-**Depois:**
-```typescript
-{ title: 'Dashboard', features: [...] }
-```
-
-### 3. Substituir Emojis nos Recursos dos Planos (função `addPlanDetails`)
-- Remover emojis de: "📦 Recursos Inclusos", "✨ Diferenciais", "🎁 Todos os planos incluem"
-- Substituir por marcadores simples ou apenas texto
-
-**Antes:**
-```typescript
-doc.text('📦 Recursos Inclusos', 15, yPos);
-```
-
-**Depois:**
-```typescript
-doc.text('Recursos Inclusos', 15, yPos);
-```
-
-### 4. Substituir Ícones de Limite nos Planos
-- Remover emojis: 👥, 🤖, 🎤, 📱, 🧠, 🏢
-
-**Antes:**
-```typescript
-{ icon: '👥', label: 'Usuários', value: '1' }
-```
-
-**Depois:**
-```typescript
-{ label: 'Usuários', value: '1' }
-```
-
-### 5. Página de Contato
-- Remover emojis: 🌐, 📧, 📱
-
-### 6. Notas e Destaques
-- Substituir "💡" por texto simples ou borda colorida
-- Substituir "✓" por ">" ou "-"
+**Arquivo:** `src/hooks/useAutomations.tsx`
+**Alteração:** Adicionar linha após a linha 161
 
 ---
 
-## Resumo das Modificações
+## Problema 2: IA Não Acessa Conteúdo de PDFs
 
-| Local | Emoji | Substituição |
-|-------|-------|--------------|
-| Capa - Logo | 🐱 | Remover círculo e emoji |
-| Capa - Boxes | 🤖, 💬, 📊 | Remover boxes inteiros |
-| Seções Features | 📊, 💬, 📋, etc. | Remover ícones |
-| Recursos Planos | 👥, 🤖, 🎤, 📱, 🧠, 🏢 | Apenas labels |
-| Títulos | 📦, ✨, 🎁 | Texto simples |
-| Bullets | ✓ | Usar ">" ou "-" |
-| Nota de economia | 💡 | Remover ou usar "DICA:" |
-| Contato | 🌐, 📧, 📱 | Texto simples |
+### Diagnóstico
+A função `getAgentKnowledge` no arquivo `supabase/functions/ai-chat/index.ts` (linhas 2191-2229) só retorna itens que têm `content` preenchido. Documentos PDF têm apenas `file_url`, então são ignorados.
+
+**Código atual:**
+```typescript
+.filter((item: any) => item.knowledge_items?.content) // Ignora PDFs
+.map((item: any) => {
+  const ki = item.knowledge_items;
+  return `### ${ki.title}\n${ki.content}`; // Só usa content
+});
+```
+
+### Solução
+Modificar a função para:
+1. Incluir itens do tipo document (PDFs) mesmo sem content
+2. Adicionar uma referência ao documento para o modelo saber que existe
+
+```typescript
+// Alteração na função getAgentKnowledge
+
+const knowledgeTexts = linkedKnowledge
+  .map((item: any) => {
+    const ki = item.knowledge_items;
+    if (!ki) return null;
+    
+    // Se tem content (texto), usa normalmente
+    if (ki.content) {
+      return `### ${ki.title}\n${ki.content}`;
+    }
+    
+    // Se é documento, adiciona referência
+    if (ki.item_type === 'document' && ki.file_url) {
+      return `### ${ki.title} (Documento)\n[Arquivo disponível: ${ki.file_name || ki.title}]`;
+    }
+    
+    return null;
+  })
+  .filter(Boolean);
+```
+
+### Limitação Importante
+A IA não consegue "ler" o conteúdo de PDFs automaticamente. Para isso funcionar completamente, seria necessário:
+
+1. **Extração de texto no upload** - Usar uma biblioteca para extrair texto do PDF quando ele é enviado
+2. **Armazenar o texto extraído** - Salvar o conteúdo textual no campo `content` da tabela `knowledge_items`
+
+### Solução Completa (Recomendada para Futuro)
+Criar um sistema de extração de texto de PDFs no momento do upload:
+
+1. Quando um PDF é enviado em `AgentKnowledgeSection.tsx`
+2. Chamar uma Edge Function que usa biblioteca de parsing de PDF
+3. Extrair o texto e salvar no campo `content` do item
+4. A IA então terá acesso ao conteúdo textual
 
 ---
 
-## Estrutura Visual Alternativa
+## Resumo das Alterações
 
-Em vez de emojis, usaremos:
-- **Cores institucionais** (#E11D48) para destacar títulos
-- **Bordas e backgrounds** para criar hierarquia visual
-- **Marcadores simples** (•, -, >) para listas
-- **Tipografia** (bold, tamanhos) para criar contraste
-
----
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/hooks/useAutomations.tsx` | Adicionar `scheduling_enabled` ao updatePayload |
+| `supabase/functions/ai-chat/index.ts` | Incluir documentos na resposta do knowledge base |
 
 ## Resultado Esperado
 
-- PDF limpo sem caracteres corrompidos
-- Visual profissional usando cores e tipografia
-- Mantém todas as informações de planos e funcionalidades
-- Compatível com qualquer visualizador de PDF
+1. **scheduling_enabled**: Após salvar, o toggle de "Agendamento habilitado" permanecerá ativo ao recarregar a página
+2. **Base de Conhecimento**: A IA receberá referência aos documentos PDF vinculados (nome e indicação que existe), mas para leitura completa do conteúdo seria necessário implementar extração de texto
+
