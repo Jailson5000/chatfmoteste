@@ -397,7 +397,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "book_appointment",
-      description: "Cria um novo agendamento no sistema com todos os dados necessários",
+      description: "Cria um novo agendamento no sistema. IMPORTANTE: Antes de chamar esta função, SEMPRE confirme com o cliente a data exata incluindo o dia da semana (ex: 'Você confirma o agendamento para quinta-feira, dia 12/02, às 14:00?'). NÃO agende sem confirmação explícita da data e dia da semana.",
       parameters: {
         type: "object",
         properties: {
@@ -1083,6 +1083,21 @@ async function executeSchedulingTool(
           });
         }
 
+        // VALIDATION: Block past dates - compare in Brazil timezone
+        const nowInBrazil = new Date(
+          new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+        );
+        const todayStr = `${nowInBrazil.getFullYear()}-${String(nowInBrazil.getMonth() + 1).padStart(2, '0')}-${String(nowInBrazil.getDate()).padStart(2, '0')}`;
+
+        if (date < todayStr) {
+          console.log(`[get_available_slots] BLOCKED: Requested date ${date} is in the past. Today is ${todayStr}`);
+          return JSON.stringify({
+            success: false,
+            error: `A data ${date} já passou. Hoje é ${todayStr}. Por favor, escolha uma data a partir de hoje.`,
+            available_slots: []
+          });
+        }
+
         // Get working hours for the requested day (0=Sunday, 1=Monday, etc.)
         const requestedDate = new Date(date + "T12:00:00-03:00");
         const dayOfWeek = requestedDate.getDay();
@@ -1096,6 +1111,8 @@ async function executeSchedulingTool(
           5: "sexta-feira",
           6: "sábado"
         };
+        
+        console.log(`[get_available_slots] Date ${date} is a ${dayNames[dayOfWeek]} (dayOfWeek=${dayOfWeek}). Today: ${todayStr}`);
 
         // Get business settings to respect business hours
         const { data: businessSettings } = await supabase
@@ -1303,7 +1320,34 @@ async function executeSchedulingTool(
           (service.buffer_after_minutes || 0);
         const endTime = new Date(startTime.getTime() + totalDuration * 60000);
         
+        // VALIDATION: Block booking in the past
+        const nowInBrazil = new Date(
+          new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+        );
+        
+        if (startTime < nowInBrazil) {
+          console.log(`[book_appointment] BLOCKED: Requested time ${date}T${time} is in the past. Now: ${nowInBrazil.toISOString()}`);
+          return JSON.stringify({
+            success: false,
+            error: "Não é possível agendar para uma data/horário que já passou. Por favor, escolha um horário futuro."
+          });
+        }
+        
+        // Calculate and log the day of week for debugging/confirmation
+        const dayOfWeekBooking = startTime.getDay();
+        const dayNamesBooking: Record<number, string> = {
+          0: "domingo",
+          1: "segunda-feira",
+          2: "terça-feira",
+          3: "quarta-feira",
+          4: "quinta-feira",
+          5: "sexta-feira",
+          6: "sábado"
+        };
+        const calculatedDayName = dayNamesBooking[dayOfWeekBooking];
+        
         console.log(`[book_appointment] Booking at ${time} Brazil time = ${startTime.toISOString()} UTC`);
+        console.log(`[book_appointment] Date ${date} at ${time} corresponds to ${calculatedDayName} (dayOfWeek=${dayOfWeekBooking})`);
 
         // Get professionals that offer this service
         const { data: serviceProfessionals } = await supabase
