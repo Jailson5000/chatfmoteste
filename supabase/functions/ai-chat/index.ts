@@ -364,7 +364,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "list_services",
-      description: "Lista todos os serviços disponíveis para agendamento. RETORNA o 'service_id' UUID de cada serviço que DEVE ser usado nas demais funções (get_available_slots, book_appointment). Apresente TODOS os serviços retornados ao cliente.",
+      description: "Lista todos os serviços disponíveis para agendamento. REGRA CRÍTICA: Você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados ao cliente, sem omitir nenhum. O cliente tem o direito de conhecer TODAS as opções. Use o campo 'services_list_for_response' para copiar a lista formatada. RETORNA o 'service_id' UUID que DEVE ser usado nas demais funções.",
       parameters: {
         type: "object",
         properties: {},
@@ -1029,14 +1029,24 @@ async function executeSchedulingTool(
           price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
         }));
 
+        // Pre-formatted list for AI to copy directly - prevents AI from summarizing/omitting
+        const servicesListForResponse = formattedServices.map(s => {
+          const priceText = s.price !== "Sob consulta" ? ` - ${s.price}` : "";
+          const descText = s.description ? ` (${s.description})` : "";
+          return `• ${s.name}${descText} - ${s.duration}${priceText}`;
+        }).join("\n");
+
         // Log for debugging
-        console.log(`[list_services] Returning ${services.length} services:`, formattedServices.map(s => `${s.name} (${s.service_id})`).join(", "));
+        console.log(`[list_services] Returning ${services.length} services: ${formattedServices.map(s => s.name).join(", ")}`);
 
         return JSON.stringify({
           success: true,
-          message: `${services.length} serviço(s) disponível(is). Use o 'service_id' para as próximas operações.`,
+          total_count: services.length,
+          message: `ATENÇÃO: Existem exatamente ${services.length} serviço(s). Você DEVE apresentar TODOS ao cliente, sem omitir nenhum.`,
+          instruction: `OBRIGATÓRIO: Apresente cada um dos ${services.length} serviços listados abaixo. NÃO omita nenhum. O cliente deve conhecer TODAS as opções.`,
           services: formattedServices,
-          hint: "IMPORTANTE: Sempre apresente TODOS os serviços listados ao cliente e use o service_id ao solicitar horários ou agendar."
+          services_list_for_response: servicesListForResponse,
+          hint: "Use o campo services_list_for_response para mostrar a lista formatada ao cliente."
         });
       }
 
@@ -3213,6 +3223,18 @@ serve(async (req) => {
         JSON.stringify({ error: "AI agent not properly configured", ref: errorRef }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Add critical scheduling rules for scheduling agents
+    if (isSchedulingAgent) {
+      systemPrompt += `
+
+### REGRAS CRÍTICAS DE AGENDAMENTO ###
+1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
+2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
+3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
+4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
+`;
     }
 
     // ========================================================================
