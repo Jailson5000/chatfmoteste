@@ -1,121 +1,83 @@
 
-# Plano: Validação de Consistência Data/Dia da Semana
 
-## Análise da Sugestão
+# Plano: Proibir Repetição da Lista de Serviços
 
-Sua sugestão é **excelente** e vai adicionar uma camada extra de segurança ao sistema de agendamento. Atualmente:
+## Problema Identificado
 
-1. ✅ O sistema já calcula o dia da semana correto (linhas 1384-1397)
-2. ✅ O sistema já loga essa informação
-3. ❌ **MAS** não usa essa informação para validar/rejeitar
+Na imagem:
+- **17:46** → IA lista os 4 serviços (correto, primeira vez)
+- **17:46** → Cliente escolhe: "o 4, pra quarta feira, as 13:30"
+- **17:47** → IA confirma: "deseja agendar Head Spa na quarta-feira, 11/02, às 13:30?"
+- **17:47** → Cliente: "isso mesmo, pode confirmar"
+- **17:48** → IA **REPETE** toda a lista de 4 serviços ❌
+- **17:48** → IA confirma novamente: "Confirma que deseja agendar..."
 
-## O Que Será Implementado
+A regra 5 atual diz apenas "NÃO repita a lista", mas não proíbe chamar `list_services` novamente. A IA está chamando a ferramenta desnecessariamente.
 
-### 1. Validação no Prompt da IA (Prevenção)
+## Resposta à Pergunta
 
-Adicionar regras explícitas no bloco `### REGRAS CRÍTICAS DE AGENDAMENTO ###`:
+**Não vai quebrar nada!** A lista de serviços é apenas informativa. O agendamento usa o `service_id` que a IA já tem em memória da primeira listagem. Repetir a lista é:
+- Redundante
+- Irritante para o cliente
+- Gasto desnecessário de tokens
+
+## Correção Proposta
+
+### 1. Reforçar Regra 5 (mais específica)
+
+Substituir a regra atual por uma versão mais forte e explícita:
 
 ```
-9. VALIDAÇÃO DE CONSISTÊNCIA: Se o cliente mencionar um dia da semana E uma data numérica que NÃO correspondem (ex: "quinta-feira 07/02" quando 07/02 é sábado):
-   - NÃO confirme o agendamento
-   - Informe o erro de forma clara e educada
-   - Ofereça as opções corretas: "07/02 é sábado" ou "a próxima quinta-feira é 12/02"
-   - Só prossiga após o cliente escolher uma opção válida
-
-10. CONFIRMAÇÃO OBRIGATÓRIA: Antes de chamar book_appointment, SEMPRE confirme:
-   - Data numérica (ex: 12/02)
-   - Dia da semana correspondente (ex: quinta-feira)
-   - Horário (ex: 11:00)
-   Exemplo: "Confirmo: quinta-feira, 12/02 às 11:00. Correto?"
+5. PROIBIDO REPETIR SERVIÇOS: 
+   - Chame list_services APENAS UMA VEZ por conversa
+   - Se o cliente já conhece os serviços, NÃO chame list_services novamente
+   - Na confirmação final, mencione apenas o serviço escolhido (ex: "Head Spa"), NÃO liste todos
+   - Se precisar do service_id, use o que você já obteve anteriormente
 ```
 
-### 2. Novo Parâmetro na Função `book_appointment`
+### 2. Atualizar Descrição da Ferramenta `list_services`
 
-Adicionar um parâmetro opcional `expected_weekday` que a IA deve informar:
+Adicionar na descrição da ferramenta que ela deve ser chamada apenas uma vez:
 
 ```typescript
-expected_weekday: {
-  type: "string",
-  description: "Dia da semana esperado em português (segunda-feira, terça-feira, etc). OBRIGATÓRIO para validação de consistência."
-}
-```
-
-### 3. Validação Backend (Última Barreira)
-
-Adicionar validação no handler `book_appointment` que verifica se a data corresponde ao dia da semana esperado:
-
-```typescript
-// Validate weekday consistency if expected_weekday is provided
-if (args.expected_weekday) {
-  const normalizedExpected = args.expected_weekday.toLowerCase().trim();
-  const normalizedCalculated = calculatedDayName.toLowerCase();
-  
-  if (normalizedExpected !== normalizedCalculated) {
-    console.log(`[book_appointment] INCONSISTENCY DETECTED: Expected "${normalizedExpected}" but date ${date} is actually "${normalizedCalculated}"`);
-    return JSON.stringify({
-      success: false,
-      error: `INCONSISTÊNCIA DETECTADA: Você mencionou "${args.expected_weekday}", mas ${date.split('-').reverse().join('/')} é ${calculatedDayName}. Por favor, confirme a data correta com o cliente.`,
-      suggestion: `Opções: "${calculatedDayName}, ${date.split('-').reverse().join('/')}" ou verifique a data correta para "${normalizedExpected}" na lista de próximos dias.`
-    });
-  }
-}
+description: "Lista todos os serviços disponíveis para agendamento. REGRAS: 
+1) Chame esta função APENAS UMA VEZ por conversa. 
+2) Se você já listou os serviços anteriormente, NÃO chame novamente - use o service_id que você já tem. 
+3) Ao apresentar, mostre TODOS os serviços retornados. 
+4) Use o campo 'services_list_for_response' para a lista formatada."
 ```
 
 ## Resumo das Alterações
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | Tool definition `book_appointment` (~linha 400) | Adicionar parâmetro `expected_weekday` |
-| `ai-chat/index.ts` | Handler `book_appointment` (~linha 1398) | Adicionar validação de consistência |
-| `ai-chat/index.ts` | Regras de agendamento (~linha 3295) | Adicionar regras 9 e 10 de validação |
+| `ai-chat/index.ts` | Descrição `list_services` (~linha 367) | Adicionar regra "chamar apenas UMA VEZ" |
+| `ai-chat/index.ts` | Regra 5 (~linha 3315) | Expandir com proibição explícita |
 
 ## Fluxo Após Correção
 
 ```text
-Cliente: "Quero agendar pra quinta-feira 07/02"
-     ↓
-IA consulta "PRÓXIMOS DIAS": 07/02 = sábado ⚠️
-     ↓
-IA detecta inconsistência antes de agendar
-     ↓
-IA responde: "Identifiquei uma inconsistência: 07/02 é sábado.
-Você gostaria de agendar para:
-• Sábado, 07/02
-• Ou quinta-feira, 12/02?"
-     ↓
-Cliente: "Quinta-feira"
-     ↓
-IA confirma: "Perfeito! Confirmo: quinta-feira, 12/02. Qual horário?"
-     ↓
-Cliente: "11:00"
-     ↓
-IA chama book_appointment(date: "2026-02-12", time: "11:00", expected_weekday: "quinta-feira", ...)
-     ↓
-Backend valida: 12/02 = quinta-feira ✓ (corresponde ao esperado)
-     ↓
-Agendamento criado corretamente ✅
+17:46 → IA chama list_services (ÚNICA VEZ)
+17:46 → IA lista os 4 serviços
+17:46 → Cliente: "o 4, pra quarta feira, as 13:30"
+17:47 → IA confirma: "Só para confirmar: Head Spa na quarta-feira, 11/02, às 13:30?"
+17:47 → Cliente: "isso mesmo, pode confirmar"
+17:48 → IA chama book_appointment (SEM chamar list_services novamente!)
+17:48 → "Seu agendamento foi realizado com sucesso! ✅"
 ```
-
-## Proteção em Camadas
-
-| Camada | Mecanismo | Objetivo |
-|--------|-----------|----------|
-| 1. Prompt | Lista "PRÓXIMOS DIAS" | IA consulta referência correta |
-| 2. Regras | Regras 9 e 10 | IA não confirma inconsistências |
-| 3. Backend | Parâmetro `expected_weekday` | Última validação antes de criar |
 
 ## Resultado Esperado
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Cliente diz "quinta 07/02" | IA agenda 07/02 (sábado) ❌ | ✅ IA detecta e oferece opções |
-| Inconsistência passa despercebida | Agendamento errado criado | ✅ Backend rejeita e explica |
-| Confirmação antes de agendar | Pode ser incompleta | ✅ Obrigatório: dia + data + horário |
+| Primeira listagem | Lista 4 serviços ✓ | Lista 4 serviços ✓ |
+| Confirmação | ❌ Lista 4 serviços DE NOVO | ✅ Confirma só "Head Spa" |
+| Chamadas a list_services | Múltiplas (2-3x) | ✅ Apenas 1x |
 
 ## Risco de Quebra
 
-**Muito Baixo**
-- Adiciona validação, não remove funcionalidade
-- Parâmetro `expected_weekday` é opcional (backward compatible)
-- Se a IA não passar o parâmetro, o agendamento ainda funciona
-- Apenas rejeita quando há inconsistência clara
+**Nenhum**
+- Não altera lógica de agendamento
+- Apenas orienta a IA a não repetir informação
+- O `service_id` continua disponível na memória da conversa
+
