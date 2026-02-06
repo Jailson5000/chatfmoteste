@@ -215,6 +215,14 @@ export default function Contacts() {
     const dataToExport = filteredClients.map((client) => {
       const status = getStatusById(client.custom_status_id);
       const department = getDepartmentById(client.department_id);
+      
+      // Get connection display
+      const conversation = client.conversations?.[0];
+      const inst = client.whatsapp_instance || conversation?.whatsapp_instance;
+      const conexao = conversation?.origin === 'WIDGET' || conversation?.origin === 'WEB' || conversation?.origin === 'TRAY' || conversation?.origin === 'SITE'
+        ? 'Chat Web' 
+        : (inst?.display_name || inst?.instance_name || '');
+      
       return {
         Nome: client.name,
         Telefone: formatPhone(client.phone),
@@ -222,9 +230,16 @@ export default function Contacts() {
         CPF_CNPJ: client.document || "",
         Status: status?.name || "",
         Departamento: department?.name || "",
+        Responsavel: client.assigned_profile?.full_name || "",
+        Conexao_WhatsApp: conexao,
         Endereco: client.address || "",
         Observacoes: client.notes || "",
+        Consentimento_LGPD: client.lgpd_consent ? "Sim" : "Não",
+        Data_Consentimento_LGPD: client.lgpd_consent_date 
+          ? format(new Date(client.lgpd_consent_date), "dd/MM/yyyy", { locale: ptBR }) 
+          : "",
         Criado_Em: format(new Date(client.created_at), "dd/MM/yyyy", { locale: ptBR }),
+        Atualizado_Em: format(new Date(client.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR }),
       };
     });
     exportToExcel(dataToExport, `contatos-${getFormattedDate()}`, "Contatos");

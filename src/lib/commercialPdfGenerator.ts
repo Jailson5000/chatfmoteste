@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { exportMultiSheetExcel } from './exportUtils';
 
 interface PlanData {
   name: string;
@@ -852,3 +853,38 @@ export function generateCommercialPDF(): void {
 }
 
 export { PLANS, FEATURE_SECTIONS };
+
+export function exportCommercialToExcel(): void {
+  const plansData = PLANS.map((plan) => ({
+    Plano: plan.name,
+    Preco_Mensal: formatCurrency(plan.price),
+    Preco_Anual: formatCurrency(plan.annualPrice),
+    Publico_Alvo: plan.targetAudience,
+    Usuarios: plan.limits.users,
+    Conversas_IA: plan.limits.aiConversations,
+    Minutos_Audio: plan.limits.audioMinutes,
+    Conexoes_WhatsApp: plan.limits.whatsappConnections,
+    Agentes_IA: plan.limits.aiAgents,
+    Workspaces: plan.limits.workspaces,
+    Diferenciais: plan.differentials.join('; '),
+    Destaque: plan.isFeatured ? 'Sim' : 'Não',
+  }));
+
+  const featuresData: { Categoria: string; Funcionalidade: string }[] = [];
+  FEATURE_SECTIONS.forEach((section) => {
+    section.features.forEach((feature) => {
+      featuresData.push({
+        Categoria: section.title,
+        Funcionalidade: feature,
+      });
+    });
+  });
+
+  exportMultiSheetExcel(
+    [
+      { name: 'Planos', data: plansData },
+      { name: 'Funcionalidades', data: featuresData },
+    ],
+    `MiauChat-Catalogo-Comercial-${new Date().toISOString().split('T')[0]}`
+  );
+}
