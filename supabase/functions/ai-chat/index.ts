@@ -364,7 +364,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "list_services",
-      description: "Lista todos os serviços disponíveis para agendamento com nome, duração e preço",
+      description: "Lista todos os serviços disponíveis para agendamento. RETORNA o 'service_id' UUID de cada serviço que DEVE ser usado nas demais funções (get_available_slots, book_appointment). Apresente TODOS os serviços retornados ao cliente.",
       parameters: {
         type: "object",
         properties: {},
@@ -1022,17 +1022,21 @@ async function executeSchedulingTool(
         }
 
         const formattedServices = services.map((s: any) => ({
-          id: s.id,
+          service_id: s.id,  // Use service_id to emphasize this is the UUID to use
           name: s.name,
           description: s.description || "",
           duration: `${s.duration_minutes} minutos`,
           price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
         }));
 
+        // Log for debugging
+        console.log(`[list_services] Returning ${services.length} services:`, formattedServices.map(s => `${s.name} (${s.service_id})`).join(", "));
+
         return JSON.stringify({
           success: true,
-          message: `${services.length} serviço(s) disponível(is)`,
-          services: formattedServices
+          message: `${services.length} serviço(s) disponível(is). Use o 'service_id' para as próximas operações.`,
+          services: formattedServices,
+          hint: "IMPORTANTE: Sempre apresente TODOS os serviços listados ao cliente e use o service_id ao solicitar horários ou agendar."
         });
       }
 
@@ -1050,18 +1054,33 @@ async function executeSchedulingTool(
         let bufferAfter = 0;
         
         if (service_id) {
-          const { data: service } = await supabase
+          // Check if service_id is a valid UUID, otherwise search by name (fallback)
+          const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
+          
+          let serviceQuery = supabase
             .from("agenda_pro_services")
-            .select("duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
-            .eq("id", service_id)
+            .select("id, duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
             .eq("law_firm_id", lawFirmId)
-            .single();
+            .eq("is_active", true);
+          
+          if (isValidUUID) {
+            serviceQuery = serviceQuery.eq("id", service_id);
+          } else {
+            // Fallback: search by name (case-insensitive)
+            console.log(`[get_available_slots] service_id "${service_id}" is not a UUID, searching by name`);
+            serviceQuery = serviceQuery.ilike("name", service_id);
+          }
+          
+          const { data: service } = await serviceQuery.single();
           
           if (service) {
             serviceDuration = service.duration_minutes;
             serviceName = service.name;
             bufferBefore = service.buffer_before_minutes || 0;
             bufferAfter = service.buffer_after_minutes || 0;
+            console.log(`[get_available_slots] Found service: ${service.name} (${service.id}), duration: ${serviceDuration}min`);
+          } else {
+            console.log(`[get_available_slots] Service not found for identifier: ${service_id}`);
           }
         }
         
@@ -1302,16 +1321,34 @@ async function executeSchedulingTool(
         }
 
         // Get service details from Agenda Pro (including pre_message fields)
-        const { data: service, error: serviceError } = await supabase
+        // Check if service_id is a valid UUID, otherwise search by name (fallback)
+        const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
+        
+        let serviceQuery = supabase
           .from("agenda_pro_services")
           .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
-          .eq("id", service_id)
           .eq("law_firm_id", lawFirmId)
-          .single();
+          .eq("is_active", true);
+        
+        if (isValidUUID) {
+          serviceQuery = serviceQuery.eq("id", service_id);
+        } else {
+          // Fallback: search by name (case-insensitive)
+          console.log(`[book_appointment] service_id "${service_id}" is not a UUID, searching by name`);
+          serviceQuery = serviceQuery.ilike("name", service_id);
+        }
+        
+        const { data: service, error: serviceError } = await serviceQuery.single();
 
         if (serviceError || !service) {
-          return JSON.stringify({ success: false, error: "Serviço não encontrado" });
+          console.log(`[book_appointment] Service not found for identifier: ${service_id}. Error:`, serviceError);
+          return JSON.stringify({ success: false, error: `Serviço "${service_id}" não encontrado. Por favor, use list_services para ver os serviços disponíveis.` });
         }
+        
+        console.log(`[book_appointment] Found service: ${service.name} (${service.id})`);
+        
+        // IMPORTANT: Use the actual service ID from the database for subsequent queries
+        const resolvedServiceId = service.id;
 
         // Parse date and time - IMPORTANT: time is in Brazil local time (UTC-3)
         const startTime = new Date(`${date}T${time}:00.000-03:00`);
@@ -1349,11 +1386,11 @@ async function executeSchedulingTool(
         console.log(`[book_appointment] Booking at ${time} Brazil time = ${startTime.toISOString()} UTC`);
         console.log(`[book_appointment] Date ${date} at ${time} corresponds to ${calculatedDayName} (dayOfWeek=${dayOfWeekBooking})`);
 
-        // Get professionals that offer this service
+        // Get professionals that offer this service (use resolvedServiceId, not the original service_id)
         const { data: serviceProfessionals } = await supabase
           .from("agenda_pro_service_professionals")
           .select("professional_id")
-          .eq("service_id", service_id);
+          .eq("service_id", resolvedServiceId);
         
         const professionalIds = serviceProfessionals?.map((sp: any) => sp.professional_id) || [];
         
@@ -1468,7 +1505,7 @@ async function executeSchedulingTool(
           .from("agenda_pro_appointments")
           .insert({
             law_firm_id: lawFirmId,
-            service_id,
+            service_id: resolvedServiceId,
             professional_id: selectedProfessionalId,
             start_time: startTime.toISOString(),
             end_time: endTime.toISOString(),
