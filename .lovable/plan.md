@@ -1,185 +1,204 @@
 
-
-# Plano: Corrigir Listagem e Identificação de Serviços via IA
+# Plano: Forçar IA a Mostrar TODOS os Serviços
 
 ## Problema Identificado
 
-### Evidência no Log
-```json
-{
-  "service_id": "Reunião de Prompt"  // ❌ NOME ao invés de UUID
-}
+A query do banco retorna corretamente **4 serviços**:
+- Consulta (30 min, R$ 150)
+- Reunião de Prompt (60 min)
+- Atendimento Inicial (45 min)
+- Head Spa (60 min, R$ 150)
+
+Mas a IA está decidindo por conta própria mostrar apenas **2 ou 3** serviços ao cliente. Isso acontece porque:
+1. A IA tenta ser "concisa" e resume a lista
+2. O hint atual é tratado como sugestão, não como obrigação
+3. Não há instrução no sistema que force a IA a não omitir itens
+
+## Análise Técnica
+
+O fluxo atual:
+```
+Cliente: "Quais serviços vocês têm?"
+         ↓
+IA chama list_services()
+         ↓
+Função retorna JSON com 4 serviços + hint
+         ↓
+IA processa e decide mostrar apenas 2-3 ❌
 ```
 
-A IA está passando o **nome** do serviço como `service_id` ao invés do **UUID real** (ex: `a354cc0b-46ee-468f-93bb-b9f12b55f56f`). Isso causa:
+O problema é que o **hint** está no nível de "sugestão" e a IA pode ignorar.
 
-1. **Serviços não listados corretamente**: A IA pode estar truncando ou interpretando mal a lista completa
-2. **Falha ao agendar**: A query `.eq("id", "Reunião de Prompt")` nunca encontra nenhum registro
+## Solução Proposta
 
-### Dados do Banco (confirmados)
-| Serviço | is_active | is_public | Profissionais | Deve aparecer |
-|---------|-----------|-----------|---------------|---------------|
-| Consulta | true | **false** | 3 | ❌ Não (privado) |
-| Reunião de Prompt | true | true | 3 | ✅ Sim |
-| Atendimento Inicial | true | true | 3 | ✅ Sim |
-| Head Spa | true | true | 1 | ✅ Sim |
+### Correção 1: Tornar o retorno da função `list_services` mais enfático
 
-A query do banco retorna **3 serviços públicos**, mas a IA só mostrou **2** na mensagem.
-
----
-
-## Causa Raiz
-
-1. **Problema na interpretação da IA**: A descrição da ferramenta `list_services` não enfatiza suficientemente que deve-se usar o `id` UUID
-2. **Falta de fallback por nome**: Se a IA passa um nome ao invés de UUID, o sistema falha silenciosamente
-3. **Log insuficiente**: Não há log do resultado da `list_services` para debug
-
----
-
-## Correções Propostas
-
-### Correção 1: Fallback de busca por nome no `book_appointment`
-
-Quando o `service_id` não é um UUID válido, buscar pelo nome do serviço:
+Mudar a estrutura do retorno para deixar absolutamente claro que a IA **NÃO PODE** omitir nenhum serviço:
 
 ```typescript
-// No book_appointment (após linha 1304)
-let serviceQuery = supabase
-  .from("agenda_pro_services")
-  .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
-  .eq("law_firm_id", lawFirmId)
-  .eq("is_active", true);
-
-// Check if service_id is a valid UUID
-const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
-
-if (isValidUUID) {
-  serviceQuery = serviceQuery.eq("id", service_id);
-} else {
-  // Fallback: search by name (case-insensitive)
-  console.log(`[book_appointment] service_id "${service_id}" is not a UUID, searching by name`);
-  serviceQuery = serviceQuery.ilike("name", service_id);
-}
-
-const { data: service, error: serviceError } = await serviceQuery.single();
-```
-
-### Correção 2: Fallback de busca por nome no `get_available_slots`
-
-Aplicar a mesma lógica na função de slots:
-
-```typescript
-// No get_available_slots (após linha 1050)
-let serviceQuery = supabase
-  .from("agenda_pro_services")
-  .select("duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
-  .eq("law_firm_id", lawFirmId);
-
-const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
-
-if (isValidUUID) {
-  serviceQuery = serviceQuery.eq("id", service_id);
-} else {
-  console.log(`[get_available_slots] service_id "${service_id}" is not a UUID, searching by name`);
-  serviceQuery = serviceQuery.ilike("name", service_id);
-}
-
-const { data: service } = await serviceQuery.single();
-```
-
-### Correção 3: Melhorar descrição do `list_services` e log de resultado
-
-```typescript
-// Na definição do tool list_services
-{
-  type: "function",
-  function: {
-    name: "list_services",
-    description: "Lista todos os serviços disponíveis para agendamento. RETORNA o 'id' UUID de cada serviço que DEVE ser usado nas demais funções. Apresente TODOS os serviços retornados ao cliente.",
-    parameters: { type: "object", properties: {}, required: [] }
-  }
-}
-
-// No case "list_services", após formatar
-console.log(`[list_services] Returning ${services.length} services:`, formattedServices.map(s => `${s.name} (${s.id})`).join(", "));
-```
-
-### Correção 4: Formato da listagem mais claro para a IA
-
-Alterar o formato de retorno para enfatizar o ID:
-
-```typescript
-const formattedServices = services.map((s: any) => ({
-  service_id: s.id,  // Renomear para service_id para ênfase
-  name: s.name,
-  description: s.description || "",
-  duration: `${s.duration_minutes} minutos`,
-  price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
-}));
-
 return JSON.stringify({
   success: true,
-  message: `${services.length} serviço(s) disponível(is). Use o 'service_id' para as próximas operações.`,
+  total_count: services.length,
+  message: `ATENÇÃO: Existem exatamente ${services.length} serviço(s). Você DEVE apresentar TODOS ao cliente, sem omitir nenhum.`,
   services: formattedServices,
-  hint: "IMPORTANTE: Sempre apresente TODOS os serviços listados e use o service_id ao solicitar horários ou agendar."
+  instruction: `OBRIGATÓRIO: Liste cada um dos ${services.length} serviços abaixo para o cliente. NÃO resuma, NÃO agrupe, NÃO omita. O cliente PRECISA conhecer todas as opções disponíveis.`,
+  services_list_for_response: formattedServices.map(s => 
+    `• ${s.name} - ${s.duration}${s.price !== "Sob consulta" ? ` - ${s.price}` : ""}`
+  ).join("\n")
 });
 ```
 
----
+### Correção 2: Adicionar o campo `services_list_for_response` 
+
+Incluir uma string pré-formatada que a IA pode copiar diretamente, reduzindo a chance de ela decidir "resumir":
+
+```typescript
+services_list_for_response: formattedServices.map(s => {
+  const priceText = s.price !== "Sob consulta" ? ` - ${s.price}` : "";
+  const descText = s.description ? ` (${s.description})` : "";
+  return `• ${s.name}${descText} - ${s.duration}${priceText}`;
+}).join("\n")
+```
+
+### Correção 3: Melhorar a descrição do tool `list_services`
+
+Atualizar a descrição para deixar claro que a IA **NUNCA** deve omitir serviços:
+
+```typescript
+description: "Lista todos os serviços disponíveis para agendamento. REGRA CRÍTICA: Você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados ao cliente, sem omitir nenhum. O cliente tem o direito de conhecer todas as opções. Use o campo 'services_list_for_response' para copiar a lista formatada."
+```
+
+### Correção 4: Adicionar instrução de sistema adicional para scheduling agents
+
+Injetar uma instrução adicional no prompt quando o agente é de agendamento:
+
+```typescript
+if (isSchedulingAgent) {
+  systemPrompt += `\n\n### REGRAS DE AGENDAMENTO ###
+- Ao listar serviços, você DEVE apresentar TODOS os serviços retornados, sem exceção.
+- NUNCA resuma ou agrupe serviços. Cada serviço deve ser mencionado individualmente.
+- Use o campo 'services_list_for_response' quando disponível para garantir que nenhum serviço seja omitido.`;
+}
+```
 
 ## Resumo das Alterações
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | `list_services` (~linha 365) | Melhorar descrição do tool |
-| `ai-chat/index.ts` | `list_services` (~linha 1024) | Renomear `id` para `service_id`, adicionar hint e log |
-| `ai-chat/index.ts` | `get_available_slots` (~linha 1052) | Fallback de busca por nome |
-| `ai-chat/index.ts` | `book_appointment` (~linha 1305) | Fallback de busca por nome |
-
----
+| `ai-chat/index.ts` | Tool description `list_services` (~linha 367) | Atualizar descrição com regra crítica |
+| `ai-chat/index.ts` | Retorno do `list_services` (~linha 1024-1040) | Adicionar `total_count`, `instruction`, `services_list_for_response` |
+| `ai-chat/index.ts` | System prompt (~linha 3210-3216) | Adicionar regras de agendamento para scheduling agents |
 
 ## Fluxo Após Correção
 
-```text
-Cliente: "Me fale dos serviços"
-     ↓
-IA chama list_services()
-     ↓
-Sistema retorna 3 serviços com service_id UUID
-     ↓
-IA apresenta TODOS: "1. Reunião de Prompt (60 min)
-                     2. Atendimento Inicial (45 min)
-                     3. Head Spa (60 min)"
-     ↓
-Cliente: "Quero Reunião de Prompt"
-     ↓
-IA chama get_available_slots(service_id: "a354cc0b-...")
-     ↓
-[OU] IA chama get_available_slots(service_id: "Reunião de Prompt")
-     ↓ 
-Sistema detecta que não é UUID → busca por nome → encontra
-     ↓
-Retorna horários disponíveis ✅
 ```
-
----
+Cliente: "Quais serviços vocês têm?"
+         ↓
+IA chama list_services()
+         ↓
+Função retorna:
+{
+  total_count: 4,
+  message: "ATENÇÃO: Existem exatamente 4 serviços...",
+  instruction: "OBRIGATÓRIO: Liste cada um...",
+  services: [...],
+  services_list_for_response: "• Consulta - 30 min - R$ 150,00\n• Reunião de Prompt - 60 min\n• Atendimento Inicial - 45 min\n• Head Spa - 60 min - R$ 150,00"
+}
+         ↓
+IA vê instrução OBRIGATÓRIA + lista pronta
+         ↓
+IA responde: "Temos 4 serviços disponíveis:
+• Consulta - 30 min - R$ 150,00
+• Reunião de Prompt - 60 min
+• Atendimento Inicial - 45 min
+• Head Spa - 60 min - R$ 150,00"
+```
 
 ## Resultado Esperado
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Listagem de serviços | 2 de 3 (faltando Head Spa) | ✅ 3 de 3 |
-| IA passa nome como ID | Erro "Serviço não encontrado" | ✅ Busca por nome (fallback) |
-| Log para debug | Sem log | ✅ Log completo dos serviços |
-| Agendamento Reunião de Prompt | Falha | ✅ Funciona |
-
----
+| 4 serviços no banco | IA mostra 2-3 | ✅ IA mostra 4 |
+| Cliente pergunta serviços | Resposta incompleta | ✅ Lista completa formatada |
+| Debug | Sem log detalhado | ✅ Log com total e nomes |
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Adiciona fallback, não remove funcionalidade
-- Busca por nome é case-insensitive (ilike)
-- UUID válido continua funcionando normalmente
-- Logs adicionais não afetam fluxo
+- Apenas adiciona campos extras ao retorno JSON
+- A estrutura existente (`success`, `services`) permanece igual
+- A instrução adicional no system prompt não conflita com prompts existentes
+- Código de fallback não é afetado
 
+## Detalhes Técnicos
+
+A alteração principal será no case `list_services`:
+
+```typescript
+case "list_services": {
+  const { data: services, error } = await supabase
+    .from("agenda_pro_services")
+    .select("id, name, description, duration_minutes, price, color")
+    .eq("law_firm_id", lawFirmId)
+    .eq("is_active", true)
+    .eq("is_public", true)
+    .order("position", { ascending: true });
+
+  if (error) {
+    console.error("[Scheduling] Error listing services:", error);
+    return JSON.stringify({ success: false, error: "Erro ao buscar serviços" });
+  }
+
+  if (!services || services.length === 0) {
+    return JSON.stringify({
+      success: true,
+      total_count: 0,
+      message: "Nenhum serviço disponível para agendamento",
+      services: []
+    });
+  }
+
+  const formattedServices = services.map((s: any) => ({
+    service_id: s.id,
+    name: s.name,
+    description: s.description || "",
+    duration: `${s.duration_minutes} minutos`,
+    price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
+  }));
+
+  // Pre-formatted list for AI to copy directly
+  const servicesListForResponse = formattedServices.map(s => {
+    const priceText = s.price !== "Sob consulta" ? ` - ${s.price}` : "";
+    const descText = s.description ? ` (${s.description})` : "";
+    return `• ${s.name}${descText} - ${s.duration}${priceText}`;
+  }).join("\n");
+
+  console.log(`[list_services] Returning ${services.length} services: ${formattedServices.map(s => s.name).join(", ")}`);
+
+  return JSON.stringify({
+    success: true,
+    total_count: services.length,
+    message: `Encontrados ${services.length} serviço(s) disponível(is). Apresente TODOS ao cliente.`,
+    instruction: `OBRIGATÓRIO: Apresente cada um dos ${services.length} serviços listados abaixo. NÃO omita nenhum. O cliente deve conhecer TODAS as opções.`,
+    services: formattedServices,
+    services_list_for_response: servicesListForResponse,
+    hint: "Use o campo services_list_for_response para mostrar a lista formatada ao cliente."
+  });
+}
+```
+
+E a instrução adicional no system prompt para scheduling agents:
+
+```typescript
+// Após linha 3216, antes do processamento de mentions
+if (isSchedulingAgent) {
+  systemPrompt += `
+
+### REGRAS CRÍTICAS DE AGENDAMENTO ###
+1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
+2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
+3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
+4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
+`;
+}
+```
