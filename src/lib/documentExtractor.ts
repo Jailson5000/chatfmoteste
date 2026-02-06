@@ -258,5 +258,5 @@ export async function extractDocumentContent(file: File): Promise<ExtractionResu
  * Get a human-readable description of supported formats
  */
 export function getSupportedFormatsDescription(): string {
-  return 'Excel (.xlsx, .xls), Word (.docx), CSV, TXT, MD, JSON';
+  return 'Excel (.xlsx, .xls), Word (.docx), CSV, TXT, MD, JSON | PDF (somente armazenamento)';
 }
