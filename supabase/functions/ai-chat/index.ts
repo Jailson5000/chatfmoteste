@@ -1284,10 +1284,10 @@ async function executeSchedulingTool(
           });
         }
 
-        // Get service details from Agenda Pro
+        // Get service details from Agenda Pro (including pre_message fields)
         const { data: service, error: serviceError } = await supabase
           .from("agenda_pro_services")
-          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price")
+          .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
           .eq("id", service_id)
           .eq("law_firm_id", lawFirmId)
           .single();
@@ -1447,6 +1447,124 @@ async function executeSchedulingTool(
           return JSON.stringify({ success: false, error: "Erro ao criar agendamento" });
         }
 
+        // Get company name and professional name for the message (needed for scheduled messages too)
+        const { data: lawFirmData } = await supabase
+          .from("law_firms")
+          .select("name")
+          .eq("id", lawFirmId)
+          .single();
+        const companyName = lawFirmData?.name || "";
+
+        const { data: professionalData } = await supabase
+          .from("agenda_pro_professionals")
+          .select("name")
+          .eq("id", selectedProfessionalId)
+          .single();
+        const professionalName = professionalData?.name || "";
+
+        // Create scheduled reminder messages
+        try {
+          const appointmentStartTime = new Date(startTime);
+          const now = new Date();
+          
+          // Get settings for reminder configuration
+          const { data: reminderSettings } = await supabase
+            .from("agenda_pro_settings")
+            .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit, reminder_message_template, business_name")
+            .eq("law_firm_id", lawFirmId)
+            .maybeSingle();
+          
+          const scheduledMessages: any[] = [];
+          
+          // Helper function to format message template
+          const formatReminderMessage = (template: string | null, defaultMsg: string): string => {
+            if (!template) return defaultMsg;
+            const dateStr = appointmentStartTime.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' });
+            const timeStr = appointmentStartTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+            
+            return template
+              .replace(/{client_name}/g, client_name)
+              .replace(/{service_name}/g, service.name)
+              .replace(/{professional_name}/g, professionalName || "Profissional")
+              .replace(/{date}/g, dateStr)
+              .replace(/{time}/g, timeStr)
+              .replace(/{business_name}/g, reminderSettings?.business_name || companyName || "");
+          };
+          
+          const defaultReminderTemplate = "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!";
+          
+          // First reminder (configurable hours, default 24h)
+          const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
+          const reminderTime = new Date(appointmentStartTime.getTime() - reminder1Hours * 60 * 60 * 1000);
+          
+          if (reminderTime > now) {
+            scheduledMessages.push({
+              law_firm_id: lawFirmId,
+              appointment_id: appointment.id,
+              client_id: agendaProClientId,
+              message_type: "reminder",
+              message_content: formatReminderMessage(reminderSettings?.reminder_message_template || null, defaultReminderTemplate),
+              scheduled_at: reminderTime.toISOString(),
+              channel: "whatsapp",
+              status: "pending",
+            });
+          }
+
+          // Second reminder (configurable)
+          if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
+            const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
+              ? reminderSettings.reminder_2_value * 60 
+              : reminderSettings.reminder_2_value;
+            const reminder2Time = new Date(appointmentStartTime.getTime() - reminder2Minutes * 60 * 1000);
+            
+            if (reminder2Time > now) {
+              scheduledMessages.push({
+                law_firm_id: lawFirmId,
+                appointment_id: appointment.id,
+                client_id: agendaProClientId,
+                message_type: "reminder_2",
+                message_content: formatReminderMessage(reminderSettings?.reminder_message_template || null, defaultReminderTemplate),
+                scheduled_at: reminder2Time.toISOString(),
+                channel: "whatsapp",
+                status: "pending",
+              });
+            }
+          }
+
+          // Pre-message if service has it enabled
+          if (service.pre_message_enabled && service.pre_message_hours_before) {
+            const preMessageTime = new Date(appointmentStartTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
+            
+            if (preMessageTime > now) {
+              scheduledMessages.push({
+                law_firm_id: lawFirmId,
+                appointment_id: appointment.id,
+                client_id: agendaProClientId,
+                message_type: "pre_message",
+                message_content: service.pre_message_text || "Mensagem pré-atendimento",
+                scheduled_at: preMessageTime.toISOString(),
+                channel: "whatsapp",
+                status: "pending",
+              });
+            }
+          }
+
+          // Insert all scheduled messages at once
+          if (scheduledMessages.length > 0) {
+            const { error: msgError } = await supabase
+              .from("agenda_pro_scheduled_messages")
+              .insert(scheduledMessages);
+            
+            if (msgError) {
+              console.error("[Scheduling] Error creating scheduled messages:", msgError);
+            } else {
+              console.log(`[Scheduling] Created ${scheduledMessages.length} scheduled messages for appointment ${appointment.id}`);
+            }
+          }
+        } catch (scheduledMsgError) {
+          console.error("[Scheduling] Error in scheduled messages creation:", scheduledMsgError);
+        }
+
         // Send confirmation notification via Agenda Pro notification system
         try {
           await fetch(`${supabaseUrl}/functions/v1/agenda-pro-notification`, {
@@ -1463,21 +1581,6 @@ async function executeSchedulingTool(
         } catch (e) {
           console.error("[Scheduling] Failed to send confirmation notification:", e);
         }
-
-        // Get company name and professional name for the message
-        const { data: lawFirmData } = await supabase
-          .from("law_firms")
-          .select("name")
-          .eq("id", lawFirmId)
-          .single();
-        const companyName = lawFirmData?.name || "";
-
-        const { data: professionalData } = await supabase
-          .from("agenda_pro_professionals")
-          .select("name")
-          .eq("id", selectedProfessionalId)
-          .single();
-        const professionalName = professionalData?.name || "";
 
         // Format date and time nicely
         const dateObj = new Date(`${date}T${time}:00.000-03:00`);
