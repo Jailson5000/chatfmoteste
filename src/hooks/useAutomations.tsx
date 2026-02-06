@@ -159,6 +159,7 @@ export function useAutomations() {
       if (updateData.ai_temperature !== undefined) updatePayload.ai_temperature = updateData.ai_temperature;
       if (updateData.is_active !== undefined) updatePayload.is_active = updateData.is_active;
       if ((updateData as any).notify_on_transfer !== undefined) updatePayload.notify_on_transfer = (updateData as any).notify_on_transfer;
+      if ((updateData as any).scheduling_enabled !== undefined) updatePayload.scheduling_enabled = (updateData as any).scheduling_enabled;
 
       // SECURITY: Validate automation belongs to user's law firm
       const { data, error } = await supabase
