@@ -376,13 +376,13 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "get_available_slots",
-      description: "Obtém os horários disponíveis para agendamento em uma data específica, considerando o serviço escolhido e a duração real",
+      description: "Obtém os horários disponíveis para agendamento em uma data específica. IMPORTANTE: Use a data atual fornecida em '### DATA E HORA ATUAIS (Brasília) ###' como referência para calcular datas futuras. Formato de data: YYYY-MM-DD (ex: 2026-02-11). Se o cliente pedir 'quarta-feira' e hoje é quinta-feira 06/02, a próxima quarta-feira é 11/02, não 12/02.",
       parameters: {
         type: "object",
         properties: {
           date: {
             type: "string",
-            description: "Data para verificar disponibilidade no formato YYYY-MM-DD (ex: 2025-01-15)"
+            description: "Data para verificar disponibilidade no formato YYYY-MM-DD. Calcule corretamente usando a data atual do sistema."
           },
           service_id: {
             type: "string",
@@ -397,7 +397,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "book_appointment",
-      description: "Cria um novo agendamento no sistema. IMPORTANTE: Antes de chamar esta função, SEMPRE confirme com o cliente a data exata incluindo o dia da semana (ex: 'Você confirma o agendamento para quinta-feira, dia 12/02, às 14:00?'). NÃO agende sem confirmação explícita da data e dia da semana.",
+      description: "Cria um novo agendamento. REGRAS OBRIGATÓRIAS: 1) ANTES de chamar, confirme a data exata com dia da semana E data numérica (ex: 'quarta-feira, 11/02'). 2) Use a data atual de Brasília como referência para calcular dias da semana. 3) NÃO agende sem confirmação explícita do cliente. 4) VERIFIQUE se a data calculada corresponde ao dia da semana solicitado.",
       parameters: {
         type: "object",
         properties: {
@@ -3225,15 +3225,55 @@ serve(async (req) => {
       );
     }
 
-    // Add critical scheduling rules for scheduling agents
+    // Add critical scheduling rules for scheduling agents with current Brazil date/time
     if (isSchedulingAgent) {
+      // Get current date/time in Brazil timezone for accurate date calculations
+      const nowBrazil = new Date();
+      const brazilDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        weekday: "long",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      });
+      const brazilTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      
+      const currentDateBrazil = brazilDateFormatter.format(nowBrazil);
+      const currentTimeBrazil = brazilTimeFormatter.format(nowBrazil);
+      
+      // Calculate ISO date for reference
+      const isoDateFormatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      });
+      const currentIsoDate = isoDateFormatter.format(nowBrazil);
+      
+      console.log(`[Scheduling] Injecting Brazil date/time: ${currentDateBrazil}, ${currentTimeBrazil} (ISO: ${currentIsoDate})`);
+      
       systemPrompt += `
+
+### DATA E HORA ATUAIS (Brasília) ###
+Hoje é ${currentDateBrazil}, ${currentTimeBrazil}.
+Data em formato ISO: ${currentIsoDate}
 
 ### REGRAS CRÍTICAS DE AGENDAMENTO ###
 1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
 2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
 3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
 4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
+5. NÃO repita a lista de serviços se já a apresentou na conversa atual. Prossiga diretamente com o agendamento.
+6. CÁLCULO DE DATAS: Use a data atual acima como referência absoluta. Exemplo: Se hoje é quinta-feira 06/02, então:
+   - "quarta-feira" = próxima quarta = 11/02 (NÃO 12/02!)
+   - "sexta-feira" = amanhã = 07/02
+   - "segunda-feira" = 10/02
+7. SEMPRE confirme a data exata (dia da semana + data numérica) ANTES de criar o agendamento.
+8. VERIFICAÇÃO: Antes de chamar book_appointment, verifique mentalmente se a data corresponde ao dia da semana correto.
 `;
     }
 
