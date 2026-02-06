@@ -1,52 +1,58 @@
 
-# Plano: Corrigir Repetição de Serviços e Erro de Data
+# Plano: Corrigir Referência de Data Dinâmica para Agendamento
 
-## Problemas Identificados
+## Problema Identificado
 
-### Problema 1: IA Lista Serviços Múltiplas Vezes
-Na imagem:
-- 16:44 → IA lista os 4 serviços
-- 16:46 → IA lista os 4 serviços **novamente** (desnecessário)
+### Evidência dos Logs
+```
+[Scheduling] Injecting Brazil date/time: sexta-feira, 06/02/2026, 17:18 (ISO: 2026-02-06)
+```
 
-**Causa**: Não há instrução para evitar repetir a lista se já foi apresentada na conversa.
+A data está sendo injetada **corretamente** como **sexta-feira, 06/02/2026**.
 
-### Problema 2: Data Errada no Agendamento
-- Cliente pediu: **quarta-feira**
-- IA confirmou: **quarta-feira, 11/02** às 13:00
-- Mas agendou: **quinta-feira, 12/02** às 13:00
+### Mas o Exemplo Estático Contradiz
+No código atual (linha 3271):
+```
+6. CÁLCULO DE DATAS: Use a data atual acima como referência absoluta. 
+   Exemplo: Se hoje é quinta-feira 06/02, então:
+   - "quarta-feira" = próxima quarta = 11/02 (NÃO 12/02!)
+   - "sexta-feira" = amanhã = 07/02
+   - "segunda-feira" = 10/02
+```
 
-**Causa Raiz**: A IA não recebe a data atual de Brasília no prompt de agendamento. Isso faz com que ela calcule as datas incorretamente (offset de 1 dia). Hoje é **06/02/2026** (quinta-feira), então:
-- Próxima quarta-feira = **11/02/2026** ✓
-- Mas a IA passou **12/02** para a função
+**O problema**: O exemplo está fixo como "quinta-feira 06/02" - mas hoje na verdade é **sexta-feira 06/02**. A IA vê dois dias da semana diferentes para a mesma data e fica confusa.
 
-O problema está na **instrução da IA**, não na função em si. A função `book_appointment` recebe a data que a IA passa - e a IA está passando a data errada porque não sabe qual é a data atual.
+### Erro Resultante
+- Cliente pediu: "quinta-feira às 11:00"
+- IA calculou incorretamente: 07/02 como quinta-feira
+- **Realidade**: 07/02/2026 é **SÁBADO**
+- Próxima quinta-feira real: **12/02/2026**
 
 ---
 
-## Soluções Propostas
+## Causa Raiz
 
-### Correção 1: Evitar Repetir Lista de Serviços
+1. **Exemplo estático com dia fixo** contradiz a data dinâmica
+2. A IA tenta conciliar "quinta-feira 06/02" (exemplo) com "sexta-feira 06/02" (real) e faz cálculos errados
+3. Faltam exemplos dinâmicos com os próximos dias da semana calculados
 
-Adicionar regra nas instruções de agendamento para não repetir a lista se já foi apresentada:
+---
 
-```typescript
-### REGRAS CRÍTICAS DE AGENDAMENTO ###
-...
-5. Não repita a lista de serviços se já a apresentou na conversa atual. Se o cliente já conhece os serviços, prossiga diretamente com o agendamento.
-```
+## Solução Proposta
 
-### Correção 2: Injetar Data Atual no Prompt de Agendamento
+### Correção Principal: Gerar Exemplos Dinâmicos
 
-Modificar a seção `isSchedulingAgent` para incluir **explicitamente** a data atual do Brasil:
+Calcular dinamicamente os próximos dias da semana baseado na data atual real:
 
 ```typescript
 if (isSchedulingAgent) {
-  // Get current date/time in Brazil timezone
   const nowBrazil = new Date();
+  
+  // Get timezone-aware date components
   const brazilDateFormatter = new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
     weekday: "long",
-    day: "2-digit", 
+    day: "2-digit",
     month: "2-digit",
     year: "numeric"
   });
@@ -59,16 +65,42 @@ if (isSchedulingAgent) {
   const currentDateBrazil = brazilDateFormatter.format(nowBrazil);
   const currentTimeBrazil = brazilTimeFormatter.format(nowBrazil);
   
-  // Calculate weekday names for reference
-  const weekdayCalc = new Intl.DateTimeFormat("en-US", { 
-    timeZone: "America/Sao_Paulo", 
-    weekday: "long" 
-  }).format(nowBrazil);
+  // Calculate ISO date
+  const isoDateFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  const currentIsoDate = isoDateFormatter.format(nowBrazil);
+  
+  // Get current day of week in Brazil (0=Sunday, 6=Saturday)
+  const brazilNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const currentDayOfWeek = brazilNow.getDay();
+  
+  // Calculate dates for next 7 days dynamically
+  const weekdayNames = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+  const upcomingDays: string[] = [];
+  
+  for (let i = 1; i <= 7; i++) {
+    const futureDate = new Date(brazilNow);
+    futureDate.setDate(futureDate.getDate() + i);
+    const futureDayOfWeek = futureDate.getDay();
+    const futureDay = String(futureDate.getDate()).padStart(2, '0');
+    const futureMonth = String(futureDate.getMonth() + 1).padStart(2, '0');
+    upcomingDays.push(`   - "${weekdayNames[futureDayOfWeek]}" = ${futureDay}/${futureMonth}`);
+  }
+  
+  const dynamicExamples = upcomingDays.join("\n");
   
   systemPrompt += `
 
 ### DATA E HORA ATUAIS (Brasília) ###
 Hoje é ${currentDateBrazil}, ${currentTimeBrazil}.
+Data em formato ISO: ${currentIsoDate}
+
+### PRÓXIMOS DIAS (Referência para Cálculo) ###
+${dynamicExamples}
 
 ### REGRAS CRÍTICAS DE AGENDAMENTO ###
 1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
@@ -76,25 +108,35 @@ Hoje é ${currentDateBrazil}, ${currentTimeBrazil}.
 3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
 4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
 5. NÃO repita a lista de serviços se já a apresentou na conversa atual.
-6. CÁLCULO DE DATAS: Use a data atual acima como referência. Se o cliente pede "quarta-feira" e hoje é quinta-feira dia 06/02, a próxima quarta-feira é dia 11/02.
-7. SEMPRE confirme a data exata (dia da semana + data numérica) antes de criar o agendamento.
+6. CÁLCULO DE DATAS: Use a referência "PRÓXIMOS DIAS" acima. NÃO calcule manualmente.
+7. SEMPRE confirme a data exata (dia da semana + data numérica) ANTES de criar o agendamento.
+8. VERIFICAÇÃO: Compare o dia da semana solicitado com a lista "PRÓXIMOS DIAS" antes de chamar book_appointment.
 `;
 }
 ```
 
-### Correção 3: Adicionar Informação de Referência nas Ferramentas
+---
 
-Atualizar a descrição das ferramentas para enfatizar o uso correto de datas:
+## Resultado Esperado
 
-**get_available_slots**:
-```typescript
-description: "Obtém os horários disponíveis para agendamento em uma data específica. Use a data atual fornecida no contexto como referência para calcular datas futuras. Formato de data: YYYY-MM-DD (ex: 2026-02-11)"
+Com a correção, se hoje é **sexta-feira, 06/02/2026**, a IA receberá:
+
+```
+### DATA E HORA ATUAIS (Brasília) ###
+Hoje é sexta-feira, 06/02/2026, 17:20.
+Data em formato ISO: 2026-02-06
+
+### PRÓXIMOS DIAS (Referência para Cálculo) ###
+   - "sábado" = 07/02
+   - "domingo" = 08/02
+   - "segunda-feira" = 09/02
+   - "terça-feira" = 10/02
+   - "quarta-feira" = 11/02
+   - "quinta-feira" = 12/02
+   - "sexta-feira" = 13/02
 ```
 
-**book_appointment**:
-```typescript
-description: "Cria um novo agendamento. ANTES de chamar: 1) Confirme a data exata com dia da semana (ex: 'quarta-feira, 11/02'). 2) Use a data atual do sistema como referência. 3) NÃO agende sem confirmação do cliente."
-```
+Quando o cliente pedir **"quinta-feira às 11:00"**, a IA consultará a lista e verá que **quinta-feira = 12/02**, não 07/02.
 
 ---
 
@@ -102,55 +144,51 @@ description: "Cria um novo agendamento. ANTES de chamar: 1) Confirme a data exat
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Injetar data/hora atual de Brasília |
-| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Adicionar regra para não repetir serviços |
-| `ai-chat/index.ts` | Regras de agendamento (~linha 3229) | Adicionar regra de cálculo de datas |
-| `ai-chat/index.ts` | `get_available_slots` (~linha 378) | Atualizar descrição com referência à data atual |
-| `ai-chat/index.ts` | `book_appointment` (~linha 399) | Reforçar confirmação de data antes de agendar |
+| `ai-chat/index.ts` | Seção `isSchedulingAgent` (~linha 3229-3278) | Substituir exemplo estático por cálculo dinâmico dos próximos 7 dias |
 
 ---
 
 ## Fluxo Após Correção
 
 ```text
-PROMPT DA IA recebe:
-"### DATA E HORA ATUAIS (Brasília) ###
-Hoje é quinta-feira, 06/02/2026, 16:45."
+Sistema injeta no prompt:
+"### PRÓXIMOS DIAS ###
+   - 'sábado' = 07/02
+   - 'domingo' = 08/02
+   - 'segunda-feira' = 09/02
+   ...
+   - 'quinta-feira' = 12/02"
 
-Cliente: "Quero marcar uma consulta pra quarta-feira"
+Cliente: "Quero marcar pra quinta-feira"
      ↓
-IA calcula: Hoje é quinta 06/02 → próxima quarta = 11/02
+IA consulta lista: "quinta-feira" = 12/02 ✓
      ↓
-IA responde: "Posso agendar para quarta-feira, 11/02. Qual horário prefere?"
+IA confirma: "Posso agendar para quinta-feira, 12/02?"
      ↓
-Cliente: "13:00"
+Cliente: "Sim, às 11:00"
      ↓
-IA confirma: "Confirmo: Consulta para quarta-feira, 11/02 às 13:00?"
+IA chama book_appointment(date: "2026-02-12", time: "11:00", ...)
      ↓
-Cliente: "Sim"
-     ↓
-IA chama book_appointment(date: "2026-02-11", time: "13:00", ...)
-     ↓
-Agendamento criado para quarta-feira, 11/02 ✅
+Agendamento criado para quinta-feira, 12/02 ✅
 ```
 
 ---
 
-## Resultado Esperado
+## Comparação: Antes vs Depois
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Lista de serviços | Repete 2x na conversa | ✅ Lista 1x só |
-| Cliente pede "quarta-feira" | Agenda quinta-feira 12/02 (erro) | ✅ Agenda quarta 11/02 |
-| Referência de data | IA não sabe a data atual | ✅ IA recebe "Hoje é 06/02/2026" |
-| Confirmação de data | Confirma mas data errada | ✅ Confirma data correta |
+| Hoje (06/02) | Exemplo diz "quinta-feira 06/02" | ✅ Exibe "sexta-feira, 06/02" |
+| Cliente pede "quinta-feira" | IA confunde e marca 07/02 (sábado) | ✅ Consulta lista: quinta = 12/02 |
+| Exemplos de datas | Fixos e desatualizados | ✅ Calculados dinamicamente |
+| Próximos 7 dias | Não disponíveis | ✅ Listados com dia e data |
 
 ---
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Adiciona informações ao prompt, não remove nada
-- Regras são aditivas (não conflitam com existentes)
-- Descrições de ferramentas são apenas mais detalhadas
-- Nenhuma mudança na lógica de agendamento real
+- Substitui texto estático por texto dinâmico
+- Mesma estrutura de prompt, apenas conteúdo atualizado
+- Nenhuma mudança nas funções de agendamento
+- Adiciona informação (não remove)
