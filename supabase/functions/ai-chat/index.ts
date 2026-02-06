@@ -1097,6 +1097,46 @@ async function executeSchedulingTool(
           6: "sábado"
         };
 
+        // Get business settings to respect business hours
+        const { data: businessSettings } = await supabase
+          .from("agenda_pro_settings")
+          .select("default_start_time, default_end_time, respect_business_hours, saturday_enabled, saturday_start_time, saturday_end_time, sunday_enabled, sunday_start_time, sunday_end_time")
+          .eq("law_firm_id", lawFirmId)
+          .maybeSingle();
+
+        // Check if day is enabled based on settings
+        if (dayOfWeek === 0 && (!businessSettings?.sunday_enabled)) {
+          return JSON.stringify({
+            success: true,
+            message: `Não atendemos aos domingos.`,
+            available_slots: []
+          });
+        }
+        if (dayOfWeek === 6 && (!businessSettings?.saturday_enabled)) {
+          return JSON.stringify({
+            success: true,
+            message: `Não atendemos aos sábados.`,
+            available_slots: []
+          });
+        }
+
+        // Determine effective business hours for this day
+        let effectiveStartTime = "08:00:00";
+        let effectiveEndTime = "18:00:00";
+
+        if (businessSettings?.respect_business_hours) {
+          if (dayOfWeek === 6) {
+            effectiveStartTime = businessSettings.saturday_start_time || "08:00:00";
+            effectiveEndTime = businessSettings.saturday_end_time || "12:00:00";
+          } else if (dayOfWeek === 0) {
+            effectiveStartTime = businessSettings.sunday_start_time || "08:00:00";
+            effectiveEndTime = businessSettings.sunday_end_time || "12:00:00";
+          } else {
+            effectiveStartTime = businessSettings.default_start_time || "08:00:00";
+            effectiveEndTime = businessSettings.default_end_time || "18:00:00";
+          }
+        }
+
         // Get working hours for professionals on this day
         const { data: workingHours } = await supabase
           .from("agenda_pro_working_hours")
@@ -1117,8 +1157,27 @@ async function executeSchedulingTool(
         const allSlots = new Set<string>();
         
         for (const wh of workingHours) {
-          const startParts = wh.start_time.split(":");
-          const endParts = wh.end_time.split(":");
+          // Apply business hours filter if respect_business_hours is enabled
+          let whStartTime = wh.start_time;
+          let whEndTime = wh.end_time;
+          
+          if (businessSettings?.respect_business_hours) {
+            // Use the later of professional start or business start
+            if (whStartTime < effectiveStartTime) {
+              whStartTime = effectiveStartTime;
+            }
+            // Use the earlier of professional end or business end
+            if (whEndTime > effectiveEndTime) {
+              whEndTime = effectiveEndTime;
+            }
+            // Skip if no valid range after applying business hours
+            if (whStartTime >= whEndTime) {
+              continue;
+            }
+          }
+          
+          const startParts = whStartTime.split(":");
+          const endParts = whEndTime.split(":");
           const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
           const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
           
@@ -1398,7 +1457,7 @@ async function executeSchedulingTool(
             },
             body: JSON.stringify({
               appointment_id: appointment.id,
-              type: "confirmation"
+              type: "created"
             }),
           });
         } catch (e) {
