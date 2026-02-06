@@ -20,11 +20,14 @@ import {
   Link2,
   Unlink,
   Loader2,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useLawFirm } from '@/hooks/useLawFirm';
 import { useToast } from '@/hooks/use-toast';
+import { extractDocumentContent, getSupportedFormatsDescription } from '@/lib/documentExtractor';
 
 const CATEGORIES = [
   { value: 'legal', label: 'Informações Legais' },
@@ -87,6 +90,10 @@ export function AgentKnowledgeSection({ automationId }: AgentKnowledgeSectionPro
 
     setIsUploading(true);
     try {
+      // 1. Extract text content from the document
+      const extraction = await extractDocumentContent(file);
+      
+      // 2. Upload file to storage
       const fileExt = file.name.split('.').pop();
       const fileName = `${lawFirmId}/${Date.now()}.${fileExt}`;
 
@@ -100,9 +107,10 @@ export function AgentKnowledgeSection({ automationId }: AgentKnowledgeSectionPro
         .from('internal-chat-files')
         .getPublicUrl(fileName);
 
+      // 3. Save to database with extracted content
       await createItem.mutateAsync({
         title: file.name,
-        content: null,
+        content: extraction.content, // Now includes extracted text!
         category: 'other',
         item_type: 'document',
         file_url: publicUrl,
@@ -111,10 +119,24 @@ export function AgentKnowledgeSection({ automationId }: AgentKnowledgeSectionPro
         file_size: file.size,
       });
 
-      toast({
-        title: 'Documento enviado',
-        description: 'O arquivo foi adicionado à base de conhecimento.',
-      });
+      // 4. Show appropriate feedback
+      if (extraction.content) {
+        toast({
+          title: 'Documento processado com sucesso',
+          description: `Texto extraído de "${file.name}". A IA poderá ler o conteúdo.`,
+        });
+      } else if (extraction.error) {
+        toast({
+          title: 'Documento salvo com limitações',
+          description: extraction.error,
+          variant: 'default',
+        });
+      } else {
+        toast({
+          title: 'Documento salvo',
+          description: 'Arquivo salvo, mas sem extração de texto disponível.',
+        });
+      }
     } catch (error) {
       console.error('Upload error:', error);
       toast({
@@ -344,14 +366,17 @@ export function AgentKnowledgeSection({ automationId }: AgentKnowledgeSectionPro
 
               <div>
                 <Label htmlFor="file-upload" className="cursor-pointer">
-                  <div className="flex items-center justify-center gap-2 p-4 border-2 border-dashed rounded-lg hover:border-primary/50 transition-colors">
+                  <div className="flex flex-col items-center justify-center gap-2 p-4 border-2 border-dashed rounded-lg hover:border-primary/50 transition-colors">
                     {isUploading ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
                     ) : (
                       <Upload className="h-5 w-5 text-muted-foreground" />
                     )}
                     <span className="text-sm text-muted-foreground">
-                      {isUploading ? 'Enviando...' : 'Enviar documento'}
+                      {isUploading ? 'Processando documento...' : 'Enviar documento'}
+                    </span>
+                    <span className="text-xs text-muted-foreground/70">
+                      {getSupportedFormatsDescription()}
                     </span>
                   </div>
                 </Label>
@@ -359,6 +384,7 @@ export function AgentKnowledgeSection({ automationId }: AgentKnowledgeSectionPro
                   id="file-upload"
                   type="file"
                   className="hidden"
+                  accept=".xlsx,.xls,.csv,.docx,.txt,.md,.json,.pdf"
                   onChange={handleFileUpload}
                   disabled={isUploading}
                 />
