@@ -126,14 +126,12 @@ const PLANS: PlanData[] = [
 ];
 
 interface FeatureSection {
-  icon: string;
   title: string;
   features: string[];
 }
 
 const FEATURE_SECTIONS: FeatureSection[] = [
   {
-    icon: '📊',
     title: 'Dashboard',
     features: [
       'Visão geral de métricas em tempo real',
@@ -148,7 +146,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '💬',
     title: 'Conversas',
     features: [
       'Inbox unificado para todas as conversas',
@@ -171,7 +168,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '📋',
     title: 'Kanban',
     features: [
       'Visualização em colunas arrastáveis',
@@ -183,7 +179,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '👥',
     title: 'Contatos',
     features: [
       'Lista completa de contatos/clientes',
@@ -194,7 +189,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '🔗',
     title: 'Conexões WhatsApp',
     features: [
       'Gerenciamento de instâncias WhatsApp',
@@ -208,7 +202,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '🤖',
     title: 'Agentes de IA',
     features: [
       'Criação de múltiplos agentes especializados',
@@ -226,7 +219,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '📚',
     title: 'Base de Conhecimento',
     features: [
       'Criação de itens de texto',
@@ -237,7 +229,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '🎤',
     title: 'Voz IA',
     features: [
       'Respostas em áudio geradas por IA',
@@ -248,7 +239,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '📅',
     title: 'Agenda Pro',
     features: [
       'Calendário visual (dia, semana, mês)',
@@ -265,7 +255,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '✅',
     title: 'Tarefas',
     features: [
       'Kanban de tarefas da equipe',
@@ -279,7 +268,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '⚙️',
     title: 'Configurações',
     features: [
       'Status personalizados com cores',
@@ -301,7 +289,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '💳',
     title: 'Meu Plano',
     features: [
       'Visualização do plano atual',
@@ -313,7 +300,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '📞',
     title: 'Suporte',
     features: [
       'Chat de suporte integrado',
@@ -322,7 +308,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     ],
   },
   {
-    icon: '🎓',
     title: 'Tutoriais',
     features: [
       'Vídeos de treinamento',
@@ -375,7 +360,7 @@ function addFooter(doc: jsPDF, pageNumber: number) {
   
   doc.text('MiauChat - Plataforma de Atendimento Inteligente', 15, pageHeight - 12);
   doc.text('contato@miauchat.com.br | www.miauchat.com.br', 15, pageHeight - 7);
-  doc.text(`Página ${pageNumber}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+  doc.text(`Pagina ${pageNumber}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
 }
 
 function addCoverPage(doc: jsPDF) {
@@ -384,64 +369,58 @@ function addCoverPage(doc: jsPDF) {
   
   // Background gradient effect
   doc.setFillColor(225, 29, 72);
-  doc.rect(0, 0, pageWidth, pageHeight * 0.4, 'F');
-  
-  // Logo circle
-  doc.setFillColor(255, 255, 255);
-  doc.circle(pageWidth / 2, 60, 30, 'F');
-  
-  // Logo text
-  doc.setTextColor(225, 29, 72);
-  doc.setFontSize(24);
-  doc.setFont('helvetica', 'bold');
-  doc.text('🐱', pageWidth / 2 - 8, 68);
+  doc.rect(0, 0, pageWidth, pageHeight * 0.45, 'F');
   
   // Main title
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(32);
+  doc.setFontSize(36);
   doc.setFont('helvetica', 'bold');
-  doc.text('MiauChat', pageWidth / 2, 110, { align: 'center' });
+  doc.text('MiauChat', pageWidth / 2, 70, { align: 'center' });
   
   doc.setFontSize(16);
   doc.setFont('helvetica', 'normal');
-  doc.text('Plataforma de Atendimento Inteligente', pageWidth / 2, 125, { align: 'center' });
+  doc.text('Plataforma de Atendimento Inteligente', pageWidth / 2, 85, { align: 'center' });
   
-  // Subtitle
+  // Decorative line
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(0.5);
+  doc.line(pageWidth / 2 - 40, 100, pageWidth / 2 + 40, 100);
+  
+  // Subtitle on white background
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(28);
   doc.setFont('helvetica', 'bold');
-  doc.text('Apresentação Comercial', pageWidth / 2, 175, { align: 'center' });
+  doc.text('Apresentacao Comercial', pageWidth / 2, 160, { align: 'center' });
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text('Catálogo de Planos e Funcionalidades', pageWidth / 2, 190, { align: 'center' });
+  doc.text('Catalogo de Planos e Funcionalidades', pageWidth / 2, 175, { align: 'center' });
   
-  // Features highlight boxes
-  const boxY = 220;
-  const boxWidth = 50;
-  const boxGap = 10;
-  const startX = (pageWidth - (boxWidth * 3 + boxGap * 2)) / 2;
+  // Key highlights - simple text-based approach
+  const highlightsY = 210;
+  
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(15, highlightsY - 10, pageWidth - 30, 50, 5, 5, 'F');
+  
+  doc.setTextColor(225, 29, 72);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Por que escolher o MiauChat?', pageWidth / 2, highlightsY, { align: 'center' });
+  
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
   
   const highlights = [
-    { icon: '🤖', text: 'IA Avançada' },
-    { icon: '💬', text: 'Multi-canal' },
-    { icon: '📊', text: 'Analytics' },
+    'IA Avancada para atendimento automatizado',
+    'Multi-canal: WhatsApp, Web e mais',
+    'Analytics completo em tempo real',
   ];
   
-  highlights.forEach((item, index) => {
-    const x = startX + (boxWidth + boxGap) * index;
-    
-    doc.setFillColor(241, 245, 249);
-    doc.roundedRect(x, boxY, boxWidth, 40, 3, 3, 'F');
-    
-    doc.setFontSize(20);
-    doc.text(item.icon, x + boxWidth / 2 - 5, boxY + 18);
-    
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text(item.text, x + boxWidth / 2, boxY + 32, { align: 'center' });
+  highlights.forEach((text, index) => {
+    doc.text('>', 30, highlightsY + 12 + index * 10);
+    doc.text(text, 40, highlightsY + 12 + index * 10);
   });
   
   // Date
@@ -453,15 +432,15 @@ function addCoverPage(doc: jsPDF) {
     month: 'long',
     year: 'numeric',
   });
-  doc.text(`Documento gerado em ${date}`, pageWidth / 2, pageHeight - 30, { align: 'center' });
+  doc.text(`Documento gerado em ${date}`, pageWidth / 2, pageHeight - 35, { align: 'center' });
   
   // Footer info
   doc.setFontSize(9);
-  doc.text('CNPJ: 54.440.907/0001-02 | contato@miauchat.com.br', pageWidth / 2, pageHeight - 20, { align: 'center' });
+  doc.text('CNPJ: 54.440.907/0001-02 | contato@miauchat.com.br', pageWidth / 2, pageHeight - 25, { align: 'center' });
 }
 
 function addPlansOverview(doc: jsPDF) {
-  addHeader(doc, 'Visão Geral dos Planos');
+  addHeader(doc, 'Visao Geral dos Planos');
   
   const pageWidth = doc.internal.pageSize.getWidth();
   let yPos = 40;
@@ -470,9 +449,9 @@ function addPlansOverview(doc: jsPDF) {
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
-  doc.text('Escolha o plano ideal para o seu negócio. Todos os planos incluem suporte', 15, yPos);
+  doc.text('Escolha o plano ideal para o seu negocio. Todos os planos incluem suporte', 15, yPos);
   yPos += 6;
-  doc.text('técnico, atualizações automáticas e 7 dias de teste gratuito.', 15, yPos);
+  doc.text('tecnico, atualizacoes automaticas e 7 dias de teste gratuito.', 15, yPos);
   yPos += 15;
   
   // Plans comparison table header
@@ -493,7 +472,7 @@ function addPlansOverview(doc: jsPDF) {
   xPos += colWidths[0];
   
   PLANS.forEach((plan, index) => {
-    const label = plan.isFeatured ? `${plan.name} ⭐` : plan.name;
+    const label = plan.isFeatured ? `${plan.name} *` : plan.name;
     doc.text(label, xPos + colWidths[index + 1] / 2, yPos + 8, { align: 'center' });
     xPos += colWidths[index + 1];
   });
@@ -502,11 +481,11 @@ function addPlansOverview(doc: jsPDF) {
   
   // Table rows
   const rows = [
-    { label: 'Preço/mês', values: PLANS.map(p => formatCurrency(p.price)) },
-    { label: 'Preço/ano', values: PLANS.map(p => formatCurrency(p.annualPrice)) },
-    { label: 'Usuários', values: PLANS.map(p => String(p.limits.users)) },
-    { label: 'Conversas IA', values: PLANS.map(p => `${p.limits.aiConversations}/mês`) },
-    { label: 'Áudio IA', values: PLANS.map(p => `${p.limits.audioMinutes} min`) },
+    { label: 'Preco/mes', values: PLANS.map(p => formatCurrency(p.price)) },
+    { label: 'Preco/ano', values: PLANS.map(p => formatCurrency(p.annualPrice)) },
+    { label: 'Usuarios', values: PLANS.map(p => String(p.limits.users)) },
+    { label: 'Conversas IA', values: PLANS.map(p => `${p.limits.aiConversations}/mes`) },
+    { label: 'Audio IA', values: PLANS.map(p => `${p.limits.audioMinutes} min`) },
     { label: 'WhatsApps', values: PLANS.map(p => String(p.limits.whatsappConnections)) },
     { label: 'Agentes IA', values: PLANS.map(p => String(p.limits.aiAgents)) },
   ];
@@ -547,15 +526,22 @@ function addPlansOverview(doc: jsPDF) {
   doc.setTextColor(146, 64, 14);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text('💡 Economia no plano anual:', 20, yPos + 8);
+  doc.text('DICA - Economia no plano anual:', 20, yPos + 8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Pague 11 meses e ganhe 1 mês grátis! Economia de 8,33%.', 20, yPos + 15);
+  doc.text('Pague 11 meses e ganhe 1 mes gratis! Economia de 8,33%.', 20, yPos + 15);
+  
+  // Legend
+  yPos += 28;
+  doc.setTextColor(100, 116, 139);
+  doc.setFontSize(8);
+  doc.text('* Plano mais escolhido pelos nossos clientes', 15, yPos);
   
   addFooter(doc, 2);
 }
 
 function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
-  addHeader(doc, `Plano ${plan.name}${plan.isFeatured ? ' ⭐ Mais Escolhido' : ''}`);
+  const headerTitle = plan.isFeatured ? `Plano ${plan.name} - Mais Escolhido` : `Plano ${plan.name}`;
+  addHeader(doc, headerTitle);
   
   const pageWidth = doc.internal.pageSize.getWidth();
   let yPos = 40;
@@ -571,7 +557,7 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
   
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  doc.text('/mês', 25 + doc.getTextWidth(formatCurrency(plan.price)) + 2, yPos + 20);
+  doc.text('/mes', 25 + doc.getTextWidth(formatCurrency(plan.price)) + 2, yPos + 20);
   
   doc.setFontSize(10);
   doc.text(`ou ${formatCurrency(plan.annualPrice)}/ano (11 meses)`, 25, yPos + 32);
@@ -587,16 +573,16 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('📦 Recursos Inclusos', 15, yPos);
+  doc.text('Recursos Inclusos', 15, yPos);
   yPos += 10;
   
   const limits = [
-    { icon: '👥', label: 'Usuários', value: String(plan.limits.users) },
-    { icon: '🤖', label: 'Conversas com IA', value: `${plan.limits.aiConversations}/mês` },
-    { icon: '🎤', label: 'Minutos de Áudio IA', value: `${plan.limits.audioMinutes} min` },
-    { icon: '📱', label: 'WhatsApps Conectados', value: String(plan.limits.whatsappConnections) },
-    { icon: '🧠', label: 'Agentes de IA', value: String(plan.limits.aiAgents) },
-    { icon: '🏢', label: 'Workspaces', value: String(plan.limits.workspaces) },
+    { label: 'Usuarios', value: String(plan.limits.users) },
+    { label: 'Conversas com IA', value: `${plan.limits.aiConversations}/mes` },
+    { label: 'Minutos de Audio IA', value: `${plan.limits.audioMinutes} min` },
+    { label: 'WhatsApps Conectados', value: String(plan.limits.whatsappConnections) },
+    { label: 'Agentes de IA', value: String(plan.limits.aiAgents) },
+    { label: 'Workspaces', value: String(plan.limits.workspaces) },
   ];
   
   const colWidth = (pageWidth - 30) / 3;
@@ -612,7 +598,7 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${limit.icon} ${limit.label}`, x + 5, y + 6);
+    doc.text(limit.label, x + 5, y + 6);
     
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(11);
@@ -626,7 +612,7 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('✨ Diferenciais do Plano', 15, yPos);
+  doc.text('Diferenciais do Plano', 15, yPos);
   yPos += 10;
   
   doc.setFontSize(10);
@@ -634,7 +620,7 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
   
   plan.differentials.forEach((differential) => {
     doc.setTextColor(225, 29, 72);
-    doc.text('✓', 20, yPos);
+    doc.text('>', 20, yPos);
     doc.setTextColor(30, 41, 59);
     doc.text(differential, 30, yPos);
     yPos += 8;
@@ -649,18 +635,18 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
   doc.setTextColor(6, 95, 70);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('🎁 Todos os planos incluem:', 20, yPos + 10);
+  doc.text('Todos os planos incluem:', 20, yPos + 10);
   
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   
   const included = [
     '7 dias de teste gratuito',
-    'Suporte técnico',
-    'Atualizações automáticas',
+    'Suporte tecnico',
+    'Atualizacoes automaticas',
     'Criptografia de dados',
     'Dashboard completo',
-    'Importação de contatos',
+    'Importacao de contatos',
   ];
   
   const incColWidth = (pageWidth - 40) / 2;
@@ -670,7 +656,7 @@ function addPlanDetails(doc: jsPDF, plan: PlanData, pageNumber: number) {
     const x = 25 + col * incColWidth;
     const y = yPos + 18 + row * 10;
     
-    doc.text(`• ${item}`, x, y);
+    doc.text(`- ${item}`, x, y);
   });
   
   addFooter(doc, pageNumber);
@@ -691,7 +677,7 @@ function addFeaturesPages(doc: jsPDF, startPage: number): number {
   doc.setFont('helvetica', 'normal');
   doc.text('O MiauChat oferece um conjunto completo de ferramentas para transformar', 15, yPos);
   yPos += 6;
-  doc.text('o atendimento da sua empresa com inteligência artificial e automação.', 15, yPos);
+  doc.text('o atendimento da sua empresa com inteligencia artificial e automacao.', 15, yPos);
   yPos += 15;
   
   FEATURE_SECTIONS.forEach((section) => {
@@ -701,7 +687,7 @@ function addFeaturesPages(doc: jsPDF, startPage: number): number {
       addFooter(doc, pageNumber);
       pageNumber++;
       doc.addPage();
-      addHeader(doc, 'Funcionalidades do Sistema (continuação)');
+      addHeader(doc, 'Funcionalidades do Sistema (continuacao)');
       yPos = 40;
     }
     
@@ -712,7 +698,7 @@ function addFeaturesPages(doc: jsPDF, startPage: number): number {
     doc.setTextColor(225, 29, 72);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${section.icon} ${section.title}`, 20, yPos + 10);
+    doc.text(section.title, 20, yPos + 10);
     
     yPos += 18;
     
@@ -735,13 +721,13 @@ function addFeaturesPages(doc: jsPDF, startPage: number): number {
         addFooter(doc, pageNumber);
         pageNumber++;
         doc.addPage();
-        addHeader(doc, 'Funcionalidades do Sistema (continuação)');
+        addHeader(doc, 'Funcionalidades do Sistema (continuacao)');
         yPos = 40;
         return;
       }
       
       doc.setTextColor(225, 29, 72);
-      doc.text('•', x, y);
+      doc.text('-', x, y);
       doc.setTextColor(30, 41, 59);
       
       // Truncate if too long
@@ -781,33 +767,30 @@ function addContactPage(doc: jsPDF, pageNumber: number) {
   
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  doc.text('Comece agora com 7 dias grátis!', pageWidth / 2, yPos + 35, { align: 'center' });
+  doc.text('Comece agora com 7 dias gratis!', pageWidth / 2, yPos + 35, { align: 'center' });
   
   yPos += 70;
   
   // Contact methods
   const contacts = [
-    { icon: '🌐', label: 'Website', value: 'www.miauchat.com.br' },
-    { icon: '📧', label: 'Email', value: 'contato@miauchat.com.br' },
-    { icon: '📱', label: 'WhatsApp', value: '(11) 99999-9999' },
+    { label: 'Website', value: 'www.miauchat.com.br' },
+    { label: 'Email', value: 'contato@miauchat.com.br' },
+    { label: 'WhatsApp', value: '(11) 99999-9999' },
   ];
   
   contacts.forEach((contact) => {
     doc.setFillColor(248, 250, 252);
     doc.roundedRect(15, yPos, pageWidth - 30, 25, 3, 3, 'F');
     
-    doc.setFontSize(14);
-    doc.text(contact.icon, 25, yPos + 16);
-    
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(contact.label, 45, yPos + 12);
+    doc.text(contact.label, 25, yPos + 10);
     
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text(contact.value, 45, yPos + 20);
+    doc.text(contact.value, 25, yPos + 18);
     
     yPos += 30;
   });
