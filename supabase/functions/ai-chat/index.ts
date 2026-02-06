@@ -397,13 +397,13 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "book_appointment",
-      description: "Cria um novo agendamento. REGRAS OBRIGATÓRIAS: 1) ANTES de chamar, confirme a data exata com dia da semana E data numérica (ex: 'quarta-feira, 11/02'). 2) Use a data atual de Brasília como referência para calcular dias da semana. 3) NÃO agende sem confirmação explícita do cliente. 4) VERIFIQUE se a data calculada corresponde ao dia da semana solicitado.",
+      description: "Cria um novo agendamento. REGRAS OBRIGATÓRIAS: 1) ANTES de chamar, confirme a data exata com dia da semana E data numérica (ex: 'quarta-feira, 11/02'). 2) Use a data atual de Brasília como referência para calcular dias da semana. 3) NÃO agende sem confirmação explícita do cliente. 4) VERIFIQUE se a data calculada corresponde ao dia da semana solicitado. 5) IMPORTANTE: Você NÃO PRECISA chamar list_services novamente se já listou os serviços anteriormente nesta conversa - use o service_id que você já obteve e tem na memória.",
       parameters: {
         type: "object",
         properties: {
           service_id: {
             type: "string",
-            description: "ID do serviço a ser agendado"
+            description: "ID do serviço a ser agendado (use o ID que você já obteve quando listou os serviços anteriormente)"
           },
           date: {
             type: "string",
@@ -3331,6 +3331,7 @@ ${dynamicExamples}
    - Horário (ex: 11:00)
    Exemplo: "Confirmo: quinta-feira, 12/02 às 11:00. Correto?"
 11. PARÂMETRO expected_weekday: Ao chamar book_appointment, SEMPRE informe o parâmetro expected_weekday com o dia da semana confirmado (ex: "quinta-feira"). O backend validará a consistência.
+12. MEMÓRIA DE SERVIÇOS: Se você JÁ listou os serviços nesta conversa (verifique no histórico de mensagens), você JÁ POSSUI os service_ids na sua memória. NÃO chame list_services novamente. Quando o cliente confirmar o agendamento, vá direto para book_appointment usando o service_id que você obteve anteriormente.
 `;
     }
 
@@ -3582,6 +3583,21 @@ ${dynamicExamples}
       
       if (!historyError && historyMessages && historyMessages.length > 0) {
         console.log(`[AI Chat] Loaded ${historyMessages.length} previous messages for context`);
+        
+        // Detect if services were already listed in this conversation
+        const servicesAlreadyListed = historyMessages.some((msg: any) => 
+          msg.is_from_me && 
+          msg.content?.includes("serviços disponíveis") &&
+          (msg.content?.includes("• ") || msg.content?.includes("- ") || msg.content?.includes("1.") || msg.content?.includes("1)"))
+        );
+        
+        if (servicesAlreadyListed) {
+          console.log(`[AI Chat] Services already listed in conversation - injecting memory note`);
+          messages.push({
+            role: "system",
+            content: "NOTA IMPORTANTE: Os serviços JÁ FORAM LISTADOS anteriormente nesta conversa. Você JÁ POSSUI os service_ids na memória. NÃO chame list_services novamente. Quando o cliente confirmar, vá direto para book_appointment usando o service_id que você já obteve."
+          });
+        }
         
         for (const msg of historyMessages) {
           // Skip empty messages
