@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { exportToExcel, getFormattedDate } from "./exportUtils";
 
 interface CompanyReportData {
   name: string;
@@ -265,4 +266,44 @@ export function generateCompanyReportPDF(config: ReportConfig): void {
   doc.save(filename);
 }
 
-export type { CompanyReportData };
+export function exportCompanyReportToExcel(config: ReportConfig): void {
+  const data = config.companies.map((company) => {
+    // Calcular status real (mesma lógica do PDF)
+    let statusFinal = company.status;
+    if (company.status === "suspended") statusFinal = "Suspenso";
+    else if (company.status === "blocked") statusFinal = "Bloqueado";
+    else if (company.approvalStatus === "pending") statusFinal = "Pendente";
+    else if (company.hasActiveSubscription) statusFinal = "Ativo";
+    else if (company.trialDaysRemaining !== null) {
+      statusFinal = company.trialDaysRemaining > 0 
+        ? `Trial (${company.trialDaysRemaining}d)` 
+        : "Trial Expirado";
+    } else if (company.status === "active") statusFinal = "Ativo";
+
+    return {
+      Nome: company.name,
+      CPF_CNPJ: company.document || "-",
+      Plano: company.planName || "-",
+      Status: statusFinal,
+      Ativo: company.isActive ? "Sim" : "Não",
+      Data_Ativacao: company.approvedAt 
+        ? format(new Date(company.approvedAt), "dd/MM/yyyy", { locale: ptBR }) 
+        : "-",
+      Ultimo_Pagamento: company.lastPaymentAt 
+        ? format(new Date(company.lastPaymentAt), "dd/MM/yyyy", { locale: ptBR }) 
+        : "-",
+      Proxima_Fatura: company.nextInvoiceAt 
+        ? format(new Date(company.nextInvoiceAt), "dd/MM/yyyy", { locale: ptBR }) 
+        : "-",
+      Faturas_Abertas: company.openInvoicesCount > 0 
+        ? `${company.openInvoicesCount} (R$ ${(company.openInvoicesTotal / 100).toFixed(2).replace('.', ',')})`
+        : "-",
+      Status_Assinatura: company.subscriptionStatus || "-",
+      Trial_Dias_Restantes: company.trialDaysRemaining ?? "-",
+    };
+  });
+
+  exportToExcel(data, `empresas-miauchat-${getFormattedDate()}`, 'Empresas');
+}
+
+export type { CompanyReportData, ReportConfig };

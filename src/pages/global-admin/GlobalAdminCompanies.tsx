@@ -59,7 +59,7 @@ import { AddonRequestsSection } from "@/components/global-admin/AddonRequestsSec
 import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { generateCompanyReportPDF, CompanyReportData } from "@/lib/companyReportGenerator";
+import { generateCompanyReportPDF, exportCompanyReportToExcel, CompanyReportData } from "@/lib/companyReportGenerator";
 import { differenceInDays } from "date-fns";
 
 export default function GlobalAdminCompanies() {
@@ -84,6 +84,7 @@ export default function GlobalAdminCompanies() {
   const [isGeneratingBilling, setIsGeneratingBilling] = useState(false);
   const [suspendingCompany, setSuspendingCompany] = useState<typeof companies[0] | null>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -662,6 +663,102 @@ export default function GlobalAdminCompanies() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Exportar relatório PDF de todas as empresas</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Export Excel Button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    setIsExportingExcel(true);
+                    try {
+                      // Fetch billing data for all companies in batch
+                      const companyIds = companies.map(c => c.id);
+                      let billingData: Record<string, {
+                        hasActiveSubscription: boolean;
+                        subscriptionStatus: string | null;
+                        lastPaymentAt: string | null;
+                        nextInvoiceAt: string | null;
+                        openInvoicesCount: number;
+                        openInvoicesTotal: number;
+                      }> = {};
+                      
+                      try {
+                        const { data: billingSummary, error: billingError } = await supabase.functions.invoke('get-company-billing-summary', {
+                          body: { company_ids: companyIds }
+                        });
+                        
+                        if (billingError) {
+                          console.warn('Could not fetch billing summary:', billingError);
+                        } else if (billingSummary?.data) {
+                          billingData = billingSummary.data;
+                        }
+                      } catch (e) {
+                        console.warn('Error fetching billing summary:', e);
+                      }
+                      
+                      // Build report data with billing info
+                      const reportData: CompanyReportData[] = companies.map((company) => {
+                        const plan = plans.find(p => p.id === company.plan_id);
+                        
+                        // Calculate trial days remaining
+                        let trialDaysRemaining: number | null = null;
+                        if (company.trial_ends_at) {
+                          const trialEnd = new Date(company.trial_ends_at);
+                          trialDaysRemaining = differenceInDays(trialEnd, new Date());
+                        }
+                        
+                        // Get billing data for this company
+                        const billing = billingData[company.id] || {
+                          hasActiveSubscription: false,
+                          subscriptionStatus: null,
+                          lastPaymentAt: null,
+                          nextInvoiceAt: null,
+                          openInvoicesCount: 0,
+                          openInvoicesTotal: 0,
+                        };
+                        
+                        return {
+                          name: company.name,
+                          document: company.document,
+                          planName: plan?.name || 'Sem plano',
+                          status: company.status,
+                          approvalStatus: company.approval_status || 'approved',
+                          isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
+                          approvedAt: company.approved_at,
+                          trialDaysRemaining,
+                          openInvoicesCount: billing.openInvoicesCount,
+                          openInvoicesTotal: billing.openInvoicesTotal,
+                          hasActiveSubscription: billing.hasActiveSubscription,
+                          subscriptionStatus: billing.subscriptionStatus,
+                          lastPaymentAt: billing.lastPaymentAt,
+                          nextInvoiceAt: billing.nextInvoiceAt,
+                        };
+                      });
+                      
+                      exportCompanyReportToExcel({
+                        companies: reportData,
+                        generatedAt: new Date(),
+                      });
+                      
+                      toast.success('Relatório Excel exportado com sucesso!');
+                    } catch (error) {
+                      console.error('Error exporting Excel:', error);
+                      toast.error('Erro ao exportar Excel');
+                    } finally {
+                      setIsExportingExcel(false);
+                    }
+                  }}
+                  disabled={isExportingExcel || companies.length === 0}
+                >
+                  <FileText className={`mr-2 h-4 w-4 ${isExportingExcel ? 'animate-pulse' : ''}`} />
+                  {isExportingExcel ? 'Exportando...' : 'Exportar Excel'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Exportar relatório Excel de todas as empresas</TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
