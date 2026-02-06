@@ -364,7 +364,7 @@ const SCHEDULING_TOOLS = [
     type: "function",
     function: {
       name: "list_services",
-      description: "Lista todos os serviços disponíveis para agendamento. REGRA CRÍTICA: Você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados ao cliente, sem omitir nenhum. O cliente tem o direito de conhecer TODAS as opções. Use o campo 'services_list_for_response' para copiar a lista formatada. RETORNA o 'service_id' UUID que DEVE ser usado nas demais funções.",
+      description: "Lista todos os serviços disponíveis para agendamento. REGRAS CRÍTICAS: 1) Chame esta função APENAS UMA VEZ por conversa - se já listou os serviços, NÃO chame novamente, use o service_id que você já obteve. 2) Você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados ao cliente, sem omitir nenhum. 3) Use o campo 'services_list_for_response' para copiar a lista formatada. 4) Na confirmação final, mencione apenas o serviço ESCOLHIDO (ex: 'Head Spa'), não liste todos novamente. RETORNA o 'service_id' UUID que DEVE ser usado nas demais funções.",
       parameters: {
         type: "object",
         properties: {},
@@ -3312,7 +3312,11 @@ ${dynamicExamples}
 2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
 3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
 4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
-5. NÃO repita a lista de serviços se já a apresentou na conversa atual. Prossiga diretamente com o agendamento.
+5. PROIBIDO REPETIR SERVIÇOS: 
+   - Chame list_services APENAS UMA VEZ por conversa
+   - Se o cliente já conhece os serviços (você já listou antes), NÃO chame list_services novamente
+   - Na confirmação final, mencione APENAS o serviço escolhido pelo nome (ex: "Head Spa"), NÃO liste todos
+   - Use o service_id que você já obteve anteriormente na memória da conversa
 6. CÁLCULO DE DATAS: Use a referência "PRÓXIMOS DIAS" acima. NÃO calcule manualmente - consulte a lista.
 7. SEMPRE confirme a data exata (dia da semana + data numérica) ANTES de criar o agendamento.
 8. VERIFICAÇÃO: Compare o dia da semana solicitado com a lista "PRÓXIMOS DIAS" antes de chamar book_appointment.
