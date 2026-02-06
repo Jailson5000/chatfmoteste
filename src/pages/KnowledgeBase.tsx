@@ -14,13 +14,15 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Plus, Trash2, Edit, Search, Upload, MoreVertical, GripVertical, Bot, Link2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2, Plus, Trash2, Edit, Search, Upload, MoreVertical, GripVertical, Bot, Link2, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLawFirm } from "@/hooks/useLawFirm";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { extractDocumentContent, getSupportedFormatsDescription } from '@/lib/documentExtractor';
 
 const CATEGORIES = [
   { value: 'legal', label: 'Informações Legais' },
@@ -201,6 +203,10 @@ export default function KnowledgeBase() {
 
     setIsUploading(true);
     try {
+      // 1. Extrair texto do documento
+      const extraction = await extractDocumentContent(file);
+      
+      // 2. Fazer upload para o storage
       const fileExt = file.name.split('.').pop();
       const fileName = `${lawFirm.id}/${Date.now()}.${fileExt}`;
 
@@ -214,9 +220,10 @@ export default function KnowledgeBase() {
         .from('internal-chat-files')
         .getPublicUrl(fileName);
 
+      // 3. Salvar com conteúdo extraído
       await createItem.mutateAsync({
         title: file.name,
-        content: null,
+        content: extraction.content,
         category: 'other',
         item_type: 'document',
         file_url: publicUrl,
@@ -225,10 +232,24 @@ export default function KnowledgeBase() {
         file_size: file.size,
       });
 
-      toast({
-        title: 'Documento enviado',
-        description: 'O arquivo foi adicionado à base de conhecimento.',
-      });
+      // 4. Feedback apropriado
+      if (extraction.content) {
+        toast({
+          title: 'Documento processado',
+          description: 'Texto extraído com sucesso. A IA poderá ler o conteúdo.',
+        });
+      } else if (extraction.error) {
+        toast({
+          title: 'Documento salvo com limitações',
+          description: extraction.error,
+          variant: 'default',
+        });
+      } else {
+        toast({
+          title: 'Documento enviado',
+          description: 'O arquivo foi adicionado à base de conhecimento.',
+        });
+      }
     } catch (error) {
       console.error('Upload error:', error);
       toast({
@@ -312,6 +333,9 @@ export default function KnowledgeBase() {
           <h1 className="text-2xl font-bold tracking-tight">Base de Conhecimento</h1>
           <p className="text-muted-foreground">
             Centralize e gerencie todo o conhecimento da sua organização
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Formatos suportados: {getSupportedFormatsDescription()}
           </p>
         </div>
         
@@ -462,9 +486,21 @@ export default function KnowledgeBase() {
                         <div className="flex items-center gap-2">
                           <p className="font-medium">{item.title}</p>
                           {item.item_type === 'document' && item.file_type && (
-                            <Badge variant="outline" className="text-xs uppercase">
-                              {item.file_type.split('/').pop() || 'doc'}
-                            </Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className="text-xs uppercase">
+                                {item.file_type.split('/').pop() || 'doc'}
+                              </Badge>
+                              {item.file_type === 'application/pdf' && !item.content && (
+                                <Tooltip>
+                                  <TooltipTrigger>
+                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">A IA não consegue ler PDFs</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </div>
                           )}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
