@@ -1377,7 +1377,7 @@ async function executeSchedulingTool(
             notes: notes || null,
             price: service.price,
             status: "scheduled",
-            source: "ai_chat",
+            source: "api",
             confirmation_token: confirmationToken
           })
           .select("id")
