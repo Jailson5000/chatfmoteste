@@ -9,11 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Users } from "lucide-react";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Users, FileText, Download } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
 import { toast } from "sonner";
+import { generateCommercialPDF } from "@/lib/commercialPdfGenerator";
 
 export default function GlobalAdminSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
@@ -530,6 +531,39 @@ export default function GlobalAdminSettings() {
             <p className="text-sm text-muted-foreground">
               Limite máximo para upload de arquivos
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Commercial PDF Export */}
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            Material Comercial
+          </CardTitle>
+          <CardDescription>
+            Gere material de apresentação comercial para clientes
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 border border-primary/20 rounded-lg bg-primary/5">
+            <div>
+              <p className="font-medium">PDF Comercial Completo</p>
+              <p className="text-sm text-muted-foreground">
+                Catálogo de planos, valores e todas as funcionalidades do sistema (~10 páginas)
+              </p>
+            </div>
+            <Button 
+              onClick={() => {
+                generateCommercialPDF();
+                toast.success("PDF comercial gerado com sucesso!");
+              }}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Gerar PDF
+            </Button>
           </div>
         </CardContent>
       </Card>
