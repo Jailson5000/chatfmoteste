@@ -428,9 +428,13 @@ const SCHEDULING_TOOLS = [
           notes: {
             type: "string",
             description: "Observações sobre o agendamento (opcional)"
+          },
+          expected_weekday: {
+            type: "string",
+            description: "Dia da semana esperado em português (segunda-feira, terça-feira, quarta-feira, quinta-feira, sexta-feira, sábado, domingo). OBRIGATÓRIO para validação de consistência - deve corresponder exatamente à data informada."
           }
         },
-        required: ["service_id", "date", "time", "client_name", "client_phone"]
+        required: ["service_id", "date", "time", "client_name", "client_phone", "expected_weekday"]
       }
     }
   },
@@ -1395,6 +1399,25 @@ async function executeSchedulingTool(
         
         console.log(`[book_appointment] Booking at ${time} Brazil time = ${startTime.toISOString()} UTC`);
         console.log(`[book_appointment] Date ${date} at ${time} corresponds to ${calculatedDayName} (dayOfWeek=${dayOfWeekBooking})`);
+        
+        // VALIDATION: Check weekday consistency if expected_weekday is provided
+        if (args.expected_weekday) {
+          const normalizedExpected = args.expected_weekday.toLowerCase().trim();
+          const normalizedCalculated = calculatedDayName.toLowerCase();
+          
+          if (normalizedExpected !== normalizedCalculated) {
+            console.log(`[book_appointment] INCONSISTENCY DETECTED: Expected "${normalizedExpected}" but date ${date} is actually "${normalizedCalculated}"`);
+            const formattedDate = date.split('-').reverse().join('/');
+            return JSON.stringify({
+              success: false,
+              error: `INCONSISTÊNCIA DETECTADA: Você mencionou "${args.expected_weekday}", mas ${formattedDate} é ${calculatedDayName}. Por favor, confirme a data correta com o cliente.`,
+              suggestion: `Opções: "${calculatedDayName}, ${formattedDate}" ou verifique a data correta para "${normalizedExpected}" na lista de próximos dias.`
+            });
+          }
+          console.log(`[book_appointment] Weekday validation PASSED: expected "${normalizedExpected}" = actual "${normalizedCalculated}"`);
+        } else {
+          console.log(`[book_appointment] WARNING: No expected_weekday provided - skipping consistency validation`);
+        }
 
         // Get professionals that offer this service (use resolvedServiceId, not the original service_id)
         const { data: serviceProfessionals } = await supabase
@@ -3293,6 +3316,17 @@ ${dynamicExamples}
 6. CÁLCULO DE DATAS: Use a referência "PRÓXIMOS DIAS" acima. NÃO calcule manualmente - consulte a lista.
 7. SEMPRE confirme a data exata (dia da semana + data numérica) ANTES de criar o agendamento.
 8. VERIFICAÇÃO: Compare o dia da semana solicitado com a lista "PRÓXIMOS DIAS" antes de chamar book_appointment.
+9. VALIDAÇÃO DE CONSISTÊNCIA: Se o cliente mencionar um dia da semana E uma data numérica que NÃO correspondem (ex: "quinta-feira 07/02" quando 07/02 é sábado):
+   - NÃO confirme o agendamento
+   - Informe o erro de forma clara e educada: "Identifiquei uma inconsistência: 07/02 é sábado."
+   - Ofereça as duas opções corretas: "Você gostaria de agendar para: sábado, 07/02 ou quinta-feira, 12/02?"
+   - Só prossiga após o cliente escolher uma opção válida
+10. CONFIRMAÇÃO OBRIGATÓRIA: Antes de chamar book_appointment, SEMPRE confirme com o cliente:
+   - Data numérica (ex: 12/02)
+   - Dia da semana correspondente (ex: quinta-feira)
+   - Horário (ex: 11:00)
+   Exemplo: "Confirmo: quinta-feira, 12/02 às 11:00. Correto?"
+11. PARÂMETRO expected_weekday: Ao chamar book_appointment, SEMPRE informe o parâmetro expected_weekday com o dia da semana confirmado (ex: "quinta-feira"). O backend validará a consistência.
 `;
     }
 
