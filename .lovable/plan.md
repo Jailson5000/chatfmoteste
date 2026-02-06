@@ -1,133 +1,170 @@
 
-# Plano: Melhorias na Base de Conhecimento com Avisos de PDF
 
-## Problemas Identificados
+# Plano: Exportação Excel de Clientes e Material Comercial
 
-### 1. A página KnowledgeBase.tsx NÃO extrai texto dos documentos
-A função `handleFileUpload` (linhas 198-243) apenas faz upload do arquivo para o storage, mas **não chama** a função `extractDocumentContent()`. Isso significa que:
-- Arquivos enviados pelo botão "Enviar Documento" na página Base de Conhecimento não têm texto extraído
-- A IA não consegue ler nenhum documento enviado por essa página
+## Resumo
 
-### 2. PDFs não têm aviso visual claro
-Na lista de documentos, PDFs aparecem sem indicação de que a IA não consegue lê-los.
-
-### 3. Botão "Enviar Documento" não mostra formatos suportados
-O usuário não sabe quais formatos são aceitos até tentar enviar.
+Adicionar/melhorar exportação em Excel para:
+1. **Lista de Clientes** - Expandir dados exportados para incluir informações completas
+2. **Material Comercial** - Adicionar botão de exportação Excel ao lado do PDF existente
 
 ---
 
-## Alterações Necessárias
+## 1. Exportação de Clientes (Melhorias)
 
-### Arquivo 1: `src/pages/KnowledgeBase.tsx`
+### Situação Atual
+A página de Contatos (`src/pages/Contacts.tsx`) já possui exportação Excel com os campos:
+- Nome, Telefone, Email, CPF/CNPJ, Status, Departamento, Endereço, Observações, Data de Criação
 
-#### Mudança A: Importar função de extração
+### Melhoria Proposta
+Adicionar campos que estão disponíveis no sistema mas não estão sendo exportados:
+
+| Campo Atual | Campos a Adicionar |
+|-------------|-------------------|
+| Nome | **Responsável** |
+| Telefone | **Última Atualização** |
+| Email | **Consentimento LGPD** |
+| CPF/CNPJ | **Data Consentimento LGPD** |
+| Status | **Conexão WhatsApp** |
+| Departamento | |
+| Endereço | |
+| Observações | |
+| Criado Em | |
+
+### Alteração no Arquivo: `src/pages/Contacts.tsx`
+
+Modificar a função `handleExport` (linhas 214-232):
+
 ```typescript
-import { extractDocumentContent, getSupportedFormatsDescription } from '@/lib/documentExtractor';
-```
-
-#### Mudança B: Atualizar handleFileUpload para extrair texto
-Modificar a função para:
-1. Chamar `extractDocumentContent(file)` antes do upload
-2. Salvar o texto extraído no campo `content`
-3. Mostrar toast apropriado baseado no resultado
-
-#### Mudança C: Adicionar tooltip/texto no botão "Enviar Documento"
-Mostrar os formatos suportados quando o usuário passar o mouse.
-
-#### Mudança D: Adicionar badge de aviso para PDFs na lista
-Na tabela, ao lado da badge "PDF", adicionar um indicador visual de que a IA não lê esse formato.
-
----
-
-## Detalhes Técnicos
-
-### handleFileUpload Atualizado (linhas 198-243):
-```typescript
-const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file || !lawFirm?.id) return;
-
-  setIsUploading(true);
-  try {
-    // 1. Extrair texto do documento
-    const extraction = await extractDocumentContent(file);
+const handleExport = () => {
+  const dataToExport = filteredClients.map((client) => {
+    const status = getStatusById(client.custom_status_id);
+    const department = getDepartmentById(client.department_id);
     
-    // 2. Fazer upload para o storage
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${lawFirm.id}/${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('internal-chat-files')
-      .upload(fileName, file);
-
-    if (uploadError) throw uploadError;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('internal-chat-files')
-      .getPublicUrl(fileName);
-
-    // 3. Salvar com conteúdo extraído
-    await createItem.mutateAsync({
-      title: file.name,
-      content: extraction.content, // Agora salva o texto!
-      category: 'other',
-      item_type: 'document',
-      file_url: publicUrl,
-      file_name: file.name,
-      file_type: file.type,
-      file_size: file.size,
-    });
-
-    // 4. Feedback apropriado
-    if (extraction.content) {
-      toast({
-        title: 'Documento processado',
-        description: 'Texto extraído com sucesso. A IA poderá ler o conteúdo.',
-      });
-    } else if (extraction.error) {
-      toast({
-        title: 'Documento salvo com limitações',
-        description: extraction.error,
-        variant: 'default',
-      });
-    }
-  } catch (error) {
-    // ... tratamento de erro existente
-  } finally {
-    setIsUploading(false);
-    e.target.value = '';
-  }
+    // Get connection display
+    const conversation = client.conversations?.[0];
+    const inst = client.whatsapp_instance || conversation?.whatsapp_instance;
+    const conexao = conversation?.origin === 'WIDGET' || conversation?.origin === 'WEB' 
+      ? 'Chat Web' 
+      : (inst?.display_name || inst?.instance_name || '');
+    
+    return {
+      Nome: client.name,
+      Telefone: formatPhone(client.phone),
+      Email: client.email || "",
+      CPF_CNPJ: client.document || "",
+      Status: status?.name || "",
+      Departamento: department?.name || "",
+      Responsavel: client.assigned_profile?.full_name || "",
+      Conexao_WhatsApp: conexao,
+      Endereco: client.address || "",
+      Observacoes: client.notes || "",
+      Consentimento_LGPD: client.lgpd_consent ? "Sim" : "Não",
+      Data_Consentimento_LGPD: client.lgpd_consent_date 
+        ? format(new Date(client.lgpd_consent_date), "dd/MM/yyyy", { locale: ptBR }) 
+        : "",
+      Criado_Em: format(new Date(client.created_at), "dd/MM/yyyy", { locale: ptBR }),
+      Atualizado_Em: format(new Date(client.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR }),
+    };
+  });
+  exportToExcel(dataToExport, `contatos-${getFormattedDate()}`, "Contatos");
+  toast({ title: "Contatos exportados com sucesso" });
 };
 ```
 
-### Badge de Aviso para PDFs (na tabela):
-Na linha 465-468, adicionar lógica para mostrar aviso quando for PDF:
-```tsx
-{item.item_type === 'document' && item.file_type && (
-  <div className="flex items-center gap-1">
-    <Badge variant="outline" className="text-xs uppercase">
-      {item.file_type.split('/').pop() || 'doc'}
-    </Badge>
-    {item.file_type === 'application/pdf' && !item.content && (
-      <Tooltip>
-        <TooltipTrigger>
-          <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="text-xs">A IA não consegue ler PDFs</p>
-        </TooltipContent>
-      </Tooltip>
-    )}
-  </div>
-)}
+---
+
+## 2. Exportação Excel do Material Comercial
+
+### Situação Atual
+- Existe apenas PDF comercial em `GlobalAdminSettings.tsx` (linha 557-566)
+- Os dados dos planos estão exportados em `commercialPdfGenerator.ts` (PLANS e FEATURE_SECTIONS)
+
+### Solução
+Criar função de exportação Excel no `commercialPdfGenerator.ts` e adicionar botão na interface.
+
+### Alteração no Arquivo: `src/lib/commercialPdfGenerator.ts`
+
+Adicionar nova função no final do arquivo:
+
+```typescript
+export function exportCommercialToExcel(): void {
+  const plansData = PLANS.map((plan) => ({
+    Plano: plan.name,
+    Preco_Mensal: formatCurrency(plan.price),
+    Preco_Anual: formatCurrency(plan.annualPrice),
+    Publico_Alvo: plan.targetAudience,
+    Usuarios: plan.limits.users,
+    Conversas_IA: plan.limits.aiConversations,
+    Minutos_Audio: plan.limits.audioMinutes,
+    Conexoes_WhatsApp: plan.limits.whatsappConnections,
+    Agentes_IA: plan.limits.aiAgents,
+    Workspaces: plan.limits.workspaces,
+    Diferenciais: plan.differentials.join('; '),
+    Destaque: plan.isFeatured ? 'Sim' : 'Não',
+  }));
+
+  const featuresData: { Categoria: string; Funcionalidade: string }[] = [];
+  FEATURE_SECTIONS.forEach((section) => {
+    section.features.forEach((feature) => {
+      featuresData.push({
+        Categoria: section.title,
+        Funcionalidade: feature,
+      });
+    });
+  });
+
+  // Use exportMultiSheetExcel from exportUtils
+  exportMultiSheetExcel(
+    [
+      { name: 'Planos', data: plansData },
+      { name: 'Funcionalidades', data: featuresData },
+    ],
+    `MiauChat-Catalogo-Comercial-${new Date().toISOString().split('T')[0]}`
+  );
+}
 ```
 
-### Texto de Formatos Suportados no Header:
-Adicionar abaixo do subtítulo:
+### Alteração no Arquivo: `src/pages/global-admin/GlobalAdminSettings.tsx`
+
+1. Atualizar import para incluir a nova função:
+```typescript
+import { generateCommercialPDF, exportCommercialToExcel } from "@/lib/commercialPdfGenerator";
+```
+
+2. Adicionar botão de Excel ao lado do PDF (após linha 566):
 ```tsx
-<p className="text-xs text-muted-foreground mt-1">
-  Formatos suportados: {getSupportedFormatsDescription()}
-</p>
+<div className="flex items-center justify-between p-4 border border-primary/20 rounded-lg bg-primary/5">
+  <div>
+    <p className="font-medium">PDF Comercial Completo</p>
+    <p className="text-sm text-muted-foreground">
+      Catálogo de planos, valores e todas as funcionalidades do sistema (~10 páginas)
+    </p>
+  </div>
+  <div className="flex gap-2">
+    <Button 
+      variant="outline"
+      onClick={() => {
+        exportCommercialToExcel();
+        toast.success("Excel comercial gerado com sucesso!");
+      }}
+      className="gap-2"
+    >
+      <Download className="h-4 w-4" />
+      Exportar Excel
+    </Button>
+    <Button 
+      onClick={() => {
+        generateCommercialPDF();
+        toast.success("PDF comercial gerado com sucesso!");
+      }}
+      className="gap-2"
+    >
+      <Download className="h-4 w-4" />
+      Gerar PDF
+    </Button>
+  </div>
+</div>
 ```
 
 ---
@@ -136,28 +173,38 @@ Adicionar abaixo do subtítulo:
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/KnowledgeBase.tsx` | Importar `extractDocumentContent` e `getSupportedFormatsDescription` |
-| `src/pages/KnowledgeBase.tsx` | Modificar `handleFileUpload` para extrair texto |
-| `src/pages/KnowledgeBase.tsx` | Adicionar badge de aviso para PDFs sem conteúdo |
-| `src/pages/KnowledgeBase.tsx` | Mostrar formatos suportados na descrição |
-| `src/pages/KnowledgeBase.tsx` | Importar `Tooltip`, `TooltipTrigger`, `TooltipContent`, `AlertCircle` |
+| `src/pages/Contacts.tsx` | Expandir `handleExport` com campos adicionais |
+| `src/lib/commercialPdfGenerator.ts` | Adicionar função `exportCommercialToExcel` + import do `exportUtils` |
+| `src/pages/global-admin/GlobalAdminSettings.tsx` | Adicionar botão de Excel ao lado do PDF |
 
 ---
 
 ## Resultado Esperado
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Upload de Excel | Salvo sem texto | Texto extraído, IA lê |
-| Upload de Word | Salvo sem texto | Texto extraído, IA lê |
-| Upload de PDF | Salvo sem texto | Salvo + Aviso visual na lista |
-| Formatos suportados | Não visível | Exibido na página |
+### Exportação de Clientes
+| Antes | Depois |
+|-------|--------|
+| 9 campos básicos | 14 campos completos |
+| Sem responsável | Com responsável |
+| Sem conexão | Com conexão WhatsApp |
+| Sem LGPD | Com consentimento LGPD |
+
+### Material Comercial
+| Antes | Depois |
+|-------|--------|
+| Apenas PDF | PDF + Excel |
+| Um botão | Dois botões lado a lado |
+
+### Excel Comercial (2 abas)
+- **Aba "Planos"**: Nome, preços, limites, diferenciais
+- **Aba "Funcionalidades"**: Categoria + funcionalidade detalhada
 
 ---
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Mudanças localizadas no componente de upload
-- Fallback: se extração falhar, continua salvando com content = null
-- Não altera lógica de leitura existente
+- Alterações isoladas em funções de exportação
+- Nenhuma alteração em lógica de dados ou banco
+- Fallback: funções existentes continuam funcionando
+
