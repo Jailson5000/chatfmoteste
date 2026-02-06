@@ -1,99 +1,219 @@
 
 
-# Plano de Correção: Persistência de Agendamento e Acesso a PDFs
+# Plano: Extração de Texto de Documentos para Base de Conhecimento
 
-## Problema 1: scheduling_enabled Não Persiste
+## Análise da Situação Atual
 
-### Diagnóstico
-No arquivo `src/hooks/useAutomations.tsx`, a função `updateAutomation` não está incluindo o campo `scheduling_enabled` no payload de atualização.
+### O que funciona hoje:
+- **Textos manuais**: Funcionam 100% - salvos no campo `content` da tabela `knowledge_items`
+- **Upload de arquivos**: Funcionam parcialmente - arquivo é salvo no storage, mas `content` fica NULL
 
-**Código atual (linha 161):**
-```typescript
-if ((updateData as any).notify_on_transfer !== undefined) 
-  updatePayload.notify_on_transfer = (updateData as any).notify_on_transfer;
-// scheduling_enabled NÃO está sendo salvo!
-```
-
-### Solução
-Adicionar a linha para incluir `scheduling_enabled` no payload de atualização:
-
-```typescript
-if ((updateData as any).scheduling_enabled !== undefined) 
-  updatePayload.scheduling_enabled = (updateData as any).scheduling_enabled;
-```
-
-**Arquivo:** `src/hooks/useAutomations.tsx`
-**Alteração:** Adicionar linha após a linha 161
+### O problema:
+- A IA só lê o campo `content`
+- PDFs, Word, Excel têm apenas `file_url` preenchido
+- Por isso a IA "não vê" o conteúdo desses documentos
 
 ---
 
-## Problema 2: IA Não Acessa Conteúdo de PDFs
+## Tipos de Arquivo e Viabilidade
 
-### Diagnóstico
-A função `getAgentKnowledge` no arquivo `supabase/functions/ai-chat/index.ts` (linhas 2191-2229) só retorna itens que têm `content` preenchido. Documentos PDF têm apenas `file_url`, então são ignorados.
+| Formato | Suporte | Biblioteca | Complexidade | Chance de Sucesso |
+|---------|---------|------------|--------------|-------------------|
+| **.xlsx / .xls** | Excelente | `xlsx` (já instalado!) | Baixa | **95%** |
+| **.docx** | Bom | `mammoth` ou parsing XML | Média | **85%** |
+| **.txt / .csv** | Excelente | Nativo JavaScript | Baixa | **99%** |
+| **.pdf** | Difícil | Requer bibliotecas externas | Alta | **50-60%** |
 
-**Código atual:**
-```typescript
-.filter((item: any) => item.knowledge_items?.content) // Ignora PDFs
-.map((item: any) => {
-  const ki = item.knowledge_items;
-  return `### ${ki.title}\n${ki.content}`; // Só usa content
-});
-```
-
-### Solução
-Modificar a função para:
-1. Incluir itens do tipo document (PDFs) mesmo sem content
-2. Adicionar uma referência ao documento para o modelo saber que existe
-
-```typescript
-// Alteração na função getAgentKnowledge
-
-const knowledgeTexts = linkedKnowledge
-  .map((item: any) => {
-    const ki = item.knowledge_items;
-    if (!ki) return null;
-    
-    // Se tem content (texto), usa normalmente
-    if (ki.content) {
-      return `### ${ki.title}\n${ki.content}`;
-    }
-    
-    // Se é documento, adiciona referência
-    if (ki.item_type === 'document' && ki.file_url) {
-      return `### ${ki.title} (Documento)\n[Arquivo disponível: ${ki.file_name || ki.title}]`;
-    }
-    
-    return null;
-  })
-  .filter(Boolean);
-```
-
-### Limitação Importante
-A IA não consegue "ler" o conteúdo de PDFs automaticamente. Para isso funcionar completamente, seria necessário:
-
-1. **Extração de texto no upload** - Usar uma biblioteca para extrair texto do PDF quando ele é enviado
-2. **Armazenar o texto extraído** - Salvar o conteúdo textual no campo `content` da tabela `knowledge_items`
-
-### Solução Completa (Recomendada para Futuro)
-Criar um sistema de extração de texto de PDFs no momento do upload:
-
-1. Quando um PDF é enviado em `AgentKnowledgeSection.tsx`
-2. Chamar uma Edge Function que usa biblioteca de parsing de PDF
-3. Extrair o texto e salvar no campo `content` do item
-4. A IA então terá acesso ao conteúdo textual
+### Por que PDF é mais difícil?
+- Bibliotecas de PDF geralmente precisam de binários externos (`mutool`, `pdfimages`)
+- Edge Functions do Supabase têm ambiente limitado
+- PDFs podem ter texto como imagem (necessitaria OCR)
+- Alternativa: usar API externa (custo adicional)
 
 ---
 
-## Resumo das Alterações
+## Solução Proposta (Segura e Incremental)
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/hooks/useAutomations.tsx` | Adicionar `scheduling_enabled` ao updatePayload |
-| `supabase/functions/ai-chat/index.ts` | Incluir documentos na resposta do knowledge base |
+### Fase 1: Extração de Excel e CSV (Alta chance de sucesso)
+
+**Biblioteca**: `xlsx` (SheetJS) - já instalada no projeto!
+
+```typescript
+// No frontend, ao fazer upload de .xlsx/.xls/.csv
+import * as XLSX from 'xlsx';
+
+const extractExcelContent = async (file: File): Promise<string> => {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  
+  let fullText = '';
+  workbook.SheetNames.forEach(sheetName => {
+    const sheet = workbook.Sheets[sheetName];
+    const csv = XLSX.utils.sheet_to_csv(sheet);
+    fullText += `=== ${sheetName} ===\n${csv}\n\n`;
+  });
+  
+  return fullText;
+};
+```
+
+**Alteração**: `AgentKnowledgeSection.tsx` - extrair texto ANTES do upload
+
+### Fase 2: Extração de DOCX (Boa chance)
+
+**Opção A**: Parsing direto de XML (DOCX é um ZIP com XMLs)
+- Zero dependências adicionais
+- Funciona no browser
+- Extrai texto principal
+
+**Opção B**: Biblioteca `mammoth` 
+- Mais completa (formatação, listas)
+- Precisa adicionar dependência
+
+### Fase 3: Extração de TXT/CSV
+
+Nativo - apenas `file.text()`:
+```typescript
+const content = await file.text();
+```
+
+### Fase 4: PDF (Implementação futura)
+
+Opções:
+1. **API externa** (DocumentCloud, Google Document AI) - custo
+2. **pdf.js** no browser - funciona mas limitado
+3. **Edge Function com Kreuzberg/WASM** - experimental
+
+---
+
+## Arquitetura da Solução
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                    UPLOAD DE DOCUMENTO                       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              FRONTEND (AgentKnowledgeSection.tsx)            │
+│                                                              │
+│  1. Detectar tipo de arquivo                                 │
+│  2. Se .xlsx/.xls/.csv → extrair com xlsx                   │
+│  3. Se .docx → extrair com parsing XML                       │
+│  4. Se .txt → ler diretamente                                │
+│  5. Se .pdf → informar limitação (por enquanto)             │
+│                                                              │
+│  6. Salvar arquivo no storage                                │
+│  7. Salvar content extraído no banco                         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   BANCO DE DADOS                             │
+│                                                              │
+│  knowledge_items:                                            │
+│    - file_url: URL do arquivo original                       │
+│    - file_name: Nome do arquivo                              │
+│    - content: TEXTO EXTRAÍDO (agora preenchido!)            │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   IA (ai-chat/index.ts)                      │
+│                                                              │
+│  Já funciona! Lê o campo content normalmente                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Alterações Necessárias
+
+### 1. Criar utilitário de extração
+**Arquivo**: `src/lib/documentExtractor.ts`
+
+```typescript
+import * as XLSX from 'xlsx';
+
+export async function extractDocumentContent(file: File): Promise<{
+  content: string | null;
+  error?: string;
+  supported: boolean;
+}> {
+  const ext = file.name.toLowerCase().split('.').pop();
+  
+  switch (ext) {
+    case 'xlsx':
+    case 'xls':
+    case 'csv':
+      return extractExcelContent(file);
+    case 'docx':
+      return extractDocxContent(file);
+    case 'txt':
+      return extractTextContent(file);
+    case 'pdf':
+      return { content: null, supported: false, 
+        error: 'PDFs ainda não suportam extração automática de texto' };
+    default:
+      return { content: null, supported: false };
+  }
+}
+```
+
+### 2. Modificar upload
+**Arquivo**: `src/components/ai-agents/AgentKnowledgeSection.tsx`
+
+- Antes do upload para o storage, chamar `extractDocumentContent(file)`
+- Salvar o texto extraído no campo `content`
+- Manter `file_url` como backup/referência
+
+### 3. Ajustar hook
+**Arquivo**: `src/hooks/useKnowledgeItems.tsx`
+
+- `createItem` já aceita `content`, sem alteração necessária
+
+---
+
+## Riscos e Mitigações
+
+| Risco | Probabilidade | Mitigação |
+|-------|---------------|-----------|
+| Arquivo Excel muito grande | Média | Limitar a 5MB e/ou primeiras 100 linhas |
+| DOCX com formatação complexa | Baixa | Extrair apenas texto, ignorar imagens |
+| Encoding de caracteres | Baixa | Usar UTF-8, tratar exceções |
+| Performance no browser | Baixa | Mostrar loading, processar async |
+
+---
 
 ## Resultado Esperado
 
-1. **scheduling_enabled**: Após salvar, o toggle de "Agendamento habilitado" permanecerá ativo ao recarregar a página
-2. **Base de Conhecimento**: A IA receberá referência aos documentos PDF vinculados (nome e indicação que existe), mas para leitura completa do conteúdo seria necessário implementar extração de texto
+| Antes | Depois |
+|-------|--------|
+| Upload de Excel → IA não lê | Upload de Excel → IA lê todo conteúdo |
+| Upload de Word → IA não lê | Upload de Word → IA lê texto |
+| Upload de CSV → IA não lê | Upload de CSV → IA lê dados |
+| Upload de PDF → IA não lê | Upload de PDF → Aviso ao usuário |
+
+---
+
+## Chance de Sucesso Global
+
+**Excel/CSV**: 95% - Biblioteca já instalada e testada
+**Word (.docx)**: 85% - Parsing XML é padrão
+**TXT**: 99% - Nativo
+**PDF**: Não implementado nesta fase
+
+**Risco de quebrar o sistema**: Muito baixo
+- Mudanças isoladas no componente de upload
+- Fallback: se extração falhar, mantém comportamento atual (content = null)
+- Não altera lógica existente da IA
+
+---
+
+## Ordem de Implementação
+
+1. Criar `src/lib/documentExtractor.ts` com funções de extração
+2. Modificar `handleFileUpload` em `AgentKnowledgeSection.tsx`
+3. Adicionar feedback visual (loading, sucesso, tipo não suportado)
+4. Testar com diferentes arquivos
 
