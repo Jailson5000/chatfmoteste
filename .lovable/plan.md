@@ -1,204 +1,87 @@
 
 
-# Plano: Adicionar Exportação Excel para Empresas
+# Plano: Corrigir Agendamento pela IA (Constraint de Source)
 
-## Contexto
+## Problema Identificado
 
-O PDF atual do relatório de empresas (`empresas-miauchat-2026-02-06_2.pdf`) contém:
-- Nome, CPF/CNPJ, Plano, Status, Ativo, Ativação, Último Pagamento, Próxima Fatura, Faturas
+A IA está tentando criar agendamentos mas está falhando com o seguinte erro nos logs:
 
-O usuário quer um botão Excel ao lado do PDF existente, com os mesmos dados + informações úteis para atendimento no WhatsApp.
+```
+new row for relation "agenda_pro_appointments" violates check constraint 
+"agenda_pro_appointments_source_check"
+```
+
+### Causa Raiz
+O código em `supabase/functions/ai-chat/index.ts` linha 1380 está inserindo:
+```typescript
+source: "ai_chat"
+```
+
+Mas o constraint da tabela `agenda_pro_appointments` só aceita estes valores:
+```sql
+CHECK ((source = ANY (ARRAY['manual', 'public_booking', 'whatsapp', 'phone', 'api', 'online'])))
+```
+
+O valor `ai_chat` **não está na lista permitida**, causando a falha de inserção.
 
 ---
 
-## Alterações Necessárias
+## Solução
 
-### Arquivo 1: `src/lib/companyReportGenerator.ts`
+Alterar o valor de `source` de `"ai_chat"` para `"api"`, que é um valor válido e semanticamente correto para agendamentos feitos via API/IA.
 
-Adicionar nova função de exportação Excel que reutiliza os mesmos dados do PDF:
+### Arquivo: `supabase/functions/ai-chat/index.ts`
 
+**Linha 1380 - Alteração:**
 ```typescript
-import { exportToExcel, getFormattedDate } from './exportUtils';
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+// ANTES:
+source: "ai_chat",
 
-export function exportCompanyReportToExcel(config: ReportConfig): void {
-  const data = config.companies.map((company) => {
-    // Calcular status real
-    let statusFinal = company.status;
-    if (company.status === "suspended") statusFinal = "Suspenso";
-    else if (company.status === "blocked") statusFinal = "Bloqueado";
-    else if (company.approvalStatus === "pending") statusFinal = "Pendente";
-    else if (company.hasActiveSubscription) statusFinal = "Ativo";
-    else if (company.trialDaysRemaining !== null) {
-      statusFinal = company.trialDaysRemaining > 0 
-        ? `Trial (${company.trialDaysRemaining}d)` 
-        : "Trial Expirado";
-    } else if (company.status === "active") statusFinal = "Ativo";
-
-    return {
-      Nome: company.name,
-      CPF_CNPJ: company.document || "-",
-      Plano: company.planName || "-",
-      Status: statusFinal,
-      Ativo: company.isActive ? "Sim" : "Não",
-      Data_Ativacao: company.approvedAt ? format(new Date(company.approvedAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
-      Ultimo_Pagamento: company.lastPaymentAt ? format(new Date(company.lastPaymentAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
-      Proxima_Fatura: company.nextInvoiceAt ? format(new Date(company.nextInvoiceAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
-      Faturas_Abertas: company.openInvoicesCount > 0 
-        ? `${company.openInvoicesCount} (R$ ${(company.openInvoicesTotal / 100).toFixed(2).replace('.', ',')})`
-        : "-",
-      Status_Assinatura: company.subscriptionStatus || "-",
-      Trial_Dias_Restantes: company.trialDaysRemaining ?? "-",
-    };
-  });
-
-  exportToExcel(data, `empresas-miauchat-${getFormattedDate()}`, 'Empresas');
-}
+// DEPOIS:
+source: "api",
 ```
 
-### Arquivo 2: `src/pages/global-admin/GlobalAdminCompanies.tsx`
+---
 
-1. Atualizar import:
-```typescript
-import { generateCompanyReportPDF, exportCompanyReportToExcel, CompanyReportData } from "@/lib/companyReportGenerator";
-```
+## Detalhes Técnicos
 
-2. Adicionar state para controle do Excel:
-```typescript
-const [isExportingExcel, setIsExportingExcel] = useState(false);
-```
+| Item | Antes | Depois |
+|------|-------|--------|
+| Valor do source | `ai_chat` | `api` |
+| Constraint válido | Não | Sim |
+| Inserção funciona | Não | Sim |
 
-3. Adicionar botão Excel ao lado do PDF existente (linha ~662):
-```tsx
-{/* Export Excel Button */}
-<TooltipProvider>
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button
-        variant="outline"
-        onClick={async () => {
-          setIsExportingExcel(true);
-          try {
-            // Buscar dados de billing (mesma lógica do PDF)
-            const { data: { session } } = await supabase.auth.getSession();
-            let billingData: Record<string, any> = {};
-            
-            try {
-              const billingSummary = await supabase.functions.invoke('get-company-billing-summary', {
-                headers: { Authorization: `Bearer ${session?.access_token}` }
-              });
-              if (billingSummary.data) {
-                billingData = billingSummary.data;
-              }
-            } catch (e) {
-              console.warn('Error fetching billing summary:', e);
-            }
-            
-            // Montar dados (mesma lógica do PDF)
-            const reportData: CompanyReportData[] = companies.map((company) => {
-              const plan = plans.find(p => p.id === company.plan_id);
-              
-              let trialDaysRemaining: number | null = null;
-              if (company.trial_ends_at) {
-                const trialEnd = new Date(company.trial_ends_at);
-                trialDaysRemaining = differenceInDays(trialEnd, new Date());
-              }
-              
-              const billing = billingData[company.id] || {
-                hasActiveSubscription: false,
-                subscriptionStatus: null,
-                lastPaymentAt: null,
-                nextInvoiceAt: null,
-                openInvoicesCount: 0,
-                openInvoicesTotal: 0,
-              };
-              
-              return {
-                name: company.name,
-                document: company.document,
-                planName: plan?.name || 'Sem plano',
-                status: company.status,
-                approvalStatus: company.approval_status || 'approved',
-                isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
-                approvedAt: company.approved_at,
-                trialDaysRemaining,
-                openInvoicesCount: billing.openInvoicesCount,
-                openInvoicesTotal: billing.openInvoicesTotal,
-                hasActiveSubscription: billing.hasActiveSubscription,
-                subscriptionStatus: billing.subscriptionStatus,
-                lastPaymentAt: billing.lastPaymentAt,
-                nextInvoiceAt: billing.nextInvoiceAt,
-              };
-            });
-            
-            exportCompanyReportToExcel({
-              companies: reportData,
-              generatedAt: new Date(),
-            });
-            
-            toast.success('Relatório Excel exportado com sucesso!');
-          } catch (error) {
-            console.error('Error exporting Excel:', error);
-            toast.error('Erro ao exportar Excel');
-          } finally {
-            setIsExportingExcel(false);
-          }
-        }}
-        disabled={isExportingExcel || companies.length === 0}
-      >
-        <FileText className={`mr-2 h-4 w-4 ${isExportingExcel ? 'animate-pulse' : ''}`} />
-        {isExportingExcel ? 'Exportando...' : 'Exportar Excel'}
-      </Button>
-    </TooltipTrigger>
-    <TooltipContent>Exportar relatório Excel de todas as empresas</TooltipContent>
-  </Tooltip>
-</TooltipProvider>
-```
+O valor `api` é apropriado porque:
+- Representa agendamentos feitos programaticamente
+- Está na lista de valores permitidos pelo constraint
+- Diferencia de `manual` (feito por humano na interface)
+- Diferencia de `public_booking` (feito pelo cliente no link público)
 
 ---
 
 ## Resumo das Alterações
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/lib/companyReportGenerator.ts` | Adicionar função `exportCompanyReportToExcel` + imports |
-| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Atualizar import + adicionar state + botão Excel |
-
----
-
-## Dados Exportados no Excel
-
-| Coluna | Descrição |
-|--------|-----------|
-| Nome | Nome da empresa |
-| CPF_CNPJ | Documento da empresa |
-| Plano | Nome do plano contratado |
-| Status | Status real (Ativo/Trial/Suspenso/etc) |
-| Ativo | Sim/Não |
-| Data_Ativacao | Data de aprovação |
-| Ultimo_Pagamento | Data do último pagamento |
-| Proxima_Fatura | Data da próxima cobrança |
-| Faturas_Abertas | Quantidade e valor total |
-| Status_Assinatura | Status no Stripe |
-| Trial_Dias_Restantes | Dias restantes de trial |
+| Arquivo | Linha | Alteração |
+|---------|-------|-----------|
+| `supabase/functions/ai-chat/index.ts` | 1380 | Alterar `source: "ai_chat"` para `source: "api"` |
 
 ---
 
 ## Resultado Esperado
 
-| Antes | Depois |
-|-------|--------|
-| Apenas botão "Exportar PDF" | Botões "Exportar Excel" + "Exportar PDF" |
-| Excel com dados iguais ao PDF | ✅ |
-| Dados úteis para atendimento WhatsApp | ✅ (nome, documento, status, plano) |
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| IA tenta criar agendamento | Erro de constraint | Agendamento criado com sucesso |
+| Cliente recebe confirmação | Não | Sim |
+| Profissional vê no sistema | Não | Sim |
 
 ---
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Adição de nova função isolada
-- Reutiliza a mesma lógica de coleta de dados do PDF
-- Não altera nenhum fluxo existente
+- Alteração de uma única linha
+- Valor `api` já é usado em outros contextos
+- Não afeta lógica de negócio, apenas o campo de identificação da origem
+- Outros fluxos de agendamento (manual, público) não são afetados
 
