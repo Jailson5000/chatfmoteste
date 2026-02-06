@@ -1,170 +1,159 @@
 
 
-# Plano: Exportação Excel de Clientes e Material Comercial
+# Plano: Adicionar Exportação Excel para Empresas
 
-## Resumo
+## Contexto
 
-Adicionar/melhorar exportação em Excel para:
-1. **Lista de Clientes** - Expandir dados exportados para incluir informações completas
-2. **Material Comercial** - Adicionar botão de exportação Excel ao lado do PDF existente
+O PDF atual do relatório de empresas (`empresas-miauchat-2026-02-06_2.pdf`) contém:
+- Nome, CPF/CNPJ, Plano, Status, Ativo, Ativação, Último Pagamento, Próxima Fatura, Faturas
+
+O usuário quer um botão Excel ao lado do PDF existente, com os mesmos dados + informações úteis para atendimento no WhatsApp.
 
 ---
 
-## 1. Exportação de Clientes (Melhorias)
+## Alterações Necessárias
 
-### Situação Atual
-A página de Contatos (`src/pages/Contacts.tsx`) já possui exportação Excel com os campos:
-- Nome, Telefone, Email, CPF/CNPJ, Status, Departamento, Endereço, Observações, Data de Criação
+### Arquivo 1: `src/lib/companyReportGenerator.ts`
 
-### Melhoria Proposta
-Adicionar campos que estão disponíveis no sistema mas não estão sendo exportados:
-
-| Campo Atual | Campos a Adicionar |
-|-------------|-------------------|
-| Nome | **Responsável** |
-| Telefone | **Última Atualização** |
-| Email | **Consentimento LGPD** |
-| CPF/CNPJ | **Data Consentimento LGPD** |
-| Status | **Conexão WhatsApp** |
-| Departamento | |
-| Endereço | |
-| Observações | |
-| Criado Em | |
-
-### Alteração no Arquivo: `src/pages/Contacts.tsx`
-
-Modificar a função `handleExport` (linhas 214-232):
+Adicionar nova função de exportação Excel que reutiliza os mesmos dados do PDF:
 
 ```typescript
-const handleExport = () => {
-  const dataToExport = filteredClients.map((client) => {
-    const status = getStatusById(client.custom_status_id);
-    const department = getDepartmentById(client.department_id);
-    
-    // Get connection display
-    const conversation = client.conversations?.[0];
-    const inst = client.whatsapp_instance || conversation?.whatsapp_instance;
-    const conexao = conversation?.origin === 'WIDGET' || conversation?.origin === 'WEB' 
-      ? 'Chat Web' 
-      : (inst?.display_name || inst?.instance_name || '');
-    
+import { exportToExcel, getFormattedDate } from './exportUtils';
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
+export function exportCompanyReportToExcel(config: ReportConfig): void {
+  const data = config.companies.map((company) => {
+    // Calcular status real
+    let statusFinal = company.status;
+    if (company.status === "suspended") statusFinal = "Suspenso";
+    else if (company.status === "blocked") statusFinal = "Bloqueado";
+    else if (company.approvalStatus === "pending") statusFinal = "Pendente";
+    else if (company.hasActiveSubscription) statusFinal = "Ativo";
+    else if (company.trialDaysRemaining !== null) {
+      statusFinal = company.trialDaysRemaining > 0 
+        ? `Trial (${company.trialDaysRemaining}d)` 
+        : "Trial Expirado";
+    } else if (company.status === "active") statusFinal = "Ativo";
+
     return {
-      Nome: client.name,
-      Telefone: formatPhone(client.phone),
-      Email: client.email || "",
-      CPF_CNPJ: client.document || "",
-      Status: status?.name || "",
-      Departamento: department?.name || "",
-      Responsavel: client.assigned_profile?.full_name || "",
-      Conexao_WhatsApp: conexao,
-      Endereco: client.address || "",
-      Observacoes: client.notes || "",
-      Consentimento_LGPD: client.lgpd_consent ? "Sim" : "Não",
-      Data_Consentimento_LGPD: client.lgpd_consent_date 
-        ? format(new Date(client.lgpd_consent_date), "dd/MM/yyyy", { locale: ptBR }) 
-        : "",
-      Criado_Em: format(new Date(client.created_at), "dd/MM/yyyy", { locale: ptBR }),
-      Atualizado_Em: format(new Date(client.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR }),
+      Nome: company.name,
+      CPF_CNPJ: company.document || "-",
+      Plano: company.planName || "-",
+      Status: statusFinal,
+      Ativo: company.isActive ? "Sim" : "Não",
+      Data_Ativacao: company.approvedAt ? format(new Date(company.approvedAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
+      Ultimo_Pagamento: company.lastPaymentAt ? format(new Date(company.lastPaymentAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
+      Proxima_Fatura: company.nextInvoiceAt ? format(new Date(company.nextInvoiceAt), "dd/MM/yyyy", { locale: ptBR }) : "-",
+      Faturas_Abertas: company.openInvoicesCount > 0 
+        ? `${company.openInvoicesCount} (R$ ${(company.openInvoicesTotal / 100).toFixed(2).replace('.', ',')})`
+        : "-",
+      Status_Assinatura: company.subscriptionStatus || "-",
+      Trial_Dias_Restantes: company.trialDaysRemaining ?? "-",
     };
   });
-  exportToExcel(dataToExport, `contatos-${getFormattedDate()}`, "Contatos");
-  toast({ title: "Contatos exportados com sucesso" });
-};
-```
 
----
-
-## 2. Exportação Excel do Material Comercial
-
-### Situação Atual
-- Existe apenas PDF comercial em `GlobalAdminSettings.tsx` (linha 557-566)
-- Os dados dos planos estão exportados em `commercialPdfGenerator.ts` (PLANS e FEATURE_SECTIONS)
-
-### Solução
-Criar função de exportação Excel no `commercialPdfGenerator.ts` e adicionar botão na interface.
-
-### Alteração no Arquivo: `src/lib/commercialPdfGenerator.ts`
-
-Adicionar nova função no final do arquivo:
-
-```typescript
-export function exportCommercialToExcel(): void {
-  const plansData = PLANS.map((plan) => ({
-    Plano: plan.name,
-    Preco_Mensal: formatCurrency(plan.price),
-    Preco_Anual: formatCurrency(plan.annualPrice),
-    Publico_Alvo: plan.targetAudience,
-    Usuarios: plan.limits.users,
-    Conversas_IA: plan.limits.aiConversations,
-    Minutos_Audio: plan.limits.audioMinutes,
-    Conexoes_WhatsApp: plan.limits.whatsappConnections,
-    Agentes_IA: plan.limits.aiAgents,
-    Workspaces: plan.limits.workspaces,
-    Diferenciais: plan.differentials.join('; '),
-    Destaque: plan.isFeatured ? 'Sim' : 'Não',
-  }));
-
-  const featuresData: { Categoria: string; Funcionalidade: string }[] = [];
-  FEATURE_SECTIONS.forEach((section) => {
-    section.features.forEach((feature) => {
-      featuresData.push({
-        Categoria: section.title,
-        Funcionalidade: feature,
-      });
-    });
-  });
-
-  // Use exportMultiSheetExcel from exportUtils
-  exportMultiSheetExcel(
-    [
-      { name: 'Planos', data: plansData },
-      { name: 'Funcionalidades', data: featuresData },
-    ],
-    `MiauChat-Catalogo-Comercial-${new Date().toISOString().split('T')[0]}`
-  );
+  exportToExcel(data, `empresas-miauchat-${getFormattedDate()}`, 'Empresas');
 }
 ```
 
-### Alteração no Arquivo: `src/pages/global-admin/GlobalAdminSettings.tsx`
+### Arquivo 2: `src/pages/global-admin/GlobalAdminCompanies.tsx`
 
-1. Atualizar import para incluir a nova função:
+1. Atualizar import:
 ```typescript
-import { generateCommercialPDF, exportCommercialToExcel } from "@/lib/commercialPdfGenerator";
+import { generateCompanyReportPDF, exportCompanyReportToExcel, CompanyReportData } from "@/lib/companyReportGenerator";
 ```
 
-2. Adicionar botão de Excel ao lado do PDF (após linha 566):
+2. Adicionar state para controle do Excel:
+```typescript
+const [isExportingExcel, setIsExportingExcel] = useState(false);
+```
+
+3. Adicionar botão Excel ao lado do PDF existente (linha ~662):
 ```tsx
-<div className="flex items-center justify-between p-4 border border-primary/20 rounded-lg bg-primary/5">
-  <div>
-    <p className="font-medium">PDF Comercial Completo</p>
-    <p className="text-sm text-muted-foreground">
-      Catálogo de planos, valores e todas as funcionalidades do sistema (~10 páginas)
-    </p>
-  </div>
-  <div className="flex gap-2">
-    <Button 
-      variant="outline"
-      onClick={() => {
-        exportCommercialToExcel();
-        toast.success("Excel comercial gerado com sucesso!");
-      }}
-      className="gap-2"
-    >
-      <Download className="h-4 w-4" />
-      Exportar Excel
-    </Button>
-    <Button 
-      onClick={() => {
-        generateCommercialPDF();
-        toast.success("PDF comercial gerado com sucesso!");
-      }}
-      className="gap-2"
-    >
-      <Download className="h-4 w-4" />
-      Gerar PDF
-    </Button>
-  </div>
-</div>
+{/* Export Excel Button */}
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Button
+        variant="outline"
+        onClick={async () => {
+          setIsExportingExcel(true);
+          try {
+            // Buscar dados de billing (mesma lógica do PDF)
+            const { data: { session } } = await supabase.auth.getSession();
+            let billingData: Record<string, any> = {};
+            
+            try {
+              const billingSummary = await supabase.functions.invoke('get-company-billing-summary', {
+                headers: { Authorization: `Bearer ${session?.access_token}` }
+              });
+              if (billingSummary.data) {
+                billingData = billingSummary.data;
+              }
+            } catch (e) {
+              console.warn('Error fetching billing summary:', e);
+            }
+            
+            // Montar dados (mesma lógica do PDF)
+            const reportData: CompanyReportData[] = companies.map((company) => {
+              const plan = plans.find(p => p.id === company.plan_id);
+              
+              let trialDaysRemaining: number | null = null;
+              if (company.trial_ends_at) {
+                const trialEnd = new Date(company.trial_ends_at);
+                trialDaysRemaining = differenceInDays(trialEnd, new Date());
+              }
+              
+              const billing = billingData[company.id] || {
+                hasActiveSubscription: false,
+                subscriptionStatus: null,
+                lastPaymentAt: null,
+                nextInvoiceAt: null,
+                openInvoicesCount: 0,
+                openInvoicesTotal: 0,
+              };
+              
+              return {
+                name: company.name,
+                document: company.document,
+                planName: plan?.name || 'Sem plano',
+                status: company.status,
+                approvalStatus: company.approval_status || 'approved',
+                isActive: company.status === 'active' && company.approval_status !== 'pending_approval',
+                approvedAt: company.approved_at,
+                trialDaysRemaining,
+                openInvoicesCount: billing.openInvoicesCount,
+                openInvoicesTotal: billing.openInvoicesTotal,
+                hasActiveSubscription: billing.hasActiveSubscription,
+                subscriptionStatus: billing.subscriptionStatus,
+                lastPaymentAt: billing.lastPaymentAt,
+                nextInvoiceAt: billing.nextInvoiceAt,
+              };
+            });
+            
+            exportCompanyReportToExcel({
+              companies: reportData,
+              generatedAt: new Date(),
+            });
+            
+            toast.success('Relatório Excel exportado com sucesso!');
+          } catch (error) {
+            console.error('Error exporting Excel:', error);
+            toast.error('Erro ao exportar Excel');
+          } finally {
+            setIsExportingExcel(false);
+          }
+        }}
+        disabled={isExportingExcel || companies.length === 0}
+      >
+        <FileText className={`mr-2 h-4 w-4 ${isExportingExcel ? 'animate-pulse' : ''}`} />
+        {isExportingExcel ? 'Exportando...' : 'Exportar Excel'}
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent>Exportar relatório Excel de todas as empresas</TooltipContent>
+  </Tooltip>
+</TooltipProvider>
 ```
 
 ---
@@ -173,38 +162,43 @@ import { generateCommercialPDF, exportCommercialToExcel } from "@/lib/commercial
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Contacts.tsx` | Expandir `handleExport` com campos adicionais |
-| `src/lib/commercialPdfGenerator.ts` | Adicionar função `exportCommercialToExcel` + import do `exportUtils` |
-| `src/pages/global-admin/GlobalAdminSettings.tsx` | Adicionar botão de Excel ao lado do PDF |
+| `src/lib/companyReportGenerator.ts` | Adicionar função `exportCompanyReportToExcel` + imports |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Atualizar import + adicionar state + botão Excel |
+
+---
+
+## Dados Exportados no Excel
+
+| Coluna | Descrição |
+|--------|-----------|
+| Nome | Nome da empresa |
+| CPF_CNPJ | Documento da empresa |
+| Plano | Nome do plano contratado |
+| Status | Status real (Ativo/Trial/Suspenso/etc) |
+| Ativo | Sim/Não |
+| Data_Ativacao | Data de aprovação |
+| Ultimo_Pagamento | Data do último pagamento |
+| Proxima_Fatura | Data da próxima cobrança |
+| Faturas_Abertas | Quantidade e valor total |
+| Status_Assinatura | Status no Stripe |
+| Trial_Dias_Restantes | Dias restantes de trial |
 
 ---
 
 ## Resultado Esperado
 
-### Exportação de Clientes
 | Antes | Depois |
 |-------|--------|
-| 9 campos básicos | 14 campos completos |
-| Sem responsável | Com responsável |
-| Sem conexão | Com conexão WhatsApp |
-| Sem LGPD | Com consentimento LGPD |
-
-### Material Comercial
-| Antes | Depois |
-|-------|--------|
-| Apenas PDF | PDF + Excel |
-| Um botão | Dois botões lado a lado |
-
-### Excel Comercial (2 abas)
-- **Aba "Planos"**: Nome, preços, limites, diferenciais
-- **Aba "Funcionalidades"**: Categoria + funcionalidade detalhada
+| Apenas botão "Exportar PDF" | Botões "Exportar Excel" + "Exportar PDF" |
+| Excel com dados iguais ao PDF | ✅ |
+| Dados úteis para atendimento WhatsApp | ✅ (nome, documento, status, plano) |
 
 ---
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Alterações isoladas em funções de exportação
-- Nenhuma alteração em lógica de dados ou banco
-- Fallback: funções existentes continuam funcionando
+- Adição de nova função isolada
+- Reutiliza a mesma lógica de coleta de dados do PDF
+- Não altera nenhum fluxo existente
 
