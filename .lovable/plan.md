@@ -1,83 +1,104 @@
 
-
-# Plano: Proibir Repetição da Lista de Serviços
+# Plano: Prevenir Chamadas Redundantes de list_services
 
 ## Problema Identificado
 
-Na imagem:
-- **17:46** → IA lista os 4 serviços (correto, primeira vez)
-- **17:46** → Cliente escolhe: "o 4, pra quarta feira, as 13:30"
-- **17:47** → IA confirma: "deseja agendar Head Spa na quarta-feira, 11/02, às 13:30?"
-- **17:47** → Cliente: "isso mesmo, pode confirmar"
-- **17:48** → IA **REPETE** toda a lista de 4 serviços ❌
-- **17:48** → IA confirma novamente: "Confirma que deseja agendar..."
-
-A regra 5 atual diz apenas "NÃO repita a lista", mas não proíbe chamar `list_services` novamente. A IA está chamando a ferramenta desnecessariamente.
-
-## Resposta à Pergunta
-
-**Não vai quebrar nada!** A lista de serviços é apenas informativa. O agendamento usa o `service_id` que a IA já tem em memória da primeira listagem. Repetir a lista é:
-- Redundante
-- Irritante para o cliente
-- Gasto desnecessário de tokens
-
-## Correção Proposta
-
-### 1. Reforçar Regra 5 (mais específica)
-
-Substituir a regra atual por uma versão mais forte e explícita:
-
+### Logs Confirmam Duplicação
 ```
-5. PROIBIDO REPETIR SERVIÇOS: 
-   - Chame list_services APENAS UMA VEZ por conversa
-   - Se o cliente já conhece os serviços, NÃO chame list_services novamente
-   - Na confirmação final, mencione apenas o serviço escolhido (ex: "Head Spa"), NÃO liste todos
-   - Se precisar do service_id, use o que você já obteve anteriormente
+21:12:59 - list_services {}  ← Primeira chamada (cliente perguntou serviços)
+21:13:00 - Returning 4 services: Consulta, Reunião de Prompt...
+21:15:05 - list_services {}  ← SEGUNDA chamada (após "Isso mesmo")
+21:15:06 - Returning 4 services: Consulta, Reunião de Prompt...
 ```
 
-### 2. Atualizar Descrição da Ferramenta `list_services`
+### Causa Raiz
+O histórico de mensagens é carregado assim (linha 3570-3597):
+```typescript
+.select("content, is_from_me, sender_type, created_at")
+```
 
-Adicionar na descrição da ferramenta que ela deve ser chamada apenas uma vez:
+Isso retorna apenas o **texto** das mensagens, mas **NÃO** as tool calls. Quando a IA recebe a nova mensagem "Isso mesmo", ela:
+1. Vê o texto das mensagens anteriores
+2. **NÃO vê** que `list_services` já foi chamada anteriormente
+3. Decide chamar `list_services` novamente porque precisa do `service_id`
+
+## Solução Proposta
+
+### 1. Detectar se Serviços Já Foram Listados no Histórico
+
+Adicionar lógica para **analisar o conteúdo das mensagens** e detectar se a lista de serviços já foi apresentada. Se sim, adicionar uma nota no prompt:
 
 ```typescript
-description: "Lista todos os serviços disponíveis para agendamento. REGRAS: 
-1) Chame esta função APENAS UMA VEZ por conversa. 
-2) Se você já listou os serviços anteriormente, NÃO chame novamente - use o service_id que você já tem. 
-3) Ao apresentar, mostre TODOS os serviços retornados. 
-4) Use o campo 'services_list_for_response' para a lista formatada."
+// After loading history messages
+const servicesAlreadyListed = historyMessages?.some((msg: any) => 
+  msg.is_from_me && 
+  msg.content?.includes("serviços disponíveis") &&
+  (msg.content?.includes("• ") || msg.content?.includes("- "))
+);
+
+if (servicesAlreadyListed) {
+  messages.push({
+    role: "system",
+    content: "NOTA: Os serviços já foram listados anteriormente nesta conversa. NÃO chame list_services novamente. Use os service_ids que você já tem na memória da conversa."
+  });
+}
+```
+
+### 2. Adicionar Lembrete no Prompt de Agendamento
+
+Adicionar uma nota mais agressiva nas regras críticas:
+
+```
+12. MEMÓRIA: Se você JÁ listou os serviços nesta conversa (olhe o histórico), você JÁ POSSUI os service_ids. NÃO chame list_services novamente. Vá direto para book_appointment.
+```
+
+### 3. Melhorar a Descrição da Tool
+
+Adicionar na descrição de `book_appointment`:
+
+```typescript
+description: "... IMPORTANTE: Você NÃO PRECISA chamar list_services novamente se já listou os serviços. Use o service_id que você já obteve anteriormente na conversa."
 ```
 
 ## Resumo das Alterações
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | Descrição `list_services` (~linha 367) | Adicionar regra "chamar apenas UMA VEZ" |
-| `ai-chat/index.ts` | Regra 5 (~linha 3315) | Expandir com proibição explícita |
+| `ai-chat/index.ts` | Após carregar histórico (~linha 3598) | Detectar se serviços já foram listados e injetar nota |
+| `ai-chat/index.ts` | Regras de agendamento (~linha 3334) | Adicionar regra 12 sobre memória de serviços |
+| `ai-chat/index.ts` | Descrição `book_appointment` (~linha 400) | Enfatizar que não precisa chamar list_services novamente |
 
 ## Fluxo Após Correção
 
 ```text
-17:46 → IA chama list_services (ÚNICA VEZ)
-17:46 → IA lista os 4 serviços
-17:46 → Cliente: "o 4, pra quarta feira, as 13:30"
-17:47 → IA confirma: "Só para confirmar: Head Spa na quarta-feira, 11/02, às 13:30?"
-17:47 → Cliente: "isso mesmo, pode confirmar"
-17:48 → IA chama book_appointment (SEM chamar list_services novamente!)
-17:48 → "Seu agendamento foi realizado com sucesso! ✅"
+18:12 → Cliente: "Me fale dos serviços"
+18:13 → IA chama list_services (ÚNICA VEZ)
+18:13 → IA lista os 4 serviços
+18:13 → Cliente: "quero marcar consulta pra quarta"
+18:14 → IA confirma: "Consulta na quarta 11/02 às 11:00?"
+18:14 → Cliente: "Isso mesmo"
+     ↓
+Sistema detecta: Histórico contém "serviços disponíveis" + lista com "•"
+     ↓
+Sistema injeta: "NOTA: Os serviços já foram listados. NÃO chame list_services novamente."
+     ↓
+IA vai direto para book_appointment (sem chamar list_services!)
+     ↓
+18:15 → "Seu agendamento foi confirmado! ✅"
 ```
 
-## Resultado Esperado
+## Por Que Isso Vai Funcionar
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Primeira listagem | Lista 4 serviços ✓ | Lista 4 serviços ✓ |
-| Confirmação | ❌ Lista 4 serviços DE NOVO | ✅ Confirma só "Head Spa" |
-| Chamadas a list_services | Múltiplas (2-3x) | ✅ Apenas 1x |
+| Problema | Antes | Depois |
+|----------|-------|--------|
+| IA sabe que já listou serviços? | Não - apenas vê texto, não tool calls | ✅ Sistema detecta no texto e avisa |
+| Há instrução explícita para não repetir? | Genérica ("APENAS UMA VEZ") | ✅ Específica ("você JÁ LISTOU, use os IDs que tem") |
+| IA tem os service_ids disponíveis? | Sim, mas não sabe disso | ✅ Sistema informa que já possui |
 
 ## Risco de Quebra
 
-**Nenhum**
+**Muito Baixo**
+- Apenas adiciona nota contextual
 - Não altera lógica de agendamento
-- Apenas orienta a IA a não repetir informação
-- O `service_id` continua disponível na memória da conversa
-
+- Não remove ferramentas
+- Pior caso: nota não é suficiente e a IA ainda chama (comportamento atual)
