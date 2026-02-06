@@ -14,7 +14,7 @@ import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
 import { toast } from "sonner";
-import { generateCommercialPDF } from "@/lib/commercialPdfGenerator";
+import { generateCommercialPDF, exportCommercialToExcel } from "@/lib/commercialPdfGenerator";
 
 export default function GlobalAdminSettings() {
   const { settings, isLoading, updateSetting, createSetting } = useSystemSettings();
@@ -554,16 +554,29 @@ export default function GlobalAdminSettings() {
                 Catálogo de planos, valores e todas as funcionalidades do sistema (~10 páginas)
               </p>
             </div>
-            <Button 
-              onClick={() => {
-                generateCommercialPDF();
-                toast.success("PDF comercial gerado com sucesso!");
-              }}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Gerar PDF
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline"
+                onClick={() => {
+                  exportCommercialToExcel();
+                  toast.success("Excel comercial gerado com sucesso!");
+                }}
+                className="gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Exportar Excel
+              </Button>
+              <Button 
+                onClick={() => {
+                  generateCommercialPDF();
+                  toast.success("PDF comercial gerado com sucesso!");
+                }}
+                className="gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Gerar PDF
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
