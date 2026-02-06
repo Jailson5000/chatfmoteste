@@ -2200,7 +2200,9 @@ async function getAgentKnowledge(supabase: any, automationId: string): Promise<s
           title,
           content,
           category,
-          item_type
+          item_type,
+          file_url,
+          file_name
         )
       `)
       .eq("automation_id", automationId);
@@ -2209,13 +2211,25 @@ async function getAgentKnowledge(supabase: any, automationId: string): Promise<s
       return "";
     }
     
-    // Build knowledge context
+    // Build knowledge context - include both text content and document references
     const knowledgeTexts = linkedKnowledge
-      .filter((item: any) => item.knowledge_items?.content)
       .map((item: any) => {
         const ki = item.knowledge_items;
-        return `### ${ki.title}\n${ki.content}`;
-      });
+        if (!ki) return null;
+        
+        // If has text content, use it
+        if (ki.content) {
+          return `### ${ki.title}\n${ki.content}`;
+        }
+        
+        // If is a document (PDF), add reference so AI knows it exists
+        if (ki.item_type === 'document' && ki.file_url) {
+          return `### ${ki.title} (Documento)\n[Arquivo disponível: ${ki.file_name || ki.title}]`;
+        }
+        
+        return null;
+      })
+      .filter(Boolean);
     
     if (knowledgeTexts.length === 0) {
       return "";
