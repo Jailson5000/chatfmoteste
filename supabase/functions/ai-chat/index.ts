@@ -3254,7 +3254,26 @@ serve(async (req) => {
       });
       const currentIsoDate = isoDateFormatter.format(nowBrazil);
       
+      // Get Brazil-accurate date for day calculations
+      const brazilNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+      
+      // Calculate dates for next 7 days dynamically
+      const weekdayNames = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+      const upcomingDays: string[] = [];
+      
+      for (let i = 1; i <= 7; i++) {
+        const futureDate = new Date(brazilNow);
+        futureDate.setDate(futureDate.getDate() + i);
+        const futureDayOfWeek = futureDate.getDay();
+        const futureDay = String(futureDate.getDate()).padStart(2, '0');
+        const futureMonth = String(futureDate.getMonth() + 1).padStart(2, '0');
+        upcomingDays.push(`   - "${weekdayNames[futureDayOfWeek]}" = ${futureDay}/${futureMonth}`);
+      }
+      
+      const dynamicExamples = upcomingDays.join("\n");
+      
       console.log(`[Scheduling] Injecting Brazil date/time: ${currentDateBrazil}, ${currentTimeBrazil} (ISO: ${currentIsoDate})`);
+      console.log(`[Scheduling] Upcoming days reference:\n${dynamicExamples}`);
       
       systemPrompt += `
 
@@ -3262,18 +3281,18 @@ serve(async (req) => {
 Hoje é ${currentDateBrazil}, ${currentTimeBrazil}.
 Data em formato ISO: ${currentIsoDate}
 
+### PRÓXIMOS DIAS (Referência para Cálculo) ###
+${dynamicExamples}
+
 ### REGRAS CRÍTICAS DE AGENDAMENTO ###
 1. Ao listar serviços com list_services, você DEVE apresentar ABSOLUTAMENTE TODOS os serviços retornados.
 2. NUNCA resuma, agrupe ou omita serviços. Cada um deve ser mencionado individualmente.
 3. Use o campo 'services_list_for_response' da resposta para garantir que a lista esteja completa.
 4. O cliente tem o direito de conhecer TODAS as opções disponíveis.
 5. NÃO repita a lista de serviços se já a apresentou na conversa atual. Prossiga diretamente com o agendamento.
-6. CÁLCULO DE DATAS: Use a data atual acima como referência absoluta. Exemplo: Se hoje é quinta-feira 06/02, então:
-   - "quarta-feira" = próxima quarta = 11/02 (NÃO 12/02!)
-   - "sexta-feira" = amanhã = 07/02
-   - "segunda-feira" = 10/02
+6. CÁLCULO DE DATAS: Use a referência "PRÓXIMOS DIAS" acima. NÃO calcule manualmente - consulte a lista.
 7. SEMPRE confirme a data exata (dia da semana + data numérica) ANTES de criar o agendamento.
-8. VERIFICAÇÃO: Antes de chamar book_appointment, verifique mentalmente se a data corresponde ao dia da semana correto.
+8. VERIFICAÇÃO: Compare o dia da semana solicitado com a lista "PRÓXIMOS DIAS" antes de chamar book_appointment.
 `;
     }
 
