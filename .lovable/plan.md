@@ -1,178 +1,144 @@
 
 
-# Plano: Criar Mensagens Agendadas (Lembretes 1 e 2) via IA
+# Plano: Corrigir Erros Críticos de Datas no Agendamento via IA
 
-## Problema Identificado
+## Problemas Identificados
 
-Quando a IA cria um agendamento, **não são criadas as mensagens agendadas de lembrete** na tabela `agenda_pro_scheduled_messages`. 
+### Problema 1: Cliente pede "quinta-feira" mas agenda na sexta-feira
+**Evidência na imagem**: Cliente pediu explicitamente "quinta-feira" várias vezes, a IA confirmou que ia agendar para "quinta-feira às 14:00", mas a mensagem de confirmação mostra **sexta-feira, 13 de fevereiro de 2026**.
 
-O código atual do `ai-chat/index.ts`:
-1. Cria o agendamento na tabela `agenda_pro_appointments`
-2. Chama a função `agenda-pro-notification` com `type: "created"` (notificação imediata)
-3. ❌ **NÃO cria as mensagens agendadas de lembrete**
+**Causa**: A IA está passando a data `2026-02-13` para a função `book_appointment`, mas não há validação de que o dia da semana corresponde ao que foi solicitado pelo cliente. A data 13/02/2026 **é uma sexta-feira**, não quinta-feira.
 
-Enquanto o código do frontend (`useAgendaProAppointments.tsx` e `PublicBooking.tsx`):
-1. Cria o agendamento
-2. ✅ **Cria as mensagens agendadas** (lembrete 1, lembrete 2, pre_message)
-3. Chama a notificação de confirmação
+**Bug técnico**: A IA está interpretando erroneamente a data ou calculando +1 dia devido a problemas de fuso horário (UTC vs America/Sao_Paulo).
 
----
+### Problema 2: IA oferece datas que já passaram
+**Evidência na imagem (segundo cliente)**: A IA diz "temos horários disponíveis na **quarta-feira, dia 4 de fevereiro**" - mas a data atual é **6 de fevereiro de 2026**, ou seja, 4/02 já passou.
 
-## Solução
-
-Adicionar a lógica de criação de mensagens agendadas no `ai-chat/index.ts`, logo após a criação do agendamento e antes de chamar a notificação.
-
-### Mensagens a serem criadas:
-
-| Tipo | Quando é enviada | Condição |
-|------|------------------|----------|
-| `reminder` | X horas antes (configurável, padrão 24h) | Sempre (se `scheduled_at > now`) |
-| `reminder_2` | X minutos antes (configurável) | Se `reminder_2_enabled = true` |
-| `pre_message` | X horas antes | Se serviço tem `pre_message_enabled = true` |
+**Causa**: A função `get_available_slots` não valida se a data solicitada está no passado. O sistema só filtra slots passados dentro do dia, mas não rejeita dias passados completamente.
 
 ---
 
-## Alterações no Arquivo
+## Análise Técnica
 
-### `supabase/functions/ai-chat/index.ts`
+### Raiz do Problema 1 (dia da semana errado)
+Na função `book_appointment` (linha 1299):
+```typescript
+const startTime = new Date(`${date}T${time}:00.000-03:00`);
+```
 
-Adicionar após a linha que cria o agendamento (após linha ~1444) e antes de chamar a notificação:
+O código cria a data corretamente com timezone, mas **não valida se o dia da semana resultante corresponde ao que o cliente pediu**. A IA pode estar calculando a data erroneamente antes de chamar a função.
+
+### Raiz do Problema 2 (data no passado)
+Na função `get_available_slots` (linhas 1039-1275):
+- Não há validação `if (requestedDate < today)` para bloquear datas passadas
+- O filtro de slots passados só funciona para horários dentro do dia atual
+
+---
+
+## Soluções Propostas
+
+### Correção 1: Validação de data passada em get_available_slots
+Adicionar verificação no início da função (após linha 1087):
 
 ```typescript
-// Create scheduled reminder messages
-try {
-  const startTime = new Date(appointment.start_time || startTime.toISOString());
-  const now = new Date();
-  
-  // Get settings for reminder configuration
-  const { data: reminderSettings } = await supabase
-    .from("agenda_pro_settings")
-    .select("reminder_hours_before, reminder_2_enabled, reminder_2_value, reminder_2_unit, reminder_message_template, business_name")
-    .eq("law_firm_id", lawFirmId)
-    .single();
-  
-  const scheduledMessages: any[] = [];
-  
-  // Helper function to format message template
-  const formatReminderMessage = (template: string | null, defaultMsg: string): string => {
-    if (!template) return defaultMsg;
-    const dateStr = startTime.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    const timeStr = startTime.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
-    
-    return template
-      .replace(/{client_name}/g, client_name)
-      .replace(/{service_name}/g, service.name)
-      .replace(/{professional_name}/g, professionalData?.name || "Profissional")
-      .replace(/{date}/g, dateStr)
-      .replace(/{time}/g, timeStr)
-      .replace(/{business_name}/g, reminderSettings?.business_name || companyName || "");
-  };
-  
-  const defaultReminderTemplate = "Olá {client_name}! 👋 Lembramos que você tem um agendamento de {service_name} no dia {date} às {time}. Confirme sua presença!";
-  
-  // First reminder (configurable hours, default 24h)
-  const reminder1Hours = reminderSettings?.reminder_hours_before || 24;
-  const reminderTime = new Date(startTime.getTime() - reminder1Hours * 60 * 60 * 1000);
-  
-  if (reminderTime > now) {
-    scheduledMessages.push({
-      law_firm_id: lawFirmId,
-      appointment_id: appointment.id,
-      client_id: agendaProClientId,
-      message_type: "reminder",
-      message_content: formatReminderMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
-      scheduled_at: reminderTime.toISOString(),
-      channel: "whatsapp",
-      status: "pending",
-    });
-  }
+// BLOCK: Prevent booking in the past
+const nowInBrazil = new Date(
+  new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+);
+const todayStr = `${nowInBrazil.getFullYear()}-${String(nowInBrazil.getMonth() + 1).padStart(2, '0')}-${String(nowInBrazil.getDate()).padStart(2, '0')}`;
 
-  // Second reminder (configurable)
-  if (reminderSettings?.reminder_2_enabled && reminderSettings?.reminder_2_value) {
-    const reminder2Minutes = reminderSettings.reminder_2_unit === 'hours' 
-      ? reminderSettings.reminder_2_value * 60 
-      : reminderSettings.reminder_2_value;
-    const reminder2Time = new Date(startTime.getTime() - reminder2Minutes * 60 * 1000);
-    
-    if (reminder2Time > now) {
-      scheduledMessages.push({
-        law_firm_id: lawFirmId,
-        appointment_id: appointment.id,
-        client_id: agendaProClientId,
-        message_type: "reminder_2",
-        message_content: formatReminderMessage(reminderSettings?.reminder_message_template, defaultReminderTemplate),
-        scheduled_at: reminder2Time.toISOString(),
-        channel: "whatsapp",
-        status: "pending",
-      });
-    }
-  }
-
-  // Pre-message if service has it enabled
-  if (service.pre_message_enabled && service.pre_message_hours_before) {
-    const preMessageTime = new Date(startTime.getTime() - (service.pre_message_hours_before * 60 * 60 * 1000));
-    
-    if (preMessageTime > now) {
-      scheduledMessages.push({
-        law_firm_id: lawFirmId,
-        appointment_id: appointment.id,
-        client_id: agendaProClientId,
-        message_type: "pre_message",
-        message_content: service.pre_message_text || "Mensagem pré-atendimento",
-        scheduled_at: preMessageTime.toISOString(),
-        channel: "whatsapp",
-        status: "pending",
-      });
-    }
-  }
-
-  // Insert all scheduled messages at once
-  if (scheduledMessages.length > 0) {
-    const { error: msgError } = await supabase
-      .from("agenda_pro_scheduled_messages")
-      .insert(scheduledMessages);
-    
-    if (msgError) {
-      console.error("[Scheduling] Error creating scheduled messages:", msgError);
-    } else {
-      console.log(`[Scheduling] Created ${scheduledMessages.length} scheduled messages for appointment ${appointment.id}`);
-    }
-  }
-} catch (scheduledMsgError) {
-  console.error("[Scheduling] Error in scheduled messages creation:", scheduledMsgError);
+if (date < todayStr) {
+  return JSON.stringify({
+    success: false,
+    error: `A data ${date} já passou. Hoje é ${todayStr}. Por favor, escolha uma data futura.`,
+    available_slots: []
+  });
 }
 ```
 
-Também preciso atualizar a query do serviço para incluir os campos de pre_message:
+### Correção 2: Validação de data passada em book_appointment
+Adicionar verificação (após linha 1300):
 
 ```typescript
-// Na busca do serviço (linha ~1270), adicionar campos:
-.select("id, name, duration_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
+// BLOCK: Prevent booking in the past
+const nowInBrazil = new Date(
+  new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
+);
+if (startTime < nowInBrazil) {
+  return JSON.stringify({
+    success: false,
+    error: "Não é possível agendar para uma data/horário que já passou. Por favor, escolha um horário futuro."
+  });
+}
+```
+
+### Correção 3: Adicionar confirmação do dia da semana no book_appointment
+A IA deve confirmar o dia da semana antes de criar o agendamento. Adicionar após criação de `startTime`:
+
+```typescript
+// Calculate and include day of week for confirmation
+const dayOfWeek = startTime.getDay();
+const dayNames: Record<number, string> = {
+  0: "domingo",
+  1: "segunda-feira",
+  2: "terça-feira",
+  3: "quarta-feira",
+  4: "quinta-feira",
+  5: "sexta-feira",
+  6: "sábado"
+};
+const calculatedDayName = dayNames[dayOfWeek];
+
+// Log for debugging
+console.log(`[book_appointment] Client requested date ${date} at ${time} - This is a ${calculatedDayName} (dayOfWeek=${dayOfWeek})`);
+```
+
+E modificar a mensagem de retorno para incluir explicitamente o dia da semana calculado, pedindo confirmação se necessário.
+
+### Correção 4: Instruções no prompt do sistema para agendamento
+Atualizar a descrição da ferramenta `book_appointment` para enfatizar a validação:
+
+```typescript
+description: "Cria um novo agendamento no sistema. IMPORTANTE: Antes de chamar esta função, SEMPRE confirme com o cliente a data exata (ex: 'Você quer agendar para quinta-feira, dia 12/02?'). NÃO agende sem confirmação explícita da data."
 ```
 
 ---
 
 ## Resumo das Alterações
 
-| Local | Alteração |
-|-------|-----------|
-| `ai-chat/index.ts` linha ~1270 | Adicionar campos `pre_message_*` na busca do serviço |
-| `ai-chat/index.ts` linhas ~1445-1510 | Adicionar lógica de criação das mensagens agendadas |
+| Arquivo | Local | Alteração |
+|---------|-------|-----------|
+| `ai-chat/index.ts` | get_available_slots (~linha 1088) | Bloquear datas passadas |
+| `ai-chat/index.ts` | book_appointment (~linha 1300) | Bloquear agendamento no passado |
+| `ai-chat/index.ts` | book_appointment (~linha 1300) | Log do dia da semana calculado |
+| `ai-chat/index.ts` | SCHEDULING_TOOLS (~linha 400) | Atualizar descrição para exigir confirmação |
 
 ---
 
 ## Fluxo Após Correção
 
 ```
-IA recebe pedido de agendamento
-       ↓
-Cria agendamento na tabela agenda_pro_appointments
-       ↓
-✅ Cria mensagens agendadas (reminder, reminder_2, pre_message)
-       ↓
-Chama agenda-pro-notification (confirmação imediata)
-       ↓
-Cliente recebe confirmação agora + lembretes automáticos depois
+Cliente: "Quero agendar para quinta-feira"
+     ↓
+IA calcula: próxima quinta = 12/02/2026
+     ↓
+IA chama get_available_slots(date: "2026-02-12")
+     ↓
+Sistema valida: 2026-02-12 > hoje? ✅ Sim
+     ↓
+Retorna horários disponíveis para QUINTA-FEIRA
+     ↓
+IA confirma: "Encontrei horários para quinta, 12/02. Qual prefere?"
+     ↓
+Cliente escolhe horário
+     ↓
+IA chama book_appointment(date: "2026-02-12")
+     ↓
+Sistema valida: data futura? ✅ Sim
+     ↓
+Sistema cria agendamento e loga: "This is a quinta-feira"
+     ↓
+Confirmação mostra: "quinta-feira, 12 de fevereiro de 2026" ✅
 ```
 
 ---
@@ -181,18 +147,16 @@ Cliente recebe confirmação agora + lembretes automáticos depois
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Agendamento via IA | Sem lembretes | ✅ Lembrete 1 (24h antes) |
-| | | ✅ Lembrete 2 (55min antes, se configurado) |
-| | | ✅ Pre-message (se serviço tiver) |
-| Mensagens na aba "Mensagens Agendadas" | Não aparece | ✅ Aparece |
+| Cliente pede "quinta-feira" | Agenda sexta-feira (erro) | ✅ Valida e confirma antes |
+| Data 4/02 quando hoje é 6/02 | Mostra horários (erro) | ✅ Erro: "data já passou" |
+| Horário 10:00 quando são 11:00 | Pode agendar (erro) | ✅ Erro: "horário já passou" |
 
 ---
 
 ## Risco de Quebra
 
-**Muito Baixo**
-- Código adicional, não altera lógica existente
-- Mesma estrutura já usada no frontend
-- Fallbacks para configurações padrão
-- Erros são capturados e logados sem interromper o fluxo
+**Baixo**
+- Adiciona validações que impedem erros, não altera fluxo existente
+- Mensagens de erro claras guiam o usuário para correção
+- Logs adicionais ajudam a debuggar futuros problemas
 
