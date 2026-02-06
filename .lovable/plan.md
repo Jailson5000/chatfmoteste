@@ -1,105 +1,128 @@
 
 
-# Plano: Corrigir Erros Críticos de Datas no Agendamento via IA
+# Plano: Corrigir Listagem e Identificação de Serviços via IA
 
-## Problemas Identificados
+## Problema Identificado
 
-### Problema 1: Cliente pede "quinta-feira" mas agenda na sexta-feira
-**Evidência na imagem**: Cliente pediu explicitamente "quinta-feira" várias vezes, a IA confirmou que ia agendar para "quinta-feira às 14:00", mas a mensagem de confirmação mostra **sexta-feira, 13 de fevereiro de 2026**.
-
-**Causa**: A IA está passando a data `2026-02-13` para a função `book_appointment`, mas não há validação de que o dia da semana corresponde ao que foi solicitado pelo cliente. A data 13/02/2026 **é uma sexta-feira**, não quinta-feira.
-
-**Bug técnico**: A IA está interpretando erroneamente a data ou calculando +1 dia devido a problemas de fuso horário (UTC vs America/Sao_Paulo).
-
-### Problema 2: IA oferece datas que já passaram
-**Evidência na imagem (segundo cliente)**: A IA diz "temos horários disponíveis na **quarta-feira, dia 4 de fevereiro**" - mas a data atual é **6 de fevereiro de 2026**, ou seja, 4/02 já passou.
-
-**Causa**: A função `get_available_slots` não valida se a data solicitada está no passado. O sistema só filtra slots passados dentro do dia, mas não rejeita dias passados completamente.
-
----
-
-## Análise Técnica
-
-### Raiz do Problema 1 (dia da semana errado)
-Na função `book_appointment` (linha 1299):
-```typescript
-const startTime = new Date(`${date}T${time}:00.000-03:00`);
-```
-
-O código cria a data corretamente com timezone, mas **não valida se o dia da semana resultante corresponde ao que o cliente pediu**. A IA pode estar calculando a data erroneamente antes de chamar a função.
-
-### Raiz do Problema 2 (data no passado)
-Na função `get_available_slots` (linhas 1039-1275):
-- Não há validação `if (requestedDate < today)` para bloquear datas passadas
-- O filtro de slots passados só funciona para horários dentro do dia atual
-
----
-
-## Soluções Propostas
-
-### Correção 1: Validação de data passada em get_available_slots
-Adicionar verificação no início da função (após linha 1087):
-
-```typescript
-// BLOCK: Prevent booking in the past
-const nowInBrazil = new Date(
-  new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
-);
-const todayStr = `${nowInBrazil.getFullYear()}-${String(nowInBrazil.getMonth() + 1).padStart(2, '0')}-${String(nowInBrazil.getDate()).padStart(2, '0')}`;
-
-if (date < todayStr) {
-  return JSON.stringify({
-    success: false,
-    error: `A data ${date} já passou. Hoje é ${todayStr}. Por favor, escolha uma data futura.`,
-    available_slots: []
-  });
+### Evidência no Log
+```json
+{
+  "service_id": "Reunião de Prompt"  // ❌ NOME ao invés de UUID
 }
 ```
 
-### Correção 2: Validação de data passada em book_appointment
-Adicionar verificação (após linha 1300):
+A IA está passando o **nome** do serviço como `service_id` ao invés do **UUID real** (ex: `a354cc0b-46ee-468f-93bb-b9f12b55f56f`). Isso causa:
+
+1. **Serviços não listados corretamente**: A IA pode estar truncando ou interpretando mal a lista completa
+2. **Falha ao agendar**: A query `.eq("id", "Reunião de Prompt")` nunca encontra nenhum registro
+
+### Dados do Banco (confirmados)
+| Serviço | is_active | is_public | Profissionais | Deve aparecer |
+|---------|-----------|-----------|---------------|---------------|
+| Consulta | true | **false** | 3 | ❌ Não (privado) |
+| Reunião de Prompt | true | true | 3 | ✅ Sim |
+| Atendimento Inicial | true | true | 3 | ✅ Sim |
+| Head Spa | true | true | 1 | ✅ Sim |
+
+A query do banco retorna **3 serviços públicos**, mas a IA só mostrou **2** na mensagem.
+
+---
+
+## Causa Raiz
+
+1. **Problema na interpretação da IA**: A descrição da ferramenta `list_services` não enfatiza suficientemente que deve-se usar o `id` UUID
+2. **Falta de fallback por nome**: Se a IA passa um nome ao invés de UUID, o sistema falha silenciosamente
+3. **Log insuficiente**: Não há log do resultado da `list_services` para debug
+
+---
+
+## Correções Propostas
+
+### Correção 1: Fallback de busca por nome no `book_appointment`
+
+Quando o `service_id` não é um UUID válido, buscar pelo nome do serviço:
 
 ```typescript
-// BLOCK: Prevent booking in the past
-const nowInBrazil = new Date(
-  new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" })
-);
-if (startTime < nowInBrazil) {
-  return JSON.stringify({
-    success: false,
-    error: "Não é possível agendar para uma data/horário que já passou. Por favor, escolha um horário futuro."
-  });
+// No book_appointment (após linha 1304)
+let serviceQuery = supabase
+  .from("agenda_pro_services")
+  .select("id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price, pre_message_enabled, pre_message_hours_before, pre_message_text")
+  .eq("law_firm_id", lawFirmId)
+  .eq("is_active", true);
+
+// Check if service_id is a valid UUID
+const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
+
+if (isValidUUID) {
+  serviceQuery = serviceQuery.eq("id", service_id);
+} else {
+  // Fallback: search by name (case-insensitive)
+  console.log(`[book_appointment] service_id "${service_id}" is not a UUID, searching by name`);
+  serviceQuery = serviceQuery.ilike("name", service_id);
 }
+
+const { data: service, error: serviceError } = await serviceQuery.single();
 ```
 
-### Correção 3: Adicionar confirmação do dia da semana no book_appointment
-A IA deve confirmar o dia da semana antes de criar o agendamento. Adicionar após criação de `startTime`:
+### Correção 2: Fallback de busca por nome no `get_available_slots`
+
+Aplicar a mesma lógica na função de slots:
 
 ```typescript
-// Calculate and include day of week for confirmation
-const dayOfWeek = startTime.getDay();
-const dayNames: Record<number, string> = {
-  0: "domingo",
-  1: "segunda-feira",
-  2: "terça-feira",
-  3: "quarta-feira",
-  4: "quinta-feira",
-  5: "sexta-feira",
-  6: "sábado"
-};
-const calculatedDayName = dayNames[dayOfWeek];
+// No get_available_slots (após linha 1050)
+let serviceQuery = supabase
+  .from("agenda_pro_services")
+  .select("duration_minutes, buffer_before_minutes, buffer_after_minutes, name")
+  .eq("law_firm_id", lawFirmId);
 
-// Log for debugging
-console.log(`[book_appointment] Client requested date ${date} at ${time} - This is a ${calculatedDayName} (dayOfWeek=${dayOfWeek})`);
+const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(service_id);
+
+if (isValidUUID) {
+  serviceQuery = serviceQuery.eq("id", service_id);
+} else {
+  console.log(`[get_available_slots] service_id "${service_id}" is not a UUID, searching by name`);
+  serviceQuery = serviceQuery.ilike("name", service_id);
+}
+
+const { data: service } = await serviceQuery.single();
 ```
 
-E modificar a mensagem de retorno para incluir explicitamente o dia da semana calculado, pedindo confirmação se necessário.
-
-### Correção 4: Instruções no prompt do sistema para agendamento
-Atualizar a descrição da ferramenta `book_appointment` para enfatizar a validação:
+### Correção 3: Melhorar descrição do `list_services` e log de resultado
 
 ```typescript
-description: "Cria um novo agendamento no sistema. IMPORTANTE: Antes de chamar esta função, SEMPRE confirme com o cliente a data exata (ex: 'Você quer agendar para quinta-feira, dia 12/02?'). NÃO agende sem confirmação explícita da data."
+// Na definição do tool list_services
+{
+  type: "function",
+  function: {
+    name: "list_services",
+    description: "Lista todos os serviços disponíveis para agendamento. RETORNA o 'id' UUID de cada serviço que DEVE ser usado nas demais funções. Apresente TODOS os serviços retornados ao cliente.",
+    parameters: { type: "object", properties: {}, required: [] }
+  }
+}
+
+// No case "list_services", após formatar
+console.log(`[list_services] Returning ${services.length} services:`, formattedServices.map(s => `${s.name} (${s.id})`).join(", "));
+```
+
+### Correção 4: Formato da listagem mais claro para a IA
+
+Alterar o formato de retorno para enfatizar o ID:
+
+```typescript
+const formattedServices = services.map((s: any) => ({
+  service_id: s.id,  // Renomear para service_id para ênfase
+  name: s.name,
+  description: s.description || "",
+  duration: `${s.duration_minutes} minutos`,
+  price: s.price ? `R$ ${s.price.toFixed(2)}` : "Sob consulta"
+}));
+
+return JSON.stringify({
+  success: true,
+  message: `${services.length} serviço(s) disponível(is). Use o 'service_id' para as próximas operações.`,
+  services: formattedServices,
+  hint: "IMPORTANTE: Sempre apresente TODOS os serviços listados e use o service_id ao solicitar horários ou agendar."
+});
 ```
 
 ---
@@ -108,37 +131,35 @@ description: "Cria um novo agendamento no sistema. IMPORTANTE: Antes de chamar e
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | get_available_slots (~linha 1088) | Bloquear datas passadas |
-| `ai-chat/index.ts` | book_appointment (~linha 1300) | Bloquear agendamento no passado |
-| `ai-chat/index.ts` | book_appointment (~linha 1300) | Log do dia da semana calculado |
-| `ai-chat/index.ts` | SCHEDULING_TOOLS (~linha 400) | Atualizar descrição para exigir confirmação |
+| `ai-chat/index.ts` | `list_services` (~linha 365) | Melhorar descrição do tool |
+| `ai-chat/index.ts` | `list_services` (~linha 1024) | Renomear `id` para `service_id`, adicionar hint e log |
+| `ai-chat/index.ts` | `get_available_slots` (~linha 1052) | Fallback de busca por nome |
+| `ai-chat/index.ts` | `book_appointment` (~linha 1305) | Fallback de busca por nome |
 
 ---
 
 ## Fluxo Após Correção
 
-```
-Cliente: "Quero agendar para quinta-feira"
+```text
+Cliente: "Me fale dos serviços"
      ↓
-IA calcula: próxima quinta = 12/02/2026
+IA chama list_services()
      ↓
-IA chama get_available_slots(date: "2026-02-12")
+Sistema retorna 3 serviços com service_id UUID
      ↓
-Sistema valida: 2026-02-12 > hoje? ✅ Sim
+IA apresenta TODOS: "1. Reunião de Prompt (60 min)
+                     2. Atendimento Inicial (45 min)
+                     3. Head Spa (60 min)"
      ↓
-Retorna horários disponíveis para QUINTA-FEIRA
+Cliente: "Quero Reunião de Prompt"
      ↓
-IA confirma: "Encontrei horários para quinta, 12/02. Qual prefere?"
+IA chama get_available_slots(service_id: "a354cc0b-...")
      ↓
-Cliente escolhe horário
+[OU] IA chama get_available_slots(service_id: "Reunião de Prompt")
+     ↓ 
+Sistema detecta que não é UUID → busca por nome → encontra
      ↓
-IA chama book_appointment(date: "2026-02-12")
-     ↓
-Sistema valida: data futura? ✅ Sim
-     ↓
-Sistema cria agendamento e loga: "This is a quinta-feira"
-     ↓
-Confirmação mostra: "quinta-feira, 12 de fevereiro de 2026" ✅
+Retorna horários disponíveis ✅
 ```
 
 ---
@@ -147,16 +168,18 @@ Confirmação mostra: "quinta-feira, 12 de fevereiro de 2026" ✅
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
-| Cliente pede "quinta-feira" | Agenda sexta-feira (erro) | ✅ Valida e confirma antes |
-| Data 4/02 quando hoje é 6/02 | Mostra horários (erro) | ✅ Erro: "data já passou" |
-| Horário 10:00 quando são 11:00 | Pode agendar (erro) | ✅ Erro: "horário já passou" |
+| Listagem de serviços | 2 de 3 (faltando Head Spa) | ✅ 3 de 3 |
+| IA passa nome como ID | Erro "Serviço não encontrado" | ✅ Busca por nome (fallback) |
+| Log para debug | Sem log | ✅ Log completo dos serviços |
+| Agendamento Reunião de Prompt | Falha | ✅ Funciona |
 
 ---
 
 ## Risco de Quebra
 
-**Baixo**
-- Adiciona validações que impedem erros, não altera fluxo existente
-- Mensagens de erro claras guiam o usuário para correção
-- Logs adicionais ajudam a debuggar futuros problemas
+**Muito Baixo**
+- Adiciona fallback, não remove funcionalidade
+- Busca por nome é case-insensitive (ilike)
+- UUID válido continua funcionando normalmente
+- Logs adicionais não afetam fluxo
 
