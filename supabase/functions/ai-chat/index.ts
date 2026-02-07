@@ -3572,7 +3572,39 @@ Exemplo de resposta ERRADA (nunca faça isso):
 "Vou transferir sua consulta para o departamento adequado."
 `;
 
-    const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
+    // AUTO-INJECT: Current date/time context for ALL agents
+    // This ensures every AI agent knows the current date for accurate reasoning
+    const autoInjectNow = new Date();
+    const autoInjectTimezone = lawFirmData?.timezone || "America/Sao_Paulo";
+    
+    const autoDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: autoInjectTimezone,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+    const autoTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+      timeZone: autoInjectTimezone,
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    
+    const autoCurrentDate = autoDateFormatter.format(autoInjectNow);
+    const autoCurrentTime = autoTimeFormatter.format(autoInjectNow);
+    
+    const dateContextPrefix = `📅 CONTEXTO TEMPORAL (SEMPRE CONSIDERE):
+Data de hoje: ${autoCurrentDate}
+Hora atual: ${autoCurrentTime}
+Fuso horário: ${autoInjectTimezone}
+
+REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos, analisar datas mencionadas pelo cliente, ou responder perguntas que envolvam tempo.
+
+---
+
+`;
+
+    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules;
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: fullSystemPrompt }
     ];
