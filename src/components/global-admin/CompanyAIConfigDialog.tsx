@@ -54,6 +54,9 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
 
   // ElevenLabs TTS config (per-company)
   const [elevenLabsVoice, setElevenLabsVoice] = useState(DEFAULT_VOICE_ID);
+  
+  // OpenAI model per-company ("global" = use system default)
+  const [openaiModel, setOpenaiModel] = useState("global");
 
   // AI Capabilities
   const [capabilities, setCapabilities] = useState({
@@ -117,6 +120,9 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
           
           // ElevenLabs voice
           setElevenLabsVoice(caps.elevenlabs_voice ?? DEFAULT_VOICE_ID);
+          
+          // OpenAI model per-company
+          setOpenaiModel(caps.openai_model ?? "global");
         }
       }
 
@@ -241,6 +247,7 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
         openai_active: openaiEnabled,
         elevenlabs_active: elevenLabsEnabled,
         elevenlabs_voice: elevenLabsVoice,
+        openai_model: openaiModel,
       };
 
       const settingsData = {
@@ -469,9 +476,31 @@ export function CompanyAIConfigDialog({ company, open, onOpenChange }: CompanyAI
                 </div>
 
                 {openaiEnabled && (
-                  <div className="flex items-center gap-2 text-sm text-green-400 pt-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>Usando chave OpenAI global configurada no sistema</span>
+                  <div className="space-y-3 pt-2 border-t border-white/10">
+                    <div className="flex items-center gap-2 text-sm text-green-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>Usando chave OpenAI global configurada no sistema</span>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-white/70 text-sm">Modelo OpenAI</Label>
+                      <Select value={openaiModel} onValueChange={setOpenaiModel}>
+                        <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1a] border-white/10">
+                          <SelectItem value="global">🌐 Usar Padrão do Sistema</SelectItem>
+                          <SelectItem value="gpt-4.1-mini">GPT-4.1 Mini (Mais Barato)</SelectItem>
+                          <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
+                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                          <SelectItem value="gpt-4o">GPT-4o (Mais Inteligente)</SelectItem>
+                          <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-white/40">
+                        "Usar Padrão" aplica o modelo configurado em Admin Global → IAs APIs
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
