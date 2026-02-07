@@ -1,104 +1,127 @@
 
-# Plano: Prevenir Chamadas Redundantes de list_services
 
-## Problema Identificado
+# Plano: Injetar service_ids no Contexto para Eliminar Duplicação
 
-### Logs Confirmam Duplicação
-```
-21:12:59 - list_services {}  ← Primeira chamada (cliente perguntou serviços)
-21:13:00 - Returning 4 services: Consulta, Reunião de Prompt...
-21:15:05 - list_services {}  ← SEGUNDA chamada (após "Isso mesmo")
-21:15:06 - Returning 4 services: Consulta, Reunião de Prompt...
-```
+## Análise da Causa Raiz
 
-### Causa Raiz
-O histórico de mensagens é carregado assim (linha 3570-3597):
-```typescript
-.select("content, is_from_me, sender_type, created_at")
-```
-
-Isso retorna apenas o **texto** das mensagens, mas **NÃO** as tool calls. Quando a IA recebe a nova mensagem "Isso mesmo", ela:
-1. Vê o texto das mensagens anteriores
-2. **NÃO vê** que `list_services` já foi chamada anteriormente
-3. Decide chamar `list_services` novamente porque precisa do `service_id`
-
-## Solução Proposta
-
-### 1. Detectar se Serviços Já Foram Listados no Histórico
-
-Adicionar lógica para **analisar o conteúdo das mensagens** e detectar se a lista de serviços já foi apresentada. Se sim, adicionar uma nota no prompt:
+### O Problema Real
+O histórico de mensagens carrega apenas **texto** (`content`), mas **NÃO** as tool calls/respostas:
 
 ```typescript
-// After loading history messages
-const servicesAlreadyListed = historyMessages?.some((msg: any) => 
-  msg.is_from_me && 
-  msg.content?.includes("serviços disponíveis") &&
-  (msg.content?.includes("• ") || msg.content?.includes("- "))
-);
+// Linha 3571-3577
+const { data: historyMessages } = await supabase
+  .from("messages")
+  .select("content, is_from_me, sender_type, created_at")  // ❌ Não tem tool results!
+  .eq("conversation_id", conversationId)
+```
 
-if (servicesAlreadyListed) {
-  messages.push({
-    role: "system",
-    content: "NOTA: Os serviços já foram listados anteriormente nesta conversa. NÃO chame list_services novamente. Use os service_ids que você já tem na memória da conversa."
-  });
+Quando a IA chamou `list_services` anteriormente, recebeu:
+```json
+{
+  "services": [
+    { "service_id": "abc-123", "name": "Head Spa" },
+    { "service_id": "def-456", "name": "Consulta" }
+  ]
 }
 ```
 
-### 2. Adicionar Lembrete no Prompt de Agendamento
+Mas esse JSON **NÃO é salvo** nem **carregado** no histórico. A IA vê apenas o texto "Temos os seguintes serviços: Head Spa, Consulta..."
 
-Adicionar uma nota mais agressiva nas regras críticas:
+### Por Isso a IA Chama list_services Novamente
+- A IA sabe que precisa do `service_id` (UUID) para chamar `book_appointment`
+- Ela vê no histórico que mencionou "Head Spa", mas **não tem o UUID**
+- Única forma de obter o UUID: chamar `list_services` novamente
 
+## Solução: Injetar os service_ids Quando Serviços Já Listados
+
+### Fluxo Proposto
+
+```text
+1. Detectar se serviços já foram listados no histórico ✅ (já fazemos)
+2. SE sim, buscar os serviços do banco e injetar no contexto ← NOVO
+3. IA recebe: "SERVICE_IDS DISPONÍVEIS: Head Spa = abc-123, Consulta = def-456"
+4. IA não precisa mais chamar list_services
 ```
-12. MEMÓRIA: Se você JÁ listou os serviços nesta conversa (olhe o histórico), você JÁ POSSUI os service_ids. NÃO chame list_services novamente. Vá direto para book_appointment.
-```
 
-### 3. Melhorar a Descrição da Tool
+### Alteração no Código
 
-Adicionar na descrição de `book_appointment`:
+Após detectar `servicesAlreadyListed`, buscar os serviços e injetar os IDs:
 
 ```typescript
-description: "... IMPORTANTE: Você NÃO PRECISA chamar list_services novamente se já listou os serviços. Use o service_id que você já obteve anteriormente na conversa."
+if (servicesAlreadyListed) {
+  console.log(`[AI Chat] Services already listed - injecting service IDs`);
+  
+  // Fetch current services to inject their IDs
+  const { data: services } = await supabase
+    .from("agenda_pro_services")
+    .select("id, name")
+    .eq("law_firm_id", agentLawFirmId)
+    .eq("is_active", true)
+    .eq("is_public", true);
+  
+  if (services && services.length > 0) {
+    const serviceIdList = services.map(s => `• ${s.name} → service_id: "${s.id}"`).join("\n");
+    
+    messages.push({
+      role: "system",
+      content: `MEMÓRIA DE SERVIÇOS (NÃO chame list_services novamente):
+Os serviços já foram listados ao cliente. Aqui estão os service_ids para sua referência:
+
+${serviceIdList}
+
+INSTRUÇÃO: Use esses service_ids diretamente ao chamar book_appointment. NÃO chame list_services.`
+    });
+  }
+}
 ```
+
+### Por Que Vai Funcionar
+
+| Antes | Depois |
+|-------|--------|
+| IA vê "Head Spa" no texto, mas não tem UUID | ✅ IA recebe: `Head Spa → service_id: "abc-123"` |
+| IA precisa chamar list_services para obter ID | ✅ IA já tem o ID, vai direto para book_appointment |
+| Nota genérica "não chame de novo" | ✅ Contexto específico com os IDs reais |
 
 ## Resumo das Alterações
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | Após carregar histórico (~linha 3598) | Detectar se serviços já foram listados e injetar nota |
-| `ai-chat/index.ts` | Regras de agendamento (~linha 3334) | Adicionar regra 12 sobre memória de serviços |
-| `ai-chat/index.ts` | Descrição `book_appointment` (~linha 400) | Enfatizar que não precisa chamar list_services novamente |
+| `ai-chat/index.ts` | Bloco `servicesAlreadyListed` (~linha 3594-3600) | Buscar serviços do banco e injetar os IDs no contexto |
 
 ## Fluxo Após Correção
 
 ```text
-18:12 → Cliente: "Me fale dos serviços"
-18:13 → IA chama list_services (ÚNICA VEZ)
-18:13 → IA lista os 4 serviços
-18:13 → Cliente: "quero marcar consulta pra quarta"
-18:14 → IA confirma: "Consulta na quarta 11/02 às 11:00?"
-18:14 → Cliente: "Isso mesmo"
+17:46 → IA chama list_services (ÚNICA VEZ)
+17:46 → IA lista os 4 serviços
+17:46 → Cliente: "o 4, pra quarta feira, as 13:30"
+17:47 → IA confirma: "Head Spa na quarta-feira, 11/02, às 13:30?"
+17:47 → Cliente: "isso mesmo, pode confirmar"
      ↓
-Sistema detecta: Histórico contém "serviços disponíveis" + lista com "•"
+Sistema detecta: histórico contém "serviços disponíveis"
+Sistema busca: agenda_pro_services WHERE law_firm_id = X
+Sistema injeta: "Head Spa → service_id: abc-123, Consulta → service_id: def-456..."
      ↓
-Sistema injeta: "NOTA: Os serviços já foram listados. NÃO chame list_services novamente."
+IA tem o UUID na memória!
      ↓
-IA vai direto para book_appointment (sem chamar list_services!)
+IA chama book_appointment(service_id: "abc-123", ...) direto!
      ↓
-18:15 → "Seu agendamento foi confirmado! ✅"
+17:48 → "Seu agendamento foi realizado com sucesso! ✅"
 ```
 
-## Por Que Isso Vai Funcionar
+## Economia de Tokens
 
-| Problema | Antes | Depois |
-|----------|-------|--------|
-| IA sabe que já listou serviços? | Não - apenas vê texto, não tool calls | ✅ Sistema detecta no texto e avisa |
-| Há instrução explícita para não repetir? | Genérica ("APENAS UMA VEZ") | ✅ Específica ("você JÁ LISTOU, use os IDs que tem") |
-| IA tem os service_ids disponíveis? | Sim, mas não sabe disso | ✅ Sistema informa que já possui |
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Chamadas à API | 2x (list_services + book_appointment) | 1x (apenas book_appointment) |
+| Tokens consumidos | ~4000 tokens (duplo) | ~2500 tokens |
+| Tempo de resposta | ~3-4s (duas chamadas AI) | ~2s (uma chamada) |
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Apenas adiciona nota contextual
-- Não altera lógica de agendamento
-- Não remove ferramentas
-- Pior caso: nota não é suficiente e a IA ainda chama (comportamento atual)
+- Apenas adiciona contexto extra
+- Não altera lógica de tools
+- Backward compatible (se não encontrar serviços, comportamento normal)
+- Query simples ao banco (já fazemos queries similares)
+
