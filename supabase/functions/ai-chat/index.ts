@@ -3575,7 +3575,19 @@ Exemplo de resposta ERRADA (nunca faça isso):
     // AUTO-INJECT: Current date/time context for ALL agents
     // This ensures every AI agent knows the current date for accurate reasoning
     const autoInjectNow = new Date();
-    const autoInjectTimezone = lawFirmData?.timezone || "America/Sao_Paulo";
+    
+    // Fetch timezone for the law firm (agentLawFirmId is available in outer scope)
+    let autoInjectTimezone = "America/Sao_Paulo";
+    if (agentLawFirmId) {
+      const { data: tzData } = await supabase
+        .from("law_firms")
+        .select("timezone")
+        .eq("id", agentLawFirmId)
+        .maybeSingle();
+      if (tzData?.timezone) {
+        autoInjectTimezone = tzData.timezone;
+      }
+    }
     
     const autoDateFormatter = new Intl.DateTimeFormat("pt-BR", {
       timeZone: autoInjectTimezone,
