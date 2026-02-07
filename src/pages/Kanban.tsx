@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FolderPlus, MessageSquare, Plus, UserPlus, LayoutGrid, Search, X, Settings } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import { DateRange } from "react-day-picker";
 import { parseISO, isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,10 +39,12 @@ export default function Kanban() {
     conversations, 
     isLoading: convsLoading, 
     updateConversationDepartment,
+    updateConversation,
     loadMoreConversations,
     hasMoreConversations,
     isLoadingMoreConversations,
   } = useConversations();
+  const { user } = useAuth();
   const { tags } = useTags();
   const { statuses: customStatuses } = useCustomStatuses();
   const { members } = useTeamMembers();
@@ -302,6 +305,43 @@ export default function Kanban() {
   const activeDepartments = departments.filter(d => d.is_active);
   const isLoading = deptsLoading || convsLoading;
 
+  // Handle archive drop - archives conversation when dropped on archived column
+  const handleArchiveDrop = async () => {
+    if (!draggedConversation) return;
+    
+    const conv = conversations.find(c => c.id === draggedConversation);
+    if (!conv) {
+      setDraggedConversation(null);
+      return;
+    }
+    
+    // Don't archive if already archived
+    if ((conv as any).archived_at) {
+      setDraggedConversation(null);
+      return;
+    }
+    
+    try {
+      await updateConversation.mutateAsync({
+        id: conv.id,
+        archived_at: new Date().toISOString(),
+        archived_reason: "Arquivado via Kanban",
+        archived_by: user?.id,
+      });
+      
+      toast({ title: "Conversa arquivada" });
+    } catch (error) {
+      console.error("Error archiving conversation:", error);
+      toast({
+        title: "Erro ao arquivar",
+        description: "Não foi possível arquivar a conversa.",
+        variant: "destructive",
+      });
+    }
+    
+    setDraggedConversation(null);
+  };
+
 
   if (isLoading) {
     return (
@@ -489,7 +529,7 @@ export default function Kanban() {
                   isDragging={false}
                   draggedConversation={draggedConversation}
                   isArchiveColumn={true}
-                  onDrop={() => setDraggedConversation(null)}
+                  onDrop={handleArchiveDrop}
                   onConversationDragStart={(id) => setDraggedConversation(id)}
                   onConversationClick={handleConversationClick}
                 />
@@ -564,7 +604,7 @@ export default function Kanban() {
                   draggedConversation={draggedConversation}
                   groupByStatus={true}
                   isArchiveColumn={true}
-                  onDrop={() => setDraggedConversation(null)}
+                  onDrop={handleArchiveDrop}
                   onConversationDragStart={(id) => setDraggedConversation(id)}
                   onConversationClick={handleConversationClick}
                 />
