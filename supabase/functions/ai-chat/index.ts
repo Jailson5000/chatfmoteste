@@ -653,7 +653,7 @@ async function executeCrmTool(
         } else {
           return JSON.stringify({ 
             success: true, 
-            message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para o departamento ${targetDept.name}. Continue o atendimento normalmente sem mencionar a transferência.`,
+            message: `[AÇÃO SILENCIOSA EXECUTADA - PROIBIDO MENCIONAR AO CLIENTE] A conversa foi transferida para ${targetDept.name} internamente. INSTRUÇÃO OBRIGATÓRIA: NÃO mencione esta ação, NÃO diga que está transferindo, NÃO fale em departamentos. Continue a conversa como se nada tivesse acontecido ou encerre naturalmente com uma despedida simples.`,
             notify_client: false
           });
         }
@@ -903,7 +903,7 @@ async function executeCrmTool(
           } else {
             return JSON.stringify({ 
               success: true, 
-              message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para ${targetMember.full_name}. Continue a conversa normalmente, ${targetMember.full_name} irá assumir.`,
+              message: `[AÇÃO SILENCIOSA EXECUTADA - PROIBIDO MENCIONAR AO CLIENTE] A conversa foi transferida para ${targetMember.full_name} internamente. INSTRUÇÃO OBRIGATÓRIA: NÃO mencione esta ação, NÃO diga que está transferindo, NÃO fale em responsáveis ou atendentes. Continue a conversa como se nada tivesse acontecido ou encerre naturalmente com uma despedida simples.`,
               notify_client: false
             });
           }
@@ -3545,8 +3545,27 @@ ${dynamicExamples}
     
     console.log(`[AI Chat] Provider config: primary=${globalPrimaryProvider}, gemini_key=${globalGeminiApiKey ? "SET" : "NOT_SET"}, fallback=${globalEnableFallback}`);
 
-    // Build messages array
-    const fullSystemPrompt = systemPrompt + knowledgeText;
+    // Build messages array with tool behavior rules for silent transfers
+    // When notify_on_transfer is disabled, we inject explicit instructions to prevent AI from mentioning transfers
+    const toolBehaviorRules = notifyOnTransfer ? "" : `
+
+### COMPORTAMENTO EM TRANSFERÊNCIAS SILENCIOSAS ###
+ATENÇÃO: O modo "Notificar cliente ao transferir" está DESATIVADO para este agente.
+Quando você executar qualquer ação de transferência (departamento, responsável, IA):
+- NÃO diga ao cliente que ele será transferido
+- NÃO mencione departamentos ou nomes de atendentes
+- NÃO use frases como "vou transferir", "encaminhando", "outro atendente vai te atender"
+- Continue a conversa naturalmente OU encerre com despedida simples
+- Se o tool result contiver "[AÇÃO INTERNA", "[AÇÃO SILENCIOSA" ou "notify_client: false", é OBRIGATÓRIO silenciar
+
+Exemplo de resposta CORRETA após transferência silenciosa:
+"Foi um prazer ajudá-lo! Qualquer dúvida, estamos à disposição."
+
+Exemplo de resposta ERRADA (nunca faça isso):
+"Vou transferir sua consulta para o departamento adequado."
+`;
+
+    const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: fullSystemPrompt }
     ];
