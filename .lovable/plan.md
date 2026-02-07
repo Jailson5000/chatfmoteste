@@ -1,154 +1,62 @@
 
-# Plano: Exibir "Via Anúncio" no Chat e Kanban
 
-## Resumo das Alterações
+# Plano: Unificar Cor do Badge "Via Anúncio"
 
-1. **Criar componente `AdClickBanner`** para exibir no chat
-2. **Remover seção de anúncio do painel lateral** (ContactDetailsPanel.tsx)
-3. **Adicionar badge "Via Anúncio" no KanbanCard**
+## Problema Identificado
 
----
+O badge "Via Anúncio" está com cores diferentes em cada componente:
 
-## Etapa 1: Criar Componente AdClickBanner
-
-**Novo arquivo:** `src/components/conversations/AdClickBanner.tsx`
-
-Componente compacto que mostra:
-- Ícone de megafone
-- Título "Via Anúncio do Facebook"
-- Título do anúncio
-- Texto do corpo (com line-clamp)
-- Thumbnail (se disponível)
-- Link "Ver anúncio original" (se disponível)
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ 📢 Via Anúncio do Facebook                                  │
-│ FMO Advogados Associados                                    │
-│ 🔴 Atenção, aposentados entre 2015 e 2025!...               │
-│ [thumbnail]                      Ver anúncio original →     │
-└─────────────────────────────────────────────────────────────┘
-```
+| Componente | Cor Atual | Arquivo |
+|------------|-----------|---------|
+| **ConversationSidebarCard** | Azul (`bg-blue-100 text-blue-700`) ✅ | `src/components/conversations/ConversationSidebarCard.tsx` |
+| **KanbanCard** | Verde (`bg-green-100 text-green-700`) ❌ | `src/components/kanban/KanbanCard.tsx` |
 
 ---
 
-## Etapa 2: Remover Seção do Painel Lateral
+## Solução
 
-**Arquivo:** `src/components/conversations/ContactDetailsPanel.tsx`
-
-Remover linhas 782-822 (seção CTWA Ad Info) para evitar duplicação.
+Alterar a cor do badge no **KanbanCard.tsx** para usar o azul escuro, igual ao ConversationSidebarCard.
 
 ---
 
-## Etapa 3: Adicionar AdClickBanner no Chat
-
-**Arquivo:** `src/pages/Conversations.tsx`
-
-Adicionar import do componente e renderizar antes das mensagens:
-- Condição: `selectedConversation.origin === 'whatsapp_ctwa' && selectedConversation.originMetadata && !hasMoreMessages`
-- Posição: Após linha 4030, antes do `timelineItems.map`
-
----
-
-## Etapa 4: Adicionar Badge no KanbanCard
+## Alteração Necessária
 
 **Arquivo:** `src/components/kanban/KanbanCard.tsx`
 
-Adicionar lógica para detectar `origin === 'whatsapp_ctwa'` e exibir badge:
+**Linha 281** - Alterar de:
+```tsx
+className="text-[10px] h-4 px-1.5 border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+```
 
-- Importar `Megaphone` do lucide-react
-- Verificar se `conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA'`
-- Adicionar badge verde claro "Via Anúncio" na área de status/tags
-
-Posição no card (conforme imagem de referência):
-
-```text
-┌─────────────────────────────────────────┐
-│ EM  Expedito Máximo              • 11m  │
-│     +55 11 98806-8634                   │
-│ Sou um assistente virtual e não tenho...│
-│ [Via Anúncio] [Qualificado] [Recepção]  │  ← Badge aqui
-│ Solicitar do...                         │
-│ ••3528                     IA · Maria   │
-└─────────────────────────────────────────┘
+**Para:**
+```tsx
+className="text-[10px] h-4 px-1.5 border-0 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
 ```
 
 ---
 
-## Arquivos Modificados
+## Resultado Visual
 
-| Arquivo | Ação |
-|---------|------|
-| `src/components/conversations/AdClickBanner.tsx` | **CRIAR** - Novo componente |
-| `src/components/conversations/ContactDetailsPanel.tsx` | **MODIFICAR** - Remover linhas 782-822 |
-| `src/pages/Conversations.tsx` | **MODIFICAR** - Importar e renderizar AdClickBanner |
-| `src/components/kanban/KanbanCard.tsx` | **MODIFICAR** - Adicionar badge "Via Anúncio" |
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│  ANTES                        │  DEPOIS                              │
+├───────────────────────────────┼──────────────────────────────────────┤
+│  Kanban: 🟢 Via Anúncio       │  Kanban: 🔵 Via Anúncio              │
+│  (verde claro)                │  (azul escuro)                       │
+│                               │                                      │
+│  Conversas: 🔵 Via Anúncio    │  Conversas: 🔵 Via Anúncio           │
+│  (azul escuro)                │  (azul escuro)                       │
+└───────────────────────────────┴──────────────────────────────────────┘
+                                     ✅ Ambos iguais!
+```
 
 ---
 
-## Impacto e Riscos
+## Impacto
 
 | Aspecto | Avaliação |
 |---------|-----------|
-| Risco de quebra | **MUITO BAIXO** - Adicionando elementos visuais, removendo código redundante |
-| Performance | **NENHUM IMPACTO** - Dados já disponíveis |
-| Retrocompatibilidade | **TOTAL** - Conversas sem anúncio não são afetadas |
+| Risco | **NENHUM** - Apenas mudança de cor em classe CSS |
+| Arquivos alterados | 1 arquivo |
+| Tempo de implementação | ~10 segundos |
 
----
-
-## Detalhes Técnicos
-
-### Interface AdClickBanner
-
-```typescript
-interface AdClickBannerProps {
-  originMetadata: {
-    ad_title?: string | null;
-    ad_body?: string | null;
-    ad_thumbnail?: string | null;
-    ad_source_url?: string | null;
-  };
-}
-```
-
-### Lógica do Badge no Kanban
-
-```typescript
-// Verificar se é via anúncio
-const isFromAd = conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA';
-
-// Renderizar badge
-{isFromAd && (
-  <Badge className="text-[10px] h-4 px-1.5 border-0 bg-green-100 text-green-700">
-    <Megaphone className="h-2.5 w-2.5 mr-0.5" />
-    Via Anúncio
-  </Badge>
-)}
-```
-
----
-
-## Visualização Final
-
-**Chat (topo):**
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ 📢 Via Anúncio do Facebook                                  │
-│ FMO Advogados Associados                                    │
-│ 🔴 Atenção, aposentados entre 2015 e 2025!                  │
-│ [thumbnail]                      Ver anúncio original →     │
-└─────────────────────────────────────────────────────────────┘
-│ [Primeira mensagem do cliente]                              │
-│ [Resposta da IA]                                            │
-```
-
-**Kanban Card:**
-```text
-┌─────────────────────────────────────────┐
-│ EM  Nome do Cliente              • 5m   │
-│     +55 11 98806-8634                   │
-│ Última mensagem do chat...              │
-│ [📢 Via Anúncio] [Qualificado]          │
-│ ••3528                     IA · Maria   │
-└─────────────────────────────────────────┘
-```
