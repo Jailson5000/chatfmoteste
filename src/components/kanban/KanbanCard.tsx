@@ -278,7 +278,7 @@ export function KanbanCard({
         {/* Via Anúncio Badge */}
         {conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA' && (
           <Badge 
-            className="text-[10px] h-4 px-1.5 border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+            className="text-[10px] h-4 px-1.5 border-0 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
           >
             <Megaphone className="h-2.5 w-2.5 mr-0.5" />
             Via Anúncio
