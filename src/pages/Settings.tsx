@@ -798,7 +798,7 @@ export default function Settings() {
                                   onPointerDown={(e) => e.stopPropagation()}
                                 />
                                 <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                                <span className="text-sm font-medium">Arquivados / Finalizados</span>
+                                <span className="text-sm font-medium">Arquivados</span>
                               </div>
                               
                               {/* Regular departments */}

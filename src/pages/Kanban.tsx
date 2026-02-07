@@ -480,7 +480,7 @@ export default function Kanban() {
               {canViewArchived && (
                 <KanbanColumn
                   id="archived"
-                  name="Arquivado / Finalizado"
+                  name="Arquivados"
                   color="#dc2626"
                   conversations={archivedConversations}
                   customStatuses={customStatuses}
@@ -554,7 +554,7 @@ export default function Kanban() {
               {canViewArchived && (
                 <KanbanColumn
                   id="archived"
-                  name="Arquivado / Finalizado"
+                  name="Arquivados"
                   color="#dc2626"
                   conversations={archivedConversations}
                   customStatuses={customStatuses}
