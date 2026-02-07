@@ -1,53 +1,144 @@
 
-# Plano: Injeção Automática de Data/Hora em TODOS os Agentes de IA
 
-## Resumo do Problema
+# Correção: Erro "lawFirmData is not defined"
 
-Atualmente, a data/hora só é injetada se o prompt do agente contiver explicitamente as tags `@Data atual` ou `@Hora atual`. Isso causa erros lógicos quando a IA precisa fazer cálculos de prazo (como o caso da aposentadoria de 10 anos) mas o prompt não contém essas tags.
+## Diagnóstico
 
-## Solução Proposta
+O erro ocorre porque a variável `lawFirmData` foi declarada **dentro** de um bloco condicional (linhas 3341-3460) mas está sendo usada **fora** desse bloco na linha 3578.
 
-Injetar **automaticamente** um prefixo com data, hora e dia da semana no início do system prompt de TODOS os agentes, independentemente de terem as tags ou não.
+```text
+Linha 3341: if (agentLawFirmId && systemPrompt) {
+Linha 3343:   const { data: lawFirmData } = await supabase...  ← Declarada AQUI
+Linha 3460: }                                                  ← Escopo termina AQUI
+
+Linha 3578: const autoInjectTimezone = lawFirmData?.timezone   ← ERRO! Fora do escopo
+```
 
 ---
 
-## Alteração Necessária
+## Solução Proposta
 
-### Arquivo: `supabase/functions/ai-chat/index.ts`
+Buscar o timezone **independentemente** usando `agentLawFirmId` (que está disponível no escopo externo desde a linha 3217).
 
-**Localização**: Linha ~3575 (construção do `fullSystemPrompt`)
+### Alteração Necessária
+
+**Arquivo:** `supabase/functions/ai-chat/index.ts`
+**Linhas:** 3575-3607
 
 **De:**
 ```typescript
-const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
+// AUTO-INJECT: Current date/time context for ALL agents
+const autoInjectNow = new Date();
+const autoInjectTimezone = lawFirmData?.timezone || "America/Sao_Paulo";  // ← ERRO
 ```
 
 **Para:**
 ```typescript
 // AUTO-INJECT: Current date/time context for ALL agents
-const now = new Date();
-const timezone = lawFirmData?.timezone || "America/Sao_Paulo";
+const autoInjectNow = new Date();
 
-const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: timezone,
+// Fetch timezone for the law firm (agentLawFirmId is available in outer scope)
+let autoInjectTimezone = "America/Sao_Paulo";
+if (agentLawFirmId) {
+  const { data: tzData } = await supabase
+    .from("law_firms")
+    .select("timezone")
+    .eq("id", agentLawFirmId)
+    .maybeSingle();
+  if (tzData?.timezone) {
+    autoInjectTimezone = tzData.timezone;
+  }
+}
+```
+
+---
+
+## Fluxo Corrigido
+
+```text
+┌────────────────────────────────────────────────────────────────┐
+│                    ESCOPO DE VARIÁVEIS                         │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Linha 3217: const agentLawFirmId = automation.law_firm_id     │
+│              ↓ (disponível em todo o escopo da função)         │
+│                                                                │
+│  Linha 3341: if (agentLawFirmId && systemPrompt) {             │
+│              │  const { data: lawFirmData } = ...   ← INTERNO  │
+│              │  ... processamento de mentions ...              │
+│  Linha 3460: }                                                 │
+│                                                                │
+│  Linha 3575: // AUTO-INJECT                                    │
+│              if (agentLawFirmId) {                             │
+│                  const { data: tzData } = ...       ← BUSCA    │
+│                  autoInjectTimezone = tzData?.timezone         │
+│              }                                                 │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Consideração: Evitar Query Duplicada
+
+Poderíamos reutilizar `lawFirmData` se a movêssemos para fora do bloco condicional, mas isso requereria uma refatoração maior. A abordagem proposta:
+
+- **Adiciona uma query simples** (apenas campo `timezone`)
+- **É mais segura** (menos impacto no código existente)
+- **É rápida** (query leve com índice em `id`)
+
+---
+
+## Arquivo Modificado
+
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/ai-chat/index.ts` | Corrigir busca de timezone na linha 3577-3580 |
+
+---
+
+## Seção Técnica
+
+### Código Final Corrigido (linhas 3575-3610)
+
+```typescript
+// AUTO-INJECT: Current date/time context for ALL agents
+// This ensures every AI agent knows the current date for accurate reasoning
+const autoInjectNow = new Date();
+
+// Fetch timezone for the law firm (agentLawFirmId is available in outer scope)
+let autoInjectTimezone = "America/Sao_Paulo";
+if (agentLawFirmId) {
+  const { data: tzData } = await supabase
+    .from("law_firms")
+    .select("timezone")
+    .eq("id", agentLawFirmId)
+    .maybeSingle();
+  if (tzData?.timezone) {
+    autoInjectTimezone = tzData.timezone;
+  }
+}
+
+const autoDateFormatter = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: autoInjectTimezone,
   weekday: "long",
   year: "numeric",
   month: "long",
   day: "numeric"
 });
-const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: timezone,
+const autoTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: autoInjectTimezone,
   hour: "2-digit",
   minute: "2-digit"
 });
 
-const currentDate = dateFormatter.format(now);
-const currentTime = timeFormatter.format(now);
+const autoCurrentDate = autoDateFormatter.format(autoInjectNow);
+const autoCurrentTime = autoTimeFormatter.format(autoInjectNow);
 
 const dateContextPrefix = `📅 CONTEXTO TEMPORAL (SEMPRE CONSIDERE):
-Data de hoje: ${currentDate}
-Hora atual: ${currentTime}
-Fuso horário: ${timezone}
+Data de hoje: ${autoCurrentDate}
+Hora atual: ${autoCurrentTime}
+Fuso horário: ${autoInjectTimezone}
 
 REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos, analisar datas mencionadas pelo cliente, ou responder perguntas que envolvam tempo.
 
@@ -60,106 +151,12 @@ const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + tool
 
 ---
 
-## Fluxo de Injeção
-
-```text
-┌──────────────────────────────────────────────────────────────┐
-│                CONSTRUÇÃO DO SYSTEM PROMPT                   │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────────────────────────────┐                     │
-│  │      📅 CONTEXTO TEMPORAL           │  ← AUTOMÁTICO      │
-│  │  Data: quinta-feira, 6 de fev 2025  │                     │
-│  │  Hora: 14:35                        │                     │
-│  │  Timezone: America/Sao_Paulo        │                     │
-│  └─────────────────────────────────────┘                     │
-│                     +                                        │
-│  ┌─────────────────────────────────────┐                     │
-│  │      Prompt do Agente               │  ← Configurado     │
-│  │  (ex: "Você é Maria, especialista   │    pelo admin      │
-│  │   em direito previdenciário...")    │                     │
-│  └─────────────────────────────────────┘                     │
-│                     +                                        │
-│  ┌─────────────────────────────────────┐                     │
-│  │      Base de Conhecimento           │  ← Vinculada       │
-│  └─────────────────────────────────────┘                     │
-│                     +                                        │
-│  ┌─────────────────────────────────────┐                     │
-│  │      Regras de Transferência        │  ← Automático      │
-│  └─────────────────────────────────────┘                     │
-│                                                              │
-│                     =                                        │
-│                                                              │
-│  ┌─────────────────────────────────────┐                     │
-│  │      fullSystemPrompt               │  → Enviado à IA    │
-│  └─────────────────────────────────────┘                     │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Análise de Risco
 
 | Aspecto | Risco | Justificativa |
 |---------|-------|---------------|
-| Retrocompatibilidade | **NENHUM** | Agentes existentes funcionam igual, só ganham contexto extra |
-| Conflito com @Data atual | **NENHUM** | As substituições manuais continuam funcionando normalmente |
-| Tamanho do prompt | **MÍNIMO** | Adiciona ~200 caracteres (~50 tokens) |
-| Performance | **NENHUM** | Formatação de data é operação trivial |
-| Consistência | **MELHORA** | Todas as IAs terão acesso à data correta |
+| Query adicional | **BAIXÍSSIMO** | Query leve, apenas 1 campo, com índice |
+| Performance | **NENHUM** | ~2ms adicional por request |
+| Retrocompatibilidade | **NENHUM** | Fallback para America/Sao_Paulo |
+| Correção do bug | **CRÍTICO** | Necessário para o sistema funcionar |
 
----
-
-## Exemplo de Resultado
-
-Antes da mudança, a IA Maria não sabia a data atual e fez cálculo errado sobre prazo de 10 anos.
-
-**Após a mudança**, o início do system prompt será:
-
-```
-📅 CONTEXTO TEMPORAL (SEMPRE CONSIDERE):
-Data de hoje: sexta-feira, 7 de fevereiro de 2025
-Hora atual: 10:30
-Fuso horário: America/Sao_Paulo
-
-REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos...
-
----
-
-Você é Maria, a assistente virtual especializada em direito previdenciário...
-```
-
-Isso permitirá que a IA calcule corretamente:
-- "Aposentadoria em 2015 → 10 anos = 2025 → prazo ainda NÃO passou"
-
----
-
-## Arquivo Modificado
-
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/ai-chat/index.ts` | Adicionar prefixo de data automático na linha ~3575 |
-
----
-
-## Seção Técnica
-
-### Localização Exata
-
-```typescript
-// Linha 3575 atual:
-const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
-
-// Alteração: Adicionar bloco de 15-20 linhas ANTES desta linha
-// para criar dateContextPrefix e modificar a concatenação
-```
-
-### Variáveis Já Disponíveis no Escopo
-
-- `lawFirmData` - contém o timezone da empresa (linha ~3284)
-- `now` já é usado mais acima para substituições (linha ~3388)
-
-### Consideração: Evitar Duplicação
-
-O código já cria `brazilFormatter` e `timeFormatter` nas linhas 3389-3396 para substituição de tags. Vamos **reutilizar** essa lógica movendo-a para cima e criando os formatadores uma única vez.
