@@ -3846,6 +3846,32 @@ serve(async (req) => {
         }
 
         // ========================================
+        // CRITICAL: BLOCK LID (Lead ID) MESSAGES
+        // LIDs are temporary internal IDs from WABA (WhatsApp Business API)
+        // They have @lid suffix and are NOT real phone numbers
+        // These are generated for Click-to-WhatsApp ads before user sends a real message
+        // ========================================
+        const isLidMessage = remoteJid.endsWith('@lid');
+        if (isLidMessage) {
+          logDebug('MESSAGE', `🚫 IGNORING LID MESSAGE - Not a valid phone number`, { 
+            requestId, 
+            remoteJid,
+            extractedNumber: phoneNumber,
+            instanceName: instance?.instance_name,
+            reason: 'LID is a temporary WABA internal ID, not a real phone number'
+          });
+          return new Response(
+            JSON.stringify({ 
+              success: true, 
+              action: 'ignored',
+              reason: 'lid_message_blocked',
+              message: 'Messages from LID (Lead ID) contacts are not processed'
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // ========================================
         // REACTION MESSAGE HANDLING (reactionMessage inside messages.upsert)
         // ========================================
         // Some Evolution API versions send reactions as messages.upsert with messageType='reactionMessage'
