@@ -588,7 +588,7 @@ export function useConversations() {
       // Snapshot current conversations
       const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
 
-      // Optimistically update to the new department_id
+      // Optimistically update to the new department_id in queryClient
       queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
         if (!old) return old;
         return old.map((conv) =>
@@ -598,12 +598,22 @@ export function useConversations() {
         );
       });
 
+      // CRITICAL: Also update local state for immediate UI response during rapid drags
+      setAllConversations(prev => 
+        prev.map(conv => 
+          conv.id === conversationId 
+            ? { ...conv, department_id: departmentId } 
+            : conv
+        )
+      );
+
       return { previousConversations };
     },
     onError: (error, _vars, context) => {
-      // Rollback on error
+      // Rollback on error - both queryClient and local state
       if (context?.previousConversations) {
         queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+        setAllConversations(context.previousConversations);
       }
       toast({
         title: "Erro ao mover conversa",
@@ -700,11 +710,27 @@ export function useConversations() {
         });
       });
 
+      // CRITICAL: Also update local state for immediate UI response during rapid drags
+      setAllConversations(prev => 
+        prev.map(conv => {
+          const client = conv.client as { id?: string; custom_status_id?: string | null } | null;
+          if (client?.id === clientId) {
+            return {
+              ...conv,
+              client: { ...client, custom_status_id: statusId },
+            };
+          }
+          return conv;
+        })
+      );
+
       return { previousConversations };
     },
     onError: (error, _vars, context) => {
+      // Rollback on error - both queryClient and local state
       if (context?.previousConversations) {
         queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+        setAllConversations(context.previousConversations);
       }
       toast({
         title: "Erro ao atualizar status",
