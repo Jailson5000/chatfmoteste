@@ -1,131 +1,88 @@
 
-# Plano de Correção: Comportamento da IA com Status e Notificação de Transferência
+# Plano: Exibir "Via Anúncio" no Chat e Kanban
 
-## Resumo do Problema
+## Resumo das Alterações
 
-Dois bugs identificados no comportamento do agente de IA "Maria":
-
-1. **Status incorreto**: Cliente disse que NÃO pediu revisão, mas IA colocou "Qualificado" em vez de "Desqualificado"
-2. **Notificação indevida**: IA avisou "Vou transferir sua consulta para o departamento adequado" mesmo com a configuração "Notificar cliente" **desativada**
+1. **Criar componente `AdClickBanner`** para exibir no chat
+2. **Remover seção de anúncio do painel lateral** (ContactDetailsPanel.tsx)
+3. **Adicionar badge "Via Anúncio" no KanbanCard**
 
 ---
 
-## Análise Técnica
+## Etapa 1: Criar Componente AdClickBanner
 
-### Problema 1: Status Incorreto
+**Novo arquivo:** `src/components/conversations/AdClickBanner.tsx`
 
-| Aspecto | Detalhes |
-|---------|----------|
-| Local | Prompt do agente (prompt de usuário, não código) |
-| Causa | A IA interpretou a negativa do cliente como sendo sobre o prazo, não sobre a intenção |
-| Solução | Reforço no prompt com instrução mais explícita |
-
-O prompt atual diz:
-> "Se a resposta for 'não'... Adicione o status @status:Desqualificado"
-
-Mas a IA falhou em reconhecer "não solicitei a revisão" como uma resposta negativa clara.
-
-### Problema 2: Notificação Indevida de Transferência
-
-| Aspecto | Detalhes |
-|---------|----------|
-| Local | `supabase/functions/ai-chat/index.ts` |
-| Causa | O sistema retorna `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE]` no tool result, mas NÃO há instrução no prompt de sistema para respeitar essa marcação |
-| Solução | Adicionar instrução explícita no prompt de sistema sobre comportamento de transferência silenciosa |
+Componente compacto que mostra:
+- Ícone de megafone
+- Título "Via Anúncio do Facebook"
+- Título do anúncio
+- Texto do corpo (com line-clamp)
+- Thumbnail (se disponível)
+- Link "Ver anúncio original" (se disponível)
 
 ```text
-Fluxo atual (com bug):
-1. IA chama transfer_to_department
-2. Sistema executa e retorna: "[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] ..."
-3. IA recebe o tool result
-4. IA decide (por conta própria) se menciona ou não ao cliente
-   → Às vezes ignora a instrução embutida no resultado
+┌─────────────────────────────────────────────────────────────┐
+│ 📢 Via Anúncio do Facebook                                  │
+│ FMO Advogados Associados                                    │
+│ 🔴 Atenção, aposentados entre 2015 e 2025!...               │
+│ [thumbnail]                      Ver anúncio original →     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Plano de Implementação
+## Etapa 2: Remover Seção do Painel Lateral
 
-### Etapa 1: Adicionar Instrução de Sistema sobre Tool Results (Correção Principal)
+**Arquivo:** `src/components/conversations/ContactDetailsPanel.tsx`
 
-**Arquivo:** `supabase/functions/ai-chat/index.ts`
-
-Injetar uma instrução explícita no prompt de sistema sobre como tratar transferências:
-
-```typescript
-// Após construir o fullSystemPrompt, adicionar regras de tools
-const toolBehaviorRules = `
-
-### REGRAS CRÍTICAS DE TOOLS DE CRM ###
-1. Quando o resultado de uma tool começar com "[AÇÃO INTERNA - NÃO INFORME AO CLIENTE]", você NÃO DEVE mencionar essa ação ao cliente de forma alguma. Continue a conversa naturalmente sem referência à transferência, mudança de departamento ou responsável.
-
-2. Quando o resultado indicar "notify_client: false", significa que a ação foi configurada para ser silenciosa. Não diga ao cliente que ele será transferido, não mencione departamentos, nem diga que outra pessoa vai atender.
-
-3. Siga as instruções exatas do tool result - se ele diz para não informar, NÃO informe.
-`;
-
-// Injetar ANTES do prompt do usuário
-const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
-```
-
-### Etapa 2: Reforço Adicional no Tool Result (Dupla Proteção)
-
-**Arquivo:** `supabase/functions/ai-chat/index.ts`
-
-Alterar a mensagem de retorno da tool para ser ainda mais enfática:
-
-**Antes (linhas 654-657):**
-```typescript
-message: `[AÇÃO INTERNA - NÃO INFORME AO CLIENTE] Conversa transferida para o departamento ${targetDept.name}. Continue o atendimento normalmente sem mencionar a transferência.`
-```
-
-**Depois:**
-```typescript
-message: `[AÇÃO SILENCIOSA EXECUTADA - PROIBIDO MENCIONAR AO CLIENTE] A conversa foi transferida para ${targetDept.name} internamente. INSTRUÇÃO OBRIGATÓRIA: NÃO mencione esta ação, NÃO diga que está transferindo, NÃO fale em departamentos. Continue a conversa como se nada tivesse acontecido ou encerre naturalmente se for o caso.`
-```
-
-### Etapa 3: Aplicar a Mesma Correção para transfer_to_responsible
-
-**Arquivo:** `supabase/functions/ai-chat/index.ts`
-
-Mesma alteração nas linhas 904-908 (transferência para responsável humano).
+Remover linhas 782-822 (seção CTWA Ad Info) para evitar duplicação.
 
 ---
 
-## Detalhes Técnicos da Implementação
+## Etapa 3: Adicionar AdClickBanner no Chat
 
-### Alteração 1: Adicionar regras de comportamento de tools no prompt
+**Arquivo:** `src/pages/Conversations.tsx`
 
-**Localização:** Linha ~3549, antes de construir o array `messages`
+Adicionar import do componente e renderizar antes das mensagens:
+- Condição: `selectedConversation.origin === 'whatsapp_ctwa' && selectedConversation.originMetadata && !hasMoreMessages`
+- Posição: Após linha 4030, antes do `timelineItems.map`
 
-```typescript
-// Tool behavior rules - injected to ensure AI respects internal actions
-const toolBehaviorRules = notifyOnTransfer ? "" : `
+---
 
-### COMPORTAMENTO EM TRANSFERÊNCIAS SILENCIOSAS ###
-ATENÇÃO: O modo "Notificar cliente ao transferir" está DESATIVADO para este agente.
-Quando você executar qualquer ação de transferência (departamento, responsável, IA):
-- NÃO diga ao cliente que ele será transferido
-- NÃO mencione departamentos ou nomes de atendentes
-- NÃO use frases como "vou transferir", "encaminhando", "outro atendente vai te atender"
-- Continue a conversa naturalmente OU encerre com despedida simples
-- Se o tool result contiver "[AÇÃO INTERNA" ou "notify_client: false", é OBRIGATÓRIO silenciar
+## Etapa 4: Adicionar Badge no KanbanCard
 
-Exemplo de resposta CORRETA após transferência silenciosa:
-"Foi um prazer ajudá-lo! Qualquer dúvida, estamos à disposição."
+**Arquivo:** `src/components/kanban/KanbanCard.tsx`
 
-Exemplo de resposta ERRADA (nunca faça isso):
-"Vou transferir sua consulta para o departamento adequado."
-`;
+Adicionar lógica para detectar `origin === 'whatsapp_ctwa'` e exibir badge:
 
-const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
+- Importar `Megaphone` do lucide-react
+- Verificar se `conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA'`
+- Adicionar badge verde claro "Via Anúncio" na área de status/tags
+
+Posição no card (conforme imagem de referência):
+
+```text
+┌─────────────────────────────────────────┐
+│ EM  Expedito Máximo              • 11m  │
+│     +55 11 98806-8634                   │
+│ Sou um assistente virtual e não tenho...│
+│ [Via Anúncio] [Qualificado] [Recepção]  │  ← Badge aqui
+│ Solicitar do...                         │
+│ ••3528                     IA · Maria   │
+└─────────────────────────────────────────┘
 ```
 
-### Alteração 2: Reforçar mensagens de tool results
+---
 
-**Localizações:**
-- Linha 654-658: `transfer_to_department` (notify_client: false)
-- Linha 904-908: `transfer_to_responsible` (notify_client: false)
+## Arquivos Modificados
+
+| Arquivo | Ação |
+|---------|------|
+| `src/components/conversations/AdClickBanner.tsx` | **CRIAR** - Novo componente |
+| `src/components/conversations/ContactDetailsPanel.tsx` | **MODIFICAR** - Remover linhas 782-822 |
+| `src/pages/Conversations.tsx` | **MODIFICAR** - Importar e renderizar AdClickBanner |
+| `src/components/kanban/KanbanCard.tsx` | **MODIFICAR** - Adicionar badge "Via Anúncio" |
 
 ---
 
@@ -133,42 +90,65 @@ const fullSystemPrompt = systemPrompt + knowledgeText + toolBehaviorRules;
 
 | Aspecto | Avaliação |
 |---------|-----------|
-| Risco de quebra | **BAIXO** - Apenas adicionando instruções, não alterando lógica |
-| Impacto em outras funcionalidades | **NENHUM** - Não afeta agendamento, tags, status |
-| Tokens adicionais | ~100 tokens extras por chamada quando notify=false |
-| Retrocompatibilidade | **TOTAL** - Agentes com notify_on_transfer=true não são afetados |
+| Risco de quebra | **MUITO BAIXO** - Adicionando elementos visuais, removendo código redundante |
+| Performance | **NENHUM IMPACTO** - Dados já disponíveis |
+| Retrocompatibilidade | **TOTAL** - Conversas sem anúncio não são afetadas |
 
 ---
 
-## Sobre o Problema 1 (Status Qualificado vs Desqualificado)
+## Detalhes Técnicos
 
-Este problema é mais de **aderência ao prompt** do que de bug de código. Recomendações:
+### Interface AdClickBanner
 
-1. **No prompt do agente Maria**, adicionar instrução mais explícita:
-   ```
-   IMPORTANTE: Se o cliente disser "não", "não pedi", "não solicitei" ou qualquer negativa 
-   sobre ter pedido a revisão, ele deve ser marcado como Desqualificado, NÃO como Qualificado.
-   ```
+```typescript
+interface AdClickBannerProps {
+  originMetadata: {
+    ad_title?: string | null;
+    ad_body?: string | null;
+    ad_thumbnail?: string | null;
+    ad_source_url?: string | null;
+  };
+}
+```
 
-2. **Considerar usar palavras-chave mais específicas** no prompt que a IA possa detectar claramente
+### Lógica do Badge no Kanban
 
-A correção de código proposta aqui não resolve diretamente o Problema 1, que é comportamental do modelo. Porém, as instruções mais claras sobre respeitar tool results podem melhorar a aderência geral.
+```typescript
+// Verificar se é via anúncio
+const isFromAd = conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA';
+
+// Renderizar badge
+{isFromAd && (
+  <Badge className="text-[10px] h-4 px-1.5 border-0 bg-green-100 text-green-700">
+    <Megaphone className="h-2.5 w-2.5 mr-0.5" />
+    Via Anúncio
+  </Badge>
+)}
+```
 
 ---
 
-## Arquivos Modificados
+## Visualização Final
 
-1. `supabase/functions/ai-chat/index.ts`
-   - Adicionar regras de comportamento para transferências silenciosas (~linha 3549)
-   - Atualizar mensagem de `transfer_to_department` quando notify=false (linhas 654-658)
-   - Atualizar mensagem de `transfer_to_responsible` quando notify=false (linhas 904-908)
+**Chat (topo):**
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ 📢 Via Anúncio do Facebook                                  │
+│ FMO Advogados Associados                                    │
+│ 🔴 Atenção, aposentados entre 2015 e 2025!                  │
+│ [thumbnail]                      Ver anúncio original →     │
+└─────────────────────────────────────────────────────────────┘
+│ [Primeira mensagem do cliente]                              │
+│ [Resposta da IA]                                            │
+```
 
----
-
-## Testes Recomendados
-
-Após implementação:
-
-1. **Teste de transferência silenciosa**: Enviar mensagem que dispare transferência de departamento com notify_on_transfer=false e verificar se a IA NÃO menciona a transferência
-2. **Teste de transferência notificada**: Ativar notify_on_transfer=true e verificar se a IA corretamente informa sobre a transferência
-3. **Teste de regressão**: Verificar que agendamentos, tags e status continuam funcionando normalmente
+**Kanban Card:**
+```text
+┌─────────────────────────────────────────┐
+│ EM  Nome do Cliente              • 5m   │
+│     +55 11 98806-8634                   │
+│ Última mensagem do chat...              │
+│ [📢 Via Anúncio] [Qualificado]          │
+│ ••3528                     IA · Maria   │
+└─────────────────────────────────────────┘
+```
