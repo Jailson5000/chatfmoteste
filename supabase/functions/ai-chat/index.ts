@@ -3592,11 +3592,38 @@ ${dynamicExamples}
         );
         
         if (servicesAlreadyListed) {
-          console.log(`[AI Chat] Services already listed in conversation - injecting memory note`);
-          messages.push({
-            role: "system",
-            content: "NOTA IMPORTANTE: Os serviços JÁ FORAM LISTADOS anteriormente nesta conversa. Você JÁ POSSUI os service_ids na memória. NÃO chame list_services novamente. Quando o cliente confirmar, vá direto para book_appointment usando o service_id que você já obteve."
-          });
+          console.log(`[AI Chat] Services already listed - fetching service IDs to inject into context`);
+          
+          // Fetch current services to inject their IDs into context
+          const { data: cachedServices, error: servicesFetchError } = await supabase
+            .from("agenda_pro_services")
+            .select("id, name")
+            .eq("law_firm_id", agentLawFirmId)
+            .eq("is_active", true)
+            .eq("is_public", true)
+            .order("position", { ascending: true });
+          
+          if (!servicesFetchError && cachedServices && cachedServices.length > 0) {
+            const serviceIdList = cachedServices.map((s, i) => `${i + 1}. ${s.name} → service_id: "${s.id}"`).join("\n");
+            console.log(`[AI Chat] Injecting ${cachedServices.length} service IDs into context`);
+            
+            messages.push({
+              role: "system",
+              content: `MEMÓRIA DE SERVIÇOS (NÃO chame list_services novamente):
+
+Os serviços já foram apresentados ao cliente. Aqui estão os service_ids para sua referência imediata:
+
+${serviceIdList}
+
+INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointment. NÃO chame list_services - você já tem todos os IDs que precisa acima.`
+            });
+          } else {
+            // Fallback: just inject note without IDs
+            messages.push({
+              role: "system",
+              content: "NOTA: Os serviços já foram listados anteriormente. NÃO chame list_services novamente."
+            });
+          }
         }
         
         for (const msg of historyMessages) {
