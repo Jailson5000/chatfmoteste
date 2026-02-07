@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone } from "lucide-react";
+import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone, Megaphone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -273,9 +273,20 @@ export function KanbanCard({
         </p>
       </div>
 
-      {/* Status Badge */}
-      {customStatus && (
-        <div className="mt-1.5">
+      {/* Status Badge + Ad Badge */}
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {/* Via Anúncio Badge */}
+        {conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA' && (
+          <Badge 
+            className="text-[10px] h-4 px-1.5 border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+          >
+            <Megaphone className="h-2.5 w-2.5 mr-0.5" />
+            Via Anúncio
+          </Badge>
+        )}
+        
+        {/* Status Badge */}
+        {customStatus && (
           <Badge 
             className="text-[10px] h-4 px-1.5 border-0"
             style={{ 
@@ -285,8 +296,8 @@ export function KanbanCard({
           >
             {customStatus.name}
           </Badge>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Footer: Tags, Instance, Handler */}
       <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center gap-2">
