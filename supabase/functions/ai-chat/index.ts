@@ -3536,6 +3536,13 @@ ${dynamicExamples}
         const caps = settings.ai_capabilities as any;
         const iaOpenAI = caps.openai_active ?? (settings.ai_provider === "openai");
         
+        // Check for tenant-specific OpenAI model override
+        const tenantModel = caps.openai_model;
+        if (tenantModel && tenantModel !== "global") {
+          openaiModel = tenantModel;
+          console.log(`[AI Chat] Using tenant-specific OpenAI model: ${openaiModel}`);
+        }
+        
         if (iaOpenAI && OPENAI_API_KEY) {
           useOpenAI = true;
           console.log(`[AI Chat] Using OpenAI per-tenant override (model=${openaiModel})`);
