@@ -1,127 +1,186 @@
 
+# Plano: Corrigir Cards Travando no Kanban Após Múltiplos Drags
 
-# Plano: Injetar service_ids no Contexto para Eliminar Duplicação
+## Problema Identificado
 
-## Análise da Causa Raiz
+### Sintoma
+- Ao mover mais de 5 cards rapidamente, eles "travam" visualmente
+- Após F5 (refresh), as mudanças aparecem corretamente
+- Significa que a persistência funciona, mas o estado local não reflete as mudanças
 
-### O Problema Real
-O histórico de mensagens carrega apenas **texto** (`content`), mas **NÃO** as tool calls/respostas:
-
-```typescript
-// Linha 3571-3577
-const { data: historyMessages } = await supabase
-  .from("messages")
-  .select("content, is_from_me, sender_type, created_at")  // ❌ Não tem tool results!
-  .eq("conversation_id", conversationId)
-```
-
-Quando a IA chamou `list_services` anteriormente, recebeu:
-```json
-{
-  "services": [
-    { "service_id": "abc-123", "name": "Head Spa" },
-    { "service_id": "def-456", "name": "Consulta" }
-  ]
-}
-```
-
-Mas esse JSON **NÃO é salvo** nem **carregado** no histórico. A IA vê apenas o texto "Temos os seguintes serviços: Head Spa, Consulta..."
-
-### Por Isso a IA Chama list_services Novamente
-- A IA sabe que precisa do `service_id` (UUID) para chamar `book_appointment`
-- Ela vê no histórico que mencionou "Head Spa", mas **não tem o UUID**
-- Única forma de obter o UUID: chamar `list_services` novamente
-
-## Solução: Injetar os service_ids Quando Serviços Já Listados
-
-### Fluxo Proposto
+### Causa Raiz
+O hook `useConversations` tem **duas fontes de dados desconectadas**:
 
 ```text
-1. Detectar se serviços já foram listados no histórico ✅ (já fazemos)
-2. SE sim, buscar os serviços do banco e injetar no contexto ← NOVO
-3. IA recebe: "SERVICE_IDS DISPONÍVEIS: Head Spa = abc-123, Consulta = def-456"
-4. IA não precisa mais chamar list_services
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FLUXO ATUAL (PROBLEMÁTICO)                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   [Kanban] ← usa conversations ← usa allConversations (useState)            │
+│                                                   ↑                         │
+│                                                   │ NÃO É ATUALIZADO!       │
+│                                                   │                         │
+│   [Mutation onMutate] → queryClient.setQueryData ─┘                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Alteração no Código
+1. O **Kanban consome** `conversations`, que vem de `allConversations` (useState local, linha 247)
+2. Os **optimistic updates** modificam o `queryClient.setQueryData` (linhas 592-598, 689-700)
+3. O estado local `allConversations` **não é atualizado imediatamente**
+4. A sincronização só acontece quando `initialData` muda (após refetch), mas com múltiplas mutações rápidas, o refetch fica atrasado ou enfileirado
 
-Após detectar `servicesAlreadyListed`, buscar os serviços e injetar os IDs:
+### Por Que Funciona com Poucos Cards
+- Com 1-4 cards, o `onSettled` → `invalidateQueries` completa antes da próxima operação
+- Com 5+ cards em sequência rápida, as invalidações se acumulam e o estado local fica desatualizado
+
+## Solução
+
+Modificar as funções de mutation para atualizar **também** o state local `allConversations` no `onMutate` (optimistic update).
+
+### Alteração 1: `updateConversationDepartment.onMutate`
+
+Adicionar atualização do state local junto com o queryClient:
 
 ```typescript
-if (servicesAlreadyListed) {
-  console.log(`[AI Chat] Services already listed - injecting service IDs`);
-  
-  // Fetch current services to inject their IDs
-  const { data: services } = await supabase
-    .from("agenda_pro_services")
-    .select("id, name")
-    .eq("law_firm_id", agentLawFirmId)
-    .eq("is_active", true)
-    .eq("is_public", true);
-  
-  if (services && services.length > 0) {
-    const serviceIdList = services.map(s => `• ${s.name} → service_id: "${s.id}"`).join("\n");
-    
-    messages.push({
-      role: "system",
-      content: `MEMÓRIA DE SERVIÇOS (NÃO chame list_services novamente):
-Os serviços já foram listados ao cliente. Aqui estão os service_ids para sua referência:
+onMutate: async ({ conversationId, departmentId }) => {
+  await queryClient.cancelQueries({ queryKey: ["conversations"] });
 
-${serviceIdList}
+  const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
 
-INSTRUÇÃO: Use esses service_ids diretamente ao chamar book_appointment. NÃO chame list_services.`
-    });
-  }
-}
+  // Atualizar queryClient (para outros componentes)
+  queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
+    if (!old) return old;
+    return old.map((conv) =>
+      conv.id === conversationId
+        ? { ...conv, department_id: departmentId }
+        : conv
+    );
+  });
+
+  // NOVO: Atualizar state local para UI imediata
+  setAllConversations(prev => 
+    prev.map(conv => 
+      conv.id === conversationId 
+        ? { ...conv, department_id: departmentId } 
+        : conv
+    )
+  );
+
+  return { previousConversations };
+},
 ```
 
-### Por Que Vai Funcionar
+### Alteração 2: `updateConversationDepartment.onError`
 
-| Antes | Depois |
-|-------|--------|
-| IA vê "Head Spa" no texto, mas não tem UUID | ✅ IA recebe: `Head Spa → service_id: "abc-123"` |
-| IA precisa chamar list_services para obter ID | ✅ IA já tem o ID, vai direto para book_appointment |
-| Nota genérica "não chame de novo" | ✅ Contexto específico com os IDs reais |
+Rollback também no state local:
+
+```typescript
+onError: (error, { conversationId }, context) => {
+  // Rollback queryClient
+  if (context?.previousConversations) {
+    queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+  }
+  
+  // NOVO: Rollback state local
+  if (context?.previousConversations) {
+    setAllConversations(context.previousConversations);
+  }
+  
+  toast({...});
+},
+```
+
+### Alteração 3: `updateClientStatus.onMutate` (para status drag)
+
+Mesma correção para atualização de status:
+
+```typescript
+onMutate: async ({ clientId, statusId }) => {
+  await queryClient.cancelQueries({ queryKey: ["conversations"] });
+
+  const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
+
+  queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
+    if (!old) return old;
+    return old.map((conv) => {
+      const client = conv.client;
+      if (client?.id === clientId) {
+        return { ...conv, client: { ...client, custom_status_id: statusId } };
+      }
+      return conv;
+    });
+  });
+
+  // NOVO: Atualizar state local
+  setAllConversations(prev => 
+    prev.map(conv => {
+      const client = conv.client;
+      if (client?.id === clientId) {
+        return { ...conv, client: { ...client, custom_status_id: statusId } };
+      }
+      return conv;
+    })
+  );
+
+  return { previousConversations };
+},
+```
+
+### Alteração 4: `updateClientStatus.onError`
+
+Rollback state local:
+
+```typescript
+onError: (error, _vars, context) => {
+  if (context?.previousConversations) {
+    queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+    // NOVO: Rollback state local
+    setAllConversations(context.previousConversations);
+  }
+  toast({...});
+},
+```
 
 ## Resumo das Alterações
 
 | Arquivo | Local | Alteração |
 |---------|-------|-----------|
-| `ai-chat/index.ts` | Bloco `servicesAlreadyListed` (~linha 3594-3600) | Buscar serviços do banco e injetar os IDs no contexto |
+| `useConversations.tsx` | `updateConversationDepartment.onMutate` (~linha 584) | Adicionar `setAllConversations` optimistic |
+| `useConversations.tsx` | `updateConversationDepartment.onError` (~linha 603) | Adicionar rollback do state local |
+| `useConversations.tsx` | `updateClientStatus.onMutate` (~linha 684) | Adicionar `setAllConversations` optimistic |
+| `useConversations.tsx` | `updateClientStatus.onError` (~linha 705) | Adicionar rollback do state local |
 
-## Fluxo Após Correção
+## Fluxo Corrigido
 
 ```text
-17:46 → IA chama list_services (ÚNICA VEZ)
-17:46 → IA lista os 4 serviços
-17:46 → Cliente: "o 4, pra quarta feira, as 13:30"
-17:47 → IA confirma: "Head Spa na quarta-feira, 11/02, às 13:30?"
-17:47 → Cliente: "isso mesmo, pode confirmar"
-     ↓
-Sistema detecta: histórico contém "serviços disponíveis"
-Sistema busca: agenda_pro_services WHERE law_firm_id = X
-Sistema injeta: "Head Spa → service_id: abc-123, Consulta → service_id: def-456..."
-     ↓
-IA tem o UUID na memória!
-     ↓
-IA chama book_appointment(service_id: "abc-123", ...) direto!
-     ↓
-17:48 → "Seu agendamento foi realizado com sucesso! ✅"
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   FLUXO CORRIGIDO                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   [Kanban] ← usa conversations ← usa allConversations (useState)            │
+│                                                   ↑                         │
+│                                                   │ ✅ ATUALIZADO!          │
+│                                                   │                         │
+│   [Mutation onMutate] → setAllConversations() ────┘                         │
+│                       → queryClient.setQueryData (para outros hooks)        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Economia de Tokens
+## Resultado Esperado
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Chamadas à API | 2x (list_services + book_appointment) | 1x (apenas book_appointment) |
-| Tokens consumidos | ~4000 tokens (duplo) | ~2500 tokens |
-| Tempo de resposta | ~3-4s (duas chamadas AI) | ~2s (uma chamada) |
+| Operação | Antes | Depois |
+|----------|-------|--------|
+| Mover 1 card | ✅ Funciona | ✅ Funciona |
+| Mover 5 cards rápido | ❌ Trava | ✅ Funciona |
+| Mover 10+ cards rápido | ❌ Trava completamente | ✅ Funciona |
+| Erro de rede | Sem rollback visual | ✅ Rollback visual imediato |
 
 ## Risco de Quebra
 
 **Muito Baixo**
-- Apenas adiciona contexto extra
-- Não altera lógica de tools
-- Backward compatible (se não encontrar serviços, comportamento normal)
-- Query simples ao banco (já fazemos queries similares)
-
+- Apenas adiciona sincronização do state local
+- Mantém toda lógica existente de queryClient
+- Rollback funciona em ambos os lugares
+- Não altera schema, RPC ou banco de dados
