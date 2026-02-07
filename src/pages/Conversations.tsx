@@ -100,6 +100,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { MediaPreviewDialog } from "@/components/conversations/MediaPreviewDialog";
 import { ContactDetailsPanel } from "@/components/conversations/ContactDetailsPanel";
+import { AdClickBanner } from "@/components/conversations/AdClickBanner";
 import { ConversationSidebarCard } from "@/components/conversations/ConversationSidebarCard";
 import { AudioRecorder } from "@/components/conversations/AudioRecorder";
 import { AudioModeIndicator } from "@/components/conversations/AudioModeIndicator";
@@ -4028,6 +4029,14 @@ export default function Conversations() {
                           <span className="text-xs text-muted-foreground">↑ Role para cima para carregar mais</span>
                         </div>
                       )}
+                      
+                      {/* Ad Click Banner - shown at the very top of conversation history */}
+                      {!hasMoreMessages && 
+                       selectedConversation?.origin === 'whatsapp_ctwa' && 
+                       selectedConversation?.origin_metadata && (
+                        <AdClickBanner originMetadata={selectedConversation.origin_metadata} />
+                      )}
+                      
                       {timelineItems.map((item, index) => {
                         const prevItem = index > 0 ? timelineItems[index - 1] : null;
                         // Get date from the correct field based on item type
