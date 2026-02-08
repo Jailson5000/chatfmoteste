@@ -1933,7 +1933,7 @@ async function sendAudioToWhatsApp(
       body: JSON.stringify({
         number: remoteJid,
         mediatype: "audio",
-        mimetype: "audio/ogg",
+        mimetype: "audio/mpeg", // Use MP3 format (same as ElevenLabs output)
         media: audioBase64,
         delay: 1200,
       }),
@@ -2125,10 +2125,68 @@ async function sendAIResponseToWhatsApp(
         }
       }
       
-      return unique.join('\n\n');
+    return unique.join('\n\n');
     };
 
-    const sanitizedResponse = deduplicateParagraphs(sanitizeText(aiResponse));
+    // ==========================================================================
+    // Process AI audio commands (@Ativar áudio / @Desativar áudio)
+    // These are prompt instructions that should NOT be sent to the user
+    // Instead, they trigger audio mode changes on the conversation
+    // ==========================================================================
+    const processAIAudioCommands = (text: string): { cleanText: string; shouldEnableAudio: boolean; shouldDisableAudio: boolean } => {
+      let cleanText = text;
+      let shouldEnableAudio = false;
+      let shouldDisableAudio = false;
+
+      // Detect @Ativar áudio and variations (case-insensitive, with/without accent)
+      const enablePattern = /@[Aa]tivar\s*[aáAÁ]udio/g;
+      if (enablePattern.test(cleanText)) {
+        shouldEnableAudio = true;
+        cleanText = cleanText.replace(/@[Aa]tivar\s*[aáAÁ]udio/gi, '');
+        logDebug('AUDIO_COMMAND', 'Detected @Ativar áudio - will enable audio mode', {});
+      }
+
+      // Detect @Desativar áudio and variations
+      const disablePattern = /@[Dd]esativar\s*[aáAÁ]udio/g;
+      if (disablePattern.test(cleanText)) {
+        shouldDisableAudio = true;
+        cleanText = cleanText.replace(/@[Dd]esativar\s*[aáAÁ]udio/gi, '');
+        logDebug('AUDIO_COMMAND', 'Detected @Desativar áudio - will disable audio mode', {});
+      }
+
+      // Clean up extra whitespace and newlines left by removal
+      cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
+
+      return { cleanText, shouldEnableAudio, shouldDisableAudio };
+    };
+
+    // First process audio commands from raw AI response
+    const { cleanText: responseWithoutAudioCommands, shouldEnableAudio, shouldDisableAudio } = processAIAudioCommands(aiResponse);
+    
+    // Handle audio mode changes if detected
+    if (shouldEnableAudio && !shouldDisableAudio) {
+      await supabaseClient
+        .from('conversations')
+        .update({
+          ai_audio_enabled: true,
+          ai_audio_enabled_by: 'ai_command',
+          ai_audio_last_enabled_at: new Date().toISOString(),
+        })
+        .eq('id', context.conversationId);
+      logDebug('AUDIO_COMMAND', 'Audio mode ENABLED by AI command', { conversationId: context.conversationId });
+    } else if (shouldDisableAudio && !shouldEnableAudio) {
+      await supabaseClient
+        .from('conversations')
+        .update({
+          ai_audio_enabled: false,
+          ai_audio_last_disabled_at: new Date().toISOString(),
+        })
+        .eq('id', context.conversationId);
+      logDebug('AUDIO_COMMAND', 'Audio mode DISABLED by AI command', { conversationId: context.conversationId });
+    }
+
+    // Now sanitize and deduplicate the cleaned response
+    const sanitizedResponse = deduplicateParagraphs(sanitizeText(responseWithoutAudioCommands));
 
     logDebug('SEND_RESPONSE', 'Sending AI response to WhatsApp', {
       conversationId: context.conversationId,

@@ -3599,6 +3599,23 @@ você DEVE chamar TODAS as tools correspondentes. NÃO omita nenhuma ação.
 Exemplo: Se o prompt diz "Adicione o status @status:Desqualificado e a tag @etiqueta:Não tem direito a revisão"
 → Você DEVE chamar change_status E add_tag (2 tools).
 
+### REGRA ESPECÍFICA: STATUS "DESQUALIFICADO" ###
+
+🚨 CENÁRIO CRÍTICO DE DESQUALIFICAÇÃO:
+Quando o cliente NÃO tem direito à revisão (ex: aposentadoria há mais de 10 anos, prazo decadencial expirado):
+
+1. Você DEVE chamar a tool "change_status" com status_name="Desqualificado" (ou nome equivalente)
+2. NÃO chame change_status com "Qualificado" neste cenário - isso é um ERRO
+3. FAÇA APENAS UMA chamada de change_status com o status CORRETO desde o início
+4. Se o prompt menciona "@status:Desqualificado" para uma situação específica, use EXATAMENTE esse status
+
+EXEMPLO DE RACIOCÍNIO CORRETO:
+- Cliente diz: "me aposentei em 2015" (mais de 10 anos)
+- Ação: chamar change_status com status_name="Desqualificado"
+- ERRADO: Marcar como "Qualificado" e depois tentar corrigir
+
+LEMBRE-SE: O status do CRM deve refletir a CONCLUSÃO da análise, não um estado intermediário.
+
 `;
 
     // AUTO-INJECT: Current date/time context for ALL agents
