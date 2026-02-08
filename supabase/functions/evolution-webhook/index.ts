@@ -2751,14 +2751,14 @@ async function sendAIResponseToWhatsApp(
           }
 
           // Generate file path
-          const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}.mp3`;
+          const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}.ogg`;
 
           // Upload to chat-media bucket
           const { data: uploadData, error: uploadError } = await supabaseClient
             .storage
             .from('chat-media')
             .upload(storagePath, bytes, {
-              contentType: 'audio/mpeg',
+              contentType: 'audio/ogg',
               cacheControl: '31536000',
               upsert: false,
             });
@@ -2800,7 +2800,7 @@ async function sendAIResponseToWhatsApp(
             is_from_me: true,
             sender_type: 'system',
             ai_generated: true,
-            media_mime_type: 'audio/mpeg',
+            media_mime_type: 'audio/ogg',
             media_url: audioStorageUrl, // NEW: URL from Storage for download
             ai_agent_id: context.automationId || null,
             ai_agent_name: context.automationName || null,
