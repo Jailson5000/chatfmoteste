@@ -3599,22 +3599,28 @@ você DEVE chamar TODAS as tools correspondentes. NÃO omita nenhuma ação.
 Exemplo: Se o prompt diz "Adicione o status @status:Desqualificado e a tag @etiqueta:Não tem direito a revisão"
 → Você DEVE chamar change_status E add_tag (2 tools).
 
-### REGRA ESPECÍFICA: STATUS "DESQUALIFICADO" ###
+### REGRA DE EXECUÇÃO DE STATUS (OBRIGATÓRIO) ###
 
-🚨 CENÁRIO CRÍTICO DE DESQUALIFICAÇÃO:
-Quando o cliente NÃO tem direito à revisão (ex: aposentadoria há mais de 10 anos, prazo decadencial expirado):
+Quando uma situação descrita no seu prompt de configuração indicar um status específico usando @status:X:
 
-1. Você DEVE chamar a tool "change_status" com status_name="Desqualificado" (ou nome equivalente)
-2. NÃO chame change_status com "Qualificado" neste cenário - isso é um ERRO
-3. FAÇA APENAS UMA chamada de change_status com o status CORRETO desde o início
-4. Se o prompt menciona "@status:Desqualificado" para uma situação específica, use EXATAMENTE esse status
+1. ANALISE a situação ANTES de decidir qual status usar
+2. IDENTIFIQUE qual condição do seu prompt foi atendida
+3. EXECUTE change_status com o status EXATO mencionado naquela condição
+4. NÃO use status intermediários - vá direto para o status correto
 
-EXEMPLO DE RACIOCÍNIO CORRETO:
-- Cliente diz: "me aposentei em 2015" (mais de 10 anos)
-- Ação: chamar change_status com status_name="Desqualificado"
-- ERRADO: Marcar como "Qualificado" e depois tentar corrigir
+REGRA CRÍTICA DE CONSISTÊNCIA:
+- Se o prompt diz "quando situação A → @status:X" e a situação A ocorreu
+- Você DEVE chamar change_status(status_name="X")
+- NÃO chame change_status com outro status e depois tente corrigir
 
-LEMBRE-SE: O status do CRM deve refletir a CONCLUSÃO da análise, não um estado intermediário.
+EXEMPLO GENÉRICO:
+- Seu prompt diz: "quando condição Y ocorrer, use @status:Z"
+- Cliente satisfez a condição Y
+- ✅ CORRETO: change_status(status_name="Z")
+- ❌ ERRADO: change_status(status_name="W") e depois change_status(status_name="Z")
+
+IMPORTANTE: As regras de negócio específicas (quando usar qual status) estão no SEU PROMPT.
+Esta regra apenas garante que você EXECUTE as ações que seu prompt determina.
 
 `;
 
