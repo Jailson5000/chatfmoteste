@@ -1910,7 +1910,8 @@ async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: strin
   }
 }
 
-// Helper function to send audio message to WhatsApp
+// Helper function to send audio message to WhatsApp with layered fallback
+// Priority: 1) sendWhatsAppAudio (PTT/voice) → 2) sendMedia OGG → 3) sendMedia MP3
 async function sendAudioToWhatsApp(
   apiUrl: string,
   instanceName: string,
@@ -1918,13 +1919,58 @@ async function sendAudioToWhatsApp(
   remoteJid: string,
   audioBase64: string
 ): Promise<{ success: boolean; messageId?: string }> {
-  try {
-    // Use sendMedia with mediatype audio for better format compatibility (webm, ogg, mp3)
-    const sendUrl = `${apiUrl}/message/sendMedia/${instanceName}`;
-    
-    logDebug('SEND_AUDIO', 'Sending audio to WhatsApp via sendMedia', { remoteJid });
+  // Clean the base64 string (remove whitespace/newlines that might corrupt the data)
+  const cleanedBase64 = audioBase64.replace(/[\r\n\s]/g, '').trim();
+  
+  logDebug('SEND_AUDIO', 'Starting layered audio send attempts', { 
+    remoteJid, 
+    base64Length: cleanedBase64.length 
+  });
 
-    const response = await fetch(sendUrl, {
+  // === ATTEMPT 1: sendWhatsAppAudio (specialized PTT/voice route) ===
+  try {
+    const sendWhatsAppAudioUrl = `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`;
+    logDebug('SEND_AUDIO', 'Attempt 1: sendWhatsAppAudio (PTT route)', { endpoint: sendWhatsAppAudioUrl });
+
+    const response1 = await fetch(sendWhatsAppAudioUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify({
+        number: remoteJid,
+        audio: cleanedBase64,
+        delay: 1200,
+      }),
+    });
+
+    if (response1.ok) {
+      const result1 = await response1.json();
+      const messageId = result1?.key?.id;
+      if (messageId) {
+        logDebug('SEND_AUDIO', '✅ Attempt 1 SUCCESS: sendWhatsAppAudio worked', { messageId });
+        return { success: true, messageId };
+      }
+    }
+
+    const errorText1 = await response1.text().catch(() => 'Unable to read error body');
+    logDebug('SEND_AUDIO', 'Attempt 1 FAILED: sendWhatsAppAudio', { 
+      status: response1.status, 
+      error: errorText1.slice(0, 500) 
+    });
+  } catch (error1) {
+    logDebug('SEND_AUDIO', 'Attempt 1 EXCEPTION: sendWhatsAppAudio', { 
+      error: error1 instanceof Error ? error1.message : String(error1) 
+    });
+  }
+
+  // === ATTEMPT 2: sendMedia with OGG format (mimetype audio/ogg;codecs=opus) ===
+  try {
+    const sendMediaUrl = `${apiUrl}/message/sendMedia/${instanceName}`;
+    logDebug('SEND_AUDIO', 'Attempt 2: sendMedia with OGG format', { endpoint: sendMediaUrl });
+
+    const response2 = await fetch(sendMediaUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1933,27 +1979,77 @@ async function sendAudioToWhatsApp(
       body: JSON.stringify({
         number: remoteJid,
         mediatype: "audio",
-        mimetype: "audio/mpeg", // Use MP3 format (same as ElevenLabs output)
-        media: audioBase64,
+        mimetype: "audio/ogg;codecs=opus",
+        fileName: "audio.ogg",
+        media: cleanedBase64,
         delay: 1200,
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logDebug('SEND_AUDIO', 'Evolution API audio send failed', { status: response.status, error: errorText });
-      return { success: false };
+    if (response2.ok) {
+      const result2 = await response2.json();
+      const messageId = result2?.key?.id;
+      if (messageId) {
+        logDebug('SEND_AUDIO', '✅ Attempt 2 SUCCESS: sendMedia OGG worked', { messageId });
+        return { success: true, messageId };
+      }
     }
 
-    const result = await response.json();
-    const messageId = result?.key?.id;
-    
-    logDebug('SEND_AUDIO', 'Audio sent successfully', { messageId });
-    return { success: true, messageId };
-  } catch (error) {
-    logDebug('SEND_AUDIO', 'Error sending audio', { error: error instanceof Error ? error.message : error });
-    return { success: false };
+    const errorText2 = await response2.text().catch(() => 'Unable to read error body');
+    logDebug('SEND_AUDIO', 'Attempt 2 FAILED: sendMedia OGG', { 
+      status: response2.status, 
+      error: errorText2.slice(0, 500) 
+    });
+  } catch (error2) {
+    logDebug('SEND_AUDIO', 'Attempt 2 EXCEPTION: sendMedia OGG', { 
+      error: error2 instanceof Error ? error2.message : String(error2) 
+    });
   }
+
+  // === ATTEMPT 3: sendMedia with MP3 format (original ElevenLabs format) ===
+  try {
+    const sendMediaUrl = `${apiUrl}/message/sendMedia/${instanceName}`;
+    logDebug('SEND_AUDIO', 'Attempt 3: sendMedia with MP3 format', { endpoint: sendMediaUrl });
+
+    const response3 = await fetch(sendMediaUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': apiKey,
+      },
+      body: JSON.stringify({
+        number: remoteJid,
+        mediatype: "audio",
+        mimetype: "audio/mpeg",
+        fileName: "audio.mp3",
+        media: cleanedBase64,
+        delay: 1200,
+      }),
+    });
+
+    if (response3.ok) {
+      const result3 = await response3.json();
+      const messageId = result3?.key?.id;
+      if (messageId) {
+        logDebug('SEND_AUDIO', '✅ Attempt 3 SUCCESS: sendMedia MP3 worked', { messageId });
+        return { success: true, messageId };
+      }
+    }
+
+    const errorText3 = await response3.text().catch(() => 'Unable to read error body');
+    logDebug('SEND_AUDIO', 'Attempt 3 FAILED: sendMedia MP3', { 
+      status: response3.status, 
+      error: errorText3.slice(0, 500) 
+    });
+  } catch (error3) {
+    logDebug('SEND_AUDIO', 'Attempt 3 EXCEPTION: sendMedia MP3', { 
+      error: error3 instanceof Error ? error3.message : String(error3) 
+    });
+  }
+
+  // All attempts failed
+  logDebug('SEND_AUDIO', '❌ All 3 audio send attempts FAILED', { remoteJid });
+  return { success: false };
 }
 
 // Helper function to send text fallback when audio fails
