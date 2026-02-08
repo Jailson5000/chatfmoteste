@@ -98,10 +98,13 @@ export function DecryptedMediaListItem({
   const normalizedMime = useMemo(() => normalizeMime(mimeType), [mimeType]);
 
   const needsDecryption = useMemo(() => {
-    // For áudio/documentos: se existe whatsappMessageId, sempre baixar via descriptografia
-    // para evitar download .enc e URLs expiradas.
+    // If we have a valid storage URL (not encrypted WhatsApp URL), use it directly
+    if (mediaUrl && !isEncryptedMediaUrl(mediaUrl)) {
+      return false;
+    }
+    // For encrypted WhatsApp media, use decryption proxy
     return !!whatsappMessageId;
-  }, [whatsappMessageId]);
+  }, [whatsappMessageId, mediaUrl]);
 
   const typeLabel = useMemo(() => {
     if (normalizedMime) return normalizedMime.split("/")[1]?.toUpperCase() || (kind === "audio" ? "ÁUDIO" : "DOC");
