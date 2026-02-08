@@ -671,10 +671,25 @@ async function executeCrmTool(
           .eq("law_firm_id", lawFirmId)
           .eq("is_active", true);
         
-        const targetStatus = statuses?.find((s: any) => 
-          s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
-          args.status_name.toLowerCase().includes(s.name.toLowerCase())
+        // Priority matching: exact > startsWith > includes (fixes substring false-positive bug)
+        // e.g., "DESQUALIFICADO" was matching "Qualificado" because includes() found substring
+        let targetStatus = statuses?.find((s: any) => 
+          s.name.toLowerCase() === args.status_name.toLowerCase()
         );
+        
+        if (!targetStatus) {
+          targetStatus = statuses?.find((s: any) => 
+            s.name.toLowerCase().startsWith(args.status_name.toLowerCase()) ||
+            args.status_name.toLowerCase().startsWith(s.name.toLowerCase())
+          );
+        }
+        
+        if (!targetStatus) {
+          targetStatus = statuses?.find((s: any) => 
+            s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+            args.status_name.toLowerCase().includes(s.name.toLowerCase())
+          );
+        }
         
         if (!targetStatus) {
           const availableStatuses = statuses?.map((s: any) => s.name).join(", ") || "nenhum";
