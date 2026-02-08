@@ -1442,7 +1442,7 @@ export function KanbanChatPanel({
   }, [conversationId, noteTargetMessage, toast, messages, setMessages]);
 
   // Download media from a message
-  const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, fileName?: string) => {
+  const handleDownloadMedia = useCallback(async (whatsappMessageId: string, conversationIdParam: string, _fileName?: string) => {
     try {
       toast({ title: "Baixando mídia..." });
 
@@ -1461,10 +1461,48 @@ export function KanbanChatPanel({
       const { base64, mimetype } = response.data;
       const dataUrl = `data:${mimetype || "application/octet-stream"};base64,${base64}`;
 
+      // Derive extension from MIME type for consistent downloads
+      const getExtensionFromMime = (mime: string): string => {
+        const mimeToExt: Record<string, string> = {
+          'audio/ogg': '.ogg',
+          'audio/ogg; codecs=opus': '.ogg',
+          'audio/mpeg': '.mp3',
+          'audio/mp4': '.m4a',
+          'audio/wav': '.wav',
+          'audio/webm': '.webm',
+          'video/mp4': '.mp4',
+          'video/webm': '.webm',
+          'image/jpeg': '.jpg',
+          'image/png': '.png',
+          'image/gif': '.gif',
+          'image/webp': '.webp',
+          'application/pdf': '.pdf',
+          'application/msword': '.doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.ms-excel': '.xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+        };
+        const normalizedMime = mime.toLowerCase().split(';')[0].trim();
+        return mimeToExt[normalizedMime] || mimeToExt[mime.toLowerCase()] || '';
+      };
+
+      // Generate safe filename based on MIME type
+      const extension = getExtensionFromMime(mimetype || '');
+      const idSuffix = whatsappMessageId.slice(0, 8);
+      
+      // Determine prefix based on MIME type
+      let prefix = 'arquivo';
+      if (mimetype?.startsWith('audio/')) prefix = 'audio';
+      else if (mimetype?.startsWith('video/')) prefix = 'video';
+      else if (mimetype?.startsWith('image/')) prefix = 'imagem';
+      else if (mimetype?.includes('pdf') || mimetype?.includes('word') || mimetype?.includes('document')) prefix = 'documento';
+      
+      const safeFileName = `${prefix}_${idSuffix}${extension}`;
+
       // Create download link
       const link = document.createElement("a");
       link.href = dataUrl;
-      link.download = fileName || `download_${whatsappMessageId.slice(0, 8)}`;
+      link.download = safeFileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

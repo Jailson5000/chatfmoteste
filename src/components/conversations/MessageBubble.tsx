@@ -1922,7 +1922,7 @@ export function MessageBubble({
               </DropdownMenuSub>
             )}
             {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
-              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
+              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId)}>
                 <Download className="h-4 w-4 mr-2" />
                 Baixar
               </DropdownMenuItem>
@@ -2161,7 +2161,7 @@ export function MessageBubble({
               </DropdownMenuSub>
             )}
             {hasMedia && whatsappMessageId && conversationId && onDownloadMedia && (
-              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId, content || undefined)}>
+              <DropdownMenuItem onClick={() => onDownloadMedia(whatsappMessageId, conversationId)}>
                 <Download className="h-4 w-4 mr-2" />
                 Baixar
               </DropdownMenuItem>
