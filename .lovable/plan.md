@@ -1,201 +1,164 @@
 
-## Diagnóstico (por que ainda não “baixa em .ogg”)
-Pelo que vi no código e nos dados do banco, hoje existem **dois problemas diferentes** que se somam:
+# Correção: IA Não Consegue Mudar para Status Diferentes de "Qualificado"
 
-### 1) O arquivo “.ogg” salvo no storage não é realmente OGG
-- O fluxo do áudio da IA gera TTS via **`ai-text-to-speech`**, e essa função **sempre retorna MP3**:
-  - ElevenLabs: `output_format=mp3_44100_128`
-  - OpenAI: `response_format: 'mp3'`
-- Depois, no `evolution-webhook`, nós passamos a salvar isso como:
-  - path `.../ai-audio/<id>.ogg`
-  - `contentType: 'audio/ogg'`
-  - `media_mime_type: 'audio/ogg'`
-- Resultado: o storage contém **bytes de MP3 “fantasiados” de OGG**. Isso pode:
-  - gerar download com “formato estranho”
-  - gerar arquivo que não abre corretamente como OGG em alguns ambientes
+## Problema Identificado
 
-Arquivos envolvidos:
-- `supabase/functions/ai-text-to-speech/index.ts` (gera MP3 hoje)
-- `supabase/functions/evolution-webhook/index.ts` (salva como .ogg)
+A IA está tentando mudar o status para "DESQUALIFICADO", mas o sistema está aplicando "Qualificado" no lugar.
 
-### 2) O download via menu “Baixar” usa o texto da mensagem como nome do arquivo (sem extensão)
-No frontend, o menu “Baixar” no bubble chama:
-- `onDownloadMedia(whatsappMessageId, conversationId, content || undefined)`
+### Causa Raiz
 
-Ou seja: para áudios (cliente e IA), ele está passando o **conteúdo transcrito/texto** como `fileName`.
-A função que baixa (`handleDownloadMedia` em `Conversations.tsx` e no Kanban) faz:
-- `link.download = fileName || download_<id>`
-Se `fileName` for aquele texto longo, o download sai como um arquivo genérico, **sem .ogg**, exatamente como no seu print.
+A lógica de busca de status na função `handleCrmToolCall` usa `includes()` bidirecional que causa **falso positivo**:
 
-Arquivos envolvidos:
-- `src/components/conversations/MessageBubble.tsx` (passa `content` como `fileName`)
-- `src/pages/Conversations.tsx` (handleDownloadMedia)
-- `src/components/kanban/KanbanChatPanel.tsx` (handleDownloadMedia)
-
----
-
-## Objetivo da correção (sem quebrar nada)
-1) Garantir que **o áudio gerado pela IA seja realmente OGG/Opus** (não MP3 renomeado).
-2) Garantir que ao clicar em **“Baixar”** o arquivo seja salvo com **nome e extensão corretos** (ex: `audio_<id>.ogg`), independentemente do `content`.
-
----
-
-## Mudanças propostas (mínimas e seguras)
-
-### A) Backend: fazer o TTS gerar OGG/Opus de verdade
-**Arquivo:** `supabase/functions/ai-text-to-speech/index.ts`
-
-1) **ElevenLabs**
-- Trocar:
-  - `output_format=mp3_44100_128`
-- Para algo do tipo:
-  - `output_format=opus_48000` (ou o formato Opus suportado pela conta)
-- E devolver no JSON:
-  - `mimeType: "audio/ogg; codecs=opus"` (ou `"audio/ogg"`)
-
-2) **OpenAI fallback**
-- Trocar:
-  - `response_format: 'mp3'`
-- Para:
-  - `response_format: 'opus'`
-- E devolver:
-  - `mimeType: "audio/ogg; codecs=opus"` (ou `"audio/ogg"`)
-
-3) **Fallback de compatibilidade**
-- Se por algum motivo o provider falhar com opus/ogg (ex: 422), fazer fallback interno:
-  - tentar novamente em mp3
-  - retornar `mimeType: "audio/mpeg"`
-Isso mantém estabilidade e evita regressões.
-
-Resultado esperado:
-- `ai-text-to-speech` passa a retornar áudio em **OGG/Opus** na maioria dos casos, com fallback para MP3 apenas se necessário.
-
----
-
-### B) Backend: salvar no storage com extensão e content-type coerentes com o TTS retornado
-**Arquivo:** `supabase/functions/evolution-webhook/index.ts`
-
-Hoje ele:
-- chama `generateTTSAudio(...)` e recebe apenas `audioContent`
-- e salva como `.ogg` sempre
-
-Ajuste proposto:
-1) Alterar `generateTTSAudio` para retornar um objeto:
-```ts
-{ audioContent: string; mimeType: string }
+```javascript
+// Linha 674-677 do ai-chat/index.ts
+const targetStatus = statuses?.find((s: any) => 
+  s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+  args.status_name.toLowerCase().includes(s.name.toLowerCase())
+);
 ```
-(pegando `mimeType` do `ai-text-to-speech`)
 
-2) Na hora de salvar:
-- se `mimeType` indicar ogg/opus:
-  - path: `.ogg`
-  - contentType: `audio/ogg`
-  - `media_mime_type`: `audio/ogg` (ou `audio/ogg; codecs=opus`)
-- se indicar mp3:
-  - path: `.mp3`
-  - contentType: `audio/mpeg`
-  - `media_mime_type`: `audio/mpeg`
+**O que acontece quando a IA passa `"DESQUALIFICADO"`:**
 
-Isso remove o risco de “arquivo MP3 com cara de OGG”.
-
-Observação importante:
-- O envio ao WhatsApp continuará usando `sendAudioToWhatsApp` (que já tem fallback em camadas). Se passarmos também o `mimeType` para ela, dá para ajustar a 3ª tentativa (MP3) somente quando fizer sentido.
-
----
-
-### C) Frontend: corrigir o nome/extensão do arquivo no “Baixar”
-Aqui é onde seu print bate muito forte.
-
-#### C1) Tornar `handleDownloadMedia` robusto (funciona mesmo que alguém passe fileName ruim)
-**Arquivos:**
-- `src/pages/Conversations.tsx`
-- `src/components/kanban/KanbanChatPanel.tsx`
-
-Alterar a lógica de filename para:
-1) Pegar `mimetype` retornado do `get_media`
-2) Derivar extensão:
-   - `audio/ogg` → `.ogg`
-   - `audio/mpeg` → `.mp3`
-   - `application/pdf` → `.pdf`
-   - etc.
-3) Se `fileName`:
-   - vier vazio, enorme, ou não tiver extensão, usar um padrão seguro:
-     - `audio_<whatsappId8>.ogg` (para áudio)
-     - `documento_<whatsappId8>.pdf` (para docs)
-4) Sanitizar e limitar tamanho do nome (evita nome gigante quebrando o download no Windows/macOS).
-
-Isso garante que:
-- mesmo que o `MessageBubble` continue passando texto, **o download sai correto**.
-
-#### C2) Parar de passar `content` como filename no menu
-**Arquivo:** `src/components/conversations/MessageBubble.tsx`
-
-Trocar os pontos onde está:
-```ts
-onDownloadMedia(whatsappMessageId, conversationId, content || undefined)
+```text
+1. find() itera nos status na ordem do array
+2. Primeiro encontra "Qualificado"
+3. Testa: "qualificado".includes("desqualificado") → FALSE
+4. Testa: "desqualificado".includes("qualificado") → TRUE ← MATCH ERRADO!
+5. Retorna "Qualificado" imediatamente (sem verificar "DESQUALIFICADO")
 ```
-para passar:
-- `undefined` (deixa `handleDownloadMedia` decidir), ou
-- um nome gerado baseado em `message_type`/`mimeType`, ex:
-  - `audio_<id8>.ogg`
 
-Essa mudança evita que o texto da mensagem vire nome do arquivo.
+Isso explica por que:
+- A IA chama `change_status("DESQUALIFICADO")` (confirmado nos logs)
+- Mas o banco registra mudança para "Qualificado"
+- O mesmo problema afeta qualquer par de status onde um contém o outro como substring
 
----
+### Evidências nos Logs
 
-## Plano de execução (ordem para minimizar risco)
-1) **Frontend primeiro (baixo risco, resolve seu print imediatamente)**
-   - Ajustar `handleDownloadMedia` (Conversations + Kanban)
-   - Ajustar chamada no `MessageBubble` para não usar `content` como filename
+```text
+Edge Function Log:
+15:15:59 - Executing CRM tool: change_status { status_name: "DESQUALIFICADO" }
 
-2) **Backend TTS (garante OGG real e evita “formato fake”)**
-   - Ajustar `ai-text-to-speech` para opus/ogg
-   - Ajustar `evolution-webhook` para respeitar `mimeType` real ao salvar
-
-3) Deploy e validação
+client_actions no Banco:
+15:16:00 - IA Maria alterou status para Qualificado (deveria ser DESQUALIFICADO!)
+```
 
 ---
 
-## Checklist de testes (obrigatório para não causar regressão)
-### Teste 1 — Download do áudio da IA
-1) Em uma conversa com “Áudio ativo”, pedir: “me responde em áudio”
-2) Na mensagem de áudio gerada:
-   - Abrir menu da mensagem → **Baixar**
-3) Verificar:
-   - arquivo baixa com **extensão `.ogg`**
-   - arquivo abre em player como **OGG/Opus** (não “arquivo genérico”)
+## Solução Proposta
 
-### Teste 2 — Download do áudio do cliente (não pode quebrar)
-- Repetir “Baixar” em um áudio do cliente
-- Confirmar `.ogg` e abertura OK
+Implementar uma estratégia de matching com **prioridade por especificidade**:
 
-### Teste 3 — Regressão em documentos/imagens
-- Baixar um PDF/documento e uma imagem via “Baixar”
-- Confirmar que nome/extensão continuam corretos
+1. **Primeiro:** Buscar match exato (case-insensitive)
+2. **Segundo:** Buscar match onde o nome do status **começa** com o termo buscado
+3. **Terceiro:** Buscar match por substring (atual, como fallback)
 
-### Teste 4 — Playback dentro do chat
-- Garantir que os players de áudio continuam reproduzindo normalmente
+### Novo Algoritmo
+
+```javascript
+// Prioridade 1: Match exato (case-insensitive)
+let targetStatus = statuses?.find((s: any) => 
+  s.name.toLowerCase() === args.status_name.toLowerCase()
+);
+
+// Prioridade 2: Match por início do nome (startsWith)
+if (!targetStatus) {
+  targetStatus = statuses?.find((s: any) => 
+    s.name.toLowerCase().startsWith(args.status_name.toLowerCase()) ||
+    args.status_name.toLowerCase().startsWith(s.name.toLowerCase())
+  );
+}
+
+// Prioridade 3: Match por substring (fallback - comportamento atual)
+if (!targetStatus) {
+  targetStatus = statuses?.find((s: any) => 
+    s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+    args.status_name.toLowerCase().includes(s.name.toLowerCase())
+  );
+}
+```
+
+### Por que isso resolve
+
+Quando a IA passa `"DESQUALIFICADO"`:
+1. Match exato: `"qualificado" === "desqualificado"` → FALSE
+2. Match exato: `"desqualificado" === "desqualificado"` → **TRUE** ✓
+3. Retorna "DESQUALIFICADO" corretamente
 
 ---
 
-## Nota sobre histórico (áudios já existentes)
-- A correção do frontend (nome/extensão) melhora inclusive downloads de mensagens antigas.
-- Para os áudios da IA já salvos no storage durante o período “MP3 disfarçado de OGG”, eles podem continuar inconsistentes se alguém baixar diretamente pelo link do storage. Como mitigação:
-  - o “Baixar” via menu (get_media) vai baixar o áudio real do WhatsApp (OGG/Opus), agora com nome correto.
+## Arquivo a Alterar
+
+**`supabase/functions/ai-chat/index.ts`**
+
+Localização: Linhas 674-677 (função `handleCrmToolCall`, case `change_status`)
+
+### Mudança Específica
+
+```text
+ANTES (linhas 674-677):
+const targetStatus = statuses?.find((s: any) => 
+  s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+  args.status_name.toLowerCase().includes(s.name.toLowerCase())
+);
+
+DEPOIS:
+// Priority matching: exact > startsWith > includes
+let targetStatus = statuses?.find((s: any) => 
+  s.name.toLowerCase() === args.status_name.toLowerCase()
+);
+
+if (!targetStatus) {
+  targetStatus = statuses?.find((s: any) => 
+    s.name.toLowerCase().startsWith(args.status_name.toLowerCase()) ||
+    args.status_name.toLowerCase().startsWith(s.name.toLowerCase())
+  );
+}
+
+if (!targetStatus) {
+  targetStatus = statuses?.find((s: any) => 
+    s.name.toLowerCase().includes(args.status_name.toLowerCase()) ||
+    args.status_name.toLowerCase().includes(s.name.toLowerCase())
+  );
+}
+```
 
 ---
 
-## Arquivos que serão alterados
-- `src/pages/Conversations.tsx` (handleDownloadMedia)
-- `src/components/kanban/KanbanChatPanel.tsx` (handleDownloadMedia)
-- `src/components/conversations/MessageBubble.tsx` (parar de passar `content` como filename)
-- `supabase/functions/ai-text-to-speech/index.ts` (gerar OGG/Opus de verdade)
-- `supabase/functions/evolution-webhook/index.ts` (salvar com mime/ext coerentes)
+## Impacto e Testes
+
+### Cenários de Teste
+
+| Status Buscado | Antes (Bug) | Depois (Corrigido) |
+|----------------|-------------|-------------------|
+| DESQUALIFICADO | Qualificado ❌ | DESQUALIFICADO ✓ |
+| Qualificado | Qualificado ✓ | Qualificado ✓ |
+| Cliente Novo | Cliente Novo ✓ | Cliente Novo ✓ |
+| Análise | Análise ✓ | Análise ✓ |
+
+### Retrocompatibilidade
+
+- A correção é **totalmente retrocompatível** porque mantém o fallback para `includes()`
+- Apenas adiciona camadas de prioridade para matches mais específicos
+- Não quebra nenhum fluxo existente que já funciona
+
+### Teste Manual Recomendado
+
+1. Em uma conversa controlada pela IA "Maria":
+   - Disparar a condição que deve mudar para "DESQUALIFICADO"
+   - Verificar se o status mudou corretamente
+
+2. Verificar outros status:
+   - Testar mudança para "Qualificado" (deve continuar funcionando)
+   - Testar status sem conflito de substring (ex: "Cliente Novo")
 
 ---
 
-## Resultado esperado
-- Download dos áudios da IA passa a sair com **`.ogg` de verdade** (e não arquivo sem extensão / formato errado).
-- Mantém compatibilidade e reduz risco de quebra porque:
-  - front fica robusto contra filename ruim
-  - backend passa a produzir e armazenar OGG real, com fallback seguro para MP3 se necessário
+## Resumo Técnico
+
+| Item | Detalhes |
+|------|----------|
+| Tipo de bug | Lógica de matching com falso positivo |
+| Arquivo afetado | `supabase/functions/ai-chat/index.ts` |
+| Linhas afetadas | 674-677 |
+| Risco da correção | Baixo (adiciona prioridade, não remove funcionalidade) |
+| Deploy necessário | Sim (edge function ai-chat) |
