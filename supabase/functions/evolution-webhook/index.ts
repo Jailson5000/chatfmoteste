@@ -2586,6 +2586,54 @@ async function sendAIResponseToWhatsApp(
 
         sentAnyAudio = true;
 
+        // [NEW] Save audio to Storage for download capability
+        let audioStorageUrl: string | null = null;
+        try {
+          // Convert base64 to Uint8Array
+          const binaryString = atob(audioBase64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j);
+          }
+
+          // Generate file path
+          const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}.mp3`;
+
+          // Upload to chat-media bucket
+          const { data: uploadData, error: uploadError } = await supabaseClient
+            .storage
+            .from('chat-media')
+            .upload(storagePath, bytes, {
+              contentType: 'audio/mpeg',
+              cacheControl: '31536000',
+              upsert: false,
+            });
+
+          if (!uploadError && uploadData) {
+            // Generate signed URL (1 year)
+            const { data: urlData } = await supabaseClient
+              .storage
+              .from('chat-media')
+              .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+
+            audioStorageUrl = urlData?.signedUrl || null;
+            
+            logDebug('TTS_STORAGE', 'Audio saved to storage', {
+              path: storagePath,
+              hasUrl: !!audioStorageUrl,
+            });
+          } else if (uploadError) {
+            logDebug('TTS_STORAGE', 'Failed to upload audio to storage', {
+              error: uploadError.message,
+            });
+          }
+        } catch (storageError) {
+          logDebug('TTS_STORAGE', 'Failed to save audio to storage (non-blocking)', {
+            error: storageError instanceof Error ? storageError.message : String(storageError),
+          });
+          // Non-blocking - audio already sent to WhatsApp
+        }
+
         // Save each audio chunk to DB (keeps transcript aligned with the audio that was sent)
         await supabaseClient
           .from('messages')
@@ -2599,6 +2647,7 @@ async function sendAIResponseToWhatsApp(
             sender_type: 'system',
             ai_generated: true,
             media_mime_type: 'audio/mpeg',
+            media_url: audioStorageUrl, // NEW: URL from Storage for download
             ai_agent_id: context.automationId || null,
             ai_agent_name: context.automationName || null,
           });
