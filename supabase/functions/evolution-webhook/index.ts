@@ -1814,7 +1814,8 @@ function splitTextForTTS(text: string, maxChars = 3500): string[] {
 }
 
 // Helper function to generate TTS audio using ai-text-to-speech edge function (supports ElevenLabs + OpenAI fallback)
-async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: string): Promise<string | null> {
+// Returns both audioContent (base64) and mimeType for correct storage/DB handling
+async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: string): Promise<{ audioContent: string; mimeType: string } | null> {
   try {
     const trimmedText = text.trim().substring(0, 3900);
 
@@ -1880,6 +1881,7 @@ async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: strin
       success: data.success,
       hasAudioContent: !!data.audioContent,
       audioContentLength: data.audioContent?.length || 0,
+      mimeType: data.mimeType || 'not provided',
       provider: data.provider || 'unknown',
       error: data.error || null,
     });
@@ -1894,13 +1896,17 @@ async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: strin
       return null;
     }
 
+    // Use mimeType from TTS response, default to ogg/opus
+    const mimeType = data.mimeType || 'audio/ogg; codecs=opus';
+
     logDebug('TTS_GENERATE', 'Audio generated SUCCESS', {
       provider: data.provider,
       audioSize: data.audioContent.length,
+      mimeType: mimeType,
       elapsedMs: elapsed,
     });
     
-    return data.audioContent;
+    return { audioContent: data.audioContent, mimeType };
   } catch (error) {
     logDebug('TTS_GENERATE', 'EXCEPTION in generateTTSAudio', { 
       error: error instanceof Error ? error.message : error,
@@ -2708,17 +2714,20 @@ async function sendAIResponseToWhatsApp(
           textLength: chunkText.length,
         });
 
-        const audioBase64 = await generateTTSAudio(chunkText, voiceConfig!.voiceId, context.lawFirmId);
+        const ttsResult = await generateTTSAudio(chunkText, voiceConfig!.voiceId, context.lawFirmId);
 
-        if (!audioBase64) {
+        if (!ttsResult) {
           logDebug('TTS_FLOW', 'FAILED to generate TTS audio chunk, falling back to text', { index: i + 1 });
           await sendTextFallbackWithWarning(supabaseClient, context, sendUrl, instance, messageParts, sanitizeText, true);
           return true;
         }
 
+        const { audioContent: audioBase64, mimeType: ttsAudioMimeType } = ttsResult;
+
         logDebug('TTS_FLOW', 'Audio chunk generated, sending to WhatsApp', {
           index: i + 1,
           audioSize: audioBase64.length,
+          mimeType: ttsAudioMimeType,
         });
 
         const audioResult = await sendAudioToWhatsApp(
@@ -2740,6 +2749,13 @@ async function sendAIResponseToWhatsApp(
 
         sentAnyAudio = true;
 
+        // Determine file extension based on mimeType
+        const isOggFormat = ttsAudioMimeType.includes('ogg') || ttsAudioMimeType.includes('opus');
+        const fileExtension = isOggFormat ? '.ogg' : '.mp3';
+        const storageContentType = isOggFormat ? 'audio/ogg' : 'audio/mpeg';
+        // Normalize mime type for DB (remove codecs info for simpler matching)
+        const dbMimeType = isOggFormat ? 'audio/ogg' : 'audio/mpeg';
+
         // [NEW] Save audio to Storage for download capability
         let audioStorageUrl: string | null = null;
         try {
@@ -2750,15 +2766,15 @@ async function sendAIResponseToWhatsApp(
             bytes[j] = binaryString.charCodeAt(j);
           }
 
-          // Generate file path
-          const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}.ogg`;
+          // Generate file path with correct extension
+          const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}${fileExtension}`;
 
-          // Upload to chat-media bucket
+          // Upload to chat-media bucket with correct content type
           const { data: uploadData, error: uploadError } = await supabaseClient
             .storage
             .from('chat-media')
             .upload(storagePath, bytes, {
-              contentType: 'audio/ogg',
+              contentType: storageContentType,
               cacheControl: '31536000',
               upsert: false,
             });
@@ -2774,6 +2790,7 @@ async function sendAIResponseToWhatsApp(
             
             logDebug('TTS_STORAGE', 'Audio saved to storage', {
               path: storagePath,
+              contentType: storageContentType,
               hasUrl: !!audioStorageUrl,
             });
           } else if (uploadError) {
@@ -2800,7 +2817,7 @@ async function sendAIResponseToWhatsApp(
             is_from_me: true,
             sender_type: 'system',
             ai_generated: true,
-            media_mime_type: 'audio/ogg',
+            media_mime_type: dbMimeType,
             media_url: audioStorageUrl, // NEW: URL from Storage for download
             ai_agent_id: context.automationId || null,
             ai_agent_name: context.automationName || null,
@@ -2821,6 +2838,7 @@ async function sendAIResponseToWhatsApp(
           chunkIndex: i + 1,
           chunksTotal: chunks.length,
           textLength: chunkText.length,
+          mimeType: dbMimeType,
         });
 
         // Note: Delay between chunks is now handled at the start of the loop

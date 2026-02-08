@@ -138,7 +138,7 @@ async function recordTTSUsage(lawFirmId: string, textLength: number): Promise<vo
   }
 }
 
-async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{ success: boolean; audioContent?: string; error?: string }> {
+async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{ success: boolean; audioContent?: string; mimeType?: string; error?: string }> {
   console.log('[TTS-ElevenLabs] Starting audio generation...');
   
   const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
@@ -166,73 +166,75 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
   console.log(`[TTS-ElevenLabs] Voice mapping: ${voiceId} -> ${resolvedVoiceId}`);
   console.log(`[TTS-ElevenLabs] Text length: ${text.length} chars`);
 
-  try {
-    const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`;
-    console.log(`[TTS-ElevenLabs] Calling API: ${apiUrl.split('?')[0]}`);
-    
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.5,
-          use_speaker_boost: true,
-        },
-      }),
-    });
+  // Try OGG/Opus first (preferred for WhatsApp), fallback to MP3 if fails
+  const formats = [
+    { format: 'ogg_opus', mimeType: 'audio/ogg; codecs=opus' },
+    { format: 'mp3_44100_128', mimeType: 'audio/mpeg' },
+  ];
 
-    console.log(`[TTS-ElevenLabs] Response status: ${response.status} ${response.statusText}`);
-    console.log(`[TTS-ElevenLabs] Response headers:`, {
-      contentType: response.headers.get('content-type'),
-      contentLength: response.headers.get('content-length'),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[TTS-ElevenLabs] API ERROR ${response.status}:`, errorText);
+  for (const { format, mimeType } of formats) {
+    try {
+      const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=${format}`;
+      console.log(`[TTS-ElevenLabs] Trying format: ${format}`);
       
-      // Log specific error types for debugging
-      if (response.status === 401) {
-        console.error('[TTS-ElevenLabs] ERROR TYPE: Invalid API key');
-      } else if (response.status === 403) {
-        console.error('[TTS-ElevenLabs] ERROR TYPE: Forbidden - check API key permissions');
-      } else if (response.status === 429) {
-        console.error('[TTS-ElevenLabs] ERROR TYPE: Rate limit exceeded');
-      } else if (response.status === 422) {
-        console.error('[TTS-ElevenLabs] ERROR TYPE: Invalid parameters');
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.5,
+            use_speaker_boost: true,
+          },
+        }),
+      });
+
+      console.log(`[TTS-ElevenLabs] Response status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[TTS-ElevenLabs] API ERROR ${response.status} for format ${format}:`, errorText);
+        
+        // If 422 or format not supported, try next format
+        if (response.status === 422 || response.status === 400) {
+          console.log(`[TTS-ElevenLabs] Format ${format} not supported, trying next...`);
+          continue;
+        }
+        
+        // For other errors (401, 403, 429), return the error
+        return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
+      }
+
+      // Read as binary (arrayBuffer)
+      const audioBuffer = await response.arrayBuffer();
+      console.log(`[TTS-ElevenLabs] Audio buffer size: ${audioBuffer.byteLength} bytes`);
+      
+      if (audioBuffer.byteLength === 0) {
+        console.error('[TTS-ElevenLabs] ERROR: Empty audio buffer received');
+        continue;
       }
       
-      return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
+      const base64Audio = base64Encode(audioBuffer);
+      console.log(`[TTS-ElevenLabs] Base64 audio length: ${base64Audio.length} chars`);
+      console.log(`[TTS-ElevenLabs] SUCCESS: Audio generated in format ${format}`);
+      
+      return { success: true, audioContent: base64Audio, mimeType };
+    } catch (error) {
+      console.error(`[TTS-ElevenLabs] EXCEPTION for format ${format}:`, error instanceof Error ? error.message : error);
+      continue;
     }
-
-    // Read as binary (arrayBuffer)
-    const audioBuffer = await response.arrayBuffer();
-    console.log(`[TTS-ElevenLabs] Audio buffer size: ${audioBuffer.byteLength} bytes`);
-    
-    if (audioBuffer.byteLength === 0) {
-      console.error('[TTS-ElevenLabs] ERROR: Empty audio buffer received');
-      return { success: false, error: 'Empty audio buffer received from ElevenLabs' };
-    }
-    
-    const base64Audio = base64Encode(audioBuffer);
-    console.log(`[TTS-ElevenLabs] Base64 audio length: ${base64Audio.length} chars`);
-    console.log(`[TTS-ElevenLabs] SUCCESS: Audio generated`);
-    
-    return { success: true, audioContent: base64Audio };
-  } catch (error) {
-    console.error('[TTS-ElevenLabs] EXCEPTION:', error instanceof Error ? error.message : error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
+
+  return { success: false, error: 'Failed to generate audio in any format' };
 }
 
-async function generateOpenAIAudio(text: string, voice: string = 'nova'): Promise<{ success: boolean; audioContent?: string; error?: string }> {
+async function generateOpenAIAudio(text: string, voice: string = 'nova'): Promise<{ success: boolean; audioContent?: string; mimeType?: string; error?: string }> {
   console.log('[TTS-OpenAI] Starting audio generation...');
   
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
@@ -247,45 +249,64 @@ async function generateOpenAIAudio(text: string, voice: string = 'nova'): Promis
   const validVoice = OPENAI_VOICES.includes(voice) ? voice : 'nova';
   console.log(`[TTS-OpenAI] Voice: ${validVoice}, Text length: ${text.length} chars`);
 
-  try {
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'tts-1-hd',
-        input: text,
-        voice: validVoice,
-        response_format: 'mp3',
-      }),
-    });
+  // Try opus first (preferred for WhatsApp compatibility), fallback to MP3
+  const formats = [
+    { format: 'opus', mimeType: 'audio/ogg; codecs=opus' },
+    { format: 'mp3', mimeType: 'audio/mpeg' },
+  ];
 
-    console.log(`[TTS-OpenAI] Response status: ${response.status} ${response.statusText}`);
+  for (const { format, mimeType } of formats) {
+    try {
+      console.log(`[TTS-OpenAI] Trying format: ${format}`);
+      
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1-hd',
+          input: text,
+          voice: validVoice,
+          response_format: format,
+        }),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[TTS-OpenAI] API ERROR ${response.status}:`, errorText);
-      return { success: false, error: `OpenAI API error: ${response.status}` };
+      console.log(`[TTS-OpenAI] Response status: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[TTS-OpenAI] API ERROR ${response.status} for format ${format}:`, errorText);
+        
+        // If format not supported, try next
+        if (response.status === 400) {
+          console.log(`[TTS-OpenAI] Format ${format} not supported, trying next...`);
+          continue;
+        }
+        
+        return { success: false, error: `OpenAI API error: ${response.status}` };
+      }
+
+      const audioBuffer = await response.arrayBuffer();
+      console.log(`[TTS-OpenAI] Audio buffer size: ${audioBuffer.byteLength} bytes`);
+      
+      if (audioBuffer.byteLength === 0) {
+        console.error('[TTS-OpenAI] ERROR: Empty audio buffer received');
+        continue;
+      }
+      
+      const base64Audio = base64Encode(audioBuffer);
+      console.log(`[TTS-OpenAI] SUCCESS: Audio generated in format ${format}`);
+      
+      return { success: true, audioContent: base64Audio, mimeType };
+    } catch (error) {
+      console.error(`[TTS-OpenAI] EXCEPTION for format ${format}:`, error instanceof Error ? error.message : error);
+      continue;
     }
-
-    const audioBuffer = await response.arrayBuffer();
-    console.log(`[TTS-OpenAI] Audio buffer size: ${audioBuffer.byteLength} bytes`);
-    
-    if (audioBuffer.byteLength === 0) {
-      console.error('[TTS-OpenAI] ERROR: Empty audio buffer received');
-      return { success: false, error: 'Empty audio buffer received from OpenAI' };
-    }
-    
-    const base64Audio = base64Encode(audioBuffer);
-    console.log(`[TTS-OpenAI] SUCCESS: Audio generated`);
-    
-    return { success: true, audioContent: base64Audio };
-  } catch (error) {
-    console.error('[TTS-OpenAI] EXCEPTION:', error instanceof Error ? error.message : error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
+
+  return { success: false, error: 'Failed to generate audio in any format' };
 }
 
 serve(async (req) => {
@@ -365,7 +386,7 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             audioContent: result.audioContent,
-            mimeType: "audio/mpeg",
+            mimeType: result.mimeType || "audio/ogg; codecs=opus",
             provider: "openai",
             voiceSource,
           }),
@@ -386,7 +407,7 @@ serve(async (req) => {
       const result = await generateElevenLabsAudio(text, resolvedVoice);
       
       if (result.success) {
-        console.log('[TTS] ElevenLabs SUCCESS');
+        console.log('[TTS] ElevenLabs SUCCESS with mimeType:', result.mimeType);
         
         // Record TTS usage for billing (non-blocking)
         if (lawFirmId) {
@@ -399,7 +420,7 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             audioContent: result.audioContent,
-            mimeType: "audio/mpeg",
+            mimeType: result.mimeType || "audio/ogg; codecs=opus",
             provider: "elevenlabs",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -410,7 +431,7 @@ serve(async (req) => {
       const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
       if (openaiResult.success) {
-        console.log('[TTS] OpenAI fallback SUCCESS');
+        console.log('[TTS] OpenAI fallback SUCCESS with mimeType:', openaiResult.mimeType);
         
         // Record TTS usage for billing (non-blocking)
         if (lawFirmId) {
@@ -423,7 +444,7 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             audioContent: openaiResult.audioContent,
-            mimeType: "audio/mpeg",
+            mimeType: openaiResult.mimeType || "audio/ogg; codecs=opus",
             provider: "openai",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -459,7 +480,7 @@ serve(async (req) => {
         JSON.stringify({
           success: true,
           audioContent: openaiResult.audioContent,
-          mimeType: "audio/mpeg",
+          mimeType: openaiResult.mimeType || "audio/ogg; codecs=opus",
           provider: "openai",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
