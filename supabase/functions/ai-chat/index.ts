@@ -3672,12 +3672,33 @@ Esta regra apenas garante que você EXECUTE as ações que seu prompt determina.
     const autoCurrentDate = autoDateFormatter.format(autoInjectNow);
     const autoCurrentTime = autoTimeFormatter.format(autoInjectNow);
     
+    // Extract current year for explicit calculation examples
+    const currentYearNumber = autoInjectNow.toLocaleString("en-US", { 
+      timeZone: autoInjectTimezone, 
+      year: "numeric" 
+    });
+    const currentYear = parseInt(currentYearNumber, 10);
+    
     const dateContextPrefix = `📅 CONTEXTO TEMPORAL (SEMPRE CONSIDERE):
 Data de hoje: ${autoCurrentDate}
 Hora atual: ${autoCurrentTime}
 Fuso horário: ${autoInjectTimezone}
+ANO ATUAL: ${currentYear}
 
-REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos, analisar datas mencionadas pelo cliente, ou responder perguntas que envolvam tempo.
+### REGRA DE CÁLCULO DE PRAZOS (OBRIGATÓRIA) ###
+
+Para verificar se uma data/ano está DENTRO de um prazo de X anos:
+1. Calcule: ANO_ATUAL (${currentYear}) - ANO_MENCIONADO = diferença
+2. Se diferença > X → FORA DO PRAZO (não qualifica)
+3. Se diferença <= X → DENTRO DO PRAZO (qualifica)
+
+EXEMPLOS PARA PRAZO DE 10 ANOS (referência ${currentYear}):
+- ${currentYear - 12}: ${currentYear} - ${currentYear - 12} = 12 → FORA (12 > 10)
+- ${currentYear - 11}: ${currentYear} - ${currentYear - 11} = 11 → FORA (11 > 10)
+- ${currentYear - 10}: ${currentYear} - ${currentYear - 10} = 10 → DENTRO (10 = 10)
+- ${currentYear - 9}: ${currentYear} - ${currentYear - 9} = 9 → DENTRO (9 < 10)
+
+ATENÇÃO: Sempre faça o cálculo ANTES de responder sobre prazos. NÃO assuma que qualquer ano está "dentro" sem calcular.
 
 ---
 
