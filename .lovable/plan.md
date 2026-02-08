@@ -1,54 +1,63 @@
 
 
-# Correção: Erro "lawFirmData is not defined"
+# Correção: IA não está executando `change_status` para status Desqualificado
 
 ## Diagnóstico
 
-O erro ocorre porque a variável `lawFirmData` foi declarada **dentro** de um bloco condicional (linhas 3341-3460) mas está sendo usada **fora** desse bloco na linha 3578.
+A IA Maria **identificou corretamente** que o cliente (aposentado desde 2005 = mais de 10 anos) deve ser marcado como Desqualificado e executou:
+- ✅ Tag "10 anos ++"
+- ✅ Tag "Não tem direito a revisão"  
+- ✅ Transferência para departamento "Finalizado"
 
-```text
-Linha 3341: if (agentLawFirmId && systemPrompt) {
-Linha 3343:   const { data: lawFirmData } = await supabase...  ← Declarada AQUI
-Linha 3460: }                                                  ← Escopo termina AQUI
+Porém **NÃO executou**:
+- ❌ `change_status` de "Qualificado" → "Desqualificado"
 
-Linha 3578: const autoInjectTimezone = lawFirmData?.timezone   ← ERRO! Fora do escopo
+### Causa Raiz
+
+O prompt da Maria contém instruções como:
 ```
+Adicione ou troque o status @status:Desqualificado e a tag @etiqueta:Não tem direito a revisão...
+```
+
+Essas mentions (`@status:`, `@etiqueta:`, `@departamento:`) são **instruções textuais** para a IA entender o que fazer, mas a IA precisa **chamar as tools** para executá-las. 
+
+A IA executou algumas ações (tags, departamento) mas **esqueceu** de chamar `change_status`, possivelmente porque já havia no fluxo anterior colocado o status "Qualificado" e o modelo não priorizou essa mudança.
 
 ---
 
 ## Solução Proposta
 
-Buscar o timezone **independentemente** usando `agentLawFirmId` (que está disponível no escopo externo desde a linha 3217).
+Adicionar uma **instrução explícita** no sistema que lembra a IA de executar TODAS as ações mencionadas no prompt quando há mentions de status, tags ou departamentos.
 
-### Alteração Necessária
+### Alteração no arquivo `supabase/functions/ai-chat/index.ts`
 
-**Arquivo:** `supabase/functions/ai-chat/index.ts`
-**Linhas:** 3575-3607
+Adicionar no bloco `toolBehaviorRules` (ou criar um novo bloco de regras) uma instrução que enfatiza a execução completa das tools:
 
-**De:**
 ```typescript
-// AUTO-INJECT: Current date/time context for ALL agents
-const autoInjectNow = new Date();
-const autoInjectTimezone = lawFirmData?.timezone || "America/Sao_Paulo";  // ← ERRO
+const toolExecutionRules = `
+
+### REGRAS DE EXECUÇÃO DE TOOLS (OBRIGATÓRIO) ###
+
+Quando o prompt mencionar ações usando @status:, @etiqueta:, @departamento:, @responsavel:
+você DEVE chamar as tools correspondentes. Não basta mencionar - você precisa EXECUTAR:
+
+- @status:NomeDoStatus → CHAMAR tool "change_status" com status_name="NomeDoStatus"
+- @etiqueta:NomeDaTag → CHAMAR tool "add_tag" com tag_name="NomeDaTag"  
+- @departamento:NomeDoDept → CHAMAR tool "transfer_to_department" com department_name="NomeDoDept"
+- @responsavel:NomeDoResp → CHAMAR tool "transfer_to_responsible" com responsible_name="NomeDoResp"
+
+IMPORTANTE: Se o prompt indicar múltiplas ações (ex: mudar status E adicionar tag E transferir), 
+você DEVE executar TODAS elas. Não omita nenhuma.
+
+VERIFICAÇÃO: Antes de responder ao cliente, confirme que executou todas as actions mencionadas no prompt para aquela situação.
+
+`;
 ```
 
-**Para:**
-```typescript
-// AUTO-INJECT: Current date/time context for ALL agents
-const autoInjectNow = new Date();
+E modificar a construção do `fullSystemPrompt`:
 
-// Fetch timezone for the law firm (agentLawFirmId is available in outer scope)
-let autoInjectTimezone = "America/Sao_Paulo";
-if (agentLawFirmId) {
-  const { data: tzData } = await supabase
-    .from("law_firms")
-    .select("timezone")
-    .eq("id", agentLawFirmId)
-    .maybeSingle();
-  if (tzData?.timezone) {
-    autoInjectTimezone = tzData.timezone;
-  }
-}
+```typescript
+const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules + toolExecutionRules;
 ```
 
 ---
@@ -56,97 +65,82 @@ if (agentLawFirmId) {
 ## Fluxo Corrigido
 
 ```text
-┌────────────────────────────────────────────────────────────────┐
-│                    ESCOPO DE VARIÁVEIS                         │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  Linha 3217: const agentLawFirmId = automation.law_firm_id     │
-│              ↓ (disponível em todo o escopo da função)         │
-│                                                                │
-│  Linha 3341: if (agentLawFirmId && systemPrompt) {             │
-│              │  const { data: lawFirmData } = ...   ← INTERNO  │
-│              │  ... processamento de mentions ...              │
-│  Linha 3460: }                                                 │
-│                                                                │
-│  Linha 3575: // AUTO-INJECT                                    │
-│              if (agentLawFirmId) {                             │
-│                  const { data: tzData } = ...       ← BUSCA    │
-│                  autoInjectTimezone = tzData?.timezone         │
-│              }                                                 │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    PROMPT DA MARIA                           │
+├──────────────────────────────────────────────────────────────┤
+│  "...Adicione o status @status:Desqualificado                │
+│   e a tag @etiqueta:Não tem direito a revisão                │
+│   transfira para @departamento:Finalizado..."                │
+└──────────────────────────────────────────────────────────────┘
+                              ↓
+┌──────────────────────────────────────────────────────────────┐
+│              NOVA REGRA INJETADA                             │
+├──────────────────────────────────────────────────────────────┤
+│  "Quando o prompt mencionar @status:X, você DEVE             │
+│   chamar a tool change_status com status_name=X"             │
+└──────────────────────────────────────────────────────────────┘
+                              ↓
+┌──────────────────────────────────────────────────────────────┐
+│                    IA EXECUTA                                │
+├──────────────────────────────────────────────────────────────┤
+│  1. change_status("Desqualificado")        ← AGORA EXECUTA   │
+│  2. add_tag("Não tem direito a revisão")   ✅                │
+│  3. add_tag("10 anos ++")                  ✅                │
+│  4. transfer_to_department("Finalizado")   ✅                │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Consideração: Evitar Query Duplicada
-
-Poderíamos reutilizar `lawFirmData` se a movêssemos para fora do bloco condicional, mas isso requereria uma refatoração maior. A abordagem proposta:
-
-- **Adiciona uma query simples** (apenas campo `timezone`)
-- **É mais segura** (menos impacto no código existente)
-- **É rápida** (query leve com índice em `id`)
-
----
-
-## Arquivo Modificado
+## Arquivo a Modificar
 
 | Arquivo | Ação |
 |---------|------|
-| `supabase/functions/ai-chat/index.ts` | Corrigir busca de timezone na linha 3577-3580 |
+| `supabase/functions/ai-chat/index.ts` | Adicionar regras de execução de tools no system prompt |
 
 ---
 
 ## Seção Técnica
 
-### Código Final Corrigido (linhas 3575-3610)
+### Localização Exata
+
+Linha ~3555-3575 onde `toolBehaviorRules` é definido. A nova variável `toolExecutionRules` será adicionada logo após e concatenada ao `fullSystemPrompt`.
+
+### Código Completo
 
 ```typescript
-// AUTO-INJECT: Current date/time context for ALL agents
-// This ensures every AI agent knows the current date for accurate reasoning
-const autoInjectNow = new Date();
+// Adicionar após linha 3573 (fim do toolBehaviorRules)
 
-// Fetch timezone for the law firm (agentLawFirmId is available in outer scope)
-let autoInjectTimezone = "America/Sao_Paulo";
-if (agentLawFirmId) {
-  const { data: tzData } = await supabase
-    .from("law_firms")
-    .select("timezone")
-    .eq("id", agentLawFirmId)
-    .maybeSingle();
-  if (tzData?.timezone) {
-    autoInjectTimezone = tzData.timezone;
-  }
-}
+const toolExecutionRules = `
 
-const autoDateFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: autoInjectTimezone,
-  weekday: "long",
-  year: "numeric",
-  month: "long",
-  day: "numeric"
-});
-const autoTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: autoInjectTimezone,
-  hour: "2-digit",
-  minute: "2-digit"
-});
+### REGRAS DE EXECUÇÃO DE AÇÕES CRM (OBRIGATÓRIO) ###
 
-const autoCurrentDate = autoDateFormatter.format(autoInjectNow);
-const autoCurrentTime = autoTimeFormatter.format(autoInjectNow);
+Quando o seu prompt de configuração mencionar ações usando os formatos:
+- @status:NomeDoStatus
+- @etiqueta:NomeTag ou @tag:NomeTag
+- @departamento:NomeDept
+- @responsavel:NomeResp ou @responsavel:IA:NomeAgente
 
-const dateContextPrefix = `📅 CONTEXTO TEMPORAL (SEMPRE CONSIDERE):
-Data de hoje: ${autoCurrentDate}
-Hora atual: ${autoCurrentTime}
-Fuso horário: ${autoInjectTimezone}
+Você DEVE chamar as tools correspondentes para executar essas ações:
 
-REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos, analisar datas mencionadas pelo cliente, ou responder perguntas que envolvam tempo.
+| Mention no Prompt        | Tool a Chamar           | Parâmetro               |
+|--------------------------|-------------------------|-------------------------|
+| @status:Desqualificado   | change_status           | status_name             |
+| @etiqueta:10 anos ++     | add_tag                 | tag_name                |
+| @departamento:Finalizado | transfer_to_department  | department_name         |
+| @responsavel:Caio        | transfer_to_responsible | responsible_name        |
 
----
+⚠️ REGRA CRÍTICA: 
+Se uma situação no seu prompt indica múltiplas ações (ex: mudar status + adicionar tag + transferir),
+você DEVE chamar TODAS as tools correspondentes. NÃO omita nenhuma ação.
+
+Exemplo: Se o prompt diz "Adicione o status @status:Desqualificado e a tag @etiqueta:Não tem direito a revisão"
+→ Você DEVE chamar change_status E add_tag (2 tools).
 
 `;
 
-const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules;
+// Modificar a construção do fullSystemPrompt
+const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules + toolExecutionRules;
 ```
 
 ---
@@ -155,8 +149,17 @@ const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + tool
 
 | Aspecto | Risco | Justificativa |
 |---------|-------|---------------|
-| Query adicional | **BAIXÍSSIMO** | Query leve, apenas 1 campo, com índice |
-| Performance | **NENHUM** | ~2ms adicional por request |
-| Retrocompatibilidade | **NENHUM** | Fallback para America/Sao_Paulo |
-| Correção do bug | **CRÍTICO** | Necessário para o sistema funcionar |
+| Tokens adicionais | **BAIXO** | ~300 tokens extras (~0.5% do total) |
+| Performance | **NENHUM** | Não adiciona lógica, apenas instrução |
+| Retrocompatibilidade | **NENHUM** | Agentes que já funcionam continuarão |
+| Correção do bug | **ALTO** | Resolve o problema de ações omitidas |
+
+---
+
+## Resultado Esperado
+
+Após a correção, a IA Maria:
+1. Vai **sempre** executar `change_status` quando o prompt mencionar `@status:X`
+2. Não vai mais "esquecer" de executar ações quando há múltiplas no mesmo fluxo
+3. O cliente 743596 (e futuros similares) será corretamente marcado como "Desqualificado"
 
