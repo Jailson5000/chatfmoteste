@@ -573,10 +573,10 @@ export default function Conversations() {
     fetchProfile();
   }, []);
 
-  // Calculate total unread from RPC data (already includes unread_count)
-  // This eliminates N+1 queries - the RPC returns unread_count for each conversation
+  // Calculate total unread CONVERSATIONS (not messages) from RPC data
+  // Counts how many conversations have at least one unread message
   const totalUnread = useMemo(() => 
-    conversations.reduce((sum, conv) => sum + ((conv as any).unread_count || 0), 0),
+    conversations.filter(conv => ((conv as any).unread_count || 0) > 0).length,
     [conversations]
   );
 
