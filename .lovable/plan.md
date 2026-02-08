@@ -1,179 +1,113 @@
 
-
-# Correção: Remover Regras de Negócio Hardcoded do ai-chat
-
-## Problema Identificado
-
-A correção anterior adicionou esta regra específica ao `ai-chat`:
-
-```typescript
-### REGRA ESPECÍFICA: STATUS "DESQUALIFICADO" ###
-
-🚨 CENÁRIO CRÍTICO DE DESQUALIFICAÇÃO:
-Quando o cliente NÃO tem direito à revisão (ex: aposentadoria há mais de 10 anos...
-```
-
-**Este é um problema porque:**
-
-| Agente | Segmento | Tem regra de 10 anos? |
-|--------|----------|----------------------|
-| Maria/Laura | Advogados - Revisão de aposentadoria | ✅ Sim, no prompt |
-| Vendas 24hs | E-commerce de peças | ❌ Não |
-| Eloisa | Agendamentos | ❌ Não |
-| Ana | Vendas B2B | ❌ Não |
-| Davi | Triagem inicial | ❌ Não |
-
-A regra "hardcoded" de 10 anos pode **confundir agentes de outros segmentos** que não têm nada a ver com aposentadoria.
+## Objetivo
+Restaurar o envio de áudio pela IA no WhatsApp (sem cair no aviso “⚠️ Não consegui enviar por áudio...”), voltando a priorizar o formato/rota que já era aceito (OGG/voz), mas mantendo a melhoria de “download do áudio” (que hoje está sendo salvo no storage como MP3).
 
 ---
 
-## Solução Correta
+## Diagnóstico (o que está acontecendo)
+Pelo código atual, quando “modo áudio” está ativo e `audioRequested === true`, o sistema entra em **audio-only**:
 
-**Remover a regra de negócio específica** e substituir por uma **instrução genérica** que força a IA a seguir exatamente o que está no prompt do agente.
+- Gera TTS via `generateTTSAudio(...)` (hoje retorna **base64 de MP3**, `mimeType: audio/mpeg`).
+- Envia para o WhatsApp com `sendAudioToWhatsApp(...)`.
+- Se falhar (sem `messageId`), dispara fallback de texto + aviso:
+  - `"⚠️ Não consegui enviar por áudio no momento, mas aí está a resposta em texto."`
 
-### Antes (Problemático)
-```typescript
-### REGRA ESPECÍFICA: STATUS "DESQUALIFICADO" ###
+O ponto sensível é exatamente o `sendAudioToWhatsApp`:
+- Atualmente ele usa **somente** `POST /message/sendMedia/...` com:
+  - `mediatype: "audio"`
+  - `mimetype: "audio/mpeg"` (mudança recente)
+  - **sem** `fileName`
+- Em implementações/versões comuns da Evolution API, envio de “voz/PTT” costuma ser mais estável via:
+  - `POST /message/sendWhatsAppAudio/...` (rota especializada) e/ou
+  - `sendMedia` com `mimetype: audio/ogg;codecs=opus` + `fileName: audio.ogg`
 
-CENÁRIO CRÍTICO: Quando o cliente tem mais de 10 anos de aposentadoria...
-```
-
-### Depois (Correto)
-```typescript
-### REGRA DE EXECUÇÃO DE STATUS ###
-
-Quando o seu prompt de configuração mencionar uma mudança de status usando @status:X,
-você DEVE chamar a tool "change_status" com o status exato mencionado.
-
-REGRA CRÍTICA DE CONSISTÊNCIA:
-- Analise a situação ANTES de decidir qual status usar
-- Chame change_status apenas UMA vez com o status CORRETO
-- Não mude para um status intermediário e depois tente corrigir
-- Siga EXATAMENTE as condições descritas no seu prompt
-
-Exemplo: Se o prompt diz "quando condição X, use @status:Desqualificado" 
-→ E a condição X foi atendida
-→ Você DEVE chamar change_status("Desqualificado")
-→ NÃO chame change_status("Qualificado") neste cenário
-```
+O screenshot indica exatamente isso: o modo áudio está ligado, mas o WhatsApp não aceitou o envio e o sistema caiu no fallback.
 
 ---
 
-## Por que isso funciona
+## Correção proposta (robusta e alinhada ao que você pediu: voltar a OGG)
+### Ideia central
+Transformar `sendAudioToWhatsApp` em um **envio com fallback em camadas**, priorizando o caminho “voz/ogg” (o que você disse que sempre foi aceito), mas mantendo compatibilidade caso alguma instância aceite MP3:
 
-1. **Cada agente tem seu próprio prompt** com regras de negócio específicas
-2. **O código do ai-chat não deve saber** quais são essas regras
-3. **A instrução genérica** apenas reforça: "siga o que está no seu prompt"
-4. **A lógica de 10 anos** continua funcionando para Maria/Laura porque está no prompt delas
-5. **Vendas 24hs e Ana** não são afetadas porque seus prompts não mencionam aposentadoria
+**Ordem de tentativa (proposta):**
+1) Tentar `sendWhatsAppAudio` (rota mais “voz/PTT”)
+2) Se falhar: `sendMedia` com **OGG** (mimetype `audio/ogg;codecs=opus`, `fileName: audio.ogg`)
+3) Se falhar: `sendMedia` com **MP3** (mimetype `audio/mpeg`, `fileName: audio.mp3`)
 
----
+Além disso:
+- Sempre “limpar” o base64 antes de enviar: `trim()` + remover whitespace/newlines
+- Logar status e trecho do body de erro em cada tentativa (para sabermos exatamente o motivo quando falha)
 
-## Fluxo Correto
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│                    AGENTE MARIA (Advogados)                    │
-├────────────────────────────────────────────────────────────────┤
-│  Prompt específico:                                            │
-│  "Se aposentadoria > 10 anos → @status:Desqualificado"         │
-│                       ↓                                        │
-│  Regra genérica do ai-chat:                                    │
-│  "Quando seu prompt mencionar @status:X, execute change_status"│
-│                       ↓                                        │
-│  IA executa: change_status("Desqualificado") ✅                │
-└────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────┐
-│                    AGENTE VENDAS 24HS (E-commerce)             │
-├────────────────────────────────────────────────────────────────┤
-│  Prompt específico:                                            │
-│  (Nada sobre aposentadoria ou 10 anos)                         │
-│                       ↓                                        │
-│  Regra genérica do ai-chat:                                    │
-│  "Quando seu prompt mencionar @status:X, execute change_status"│
-│                       ↓                                        │
-│  IA não é confundida com regras irrelevantes ✅                │
-└────────────────────────────────────────────────────────────────┘
-```
+### Por que isso resolve
+- Você volta a priorizar OGG (e rota de voz) para o WhatsApp, que já era o comportamento aceito.
+- Não depende de “mimetype perfeito” em um único endpoint.
+- Se algum provedor/instância aceitar MP3 por `sendMedia`, ele ainda funcionará.
+- O sistema deixa de cair no fallback de texto na maioria dos casos reais.
 
 ---
 
-## Arquivo a Modificar
+## Sobre “voltar a enviar em OGG” vs “salvar para download”
+Hoje o download está sendo viabilizado salvando o áudio gerado no storage como:
+- path: `${lawFirmId}/ai-audio/${whatsappMessageId}.mp3`
+- `contentType: audio/mpeg`
 
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/ai-chat/index.ts` | Substituir regra específica por regra genérica |
+Isso pode continuar exatamente assim (não quebra o download) porque:
+- O problema atual é **envio ao WhatsApp**, não o arquivo salvo.
+- Converter MP3→OGG exigiria transcodificação (não é trivial/leve no runtime atual).
 
----
-
-## Seção Técnica
-
-### Código a Substituir (linhas ~3602-3619)
-
-**Remover:**
-```typescript
-### REGRA ESPECÍFICA: STATUS "DESQUALIFICADO" ###
-
-🚨 CENÁRIO CRÍTICO DE DESQUALIFICAÇÃO:
-Quando o cliente NÃO tem direito à revisão (ex: aposentadoria há mais de 10 anos, prazo decadencial expirado):
-
-1. Você DEVE chamar a tool "change_status" com status_name="Desqualificado" (ou nome equivalente)
-2. NÃO chame change_status com "Qualificado" neste cenário - isso é um ERRO
-3. FAÇA APENAS UMA chamada de change_status com o status CORRETO desde o início
-4. Se o prompt menciona "@status:Desqualificado" para uma situação específica, use EXATAMENTE esse status
-
-EXEMPLO DE RACIOCÍNIO CORRETO:
-- Cliente diz: "me aposentei em 2015" (mais de 10 anos)
-- Ação: chamar change_status com status_name="Desqualificado"
-- ERRADO: Marcar como "Qualificado" e depois tentar corrigir
-
-LEMBRE-SE: O status do CRM deve refletir a CONCLUSÃO da análise, não um estado intermediário.
-```
-
-**Adicionar:**
-```typescript
-### REGRA DE EXECUÇÃO DE STATUS (OBRIGATÓRIO) ###
-
-Quando uma situação descrita no seu prompt de configuração indicar um status específico usando @status:X:
-
-1. ANALISE a situação ANTES de decidir qual status usar
-2. IDENTIFIQUE qual condição do seu prompt foi atendida
-3. EXECUTE change_status com o status EXATO mencionado naquela condição
-4. NÃO use status intermediários - vá direto para o status correto
-
-REGRA CRÍTICA DE CONSISTÊNCIA:
-- Se o prompt diz "quando situação A → @status:X" e a situação A ocorreu
-- Você DEVE chamar change_status(status_name="X")
-- NÃO chame change_status com outro status e depois tente corrigir
-
-EXEMPLO GENÉRICO:
-- Seu prompt diz: "quando condição Y ocorrer, use @status:Z"
-- Cliente satisfez a condição Y
-- ✅ CORRETO: change_status(status_name="Z")
-- ❌ ERRADO: change_status(status_name="W") e depois change_status(status_name="Z")
-
-IMPORTANTE: As regras de negócio específicas (quando usar qual status) estão no SEU PROMPT.
-Esta regra apenas garante que você EXECUTE as ações que seu prompt determina.
-```
+Se você quiser que o download também seja OGG no futuro, a abordagem correta (mais segura) seria:
+- Gerar TTS já em Opus/OGG (se o provedor suportar) OU
+- Após enviar pro WhatsApp, buscar o áudio “real” do WhatsApp e salvar esse (mas isso é uma segunda etapa, não necessária para destravar o envio agora).
 
 ---
 
-## Análise de Risco
+## Mudanças de código (arquivos)
+### 1) `supabase/functions/evolution-webhook/index.ts`
+Modificar **apenas** a função `sendAudioToWhatsApp(...)`:
 
-| Aspecto | Risco | Justificativa |
-|---------|-------|---------------|
-| Retrocompatibilidade | NENHUM | Agentes de advocacia continuam funcionando via seus prompts |
-| Outros segmentos | CORRIGIDO | Não serão mais confundidos com regras de aposentadoria |
-| Clareza | MELHOR | Regra genérica é mais fácil de entender |
-| Manutenção | MELHOR | Regras de negócio ficam apenas no prompt do agente |
+**Ajustes planejados:**
+- Implementar limpeza de base64
+- Implementar tentativa 1: `/message/sendWhatsAppAudio/${instanceName}`
+  - payload: `{ number: remoteJid, audio: cleanedBase64, delay: 1200 }`
+- Se falhar:
+  - tentativa 2: `/message/sendMedia/${instanceName}` com OGG
+    - `{ number, mediatype:"audio", mimetype:"audio/ogg;codecs=opus", fileName:"audio.ogg", media: cleanedBase64, delay:1200 }`
+- Se falhar:
+  - tentativa 3: `sendMedia` com MP3
+    - `{ ..., mimetype:"audio/mpeg", fileName:"audio.mp3" }`
+- Em todas as falhas:
+  - registrar `status`, `endpoint`, e `errorText.slice(0, 500)` no `logDebug('SEND_AUDIO', ...)`
+
+**Importante:** não mexeremos no fluxo de salvar MP3 no storage agora (isso não é o causador do bug e preserva o download).
 
 ---
 
-## Resultado Esperado
+## Como vamos validar (checklist de teste)
+1) Em uma conversa com “Áudio ativo”:
+   - Enviar uma mensagem do cliente que dispare `audioRequested` (ex: “me manda em áudio”).
+   - Verificar que:
+     - Não aparece o aviso de fallback
+     - O WhatsApp recebe uma mensagem de áudio
+2) Verificar no painel:
+   - A mensagem salva no histórico como `message_type='audio'`
+   - O item de mídia pode ser baixado (link do `media_url`)
+3) Teste de regressão:
+   - Conversa sem áudio ativo continua enviando texto normalmente
+   - Caso o envio de áudio falhe mesmo nas 3 tentativas, o fallback continua funcionando (melhor do que travar)
 
-1. **Maria/Laura** continuam funcionando normalmente (regra de 10 anos está no prompt delas)
-2. **Vendas 24hs, Ana, Eloisa** não são mais confundidas com regras irrelevantes
-3. **Qualquer novo agente** de qualquer segmento funcionará corretamente
-4. **Código do ai-chat** fica agnóstico a regras de negócio específicas
+---
 
+## Riscos e mitigação
+- **Risco:** algumas instâncias podem falhar no `sendWhatsAppAudio` mas aceitar `sendMedia`.
+  - **Mitigação:** fallback em camadas (2 e 3).
+- **Risco:** diferença entre “formato enviado ao WhatsApp” e “arquivo baixado” (WhatsApp pode ficar como voz/ogg, download como mp3).
+  - **Mitigação:** manter assim por agora para destravar envio; se você exigir “download em ogg”, fazemos uma segunda etapa (geração/armazenamento em ogg).
+- **Risco de deploy intermitente (erro de import deno.land):**
+  - **Mitigação:** se ocorrer, repetir deploy; é erro de rede do bundler. (Opcional futuro: migrar imports para outra fonte mais estável, mas isso foge do bug do áudio.)
+
+---
+
+## Resultado esperado
+- IA volta a enviar áudio no WhatsApp de forma confiável (priorizando OGG/voz como antes).
+- Fallback “não consegui enviar por áudio” deixa de ocorrer nesses cenários.
+- Download do áudio continua disponível (via arquivo salvo no storage).
