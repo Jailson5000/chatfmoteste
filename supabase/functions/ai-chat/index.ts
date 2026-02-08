@@ -3572,6 +3572,35 @@ Exemplo de resposta ERRADA (nunca faça isso):
 "Vou transferir sua consulta para o departamento adequado."
 `;
 
+    // CRM Tool Execution Rules - ensures AI executes ALL mentioned actions
+    const toolExecutionRules = `
+
+### REGRAS DE EXECUÇÃO DE AÇÕES CRM (OBRIGATÓRIO) ###
+
+Quando o seu prompt de configuração mencionar ações usando os formatos:
+- @status:NomeDoStatus
+- @etiqueta:NomeTag ou @tag:NomeTag
+- @departamento:NomeDept
+- @responsavel:NomeResp ou @responsavel:IA:NomeAgente
+
+Você DEVE chamar as tools correspondentes para executar essas ações:
+
+| Mention no Prompt        | Tool a Chamar           | Parâmetro               |
+|--------------------------|-------------------------|-------------------------|
+| @status:Desqualificado   | change_status           | status_name             |
+| @etiqueta:10 anos ++     | add_tag                 | tag_name                |
+| @departamento:Finalizado | transfer_to_department  | department_name         |
+| @responsavel:Caio        | transfer_to_responsible | responsible_name        |
+
+⚠️ REGRA CRÍTICA: 
+Se uma situação no seu prompt indica múltiplas ações (ex: mudar status + adicionar tag + transferir),
+você DEVE chamar TODAS as tools correspondentes. NÃO omita nenhuma ação.
+
+Exemplo: Se o prompt diz "Adicione o status @status:Desqualificado e a tag @etiqueta:Não tem direito a revisão"
+→ Você DEVE chamar change_status E add_tag (2 tools).
+
+`;
+
     // AUTO-INJECT: Current date/time context for ALL agents
     // This ensures every AI agent knows the current date for accurate reasoning
     const autoInjectNow = new Date();
@@ -3616,7 +3645,7 @@ REGRA CRÍTICA: Sempre considere a data atual ao fazer cálculos de prazos, anal
 
 `;
 
-    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules;
+    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules + toolExecutionRules;
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: fullSystemPrompt }
     ];
