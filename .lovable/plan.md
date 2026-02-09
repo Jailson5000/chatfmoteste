@@ -1,54 +1,54 @@
 
-# Correção: Departamento "Finalizado" Não Aparece na Lista de Permissões
+# Correção: Erro ao Apagar Mensagens
 
-## Problema Identificado
+## Problema
 
-Ao editar as permissões de um atendente, o departamento "Finalizado" não aparece na lista de departamentos disponíveis.
+O erro exato é:
+```
+Conversation not found: Could not embed because more than one relationship was found for 'conversations' and 'whatsapp_instances'
+```
 
 ## Causa Raiz
 
-**Arquivo:** `src/pages/Settings.tsx` - Linhas 703-711
+**Arquivo:** `supabase/functions/evolution-api/index.ts` - Linha 3525
 
-O código filtra departamentos para o dialog de edição e exclui qualquer departamento cujo nome contenha "arquivado" **ou "finalizado"**:
+A tabela `conversations` tem **duas** chaves estrangeiras para `whatsapp_instances`:
+1. `whatsapp_instance_id` (instância atual)
+2. `last_whatsapp_instance_id` (instância anterior)
 
+O código de apagar mensagem usa uma referência ambígua:
 ```javascript
-const activeDepartments = departments?.filter(d => {
-  if (!d.is_active) return false;
-  const nameLower = d.name.toLowerCase();
-  if (nameLower.includes('arquivado') || nameLower.includes('finalizado')) {
-    return false;  // <-- Remove "Finalizado" da lista!
-  }
-  return true;
-}) || [];
+.select("*, whatsapp_instances!inner(*)")
 ```
 
-Esse filtro foi adicionado porque "Arquivados" foi convertido em uma permissão especial (checkbox separado). Porém, "Finalizado" é um departamento normal de workflow e não deveria ser excluído.
+O PostgREST não sabe qual das duas FKs usar e retorna erro.
 
 ## Solução
 
-Remover `'finalizado'` do filtro, mantendo apenas `'arquivado'` (que tem o checkbox especial dedicado):
+Especificar a FK correta, exatamente como já é feito na ação `send_reaction` (linha 3616):
+
+| Linha | Código Atual (Bug) | Codigo Correto |
+|-------|-------------------|----------------|
+| 3525 | `whatsapp_instances!inner(*)` | `whatsapp_instances!conversations_whatsapp_instance_id_fkey(*)` |
+
+### Arquivo a Alterar
+
+`supabase/functions/evolution-api/index.ts` - Linha 3525
 
 ```javascript
-const activeDepartments = departments?.filter(d => {
-  if (!d.is_active) return false;
-  const nameLower = d.name.toLowerCase();
-  if (nameLower === 'arquivados' || nameLower === 'arquivado') {
-    return false;
-  }
-  return true;
-}) || [];
+// DE:
+.select("*, whatsapp_instances!inner(*)")
+
+// PARA:
+.select("*, whatsapp_instances!conversations_whatsapp_instance_id_fkey(*)")
 ```
 
-Mudança adicional: usar comparação **exata** (`===`) ao invés de `includes()` para evitar falsos positivos com departamentos que contenham "arquivado" como parte do nome (ex: "Pré-Arquivado" seria filtrado incorretamente com `includes`).
+## Sobre Edição de Mensagens
 
-## Arquivo a Alterar
-
-| Arquivo | Linhas | Mudanca |
-|---------|--------|---------|
-| `src/pages/Settings.tsx` | 703-711 | Remover "finalizado" do filtro e usar match exato para "arquivados" |
+A Evolution API suporta edição de mensagens do WhatsApp apenas em versões mais recentes, e com limitações (apenas mensagens de texto, dentro de um prazo). Por ora, a prioridade é corrigir o apagar que já existe. Podemos adicionar edição como uma melhoria futura se desejado.
 
 ## Impacto
 
-- **Risco:** Baixo - apenas remove uma exclusão incorreta
-- **Retrocompatibilidade:** Total - departamentos que antes eram ocultados passam a aparecer
-- O checkbox especial "Arquivados" continua funcionando normalmente
+- Risco: Baixo - apenas corrige a referência da FK (mesmo padrão já usado em `send_reaction`)
+- Deploy: Edge Function `evolution-api`
+- Retrocompatibilidade: Total
