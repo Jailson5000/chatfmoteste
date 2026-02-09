@@ -3522,7 +3522,7 @@ serve(async (req) => {
         const { data: deleteConversation, error: deleteConvError } =
           await supabaseClient
             .from("conversations")
-            .select("*, whatsapp_instances!inner(*)")
+            .select("*, whatsapp_instances!conversations_whatsapp_instance_id_fkey(*)")
             .eq("id", body.conversationId)
             .single();
 
