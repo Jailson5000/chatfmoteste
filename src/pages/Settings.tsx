@@ -702,9 +702,9 @@ export default function Settings() {
                 const memberBeingEdited = teamMembers.find(m => m.id === editingMember);
                 const activeDepartments = departments?.filter(d => {
                   if (!d.is_active) return false;
-                  // Exclude "Arquivado/Finalizado" department - now controlled by special permission checkbox
+                  // Exclude only "Arquivados" department - controlled by special permission checkbox
                   const nameLower = d.name.toLowerCase();
-                  if (nameLower.includes('arquivado') || nameLower.includes('finalizado')) {
+                  if (nameLower === 'arquivados' || nameLower === 'arquivado') {
                     return false;
                   }
                   return true;
