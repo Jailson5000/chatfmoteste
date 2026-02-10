@@ -1,79 +1,70 @@
 
 
-# Correcoes: Contato na Instancia Errada + Notificacao Duplicada
+# Sincronizar Planos: Corrigir features text para refletir os limites atualizados
 
-## Problema 1: Contato criado na instancia errada
+## Diagnostico
 
-### Diagnostico
-O contato "Contato 2450" foi criado com a instancia `FMOANTIGO63 (***6064)` em vez da `9089` que o usuario selecionou. Investigando o codigo, o `NewContactDialog.tsx` passa corretamente o `connectionId` para o `onCreate`, e o `Contacts.tsx` repassa como `whatsapp_instance_id` para o `createClient.mutateAsync`.
+Voce atualizou os limites numericos dos planos no painel admin, mas o texto das features (que aparece na landing page e em todo o sistema) ficou desatualizado. Abaixo as inconsistencias encontradas:
 
-O problema esta no `useEffect` de auto-selecao (linha 44-48 do `NewContactDialog.tsx`): quando o dialog e fechado via `handleClose`, o `selectedConnection` e resetado para `""`. Ao reabrir, o `useEffect` seleciona automaticamente `connectedInstances[0]` - que pode nao ser a instancia que o usuario quer. 
+| Plano | Campo | Texto atual | Limite real |
+|-------|-------|-------------|-------------|
+| BASIC | Audio | "15 minutos de audio" | 20 minutos |
+| BASIC | Agentes | Nao mencionado | 2 agentes |
+| STARTER | Audio | "25 minutos de audio" | 30 minutos |
+| STARTER | Agentes | "2 agentes de IA" | 3 agentes |
+| PROFESSIONAL | Agentes | "4 agentes de IA" | 5 agentes |
 
-Porem, o usuario troca a selecao manualmente antes de clicar "Iniciar conversa". Se a instancia errada foi salva, o problema pode estar em que `connectedInstances` muda de ordem entre renders (a query `useWhatsAppInstances` retorna instancias em ordem variavel), e o auto-select pode estar sobrescrevendo a selecao manual do usuario quando `connectedInstances` muda de referencia.
+Os planos **PRIME** e **ENTERPRISE** estao corretos (texto = limites).
 
-**Causa raiz**: O `useEffect` de auto-select tem `connectedInstances` como dependencia. Se a lista re-renderizar (por invalidacao de cache, por exemplo), a referencia do array muda, o `useEffect` executa novamente, e como `selectedConnection` pode estar vazio momentaneamente (entre re-renders), ele sobrescreve a selecao do usuario com `connectedInstances[0]`.
+## O que esta OK (nao precisa mudar)
 
-### Solucao
-- Mudar o auto-select para rodar apenas quando o dialog **abre** (`open` muda de false para true), nao a cada mudanca de `connectedInstances`
-- Usar `open` como dependencia principal do efeito
-- Se o usuario ja selecionou uma conexao, nao sobrescrever
+- **Precos no Stripe**: Todos os 5 planos com price IDs corretos (mensal + anual)
+- **Landing page**: Ja e 100% dinamica, busca planos do banco de dados
+- **Pagina de registro**: Tambem dinamica, sem valores hardcoded
+- **Edge Function de checkout**: Price IDs ja mapeados corretamente para todos os planos
+- **billing-config.ts**: Precos de adicionais inalterados
+- **MyPlanSettings**: Le diretamente do banco, sem valores fixos
+- **useCompanyPlan**: Dinamico, sem problemas
 
-### Arquivo: `src/components/contacts/NewContactDialog.tsx`
+## Solucao
 
-```text
-// Trocar o useEffect atual (linhas 44-48) por:
-useEffect(() => {
-  if (open && connectedInstances.length > 0 && !selectedConnection) {
-    setSelectedConnection(connectedInstances[0].id);
-  }
-}, [open]); // Rodar apenas quando dialog abre
-```
+Atualizar apenas o campo `features` (array de texto) dos 3 planos com inconsistencias no banco de dados. Como a landing page, registro e painel do cliente todos leem do banco, a correcao se propaga automaticamente.
 
----
+### Updates no banco de dados
 
-## Problema 2: Notificacao sonora dispara quando o atendente envia
+**BASIC** - Atualizar features para:
+- "2 usuarios"
+- "200 conversas com IA"
+- "20 minutos de audio" (era 15)
+- "1 WhatsApp conectado"
+- "2 agentes de IA" (nao existia)
+- "Automacao essencial"
+- "Mensagens rapidas"
+- "Respostas automaticas"
 
-### Diagnostico
-Existem **duas** fontes de notificacao sonora no sistema:
+**STARTER** - Atualizar features para:
+- "3 usuarios"
+- "300 conversas com IA"
+- "30 minutos de audio" (era 25)
+- "2 WhatsApps conectados"
+- "3 agentes de IA" (era 2)
+- "Tudo do plano Basic"
+- "Transcricao de audio e imagens"
+- "Mensagens agendadas"
 
-1. **`useMessageNotifications.tsx`** - O hook inteligente que acabamos de corrigir. Filtra corretamente por `sender_type === 'client'`, handler e assigned_to. **Este esta correto.**
-
-2. **`Conversations.tsx` linha 256** - `onNewMessage: () => playNotification()` passado ao `useMessagesWithPagination`. Este callback dispara para **todas** mensagens novas exceto `is_from_me && sender_type === 'attendant'`. Isso significa que mensagens de IA, bot e ate mensagens enviadas por outros atendentes ainda disparam o som aqui.
-
-### Solucao
-Remover o `playNotification()` do `onNewMessage` do `useMessagesWithPagination` em `Conversations.tsx`. A notificacao sonora ja e tratada pelo `useMessageNotifications` de forma inteligente. Manter o `onNewMessage` callback apenas se houver outra logica necessaria (scroll, por exemplo), caso contrario remover o callback.
-
-### Arquivo: `src/pages/Conversations.tsx`
-
-```text
-// Linha 254-257: remover o onNewMessage que toca som
-const {
-  messages,
-  setMessages,
-  isLoading: messagesLoading,
-  isLoadingMore: messagesLoadingMore,
-  hasMoreMessages,
-  handleScrollToTop: handleMessagesScrollToTop,
-} = useMessagesWithPagination({
-  conversationId: selectedConversationId,
-  initialBatchSize: 35,
-  loadMoreBatchSize: 30,
-  // Removido: onNewMessage: () => playNotification()
-  // A notificacao inteligente ja e gerenciada pelo useMessageNotifications
-});
-```
-
----
-
-## Resumo das Mudancas
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/components/contacts/NewContactDialog.tsx` | Corrigir auto-select para rodar apenas na abertura do dialog, evitando sobrescrever a selecao do usuario |
-| `src/pages/Conversations.tsx` | Remover `onNewMessage: () => playNotification()` duplicado que ignora as regras de notificacao inteligente |
+**PROFESSIONAL** - Atualizar features para:
+- "4 usuarios"
+- "400 conversas com IA"
+- "40 minutos de audio"
+- "4 WhatsApps conectados"
+- "5 agentes de IA" (era 4)
+- "Tudo do plano Starter"
+- "IA avancada para conversacao"
+- "Maior capacidade operacional"
 
 ## Impacto
 
-- **Risco**: Baixo - mudancas pontuais e isoladas
-- **Contato**: A instancia selecionada pelo usuario sera respeitada corretamente
-- **Notificacao**: O som tocara apenas quando um cliente envia mensagem, seguindo as regras de atribuicao (IA = nenhum, atendente especifico = so ele, fila = todos)
+- **Risco**: Zero - apenas atualizacao de texto descritivo
+- **Arquivos modificados**: Nenhum - apenas dados no banco
+- **Resultado**: Landing page, registro, painel do cliente e admin todos mostrarao os valores corretos automaticamente
+
