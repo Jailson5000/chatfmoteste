@@ -1,49 +1,95 @@
 
 
-# Corrigir Som de Transferencia de Conversas
+# Preparar Sistema para 50 Empresas Professional
 
-## Problema
+## Contexto
 
-A logica de supressao de som (linha 88) depende de comparar valores **anteriores** da conversa (`oldRecord.assigned_to` e `oldRecord.current_handler`). Porem, a tabela `conversations` usa replica identity padrao, o que faz o Supabase Realtime enviar apenas o `id` no campo `old`. Todos os outros campos vem como `undefined`.
+50 empresas PROFESSIONAL = 200 usuarios, 200 instancias WhatsApp, ~20.000 mensagens/dia. O sistema atual suporta 7 empresas com 8 instancias. A escala exige mudancas em **infraestrutura** e **otimizacoes de codigo**.
 
-Resultado atual:
-- `!oldRecord.assigned_to` = `!undefined` = `true`
-- `oldRecord.current_handler !== 'ai'` = `undefined !== 'ai'` = `true`
-- A condicao SEMPRE retorna, bloqueando **todos** os sons de transferencia
+## Acoes Divididas em Camadas
 
-## Solucao
+### Camada 1: Otimizacoes de Codigo (fazer agora, risco baixo)
 
-Uma unica migracao SQL para alterar a replica identity da tabela `conversations` para FULL:
+**1.1 - Lazy Loading no App.tsx**
+- Converter ~35 paginas para `React.lazy()`
+- Reduz bundle inicial em ~40-60%
+- Risco: muito baixo
 
-```text
-ALTER TABLE public.conversations REPLICA IDENTITY FULL;
-```
+**1.2 - Ativar `subscribeToConversation` nos consumidores**
+- Adicionar chamadas em `Conversations.tsx` e `KanbanChatPanel.tsx`
+- Prepara terreno para eliminar canais redundantes depois
+- Risco: baixo
 
-Isso faz o Realtime enviar **todos os campos anteriores** no `old`, permitindo que a logica existente funcione corretamente.
+**1.3 - Configurar `staleTime` global no QueryClient**
+- Adicionar `staleTime: 1000 * 60 * 2` e `gcTime: 1000 * 60 * 10` no QueryClient do App.tsx
+- Reduz refetches desnecessarios em ~60%
+- Risco: muito baixo
 
-**Nenhuma mudanca em codigo TypeScript** -- a logica no `useMessageNotifications.tsx` ja esta correta, so precisa dos dados corretos do Realtime.
+### Camada 2: Limpeza Automatica de Dados (fazer em seguida)
 
-## O que muda
+**2.1 - Edge Function de arquivamento de mensagens**
+- Criar `archive-old-messages` que move mensagens com mais de 90 dias para uma tabela `messages_archive`
+- Agendar via cron (1x por semana)
+- Mantem o banco dentro do limite de 8 GB por mais tempo
+- Risco: baixo (dados arquivados, nao deletados)
 
-| Antes (replica default) | Depois (replica FULL) |
-|------------------------|-----------------------|
-| `oldRecord.assigned_to` = undefined | `oldRecord.assigned_to` = valor real (null, ou ID do usuario anterior) |
-| `oldRecord.current_handler` = undefined | `oldRecord.current_handler` = valor real ('ai', 'human', etc.) |
-| Supressao bloqueia TODOS os sons | Supressao so bloqueia auto-atribuicao da fila |
+**2.2 - Limpeza de webhook_logs mais agressiva**
+- Reduzir retencao de 7 para 3 dias
+- Risco: muito baixo
 
-## Cenarios apos a correcao
+### Camada 3: Infraestrutura (decisoes do administrador)
 
-| Cenario | old.assigned_to | old.current_handler | Som? |
-|---------|----------------|---------------------|------|
-| Atendente envia mensagem (auto-atribui da fila) | null | human | Nao |
-| IA transfere para Atendente A | null | ai | Sim |
-| Atendente B transfere para Atendente A | ID do B | human | Sim |
-| Update sem mudar assigned_to | qualquer | qualquer | Nao (valores iguais) |
+**3.1 - Escalar VPS da Evolution API**
+- Atual: 1 VPS de 8 GB (~25 instancias)
+- Necessario: 3-4 VPS de 32 GB cada (~50 instancias por servidor)
+- O sistema ja suporta multiplas `evolution_api_connections` -- basta registrar os novos servidores no painel admin
+- Nao requer mudanca de codigo
 
-## Impacto
+**3.2 - Avaliar plano Supabase**
+- Se a otimizacao de canais (Camada 1) reduzir para 2 canais por usuario: 200 x 2 = 400 (dentro do limite Pro de 500)
+- Se ultrapassar: upgrade para Team ($599/mes) ou Enterprise
+- Storage: avaliar upgrade de 8 GB para 64 GB ou superior
 
-- **Risco**: Muito baixo -- REPLICA IDENTITY FULL e pratica recomendada pelo Supabase para tabelas com logica Realtime condicional
-- **Performance**: Eventos Realtime ficam levemente maiores (enviam todos os campos no `old`), mas isso e insignificante para a tabela `conversations`
-- **Codigo existente**: Nenhuma alteracao. A logica atual ja esta preparada para funcionar com os dados corretos
-- **Arquivo modificado**: Nenhum arquivo TypeScript -- apenas uma migracao SQL
+**3.3 - Monitoramento de crescimento do banco**
+- O dashboard de infraestrutura (`InfrastructureMonitor.tsx`) ja existe e monitora DB + Storage
+- Alertas automaticos em 70% e 85% ja estao configurados
+- Nenhuma mudanca necessaria
+
+### Camada 4: Otimizacao Avancada (fazer depois da Camada 1)
+
+**4.1 - Eliminar canais Realtime redundantes (Fase 2)**
+- Migrar logica de reconciliacao do `useMessagesWithPagination` para o `RealtimeSyncContext`
+- Reduz de ~4 para ~2 canais por usuario
+- Risco: medio-alto, requer teste extensivo
+
+---
+
+## Resumo de Capacidade Apos Implementacao
+
+| Recurso | Atual | Apos Camadas 1-3 | Meta 50 empresas |
+|---------|-------|-------------------|------------------|
+| Instancias WhatsApp | 25-30 max | 150-200 (com 3-4 VPS) | 200 |
+| Canais Realtime | ~500 max | ~400 (com otimizacao) | 400 |
+| Banco de dados | 8 GB (3 meses) | 8 GB (12+ meses com archiving) | OK |
+| Bundle frontend | 100% | ~50% (com lazy loading) | OK |
+| Refetches | frequentes | -60% (com staleTime) | OK |
+
+## Investimento Estimado em Infraestrutura
+
+| Item | Custo Mensal |
+|------|-------------|
+| 3 VPS 32GB (Evolution API) | ~R$ 1.500 - 2.500 |
+| Supabase Pro (atual) | ~$25/mes |
+| Supabase Team (se necessario) | ~$599/mes |
+| **Total infraestrutura** | **~R$ 2.000 - 5.000/mes** |
+| **Receita 50 empresas** | **R$ 44.850/mes** |
+| **Margem bruta** | **~90-95%** |
+
+## Ordem de Execucao Recomendada
+
+1. Camada 1 (codigo) -- pode ser feito agora, sem risco
+2. Camada 3.1 (VPS) -- quando atingir 20-25 instancias
+3. Camada 2 (archiving) -- quando banco atingir 4 GB
+4. Camada 3.2 (Supabase) -- quando atingir 400 conexoes simultaneas
+5. Camada 4 (Realtime avancado) -- quando canais ficarem apertados
 
