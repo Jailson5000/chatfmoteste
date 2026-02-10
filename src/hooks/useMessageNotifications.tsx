@@ -71,6 +71,35 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
     [playNotification, onNewMessage, soundEnabled, browserEnabled, queryClient, lawFirm?.id, user?.id]
   );
 
+  // Handle conversation transfer notifications
+  const handleConversationTransfer = useCallback(
+    (payload: any) => {
+      if (payload.eventType !== 'UPDATE') return;
+
+      const newRecord = payload.new;
+      const oldRecord = payload.old;
+
+      // Only notify if assigned_to changed TO the logged-in user
+      if (newRecord.assigned_to !== user?.id) return;
+      if (oldRecord.assigned_to === newRecord.assigned_to) return;
+
+      // Play notification sound if enabled
+      if (soundEnabled) {
+        playNotification();
+      }
+
+      // Show browser notification if enabled
+      if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
+        new Notification("Conversa transferida para você", {
+          body: "Uma conversa foi atribuída a você",
+          icon: "/favicon.png",
+          tag: `transfer-${newRecord.id}`,
+        });
+      }
+    },
+    [user?.id, soundEnabled, browserEnabled, playNotification]
+  );
+
   useEffect(() => {
     if (!enabled || !lawFirm?.id) return;
 
@@ -79,17 +108,28 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       Notification.requestPermission();
     }
 
-    // Register callback with the consolidated realtime system
-    // This uses the tenant-filtered channel from RealtimeSyncContext
+    const unregisters: (() => void)[] = [];
+
+    // Register message callback
     if (realtimeSync?.registerMessageCallback) {
-      const unregister = realtimeSync.registerMessageCallback((payload) => {
-        if (payload.eventType === "INSERT") {
-          handleNewMessage({ new: payload.new as Message });
-        }
-      });
-      return unregister;
+      unregisters.push(
+        realtimeSync.registerMessageCallback((payload) => {
+          if (payload.eventType === "INSERT") {
+            handleNewMessage({ new: payload.new as Message });
+          }
+        })
+      );
     }
-  }, [enabled, lawFirm?.id, browserEnabled, realtimeSync, handleNewMessage]);
+
+    // Register conversation transfer callback
+    if (realtimeSync?.registerConversationCallback) {
+      unregisters.push(
+        realtimeSync.registerConversationCallback(handleConversationTransfer)
+      );
+    }
+
+    return () => unregisters.forEach(fn => fn());
+  }, [enabled, lawFirm?.id, browserEnabled, realtimeSync, handleNewMessage, handleConversationTransfer]);
 
   return {
     requestNotificationPermission: () => {
