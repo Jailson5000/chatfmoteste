@@ -253,7 +253,7 @@ export default function Conversations() {
     conversationId: selectedConversationId,
     initialBatchSize: 35,
     loadMoreBatchSize: 30,
-    onNewMessage: () => playNotification(),
+    // Notification sound is handled by useMessageNotifications with smart filtering
   });
 
   const [messageInput, setMessageInput] = useState("");
