@@ -83,6 +83,10 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       if (newRecord.assigned_to !== user?.id) return;
       if (oldRecord.assigned_to === newRecord.assigned_to) return;
 
+      // Suprimir som quando o atendente se auto-atribui ao enviar mensagem
+      // (assigned_to era null e IA nao estava no controle)
+      if (!oldRecord.assigned_to && oldRecord.current_handler !== 'ai') return;
+
       // Play notification sound if enabled
       if (soundEnabled) {
         playNotification();
