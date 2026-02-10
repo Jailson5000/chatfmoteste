@@ -2,9 +2,12 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone, Megaphone } from "lucide-react";
+import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone, Megaphone, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 interface KanbanCardProps {
   conversation: {
@@ -108,18 +111,13 @@ export function KanbanCard({
   onDragStart, 
   onClick 
 }: KanbanCardProps) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const maskedPhone = maskPhone(conversation.contact_phone);
   const timeAgo = getTimeAgo(conversation.last_message_at);
   
-  // Get handler name (backend-first):
-  // - AI with automation: IA · <automation name>
-  // - AI without automation AND no assigned_to: "Sem responsável" (not really AI)
-  // - Human with assignment: <full name>
-  // - No assignment: "Sem responsável"
   const hasActiveAutomation = !!conversation.current_automation_id;
   const hasAssignment = !!conversation.assigned_profile?.full_name;
-  
-  // Only consider it AI-handled if there's actually an automation configured
   const isAI = conversation.current_handler === 'ai' && hasActiveAutomation;
   
   const automationName =
@@ -139,38 +137,23 @@ export function KanbanCard({
     handlerName = "Sem responsável";
   }
 
-  // Connection info: differentiate between Site (widget) and WhatsApp
   const getConnectionInfo = () => {
     const upperOrigin = conversation.origin?.toUpperCase();
-    
-    // Non-WhatsApp origins (Widget, Tray, Site, Web) -> Globe icon
     if (upperOrigin === 'WIDGET' || upperOrigin === 'TRAY' || upperOrigin === 'SITE' || upperOrigin === 'WEB') {
-      return { 
-        label: "Site", 
-        isWidget: true,
-        tooltipText: upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin
-      };
+      return { label: "Site", isWidget: true, tooltipText: upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin };
     }
-    
-    // WhatsApp origin -> Phone icon with last 4 digits
     const phoneNumber = conversation.whatsapp_instance?.phone_number;
     if (phoneNumber) {
       const digits = phoneNumber.replace(/\D/g, "");
       if (digits.length >= 4) {
-        return { 
-          label: `•••${digits.slice(-4)}`,
-          isWidget: false,
-          tooltipText: conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name || "WhatsApp"
-        };
+        return { label: `•••${digits.slice(-4)}`, isWidget: false, tooltipText: conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name || "WhatsApp" };
       }
     }
-    
     return { label: "----", isWidget: false, tooltipText: "Canal não identificado" };
   };
   
   const connectionInfo = getConnectionInfo();
   
-  // Get matched tags
   const conversationTags = (conversation.tags || [])
     .map(tagName => allTags.find(t => t.name === tagName || t.id === tagName))
     .filter(Boolean);
@@ -180,35 +163,42 @@ export function KanbanCard({
   const messageLabel = getMessageTypeLabel(messageType);
   const isFromMe = conversation.last_message?.is_from_me;
   
-  // Get message preview - clean up media patterns
   const getCleanPreview = () => {
     const rawContent = conversation.last_message?.content;
     if (!rawContent) {
       return messageType && messageType !== "text" ? messageLabel : "Sem mensagens";
     }
-    
-    // Check for media patterns [IMAGE]url, [VIDEO]url, etc.
     const mediaMatch = rawContent.match(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/i);
     if (mediaMatch) {
       const type = mediaMatch[1].toUpperCase();
-      // Get caption (text after the media pattern)
       const caption = rawContent.replace(/\[(IMAGE|VIDEO|AUDIO|DOCUMENT)\](https?:\/\/[^\s\n]+)/gi, "").trim();
       const mediaEmoji = type === "IMAGE" ? "📷" : type === "VIDEO" ? "🎬" : type === "AUDIO" ? "🎤" : "📄";
-      const mediaLabel = type === "IMAGE" ? "Imagem" : type === "VIDEO" ? "Vídeo" : type === "AUDIO" ? "Áudio" : "Documento";
-      return caption ? `${mediaEmoji} ${caption.slice(0, 35)}` : `${mediaEmoji} ${mediaLabel}`;
+      const mediaLabelText = type === "IMAGE" ? "Imagem" : type === "VIDEO" ? "Vídeo" : type === "AUDIO" ? "Áudio" : "Documento";
+      return caption ? `${mediaEmoji} ${caption.slice(0, 35)}` : `${mediaEmoji} ${mediaLabelText}`;
     }
-    
-    // For typed media without content
     if (messageType && messageType !== "text" && !rawContent.trim()) {
       return messageLabel;
     }
-    
     return rawContent;
   };
   
   const messagePreview = getCleanPreview();
-
   const unreadCount = conversation.unread_count || 0;
+
+  const handleDismissAd = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      await supabase
+        .from("conversations")
+        .update({ origin: null, origin_metadata: null } as any)
+        .eq("id", conversation.id);
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast({ title: "Aviso de anúncio removido" });
+    } catch (err) {
+      console.error("Error dismissing ad:", err);
+    }
+  };
 
   return (
     <div
@@ -275,13 +265,21 @@ export function KanbanCard({
 
       {/* Status Badge + Ad Badge */}
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {/* Via Anúncio Badge */}
+        {/* Via Anúncio Badge with dismiss */}
         {conversation.origin?.toUpperCase() === 'WHATSAPP_CTWA' && (
           <Badge 
-            className="text-[10px] h-4 px-1.5 border-0 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+            className="text-[10px] h-4 px-1.5 border-0 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 gap-0.5"
           >
-            <Megaphone className="h-2.5 w-2.5 mr-0.5" />
-            Via Anúncio
+            <Megaphone className="h-2.5 w-2.5" />
+            <span>Via Anúncio</span>
+            <button
+              type="button"
+              onClick={handleDismissAd}
+              className="ml-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 p-0.5 transition-colors"
+              title="Remover aviso de anúncio"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
           </Badge>
         )}
         
@@ -301,9 +299,7 @@ export function KanbanCard({
 
       {/* Footer: Tags, Instance, Handler */}
       <div className="mt-2 pt-1.5 border-t border-border/50 flex items-center gap-2">
-        {/* Left: Tags + Instance (compact) */}
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0">
-          {/* Tags icon with tooltip */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -331,7 +327,6 @@ export function KanbanCard({
             </Tooltip>
           </TooltipProvider>
 
-          {/* Connection icon: Globe for Site, Phone for WhatsApp */}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -354,7 +349,6 @@ export function KanbanCard({
           </TooltipProvider>
         </div>
 
-        {/* Handler (takes remaining space, aligns right) */}
         <div className="flex items-center gap-1 ml-auto min-w-0">
           {isAI ? (
             <Bot className="h-3 w-3 text-purple-500 flex-shrink-0" />
