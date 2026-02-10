@@ -4109,6 +4109,7 @@ export default function Conversations() {
                                 .from("conversations")
                                 .update({ origin_metadata: null, origin: null })
                                 .eq("id", selectedConversation.id);
+                              queryClient.invalidateQueries({ queryKey: ["conversations"] });
                               toast({ title: "Aviso de anúncio removido" });
                             } catch (err) {
                               console.error("Error dismissing ad banner:", err);
