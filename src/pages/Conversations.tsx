@@ -51,7 +51,7 @@ import { ContactStatusTags } from "@/components/conversations/ContactStatusTags"
 import { InlineActivityBadge, ActivityItem } from "@/components/conversations/InlineActivityBadge";
 import { DateSeparator, shouldShowDateSeparator } from "@/components/conversations/DateSeparator";
 import { useInlineActivities } from "@/hooks/useInlineActivities";
-import { useNotificationSound } from "@/hooks/useNotificationSound";
+
 import { useTemplates, Template } from "@/hooks/useTemplates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -205,7 +205,7 @@ export default function Conversations() {
   const { instances: whatsappInstances } = useWhatsAppInstances();
   const { automations } = useAutomations();
   const { toast } = useToast();
-  const { playNotification } = useNotificationSound();
+  
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { lawFirm } = useLawFirm();
