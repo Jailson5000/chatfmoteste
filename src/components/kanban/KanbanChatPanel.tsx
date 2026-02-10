@@ -2699,6 +2699,7 @@ export function KanbanChatPanel({
       automationId: type === 'ai' ? automationId || null : null,
     }, {
       onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
         toast({
           title: type === 'ai' ? "Transferido para IA" : "Transferido para atendente",
           description: type === 'ai' ? `IA ativa: ${automations.find(a => a.id === automationId)?.name || 'Selecionada'}` : undefined,
