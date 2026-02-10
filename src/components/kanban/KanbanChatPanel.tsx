@@ -2508,7 +2508,7 @@ export function KanbanChatPanel({
       }
 
       await updateConversation.mutateAsync(updatePayload);
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await queryClient.refetchQueries({ queryKey: ["conversations"] });
 
       toast({ title: "Conversa arquivada" });
       setArchiveDialogOpen(false);
@@ -2682,7 +2682,6 @@ export function KanbanChatPanel({
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
         toast({ title: "Departamento atualizado" });
         setDepartmentOpen(false);
-        onClose();
       },
     });
   };
