@@ -1,70 +1,60 @@
 
 
-# Sincronizar Planos: Corrigir features text para refletir os limites atualizados
+# Alerta Sonoro ao Receber Transferencia de Conversa
 
-## Diagnostico
+## Como funciona hoje
 
-Voce atualizou os limites numericos dos planos no painel admin, mas o texto das features (que aparece na landing page e em todo o sistema) ficou desatualizado. Abaixo as inconsistencias encontradas:
-
-| Plano | Campo | Texto atual | Limite real |
-|-------|-------|-------------|-------------|
-| BASIC | Audio | "15 minutos de audio" | 20 minutos |
-| BASIC | Agentes | Nao mencionado | 2 agentes |
-| STARTER | Audio | "25 minutos de audio" | 30 minutos |
-| STARTER | Agentes | "2 agentes de IA" | 3 agentes |
-| PROFESSIONAL | Agentes | "4 agentes de IA" | 5 agentes |
-
-Os planos **PRIME** e **ENTERPRISE** estao corretos (texto = limites).
-
-## O que esta OK (nao precisa mudar)
-
-- **Precos no Stripe**: Todos os 5 planos com price IDs corretos (mensal + anual)
-- **Landing page**: Ja e 100% dinamica, busca planos do banco de dados
-- **Pagina de registro**: Tambem dinamica, sem valores hardcoded
-- **Edge Function de checkout**: Price IDs ja mapeados corretamente para todos os planos
-- **billing-config.ts**: Precos de adicionais inalterados
-- **MyPlanSettings**: Le diretamente do banco, sem valores fixos
-- **useCompanyPlan**: Dinamico, sem problemas
+O sistema de notificacoes (`useMessageNotifications`) so dispara alertas para **mensagens novas de clientes**. Quando a IA transfere para um atendente, ou um atendente transfere para outro, nenhum som toca - o atendente so percebe se estiver olhando a tela.
 
 ## Solucao
 
-Atualizar apenas o campo `features` (array de texto) dos 3 planos com inconsistencias no banco de dados. Como a landing page, registro e painel do cliente todos leem do banco, a correcao se propaga automaticamente.
+Adicionar um listener de **mudancas na tabela `conversations`** usando o `registerConversationCallback` que ja existe no sistema Realtime consolidado. Quando o campo `assigned_to` de uma conversa muda para o ID do usuario logado, tocar o alerta sonoro.
 
-### Updates no banco de dados
+## O que muda
 
-**BASIC** - Atualizar features para:
-- "2 usuarios"
-- "200 conversas com IA"
-- "20 minutos de audio" (era 15)
-- "1 WhatsApp conectado"
-- "2 agentes de IA" (nao existia)
-- "Automacao essencial"
-- "Mensagens rapidas"
-- "Respostas automaticas"
+### Arquivo: `src/hooks/useMessageNotifications.tsx`
 
-**STARTER** - Atualizar features para:
-- "3 usuarios"
-- "300 conversas com IA"
-- "30 minutos de audio" (era 25)
-- "2 WhatsApps conectados"
-- "3 agentes de IA" (era 2)
-- "Tudo do plano Basic"
-- "Transcricao de audio e imagens"
-- "Mensagens agendadas"
+Adicionar um segundo callback registrado via `registerConversationCallback` (ja disponivel no RealtimeSyncContext) que:
 
-**PROFESSIONAL** - Atualizar features para:
-- "4 usuarios"
-- "400 conversas com IA"
-- "40 minutos de audio"
-- "4 WhatsApps conectados"
-- "5 agentes de IA" (era 4)
-- "Tudo do plano Starter"
-- "IA avancada para conversacao"
-- "Maior capacidade operacional"
+1. Escuta eventos `UPDATE` na tabela `conversations`
+2. Verifica se o campo `assigned_to` do registro **novo** e igual ao `user.id` do atendente logado
+3. Verifica se o `assigned_to` **anterior** era diferente (para nao tocar em updates irrelevantes)
+4. Se sim, toca o som de notificacao e mostra notificacao no navegador ("Conversa transferida para voce")
+
+```text
+Logica do novo callback:
+
+if (payload.eventType !== 'UPDATE') return;
+
+const newRecord = payload.new;
+const oldRecord = payload.old;
+
+// So notificar se assigned_to mudou PARA o usuario logado
+if (newRecord.assigned_to !== user?.id) return;
+if (oldRecord.assigned_to === newRecord.assigned_to) return;
+
+// Tocar som + browser notification
+```
+
+### Nenhum outro arquivo precisa ser alterado
+
+- O `RealtimeSyncContext` ja tem `registerConversationCallback` implementado e funcionando
+- O canal `tenant-core` ja escuta mudancas na tabela `conversations` filtrado por `law_firm_id`
+- O hook `useNotificationSound` ja esta importado no arquivo
+
+## Cenarios cobertos
+
+| Cenario | Resultado |
+|---------|-----------|
+| IA transfere para Atendente A | Atendente A ouve o som |
+| Atendente B transfere para Atendente A | Atendente A ouve o som |
+| Atendente A transfere para a fila (assigned_to = null) | Ninguem ouve (nao ha destinatario) |
+| Conversa volta para IA | Ninguem ouve (assigned_to nao muda para um user) |
+| Update de departamento sem mudar assigned_to | Ninguem ouve (assigned_to nao mudou) |
 
 ## Impacto
 
-- **Risco**: Zero - apenas atualizacao de texto descritivo
-- **Arquivos modificados**: Nenhum - apenas dados no banco
-- **Resultado**: Landing page, registro, painel do cliente e admin todos mostrarao os valores corretos automaticamente
+- **Risco**: Muito baixo - apenas adiciona um callback extra no mesmo hook, usando infraestrutura ja existente
+- **Canais WebSocket**: Zero novos canais - usa o `registerConversationCallback` que ja existe
+- **Arquivo modificado**: Somente `src/hooks/useMessageNotifications.tsx`
 
