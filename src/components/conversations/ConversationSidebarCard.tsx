@@ -3,7 +3,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Globe, Megaphone, Phone, Smartphone, Tag, User, UserX } from "lucide-react";
+import { Bot, Folder, Globe, Megaphone, Phone, Smartphone, Tag, User, UserX, X } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 export interface ConversationSidebarCardConversation {
   id: string;
@@ -111,6 +114,8 @@ interface ConversationSidebarCardProps {
 }
 
 function ConversationSidebarCardComponent({ conversation, selected, onClick }: ConversationSidebarCardProps) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const isAI = conversation.handler === "ai";
   const isUnassigned = conversation.handler === "unassigned";
   const hasAssigned = !!conversation.assignedTo;
@@ -196,13 +201,34 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
       {/* Status + Department + Tags + Ad Badge */}
       {(conversation.clientStatus || conversation.department || conversation.tags.length > 0 || conversation.origin === 'whatsapp_ctwa') && (
         <div className="mt-2 flex flex-wrap gap-1 min-w-0 overflow-hidden">
-          {/* CTWA Ad Badge */}
+          {/* CTWA Ad Badge with dismiss */}
           {conversation.origin === 'whatsapp_ctwa' && (
             <Badge
               className="text-[10px] h-[18px] px-1.5 border-0 gap-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
             >
               <Megaphone className="h-2.5 w-2.5 flex-shrink-0" />
               <span className="truncate">Via Anúncio</span>
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  try {
+                    await supabase
+                      .from("conversations")
+                      .update({ origin: null, origin_metadata: null } as any)
+                      .eq("id", conversation.id);
+                    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                    toast({ title: "Aviso de anúncio removido" });
+                  } catch (err) {
+                    console.error("Error dismissing ad:", err);
+                  }
+                }}
+                className="ml-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 p-0.5 transition-colors"
+                title="Remover aviso de anúncio"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
             </Badge>
           )}
 

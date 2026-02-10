@@ -2508,6 +2508,7 @@ export function KanbanChatPanel({
       }
 
       await updateConversation.mutateAsync(updatePayload);
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
 
       toast({ title: "Conversa arquivada" });
       setArchiveDialogOpen(false);
@@ -2678,8 +2679,10 @@ export function KanbanChatPanel({
     const newDeptId = currentDepartment?.id === deptId ? null : deptId;
     updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId, clientId }, {
       onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
         toast({ title: "Departamento atualizado" });
         setDepartmentOpen(false);
+        onClose();
       },
     });
   };
