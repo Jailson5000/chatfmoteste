@@ -1,5 +1,7 @@
 import { useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLawFirm } from "./useLawFirm";
+import { useAuth } from "./useAuth";
 import { useNotificationSound } from "./useNotificationSound";
 import { useNotificationPreferences } from "./useNotificationPreferences";
 import { useRealtimeSyncOptional } from "@/hooks/useRealtimeSync";
@@ -21,6 +23,8 @@ interface UseMessageNotificationsOptions {
 export function useMessageNotifications(options: UseMessageNotificationsOptions = {}) {
   const { enabled = true, onNewMessage } = options;
   const { lawFirm } = useLawFirm();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { playNotification } = useNotificationSound();
   const { soundEnabled, browserEnabled } = useNotificationPreferences();
   const realtimeSync = useRealtimeSyncOptional();
@@ -32,6 +36,20 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       // Only notify for incoming client messages (not from AI, bot, or agents)
       if (message.is_from_me) return;
       if (message.sender_type !== 'client') return;
+
+      // Smart notification: check conversation assignment
+      const cachedData = queryClient.getQueryData<any[]>(["conversations", lawFirm?.id]);
+      const conversation = cachedData?.find((c: any) => c.id === message.conversation_id);
+
+      // If AI is handling -> no notification
+      if (conversation?.current_handler === 'ai') return;
+
+      // If assigned to a specific human -> only notify that human
+      if (conversation?.assigned_to) {
+        if (conversation.assigned_to !== user?.id) return;
+      }
+
+      // If unassigned (no assigned_to) -> notify everyone (continue)
 
       // Play notification sound if enabled
       if (soundEnabled) {
@@ -50,7 +68,7 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       // Call custom handler if provided
       onNewMessage?.(message);
     },
-    [playNotification, onNewMessage, soundEnabled, browserEnabled]
+    [playNotification, onNewMessage, soundEnabled, browserEnabled, queryClient, lawFirm?.id, user?.id]
   );
 
   useEffect(() => {
