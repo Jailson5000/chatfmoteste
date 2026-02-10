@@ -669,6 +669,7 @@ export default function Conversations() {
     const idParam = searchParams.get("id");
     const phoneParam = searchParams.get("phone");
     const nameParam = searchParams.get("name");
+    const connectionIdParam = searchParams.get("connectionId");
     
     // Clear params after processing to avoid re-triggering
     const clearParams = () => {
@@ -676,6 +677,7 @@ export default function Conversations() {
       newParams.delete("id");
       newParams.delete("phone");
       newParams.delete("name");
+      newParams.delete("connectionId");
       setSearchParams(newParams, { replace: true });
     };
     
@@ -722,7 +724,7 @@ export default function Conversations() {
       } else if (lawFirm?.id && connectedInstances.length > 0) {
         // No existing conversation in memory - check database before creating
         const createOrFindConversation = async () => {
-          const instance = connectedInstances[0];
+          const instance = (connectionIdParam ? connectedInstances.find(i => i.id === connectionIdParam) : null) || connectedInstances[0];
           const remoteJid = normalizedPhone.includes("@") 
             ? normalizedPhone 
             : `${normalizedPhone}@s.whatsapp.net`;

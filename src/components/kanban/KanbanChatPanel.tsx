@@ -1846,7 +1846,7 @@ export function KanbanChatPanel({
           
           if (insertError) throw new Error('Falha ao salvar mensagem');
           
-          // Update conversation timestamp
+          // Update conversation timestamp and unarchive if needed
           await supabase
             .from("conversations")
             .update({ 
@@ -1855,6 +1855,9 @@ export function KanbanChatPanel({
               archived_reason: null,
             })
             .eq("id", conversationId);
+          
+          // Force cache invalidation for Kanban sync
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
           
           // Update optimistic message status
           setMessages(prev => prev.map(m => 
@@ -2110,6 +2113,9 @@ export function KanbanChatPanel({
             archived_reason: null,
           })
           .eq("id", conversationId);
+        
+        // Force cache invalidation for Kanban sync
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       } else {
         // WhatsApp: send directly via Evolution API (async, no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending file via Evolution API (async)');
@@ -2258,6 +2264,9 @@ export function KanbanChatPanel({
             archived_reason: null,
           })
           .eq("id", conversationId);
+        
+        // Force cache invalidation for Kanban sync
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       } else {
         // WhatsApp: send directly via Evolution API (async, no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending media via Evolution API (async)');
@@ -2396,6 +2405,9 @@ export function KanbanChatPanel({
             archived_reason: null,
           })
           .eq("id", conversationId);
+        
+        // Force cache invalidation for Kanban sync
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
       } else {
         // WhatsApp: send directly via Evolution API (no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending media via Evolution API');
