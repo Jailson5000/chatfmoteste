@@ -21,7 +21,7 @@ import { formatPhone, unmask } from "@/lib/inputMasks";
 interface NewContactDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (phone: string) => void;
+  onCreate: (phone: string, connectionId?: string) => void;
   onOpenImport: () => void;
   isCreating?: boolean;
 }
@@ -62,7 +62,7 @@ export function NewContactDialog({
     
     // Build full phone with country code
     const fullPhone = phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
-    onCreate(fullPhone);
+    onCreate(fullPhone, selectedConnection || undefined);
   };
 
   const handleClose = () => {

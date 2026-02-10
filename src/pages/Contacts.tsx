@@ -109,7 +109,7 @@ export default function Contacts() {
   const pagination = usePagination(filteredClients, { initialPageSize: 50 });
 
 
-  const handleCreateFromPhone = async (phone: string) => {
+  const handleCreateFromPhone = async (phone: string, connectionId?: string) => {
     await createClient.mutateAsync({
       name: `Contato ${phone.slice(-4)}`,
       phone,
@@ -121,12 +121,12 @@ export default function Contacts() {
       lgpd_consent_date: null,
       custom_status_id: null,
       department_id: null,
-      whatsapp_instance_id: null,
+      whatsapp_instance_id: connectionId || null,
       assigned_to: null,
     });
     setDialogOpen(false);
     // Navigate to conversations to start chat
-    navigate(`/conversations?phone=${encodeURIComponent(phone)}`);
+    navigate(`/conversations?phone=${encodeURIComponent(phone)}${connectionId ? `&connectionId=${connectionId}` : ''}`);
   };
 
   const handleImportContacts = async (file: File, connectionId?: string) => {
