@@ -1,78 +1,79 @@
 
 
-# Notificacao Inteligente: Alerta Apenas para o Atendente Responsavel
+# Correcoes: Contato na Instancia Errada + Notificacao Duplicada
 
-## Regras de Negocio
+## Problema 1: Contato criado na instancia errada
 
-| Situacao da Conversa | Quem recebe o alerta? |
-|---|---|
-| Sem atendente (unassigned) | Todos os atendentes |
-| Atendente humano atribuido | Somente o atendente atribuido |
-| Com IA (current_handler = "ai") | Ninguem |
-| Transferida para alguem | O novo responsavel (assigned_to) |
+### Diagnostico
+O contato "Contato 2450" foi criado com a instancia `FMOANTIGO63 (***6064)` em vez da `9089` que o usuario selecionou. Investigando o codigo, o `NewContactDialog.tsx` passa corretamente o `connectionId` para o `onCreate`, e o `Contacts.tsx` repassa como `whatsapp_instance_id` para o `createClient.mutateAsync`.
 
-## Solucao
+O problema esta no `useEffect` de auto-selecao (linha 44-48 do `NewContactDialog.tsx`): quando o dialog e fechado via `handleClose`, o `selectedConnection` e resetado para `""`. Ao reabrir, o `useEffect` seleciona automaticamente `connectedInstances[0]` - que pode nao ser a instancia que o usuario quer. 
 
-Modificar o hook `useMessageNotifications.tsx` para:
+Porem, o usuario troca a selecao manualmente antes de clicar "Iniciar conversa". Se a instancia errada foi salva, o problema pode estar em que `connectedInstances` muda de ordem entre renders (a query `useWhatsAppInstances` retorna instancias em ordem variavel), e o auto-select pode estar sobrescrevendo a selecao manual do usuario quando `connectedInstances` muda de referencia.
 
-1. Obter o **user ID** do usuario logado (via `useAuth`)
-2. Ao receber uma mensagem de cliente, buscar a **conversa correspondente** no cache do React Query (queryKey `["conversations"]`) usando o `conversation_id` da mensagem
-3. Aplicar as regras de decisao antes de tocar o som
+**Causa raiz**: O `useEffect` de auto-select tem `connectedInstances` como dependencia. Se a lista re-renderizar (por invalidacao de cache, por exemplo), a referencia do array muda, o `useEffect` executa novamente, e como `selectedConnection` pode estar vazio momentaneamente (entre re-renders), ele sobrescreve a selecao do usuario com `connectedInstances[0]`.
 
-## Detalhes Tecnicos
+### Solucao
+- Mudar o auto-select para rodar apenas quando o dialog **abre** (`open` muda de false para true), nao a cada mudanca de `connectedInstances`
+- Usar `open` como dependencia principal do efeito
+- Se o usuario ja selecionou uma conexao, nao sobrescrever
 
-### Arquivo: `src/hooks/useMessageNotifications.tsx`
-
-**Novas dependencias:**
-- `useAuth` para obter `user.id` do atendente logado
-- `useQueryClient` do React Query para acessar o cache de conversas
-
-**Logica no `handleNewMessage`:**
+### Arquivo: `src/components/contacts/NewContactDialog.tsx`
 
 ```text
-// 1. Filtros existentes (mantem)
-if (message.is_from_me) return;
-if (message.sender_type !== 'client') return;
-
-// 2. Buscar conversa no cache do React Query
-const allConversations = queryClient.getQueryData(["conversations", lawFirm?.id]);
-const conversation = allConversations?.find(c => c.id === message.conversation_id);
-
-// 3. Se conversa esta com IA -> nao notificar ninguem
-if (conversation?.current_handler === 'ai') return;
-
-// 4. Se conversa tem atendente humano -> notificar apenas esse atendente
-if (conversation?.assigned_to) {
-  if (conversation.assigned_to !== user?.id) return;
-  // Se chegou aqui, o usuario logado E o atendente atribuido -> notifica
-}
-
-// 5. Se nao tem atendente (unassigned) -> notifica todos (nao faz return)
-// Continua para tocar o som e mostrar notificacao...
+// Trocar o useEffect atual (linhas 44-48) por:
+useEffect(() => {
+  if (open && connectedInstances.length > 0 && !selectedConnection) {
+    setSelectedConnection(connectedInstances[0].id);
+  }
+}, [open]); // Rodar apenas quando dialog abre
 ```
 
-### Fluxo de decisao
+---
+
+## Problema 2: Notificacao sonora dispara quando o atendente envia
+
+### Diagnostico
+Existem **duas** fontes de notificacao sonora no sistema:
+
+1. **`useMessageNotifications.tsx`** - O hook inteligente que acabamos de corrigir. Filtra corretamente por `sender_type === 'client'`, handler e assigned_to. **Este esta correto.**
+
+2. **`Conversations.tsx` linha 256** - `onNewMessage: () => playNotification()` passado ao `useMessagesWithPagination`. Este callback dispara para **todas** mensagens novas exceto `is_from_me && sender_type === 'attendant'`. Isso significa que mensagens de IA, bot e ate mensagens enviadas por outros atendentes ainda disparam o som aqui.
+
+### Solucao
+Remover o `playNotification()` do `onNewMessage` do `useMessagesWithPagination` em `Conversations.tsx`. A notificacao sonora ja e tratada pelo `useMessageNotifications` de forma inteligente. Manter o `onNewMessage` callback apenas se houver outra logica necessaria (scroll, por exemplo), caso contrario remover o callback.
+
+### Arquivo: `src/pages/Conversations.tsx`
 
 ```text
-Mensagem recebida (sender_type = 'client')
-  |
-  v
-Conversa com IA? ----SIM----> Nao notifica
-  |
-  NAO
-  |
-  v
-Conversa tem atendente humano? ----SIM----> Atendente logado = assigned_to?
-  |                                            |           |
-  NAO                                         SIM         NAO
-  |                                            |           |
-  v                                       Notifica    Nao notifica
-Notifica TODOS
+// Linha 254-257: remover o onNewMessage que toca som
+const {
+  messages,
+  setMessages,
+  isLoading: messagesLoading,
+  isLoadingMore: messagesLoadingMore,
+  hasMoreMessages,
+  handleScrollToTop: handleMessagesScrollToTop,
+} = useMessagesWithPagination({
+  conversationId: selectedConversationId,
+  initialBatchSize: 35,
+  loadMoreBatchSize: 30,
+  // Removido: onNewMessage: () => playNotification()
+  // A notificacao inteligente ja e gerenciada pelo useMessageNotifications
+});
 ```
+
+---
+
+## Resumo das Mudancas
+
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/components/contacts/NewContactDialog.tsx` | Corrigir auto-select para rodar apenas na abertura do dialog, evitando sobrescrever a selecao do usuario |
+| `src/pages/Conversations.tsx` | Remover `onNewMessage: () => playNotification()` duplicado que ignora as regras de notificacao inteligente |
 
 ## Impacto
 
-- **Risco**: Baixo - apenas adiciona filtros extras no hook existente
-- **Arquivo modificado**: Somente `src/hooks/useMessageNotifications.tsx`
-- **Resultado**: Cada atendente so ouve alertas das suas proprias conversas; conversas sem dono notificam todos; conversas com IA nao notificam ninguem
-
+- **Risco**: Baixo - mudancas pontuais e isoladas
+- **Contato**: A instancia selecionada pelo usuario sera respeitada corretamente
+- **Notificacao**: O som tocara apenas quando um cliente envia mensagem, seguindo as regras de atribuicao (IA = nenhum, atendente especifico = so ele, fila = todos)
