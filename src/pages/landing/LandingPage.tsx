@@ -693,6 +693,26 @@ export function LandingPage() {
                 </div>
               </div>
             </div>
+
+            {/* Banner Implementação Inclusa */}
+            <div className="p-4 md:p-5 rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-600/5 to-transparent relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-3xl" />
+              <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                    <Rocket className="h-5 w-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base md:text-lg font-bold text-white">
+                      Planos a partir de 3 meses: <span className="text-emerald-400">configuração e implementação inclusa!</span>
+                    </h3>
+                    <p className="text-sm text-white/50 mt-1">
+                      Nossa equipe configura todo o sistema para sua empresa sem custo adicional. Comece a usar sem dor de cabeça.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">

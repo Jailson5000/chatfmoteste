@@ -1911,9 +1911,13 @@ export default function Conversations() {
     
     setIsSending(true);
     
+    const wasPontualMode = isPontualMode;
+    if (wasPontualMode) setIsPontualMode(false);
+    
     try {
       // Auto-assign conversation to current user if handler is AI or no responsible assigned
-      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
+      // Skip transfer if in pontual mode (keep AI in control)
+      if (!wasPontualMode && (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to)) {
         await transferHandler.mutateAsync({
           conversationId: selectedConversationId,
           handlerType: "human",
@@ -2015,6 +2019,7 @@ export default function Conversations() {
           media_url: blobUrl, // Local preview URL
           media_mime_type: file.type,
           status: "sending" as const,
+          is_pontual: wasPontualMode,
         };
         setMessages(prev => [...prev, optimisticMessage]);
         
@@ -2114,9 +2119,13 @@ export default function Conversations() {
     setIsSending(true);
     handleMediaPreviewClose(); // Close immediately for better UX (upload continues in background)
     
+    const wasPontualMode = isPontualMode;
+    if (wasPontualMode) setIsPontualMode(false);
+    
     try {
       // Auto-assign conversation to current user if handler is AI or no responsible assigned
-      if (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to) {
+      // Skip transfer if in pontual mode (keep AI in control)
+      if (!wasPontualMode && (selectedConversation.current_handler === "ai" || !selectedConversation.assigned_to)) {
         await transferHandler.mutateAsync({
           conversationId: selectedConversationId,
           handlerType: "human",
@@ -2273,6 +2282,7 @@ export default function Conversations() {
           media_url: blobUrl || null,
           media_mime_type: mimeType,
           status: "sending" as const,
+          is_pontual: wasPontualMode,
         };
         setMessages(prev => [...prev, optimisticMessage]);
         
@@ -2410,6 +2420,7 @@ export default function Conversations() {
           media_url: blobUrl, // Local preview URL
           media_mime_type: audioBlob.type || "audio/webm;codecs=opus",
           status: "sending" as const,
+          is_pontual: isPontualMode,
         };
         setMessages(prev => [...prev, optimisticMessage]);
         
@@ -2802,8 +2813,16 @@ export default function Conversations() {
                   placeholder="Buscar conversa..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-9"
+                  className="pl-9 pr-8 h-9"
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               {/* Mais filtros button (mobile) */}
               <Popover>
@@ -3307,8 +3326,16 @@ export default function Conversations() {
                 placeholder="Buscar conversa..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9"
+                className="pl-9 pr-8 h-9"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
             
             {/* Mais filtros popover - estilo Kanban */}
@@ -4072,7 +4099,20 @@ export default function Conversations() {
                       {!hasMoreMessages && 
                        selectedConversation?.origin === 'whatsapp_ctwa' && 
                        selectedConversation?.origin_metadata && (
-                        <AdClickBanner originMetadata={selectedConversation.origin_metadata} />
+                        <AdClickBanner 
+                          originMetadata={selectedConversation.origin_metadata} 
+                          onDismiss={async () => {
+                            try {
+                              await supabase
+                                .from("conversations")
+                                .update({ origin_metadata: null, origin: null })
+                                .eq("id", selectedConversation.id);
+                              toast({ title: "Aviso de anúncio removido" });
+                            } catch (err) {
+                              console.error("Error dismissing ad banner:", err);
+                            }
+                          }}
+                        />
                       )}
                       
                       {timelineItems.map((item, index) => {

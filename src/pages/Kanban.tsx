@@ -663,11 +663,11 @@ export default function Kanban() {
       <NewContactDialog
         open={newContactDialogOpen}
         onClose={() => setNewContactDialogOpen(false)}
-        onCreate={async (phone) => {
+        onCreate={async (phone, connectionId) => {
           setIsCreatingContact(true);
           try {
-            // Navigate to conversations with phone param to create new conversation
-            navigate(`/conversations?phone=${encodeURIComponent(phone)}`);
+            // Navigate to conversations with phone param and connection to create new conversation
+            navigate(`/conversations?phone=${encodeURIComponent(phone)}${connectionId ? `&connectionId=${connectionId}` : ''}`);
             setNewContactDialogOpen(false);
           } catch (error) {
             console.error("Erro ao criar contato:", error);
