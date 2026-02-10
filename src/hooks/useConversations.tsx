@@ -504,6 +504,27 @@ export function useConversations() {
         });
       }
     },
+    onMutate: async (variables) => {
+      // Cancel outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+      const previousConversations = queryClient.getQueryData(["conversations"]);
+
+      // Optimistically update local state for immediate UI feedback
+      setAllConversations(prev =>
+        prev.map(conv =>
+          conv.id === variables.conversationId
+            ? {
+                ...conv,
+                current_handler: variables.handlerType,
+                assigned_to: variables.assignedTo || null,
+                current_automation_id: variables.handlerType === 'ai' ? variables.automationId || null : null,
+              }
+            : conv
+        )
+      );
+
+      return { previousConversations };
+    },
     onSuccess: async (_data, variables) => {
       // Force immediate refetch to update UI with new automation name
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -519,7 +540,13 @@ export function useConversations() {
             : "A conversa foi transferida para o atendente selecionado.",
       });
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      // Rollback optimistic update on error
+      if (context?.previousConversations) {
+        queryClient.setQueryData(["conversations"], context.previousConversations);
+      }
+      // Also revert local state
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao transferir",
         description: error.message,

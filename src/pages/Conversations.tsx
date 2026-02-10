@@ -2616,6 +2616,10 @@ export default function Conversations() {
         handlerType: handler,
         assignedTo: assignedTo,
         automationId: automationId,
+      }, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        },
       });
     }
   };
