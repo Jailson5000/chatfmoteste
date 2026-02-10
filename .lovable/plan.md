@@ -1,58 +1,78 @@
 
-# Correcao: Kanban - Departamento nao fecha + Arquivo nao atualiza
 
-## Problemas
+# Notificacao Inteligente: Alerta Apenas para o Atendente Responsavel
 
-### 1. Painel fecha ao trocar departamento
-Na linha 2685 do `KanbanChatPanel.tsx`, `onClose()` e chamado no `onSuccess` do `handleDepartmentChange`. O usuario quer que o painel continue aberto apos mudar o departamento.
+## Regras de Negocio
 
-### 2. Arquivamento nao reflete no board
-O `handleArchive` usa `updateConversation.mutateAsync(updatePayload)` que tem update otimista no `onMutate`. Porem, o `cancelQueries` no `onMutate` pode interferir com refetches subsequentes, e a sincronizacao via `useEffect` (que sincroniza `initialData` para `allConversations`) pode re-sobrescrever o estado otimista antes do novo fetch completar.
+| Situacao da Conversa | Quem recebe o alerta? |
+|---|---|
+| Sem atendente (unassigned) | Todos os atendentes |
+| Atendente humano atribuido | Somente o atendente atribuido |
+| Com IA (current_handler = "ai") | Ninguem |
+| Transferida para alguem | O novo responsavel (assigned_to) |
 
-## Solucoes
+## Solucao
 
-### 1. Remover `onClose()` do department change
-Remover a chamada `onClose()` da linha 2685, mantendo o painel aberto. O update otimista do `updateConversationDepartment` (que ja atualiza `setAllConversations` no `onMutate`) garante que o card se mova para a nova coluna automaticamente.
+Modificar o hook `useMessageNotifications.tsx` para:
 
-### 2. Tornar o arquivamento mais robusto
-Em vez de depender apenas do update otimista generico do `updateConversation`, adicionar logica explicita no `handleArchive`:
-- Apos o `mutateAsync`, forcar um `refetchQueries` (em vez de apenas `invalidateQueries`) para garantir que os dados frescos do servidor sejam buscados
-- Adicionar um pequeno delay antes de `onClose()` para permitir que o React processe o re-render
-
-## Arquivo a Modificar
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/components/kanban/KanbanChatPanel.tsx` | (1) Remover `onClose()` do `handleDepartmentChange`; (2) No `handleArchive`, trocar `invalidateQueries` por `refetchQueries` e garantir que o painel so feche apos o refetch completar |
+1. Obter o **user ID** do usuario logado (via `useAuth`)
+2. Ao receber uma mensagem de cliente, buscar a **conversa correspondente** no cache do React Query (queryKey `["conversations"]`) usando o `conversation_id` da mensagem
+3. Aplicar as regras de decisao antes de tocar o som
 
 ## Detalhes Tecnicos
 
-### handleDepartmentChange (linha 2678-2688)
+### Arquivo: `src/hooks/useMessageNotifications.tsx`
+
+**Novas dependencias:**
+- `useAuth` para obter `user.id` do atendente logado
+- `useQueryClient` do React Query para acessar o cache de conversas
+
+**Logica no `handleNewMessage`:**
+
 ```text
-const handleDepartmentChange = (deptId: string) => {
-  const newDeptId = currentDepartment?.id === deptId ? null : deptId;
-  updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId, clientId }, {
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      toast({ title: "Departamento atualizado" });
-      setDepartmentOpen(false);
-      // Removido: onClose() - manter painel aberto
-    },
-  });
-};
+// 1. Filtros existentes (mantem)
+if (message.is_from_me) return;
+if (message.sender_type !== 'client') return;
+
+// 2. Buscar conversa no cache do React Query
+const allConversations = queryClient.getQueryData(["conversations", lawFirm?.id]);
+const conversation = allConversations?.find(c => c.id === message.conversation_id);
+
+// 3. Se conversa esta com IA -> nao notificar ninguem
+if (conversation?.current_handler === 'ai') return;
+
+// 4. Se conversa tem atendente humano -> notificar apenas esse atendente
+if (conversation?.assigned_to) {
+  if (conversation.assigned_to !== user?.id) return;
+  // Se chegou aqui, o usuario logado E o atendente atribuido -> notifica
+}
+
+// 5. Se nao tem atendente (unassigned) -> notifica todos (nao faz return)
+// Continua para tocar o som e mostrar notificacao...
 ```
 
-### handleArchive (linhas 2510-2515)
+### Fluxo de decisao
+
 ```text
-await updateConversation.mutateAsync(updatePayload);
-// Forcar refetch para garantir dados atualizados
-await queryClient.refetchQueries({ queryKey: ["conversations"] });
-toast({ title: "Conversa arquivada" });
-setArchiveDialogOpen(false);
-onClose();
+Mensagem recebida (sender_type = 'client')
+  |
+  v
+Conversa com IA? ----SIM----> Nao notifica
+  |
+  NAO
+  |
+  v
+Conversa tem atendente humano? ----SIM----> Atendente logado = assigned_to?
+  |                                            |           |
+  NAO                                         SIM         NAO
+  |                                            |           |
+  v                                       Notifica    Nao notifica
+Notifica TODOS
 ```
 
 ## Impacto
 
-- **Risco**: Baixo - mudancas pontuais em callbacks
-- **Resultado**: (1) Painel fica aberto ao trocar departamento, card move para nova coluna; (2) Arquivamento atualiza o board imediatamente
+- **Risco**: Baixo - apenas adiciona filtros extras no hook existente
+- **Arquivo modificado**: Somente `src/hooks/useMessageNotifications.tsx`
+- **Resultado**: Cada atendente so ouve alertas das suas proprias conversas; conversas sem dono notificam todos; conversas com IA nao notificam ninguem
+
