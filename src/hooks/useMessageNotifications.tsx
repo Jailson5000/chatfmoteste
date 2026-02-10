@@ -29,8 +29,9 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
     (payload: { new: Message }) => {
       const message = payload.new;
 
-      // Only notify for incoming messages (not from me)
+      // Only notify for incoming client messages (not from AI, bot, or agents)
       if (message.is_from_me) return;
+      if (message.sender_type !== 'client') return;
 
       // Play notification sound if enabled
       if (soundEnabled) {
