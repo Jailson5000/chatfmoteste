@@ -40,12 +40,13 @@ export function NewContactDialog({
   const connectedInstances = instances.filter(i => i.status === "connected");
   const selectedInstance = connectedInstances.find(i => i.id === selectedConnection);
 
-  // Auto-select first connection when available
+  // Auto-select first connection only when dialog opens
   useEffect(() => {
-    if (connectedInstances.length > 0 && !selectedConnection) {
+    if (open && connectedInstances.length > 0 && !selectedConnection) {
       setSelectedConnection(connectedInstances[0].id);
     }
-  }, [connectedInstances, selectedConnection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const phoneDigits = unmask(phone);
   const isPhoneValid = phoneDigits.length >= 8;
