@@ -2679,7 +2679,8 @@ export function KanbanChatPanel({
     const newDeptId = currentDepartment?.id === deptId ? null : deptId;
     updateConversationDepartment.mutate({ conversationId, departmentId: newDeptId, clientId }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        // No manual invalidateQueries here - the hook's Realtime sync handles it
+        // Duplicate invalidation was causing race conditions that reverted optimistic updates
         toast({ title: "Departamento atualizado" });
         setDepartmentOpen(false);
       },
@@ -2698,7 +2699,7 @@ export function KanbanChatPanel({
       automationId: type === 'ai' ? automationId || null : null,
     }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        // No manual invalidateQueries here - the hook's Realtime sync handles it
         toast({
           title: type === 'ai' ? "Transferido para IA" : "Transferido para atendente",
           description: type === 'ai' ? `IA ativa: ${automations.find(a => a.id === automationId)?.name || 'Selecionada'}` : undefined,
