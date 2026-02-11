@@ -580,12 +580,8 @@ export function useConversations() {
       return { previousConversations };
     },
     onSuccess: async (_data, variables) => {
-      // Delayed invalidation - gives DB time to propagate before refetch
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        queryClient.invalidateQueries({ queryKey: ["clients"] });
-      }, 1000);
-      
+      // No manual invalidation here - Realtime via RealtimeSyncContext handles refetch
+      // Manual invalidation was causing race conditions that reverted optimistic updates
       toast({
         title: "Transferência realizada",
         description:
@@ -725,11 +721,8 @@ export function useConversations() {
       });
     },
     onSuccess: () => {
-      // Delayed invalidation - gives DB time to propagate before refetch
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
-      }, 1000);
+      // No manual invalidation here - Realtime via RealtimeSyncContext handles refetch
+      // Manual invalidation was causing race conditions that reverted optimistic updates
     },
     onSettled: (_data, _error, variables) => {
       clearOptimisticUpdateAfterDelay(variables.conversationId);
