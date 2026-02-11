@@ -6,6 +6,13 @@ import { useLawFirm } from "@/hooks/useLawFirm";
 import { useUserDepartments, NO_DEPARTMENT_ID } from "@/hooks/useUserDepartments";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 
+// Tracks optimistic updates to prevent refetch from reverting them
+interface PendingOptimisticUpdate {
+  fields: Record<string, any>;
+  timestamp: number;
+}
+const OPTIMISTIC_LOCK_DURATION_MS = 3000; // 3 seconds protection window
+
 type Conversation = Tables<"conversations">;
 
 interface ConversationWithLastMessage extends Conversation {
@@ -125,6 +132,9 @@ export function useConversations() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const offsetRef = useRef(0);
   const lawFirmIdRef = useRef<string | null>(null);
+  
+  // Mutation lock: protects optimistic updates from being overwritten by stale refetch data
+  const pendingOptimisticUpdates = useRef<Map<string, PendingOptimisticUpdate>>(new Map());
 
   // Initial fetch query
   const { data: initialData, isLoading: dataLoading, error } = useQuery({
@@ -159,6 +169,41 @@ export function useConversations() {
     enabled: !!lawFirm?.id,
   });
 
+  // Helper: register an optimistic update for a conversation
+  const registerOptimisticUpdate = useCallback((conversationId: string, fields: Record<string, any>) => {
+    pendingOptimisticUpdates.current.set(conversationId, {
+      fields,
+      timestamp: Date.now(),
+    });
+  }, []);
+
+  // Helper: clear an optimistic update after a delay
+  const clearOptimisticUpdateAfterDelay = useCallback((conversationId: string) => {
+    setTimeout(() => {
+      pendingOptimisticUpdates.current.delete(conversationId);
+    }, OPTIMISTIC_LOCK_DURATION_MS);
+  }, []);
+
+  // Helper: merge fresh data with optimistic protection
+  const mergeWithOptimisticProtection = useCallback((fresh: ConversationWithLastMessage, local: ConversationWithLastMessage): ConversationWithLastMessage => {
+    const pending = pendingOptimisticUpdates.current.get(fresh.id);
+    if (!pending) return fresh; // No pending optimistic update, use fresh data
+    
+    const elapsed = Date.now() - pending.timestamp;
+    if (elapsed > OPTIMISTIC_LOCK_DURATION_MS) {
+      // Lock expired, use fresh data
+      pendingOptimisticUpdates.current.delete(fresh.id);
+      return fresh;
+    }
+    
+    // Lock active: use fresh data BUT preserve optimistically updated fields from local
+    const merged = { ...fresh };
+    for (const field of Object.keys(pending.fields)) {
+      (merged as any)[field] = (local as any)[field];
+    }
+    return merged;
+  }, []);
+
   // Sync initialData to allConversations state
   useEffect(() => {
     if (initialData && lawFirm?.id) {
@@ -170,24 +215,20 @@ export function useConversations() {
         setHasMore(initialData.length === CONVERSATIONS_BATCH_SIZE);
       } else {
         // Same law firm - merge with existing (for realtime updates)
-        // CRITICAL: Update ALL matching conversations with fresh data from initialData
-        // This ensures status/department changes are properly reflected
         setAllConversations(prev => {
           const initialMap = new Map(initialData.map(c => [c.id, c]));
           
-          // Update existing conversations with fresh data, keep others
+          // Update existing conversations with fresh data, BUT protect optimistic fields
           const updatedPrev = prev.map(c => {
             const fresh = initialMap.get(c.id);
-            // If conversation exists in initialData, use the fresh version
-            return fresh ? fresh : c;
+            if (!fresh) return c; // Not in refetch, keep local
+            return mergeWithOptimisticProtection(fresh, c);
           });
           
           // Add any new conversations from initialData that weren't in prev
           const existingIds = new Set(prev.map(c => c.id));
           const newConversations = initialData.filter(c => !existingIds.has(c.id));
           
-          // Combine: fresh updated data + new conversations
-          // Sort by last_message_at, falling back to created_at for conversations without messages
           const combined = [...updatedPrev, ...newConversations];
           return combined.sort((a, b) => {
             const aTime = a.last_message_at 
@@ -201,7 +242,7 @@ export function useConversations() {
         });
       }
     }
-  }, [initialData, lawFirm?.id]);
+  }, [initialData, lawFirm?.id, mergeWithOptimisticProtection]);
 
   // Load more conversations
   const loadMoreConversations = useCallback(async () => {
@@ -295,6 +336,9 @@ export function useConversations() {
       // Cancel outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: ["conversations"] });
       
+      // Register optimistic lock to protect against stale refetch
+      registerOptimisticUpdate(id, updates);
+      
       // Optimistically update local state for immediate UI feedback
       setAllConversations(prev => 
         prev.map(conv => 
@@ -313,10 +357,16 @@ export function useConversations() {
           )
         );
       }
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      // NOTE: Removed immediate invalidateQueries here - Realtime handles it via RealtimeSyncContext
+      // The optimistic lock protects against stale data from the delayed refetch
+    },
+    onSettled: (_data, _error, variables) => {
+      // Clear optimistic lock after delay (gives DB time to propagate)
+      clearOptimisticUpdateAfterDelay(variables.id);
     },
     onError: (error) => {
       // Revert on error by refetching
+      pendingOptimisticUpdates.current.delete(error.message); // cleanup
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao atualizar conversa",
@@ -509,16 +559,20 @@ export function useConversations() {
       await queryClient.cancelQueries({ queryKey: ["conversations"] });
       const previousConversations = queryClient.getQueryData(["conversations"]);
 
+      const optimisticFields = {
+        current_handler: variables.handlerType,
+        assigned_to: variables.assignedTo || null,
+        current_automation_id: variables.handlerType === 'ai' ? variables.automationId || null : null,
+      };
+      
+      // Register optimistic lock
+      registerOptimisticUpdate(variables.conversationId, optimisticFields);
+
       // Optimistically update local state for immediate UI feedback
       setAllConversations(prev =>
         prev.map(conv =>
           conv.id === variables.conversationId
-            ? {
-                ...conv,
-                current_handler: variables.handlerType,
-                assigned_to: variables.assignedTo || null,
-                current_automation_id: variables.handlerType === 'ai' ? variables.automationId || null : null,
-              }
+            ? { ...conv, ...optimisticFields }
             : conv
         )
       );
@@ -526,11 +580,11 @@ export function useConversations() {
       return { previousConversations };
     },
     onSuccess: async (_data, variables) => {
-      // Force immediate refetch to update UI with new automation name
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      await queryClient.refetchQueries({ queryKey: ["conversations"] });
-      // Also invalidate clients to update assigned_to column
-      await queryClient.invalidateQueries({ queryKey: ["clients"] });
+      // Delayed invalidation - gives DB time to propagate before refetch
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["clients"] });
+      }, 1000);
       
       toast({
         title: "Transferência realizada",
@@ -540,12 +594,15 @@ export function useConversations() {
             : "A conversa foi transferida para o atendente selecionado.",
       });
     },
+    onSettled: (_data, _error, variables) => {
+      clearOptimisticUpdateAfterDelay(variables.conversationId);
+    },
     onError: (error, _variables, context) => {
       // Rollback optimistic update on error
       if (context?.previousConversations) {
         queryClient.setQueryData(["conversations"], context.previousConversations);
       }
-      // Also revert local state
+      pendingOptimisticUpdates.current.delete(_variables.conversationId);
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao transferir",
@@ -615,12 +672,30 @@ export function useConversations() {
       // Snapshot current conversations
       const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
 
-      // Optimistically update to the new department_id in queryClient
+      // Build full department object from cache for immediate Kanban rendering
+      let departmentObject: { id: string; name: string; color: string } | null = null;
+      if (departmentId) {
+        const cachedDepartments = queryClient.getQueryData<any[]>(["departments"]);
+        const dept = cachedDepartments?.find((d: any) => d.id === departmentId);
+        if (dept) {
+          departmentObject = { id: dept.id, name: dept.name, color: dept.color || '#gray' };
+        }
+      }
+
+      const optimisticFields: Record<string, any> = { 
+        department_id: departmentId,
+        department: departmentObject,
+      };
+      
+      // Register optimistic lock to protect against stale refetch
+      registerOptimisticUpdate(conversationId, optimisticFields);
+
+      // Optimistically update to the new department in queryClient
       queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
         if (!old) return old;
         return old.map((conv) =>
           conv.id === conversationId
-            ? { ...conv, department_id: departmentId }
+            ? { ...conv, ...optimisticFields }
             : conv
         );
       });
@@ -629,7 +704,7 @@ export function useConversations() {
       setAllConversations(prev => 
         prev.map(conv => 
           conv.id === conversationId 
-            ? { ...conv, department_id: departmentId } 
+            ? { ...conv, ...optimisticFields } 
             : conv
         )
       );
@@ -638,6 +713,7 @@ export function useConversations() {
     },
     onError: (error, _vars, context) => {
       // Rollback on error - both queryClient and local state
+      pendingOptimisticUpdates.current.delete(_vars.conversationId);
       if (context?.previousConversations) {
         queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
         setAllConversations(context.previousConversations);
@@ -648,9 +724,15 @@ export function useConversations() {
         variant: "destructive",
       });
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
+    onSuccess: () => {
+      // Delayed invalidation - gives DB time to propagate before refetch
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        queryClient.invalidateQueries({ queryKey: ["chat-activity-actions"] });
+      }, 1000);
+    },
+    onSettled: (_data, _error, variables) => {
+      clearOptimisticUpdateAfterDelay(variables.conversationId);
     },
   });
 
