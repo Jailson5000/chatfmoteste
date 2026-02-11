@@ -1,95 +1,97 @@
 
+# Corrigir Kanban: Atualizacoes Visuais Atrasadas com Muitas Conversas
 
-# Preparar Sistema para 50 Empresas Professional
+## Causa Raiz Identificada
 
-## Contexto
+O problema esta na **corrida entre atualizacao otimista e refetch do banco**. Veja o que acontece passo a passo:
 
-50 empresas PROFESSIONAL = 200 usuarios, 200 instancias WhatsApp, ~20.000 mensagens/dia. O sistema atual suporta 7 empresas com 8 instancias. A escala exige mudancas em **infraestrutura** e **otimizacoes de codigo**.
+```text
+1. Usuario arrasta conversa para novo departamento
+2. onMutate: atualiza allConversations otimisticamente (UI muda INSTANTANEAMENTE)
+3. mutationFn: executa 4-5 queries no banco (busca dept atual, novo dept, update, log)
+4. onSettled: chama invalidateQueries(["conversations"])
+5. Refetch: executa get_conversations_with_metadata (APENAS os primeiros 30)
+6. useEffect sync: SOBRESCREVE allConversations com dados "frescos" do refetch
+7. Realtime: 300ms depois, OUTRA invalidacao chega via RealtimeSyncContext
+8. RESULTADO: dados antigos do refetch REVERTEM a atualizacao otimista
+```
 
-## Acoes Divididas em Camadas
+O problema piora com muitas conversas porque:
+- A RPC `get_conversations_with_metadata` fica mais lenta (mais dados para processar)
+- O Kanban carrega TODAS as conversas (auto-load loop nas linhas 83-87)
+- Cada refetch retorna apenas 30 conversas, mas o `useEffect` de sync (linhas 162-204) substitui as correspondentes com dados "frescos" -- que podem estar DESATUALIZADOS por causa da latencia do banco
 
-### Camada 1: Otimizacoes de Codigo (fazer agora, risco baixo)
+## Solucao Proposta
 
-**1.1 - Lazy Loading no App.tsx**
-- Converter ~35 paginas para `React.lazy()`
-- Reduz bundle inicial em ~40-60%
-- Risco: muito baixo
+### Mudanca 1: Proteger atualizacoes otimistas contra refetch prematuro
 
-**1.2 - Ativar `subscribeToConversation` nos consumidores**
-- Adicionar chamadas em `Conversations.tsx` e `KanbanChatPanel.tsx`
-- Prepara terreno para eliminar canais redundantes depois
-- Risco: baixo
+Adicionar um mecanismo de "mutation lock" no `useConversations.tsx`. Enquanto houver mutations ativas, o `useEffect` de sync nao sobrescreve os campos que foram modificados otimisticamente.
 
-**1.3 - Configurar `staleTime` global no QueryClient**
-- Adicionar `staleTime: 1000 * 60 * 2` e `gcTime: 1000 * 60 * 10` no QueryClient do App.tsx
-- Reduz refetches desnecessarios em ~60%
-- Risco: muito baixo
+**Arquivo: `src/hooks/useConversations.tsx`**
 
-### Camada 2: Limpeza Automatica de Dados (fazer em seguida)
+- Criar um `ref` chamado `pendingOptimisticUpdates` (Map de conversationId para campos atualizados)
+- No `onMutate`: registrar quais campos foram atualizados otimisticamente
+- No `onSettled`: remover o registro apos um delay de 2 segundos (tempo para o banco propagar)
+- No `useEffect` de sync (linhas 162-204): ao fazer merge, preservar campos que estao em `pendingOptimisticUpdates`
 
-**2.1 - Edge Function de arquivamento de mensagens**
-- Criar `archive-old-messages` que move mensagens com mais de 90 dias para uma tabela `messages_archive`
-- Agendar via cron (1x por semana)
-- Mantem o banco dentro do limite de 8 GB por mais tempo
-- Risco: baixo (dados arquivados, nao deletados)
+### Mudanca 2: Eliminar invalidacoes duplicadas
 
-**2.2 - Limpeza de webhook_logs mais agressiva**
-- Reduzir retencao de 7 para 3 dias
-- Risco: muito baixo
+Atualmente, cada mutation chama `invalidateQueries` no `onSuccess` ou `onSettled`, E o Realtime tambem dispara invalidacao 300ms depois. Isso causa 2 refetches para cada acao.
 
-### Camada 3: Infraestrutura (decisoes do administrador)
+**Arquivo: `src/hooks/useConversations.tsx`**
 
-**3.1 - Escalar VPS da Evolution API**
-- Atual: 1 VPS de 8 GB (~25 instancias)
-- Necessario: 3-4 VPS de 32 GB cada (~50 instancias por servidor)
-- O sistema ja suporta multiplas `evolution_api_connections` -- basta registrar os novos servidores no painel admin
-- Nao requer mudanca de codigo
+- Remover `invalidateQueries` do `onSuccess` de `updateConversation` (ja faz no `onSettled` via Realtime)
+- Mover `invalidateQueries` do `onSettled` de `updateConversationDepartment` para `onSuccess` com um `setTimeout` de 1 segundo (dar tempo ao banco para propagar)
 
-**3.2 - Avaliar plano Supabase**
-- Se a otimizacao de canais (Camada 1) reduzir para 2 canais por usuario: 200 x 2 = 400 (dentro do limite Pro de 500)
-- Se ultrapassar: upgrade para Team ($599/mes) ou Enterprise
-- Storage: avaliar upgrade de 8 GB para 64 GB ou superior
+### Mudanca 3: Atualizar departamento no objeto local (incluindo nome e cor)
 
-**3.3 - Monitoramento de crescimento do banco**
-- O dashboard de infraestrutura (`InfrastructureMonitor.tsx`) ja existe e monitora DB + Storage
-- Alertas automaticos em 70% e 85% ja estao configurados
-- Nenhuma mudanca necessaria
+O `onMutate` de `updateConversationDepartment` atualiza apenas `department_id`, mas o Kanban usa `conv.department` (objeto com id, name, color) para renderizar. Isso causa dessincronia visual.
 
-### Camada 4: Otimizacao Avancada (fazer depois da Camada 1)
+**Arquivo: `src/hooks/useConversations.tsx`**
 
-**4.1 - Eliminar canais Realtime redundantes (Fase 2)**
-- Migrar logica de reconciliacao do `useMessagesWithPagination` para o `RealtimeSyncContext`
-- Reduz de ~4 para ~2 canais por usuario
-- Risco: medio-alto, requer teste extensivo
+- No `onMutate` de `updateConversationDepartment`: tambem atualizar o campo `department` (objeto completo) usando dados dos departments ja carregados
+- Isso requer passar os departments como parametro ou buscar do cache do queryClient
+
+### Mudanca 4: Evitar refetch parcial que sobrescreve dados carregados
+
+O `useQuery` refetch retorna apenas 30 conversas (offset 0). Se a conversa movida esta na posicao 31+, ela nao e atualizada pelo refetch, mas tambem nao e revertida. Porem se esta nas primeiras 30, os dados antigos do banco (que ainda nao propagou) revertem o otimista.
+
+**Arquivo: `src/hooks/useConversations.tsx`**
+
+- No `useEffect` de sync: adicionar verificacao de timestamp. So substituir uma conversa local se o dado do refetch for mais recente que a ultima atualizacao otimista
 
 ---
 
-## Resumo de Capacidade Apos Implementacao
+## Detalhes Tecnicos
 
-| Recurso | Atual | Apos Camadas 1-3 | Meta 50 empresas |
-|---------|-------|-------------------|------------------|
-| Instancias WhatsApp | 25-30 max | 150-200 (com 3-4 VPS) | 200 |
-| Canais Realtime | ~500 max | ~400 (com otimizacao) | 400 |
-| Banco de dados | 8 GB (3 meses) | 8 GB (12+ meses com archiving) | OK |
-| Bundle frontend | 100% | ~50% (com lazy loading) | OK |
-| Refetches | frequentes | -60% (com staleTime) | OK |
+### pendingOptimisticUpdates (novo ref)
 
-## Investimento Estimado em Infraestrutura
+```text
+Tipo: Map<string, { fields: Record<string, any>, timestamp: number }>
 
-| Item | Custo Mensal |
-|------|-------------|
-| 3 VPS 32GB (Evolution API) | ~R$ 1.500 - 2.500 |
-| Supabase Pro (atual) | ~$25/mes |
-| Supabase Team (se necessario) | ~$599/mes |
-| **Total infraestrutura** | **~R$ 2.000 - 5.000/mes** |
-| **Receita 50 empresas** | **R$ 44.850/mes** |
-| **Margem bruta** | **~90-95%** |
+Fluxo:
+  onMutate  -> pendingOptimisticUpdates.set(convId, { fields: { department_id }, timestamp: Date.now() })
+  sync effect -> ao fazer merge, se convId esta no Map e timestamp < 2s, preservar os fields listados
+  onSettled -> setTimeout(2000, () => pendingOptimisticUpdates.delete(convId))
+```
 
-## Ordem de Execucao Recomendada
+### Impacto nas Mutations Existentes
 
-1. Camada 1 (codigo) -- pode ser feito agora, sem risco
-2. Camada 3.1 (VPS) -- quando atingir 20-25 instancias
-3. Camada 2 (archiving) -- quando banco atingir 4 GB
-4. Camada 3.2 (Supabase) -- quando atingir 400 conexoes simultaneas
-5. Camada 4 (Realtime avancado) -- quando canais ficarem apertados
+| Mutation | Mudanca |
+|----------|---------|
+| `updateConversation` | Adicionar registro em pendingOptimisticUpdates no onMutate. Remover invalidateQueries do onSuccess (Realtime ja cobre) |
+| `updateConversationDepartment` | Adicionar department object no onMutate. Registrar em pendingOptimisticUpdates. Delay no invalidate |
+| `updateConversationStatus` | Sem mudanca (nao tem onMutate otimista) |
+| `transferHandler` | Ja tem onMutate correto, adicionar registro em pendingOptimisticUpdates |
 
+### Risco
+
+| Aspecto | Avaliacao |
+|---------|-----------|
+| Risco de quebra | **Baixo** - so muda quando o merge acontece, nao a logica de negocio |
+| Impacto se falhar | Comportamento atual (precisa de F5) - nao piora |
+| Teste necessario | Mover conversas entre departamentos, arquivar, transferir handler com 50+ conversas carregadas |
+
+### Arquivos Modificados
+
+1. `src/hooks/useConversations.tsx` - mecanismo de protecao otimista + limpeza de invalidacoes duplicadas
