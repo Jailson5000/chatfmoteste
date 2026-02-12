@@ -1,84 +1,86 @@
 
 
-# Correcao Definitiva: Status e Tags para TODAS as Conversas (30, 200, 1500+)
+# Correcao: Cards de Conversas nao atualizam Status em tempo real
 
-## Problema Real
+## Problema Identificado
 
-As correcoes anteriores passaram as mutacoes corretas via props, mas a mutacao `updateClientStatus` tem um **bug critico**: ela faz `setAllConversations` mas **NAO registra um lock otimista** (`registerOptimisticUpdate`). Quando o Realtime dispara ~300ms depois e o sync effect roda `mergeWithOptimisticProtection`, ele nao encontra nenhum lock e **sobrescreve** a mudanca com dados stale do banco.
+Na pagina de **Conversas** (`/conversations`), o card da sidebar le o status da conversa assim:
 
-Para tags, o `handleTagToggle` faz operacoes diretas no Supabase sem nunca atualizar o campo `conversation.tags` no `allConversations` local.
+```text
+clientStatus: conv.client?.custom_status || null
+```
+
+Ou seja, ele le o **objeto completo** `{id, name, color}` do campo `custom_status` (que vem do JOIN no banco). Porem, a atualizacao otimista no `useConversations.tsx` so atualiza `custom_status_id` (o ID), sem atualizar o objeto `custom_status`:
+
+```text
+client: { ...client, custom_status_id: statusId }
+// custom_status continua com o valor ANTIGO!
+```
+
+**Resultado:** O card continua mostrando o badge do status antigo ate o proximo refetch.
+
+**Segundo problema:** O componente `ContactStatusTags` (painel lateral direito na pagina de Conversas) usa `useClients().updateClientStatus` -- uma mutacao separada que nao atualiza `allConversations` e nao registra lock otimista. Para conversas alem da 31a, o status nunca atualiza no card da sidebar.
 
 ---
 
-## Correcao 1: Adicionar lock otimista ao `updateClientStatus` (CRITICO)
+## Plano de Correcao
 
-**Arquivo:** `src/hooks/useConversations.tsx` (linhas 837-890)
-
-O `onMutate` ja faz `setAllConversations` corretamente. Falta apenas:
-
-1. Encontrar o `conversationId` correspondente ao `clientId` para registrar o lock
-2. Chamar `registerOptimisticUpdate(conversationId, { client: ... })` para proteger contra refetch stale
-3. No `onSettled`, chamar `clearOptimisticUpdateAfterDelay(conversationId)` para limpar o lock apos 3 segundos
-
-Mudanca no `onMutate`:
-```text
-// Antes do return { previousConversations }:
-// Find conversation by clientId to register lock
-const targetConv = allConversations.find(c => {
-  const client = c.client as { id?: string } | null;
-  return client?.id === clientId;
-});
-if (targetConv) {
-  registerOptimisticUpdate(targetConv.id, { client: { custom_status_id: statusId } });
-}
-```
-
-Mudanca no `onSettled`:
-```text
-onSettled: (_data, _error, variables) => {
-  // Find conversation to clear lock
-  const targetConv = allConversations.find(c => {
-    const client = c.client as { id?: string } | null;
-    return client?.id === variables.clientId;
-  });
-  if (targetConv) {
-    clearOptimisticUpdateAfterDelay(targetConv.id);
-  }
-  queryClient.invalidateQueries({ queryKey: ["clients"] });
-  queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
-  queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
-},
-```
-
-## Correcao 2: Atualizar `allConversations` no `handleTagToggle` (CRITICO)
-
-**Arquivo:** `src/components/kanban/KanbanChatPanel.tsx` (linhas 2622-2694)
-
-O KanbanCard le tags de `conversation.tags` (array de strings). Quando uma tag e adicionada/removida, precisamos atualizar esse campo localmente via uma mutacao compartilhada.
-
-Abordagem: Adicionar nova prop `setAllConversationsFn` que permite ao painel atualizar o estado compartilhado de conversas, OU usar a mutacao `updateConversationTags` do `useConversations` que ja existe (linha 773).
-
-**Opcao escolhida (mais limpa):** Usar `updateConversationTags` do `useConversations` via prop.
-
-Mas `updateConversationTags` atualiza `conversations.tags` (tabela conversations), enquanto `handleTagToggle` manipula `client_tags` (tabela separada). Sao coisas diferentes.
-
-**Solucao real:** Apos a operacao no Supabase, atualizar `allConversations` localmente via `setAllConversations` passado como prop:
-
-1. Adicionar prop `setAllConversationsFn` no `KanbanChatPanel`
-2. Apos insert/delete na `client_tags`, chamar `setAllConversationsFn` para atualizar o `client_tags` da conversa correspondente
-3. Registrar lock otimista via prop `registerOptimisticUpdateFn`
-
-**Arquivo:** `src/pages/Kanban.tsx`
-- Passar `setAllConversations` e `registerOptimisticUpdate` como props
+### Correcao 1: Incluir o objeto `custom_status` completo na atualizacao otimista
 
 **Arquivo:** `src/hooks/useConversations.tsx`
-- Exportar `setAllConversations` e `registerOptimisticUpdate` no retorno do hook (ja retorna `setAllConversations` se necessario; verificar)
 
-## Correcao 3: Remover `invalidateQueries(["conversations"])` com delay no handleTagToggle
+No `onMutate` do `updateClientStatus`, alem de setar `custom_status_id`, tambem setar `custom_status` com o objeto `{id, name, color}` correto. Para isso, precisamos buscar o status na cache do React Query (`["custom_statuses", lawFirm?.id]`).
 
-**Arquivo:** `src/components/kanban/KanbanChatPanel.tsx` (linhas 2686-2690)
+Mudanca no `onMutate` (linhas 837-878):
 
-Com a correcao 2 implementada, a invalidacao manual com setTimeout nao e mais necessaria e causa o mesmo problema de race condition para conversas antigas. Remover.
+```text
+onMutate: async ({ clientId, statusId }) => {
+  await queryClient.cancelQueries({ queryKey: ["conversations"] });
+
+  // Lookup status object from cache
+  const cachedStatuses = queryClient.getQueryData<Array<{id: string; name: string; color: string}>>(
+    ["custom_statuses", lawFirm?.id]
+  );
+  const statusObj = statusId 
+    ? cachedStatuses?.find(s => s.id === statusId) || null 
+    : null;
+
+  // ... setQueryData e setAllConversations passam a incluir:
+  client: { 
+    ...client, 
+    custom_status_id: statusId,
+    custom_status: statusObj ? { id: statusObj.id, name: statusObj.name, color: statusObj.color } : null
+  }
+```
+
+Isso garante que `conv.client?.custom_status` retorne o objeto correto imediatamente, tanto no `queryClient` cache quanto no `allConversations` local.
+
+### Correcao 2: Fazer `ContactStatusTags` usar a mutacao compartilhada
+
+**Arquivo:** `src/pages/Conversations.tsx`
+
+O `handleChangeStatus` (linha 2637) ja usa `updateClientStatus` do `useConversations()`. Porem, o componente `ContactStatusTags` (renderizado no painel lateral direito) usa internamente `useClients().updateClientStatus` -- uma mutacao completamente separada.
+
+**Solucao:** Passar `handleChangeStatus` como prop para `ContactStatusTags`, ou adicionar uma prop `onStatusChange` que sobrescreva o comportamento interno.
+
+**Arquivo:** `src/components/conversations/ContactStatusTags.tsx`
+
+Adicionar prop opcional `onStatusChange?: (statusId: string | null) => void`. Quando presente, usar essa funcao em vez de `useClients().updateClientStatus`. Isso permite que o componente funcione tanto standalone quanto integrado com o estado compartilhado.
+
+### Correcao 3: Adicionar atualizacao otimista para tags no `updateConversationTags`
+
+**Arquivo:** `src/hooks/useConversations.tsx`
+
+O `updateConversationTags` (linha 773) nao tem `onMutate` -- nenhuma atualizacao otimista. Ele so faz `invalidateQueries(["conversations"])` no `onSuccess`, que nao funciona para conversas alem da 31a.
+
+**Adicionar:**
+- `onMutate`: Atualizar `conversations.tags` no `allConversations` e registrar lock
+- `onSettled`: Limpar lock
+- `onError`: Rollback
+
+**Nota:** A sidebar de Conversas le tags de `conv.client_tags` (tabela `client_tags`), nao de `conv.tags`. Porem, o `handleChangeTags` chama `updateConversationTags` que atualiza `conversations.tags`. Isso indica uma inconsistencia: o componente `ContactStatusTags` manipula `client_tags` (tabela separada), enquanto `updateConversationTags` atualiza `conversations.tags`. Ambos os caminhos precisam atualizar `allConversations` localmente para refletir no card.
+
+Para tags via `ContactStatusTags`, a mesma abordagem da Correcao 2 sera usada: passar uma callback `onTagsChange` que atualize o `allConversations` diretamente.
 
 ---
 
@@ -88,33 +90,22 @@ Com a correcao 2 implementada, a invalidacao manual com setTimeout nao e mais ne
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/hooks/useConversations.tsx` | Adicionar `registerOptimisticUpdate` + `clearOptimisticUpdateAfterDelay` no `updateClientStatus`; exportar `setAllConversations`, `registerOptimisticUpdate`, `clearOptimisticUpdateAfterDelay` |
-| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar props para `setAllConversationsFn`, `registerOptimisticUpdateFn`, `clearOptimisticUpdateAfterDelayFn`; atualizar `handleTagToggle` para update otimista local; remover setTimeout invalidation |
-| `src/pages/Kanban.tsx` | Passar as novas props do hook para o painel |
+| `src/hooks/useConversations.tsx` | Incluir `custom_status` objeto no `onMutate` de `updateClientStatus`; adicionar `onMutate` com update otimista ao `updateConversationTags` |
+| `src/components/conversations/ContactStatusTags.tsx` | Adicionar prop `onStatusChange` e `onTagsChange` opcionais |
+| `src/pages/Conversations.tsx` | Passar `handleChangeStatus` e callback de tags para `ContactStatusTags` |
 
-### Por que isso funciona para 32, 200, 1500 conversas
+### Fluxo Corrigido (Status na pagina Conversas)
 
-O `allConversations` acumula TODAS as conversas carregadas (incluindo paginadas). O `setAllConversations` atualiza diretamente esse array completo, independente de quantas conversas existem. O `registerOptimisticUpdate` protege o campo atualizado por 3 segundos contra refetches parciais (que so trazem as primeiras 30). Isso garante que mesmo a conversa #1500 mantenha seu status/tag correto apos o update.
+1. Usuario clica "Analise" no painel lateral direito
+2. `onStatusChange` (prop) chama `handleChangeStatus` -> `updateClientStatus.mutate()`
+3. `onMutate` busca status `{id, name, color}` do cache de `custom_statuses`
+4. `setAllConversations` atualiza `client.custom_status_id` E `client.custom_status`
+5. `mappedConversations` recalcula -> `clientStatus` tem o objeto correto -> badge atualiza
+6. Lock de 3s protege contra refetch stale
 
-### Fluxo Corrigido (Status)
+### Risco
 
-1. Usuario clica "Qualificado" no painel
-2. `onMutate` -> `setAllConversations` atualiza o `client.custom_status_id` -> card move instantaneamente
-3. `registerOptimisticUpdate(convId, { client })` -> lock de 3s ativo
-4. Realtime dispara apos ~300ms -> refetch traz 30 primeiras conversas
-5. Sync effect roda `mergeWithOptimisticProtection` -> encontra lock ativo -> preserva status otimista
-6. Lock expira apos 3s -> proximo refetch atualiza com dados confirmados do banco
-
-### Fluxo Corrigido (Tags)
-
-1. Usuario clica tag no painel
-2. Supabase insert/delete em `client_tags` executa
-3. `setAllConversationsFn` atualiza `client_tags` da conversa localmente -> tag aparece/desaparece no card
-4. `registerOptimisticUpdateFn` protege por 3s
-5. Realtime confirma -> merge protegido mantem a tag correta
-
-## Risco
-- **Baixo**: Adiciona logica de lock que ja existe em todas as outras mutacoes
-- **Sem breaking changes**: Props opcionais com fallback
-- **Padrao consistente**: Todas as mutacoes agora seguem o mesmo pattern de lock otimista
+- **Muito baixo**: Apenas adiciona dados que ja existem no cache ao update otimista
+- **Sem breaking changes**: Props opcionais com fallback para comportamento atual
+- **Retrocompativel**: `ContactStatusTags` continua funcionando standalone em outros contextos
 
