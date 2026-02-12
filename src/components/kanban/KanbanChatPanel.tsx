@@ -1035,6 +1035,10 @@ interface KanbanChatPanelProps {
   members: TeamMember[];
   automations: Automation[];
   onClose: () => void;
+  /** Shared mutations from parent Kanban to operate on the same state */
+  updateConversationMutation?: ReturnType<typeof useConversations>['updateConversation'];
+  updateConversationDepartmentMutation?: ReturnType<typeof useConversations>['updateConversationDepartment'];
+  transferHandlerMutation?: ReturnType<typeof useConversations>['transferHandler'];
 }
 
 export function KanbanChatPanel({
@@ -1062,6 +1066,9 @@ export function KanbanChatPanel({
   members,
   automations,
   onClose,
+  updateConversationMutation,
+  updateConversationDepartmentMutation,
+  transferHandlerMutation,
 }: KanbanChatPanelProps) {
   // Determine if this is a WhatsApp conversation (robust detection)
   // Criteria: origin='whatsapp' OR remote_jid ends with @s.whatsapp.net
@@ -1080,7 +1087,10 @@ export function KanbanChatPanel({
   const { toast } = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { transferHandler, updateConversation, updateConversationDepartment } = useConversations();
+  const localConversations = useConversations();
+  const transferHandler = transferHandlerMutation ?? localConversations.transferHandler;
+  const updateConversation = updateConversationMutation ?? localConversations.updateConversation;
+  const updateConversationDepartment = updateConversationDepartmentMutation ?? localConversations.updateConversationDepartment;
   const { updateClientStatus, updateClient } = useClients();
   const { lawFirm } = useLawFirm();
   const lawFirmId = lawFirm?.id;
@@ -1857,7 +1867,7 @@ export function KanbanChatPanel({
             .eq("id", conversationId);
           
           // Force cache invalidation for Kanban sync
-          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+           
           
           // Update optimistic message status
           setMessages(prev => prev.map(m => 
@@ -2115,7 +2125,7 @@ export function KanbanChatPanel({
           .eq("id", conversationId);
         
         // Force cache invalidation for Kanban sync
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+         
       } else {
         // WhatsApp: send directly via Evolution API (async, no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending file via Evolution API (async)');
@@ -2266,7 +2276,7 @@ export function KanbanChatPanel({
           .eq("id", conversationId);
         
         // Force cache invalidation for Kanban sync
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+         
       } else {
         // WhatsApp: send directly via Evolution API (async, no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending media via Evolution API (async)');
@@ -2407,7 +2417,7 @@ export function KanbanChatPanel({
           .eq("id", conversationId);
         
         // Force cache invalidation for Kanban sync
-        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+         
       } else {
         // WhatsApp: send directly via Evolution API (no storage upload needed)
         console.log('[Kanban] WhatsApp channel - sending media via Evolution API');
@@ -2669,7 +2679,7 @@ export function KanbanChatPanel({
     // Invalidate queries to sync all components
     queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    
     
     toast({ title: "Tags atualizadas" });
   };
