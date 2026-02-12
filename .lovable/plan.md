@@ -1,129 +1,75 @@
 
+# Solução: Corrigir OAuth Meta com Subdomínios - Configuração + Código
 
-# Corrigir OAuth Meta: Popup + Redirect URI Fixo + Dominio miauchat.com.br
+## O Problema
 
-## O que configurar no Meta Developer Dashboard
+O sistema usa subdomínios dinâmicos (`suporte.miauchat.com.br`, `admin.miauchat.com.br`, etc), mas o Meta OAuth exige que **todos os domínios estejam explicitamente registrados** no Meta Developer Dashboard. Adicionar todos os subdomínios manualmente é impraticável.
 
-Na tela que voce esta vendo ("Login do Facebook para Empresas" > Configuracoes), preencha assim:
+**Erro na imagem**: "Não é possível carregar a URL" - O domínio do callback não está autorizado.
 
-### URIs de redirecionamento do OAuth validos
-Adicione estas URIs (uma por linha):
-```
-https://miauchat.com.br/auth/meta-callback
-https://chatfmoteste.lovable.app/auth/meta-callback
-```
+## A Solução de Dois Lados
 
-A primeira e para producao (seu dominio). A segunda e para testes no Lovable.
+### 1. CONFIGURAÇÃO META DEVELOPER DASHBOARD (você precisa fazer manualmente)
 
-### Dominios permitidos para o SDK do JavaScript
+Em "Facebook Login for Business" > "Settings":
+
+**App Domains** (campo principal):
 ```
 miauchat.com.br
 chatfmoteste.lovable.app
 ```
 
-### Configuracoes de OAuth do cliente
-- **Login no OAuth do cliente**: Sim
-- **Login do OAuth na Web**: Sim
-- **Forcar HTTPS**: Sim
-- **Usar modo estrito para URIs de redirecionamento**: Sim
-- **Login OAuth no navegador incorporado**: Nao
-- **Forcar reautenticacao do OAuth na Web**: Nao
-
-### Desautorizar URL de retorno de chamada
+**Valid OAuth Redirect URIs** (deve ser exatamente):
 ```
-https://miauchat.com.br/auth/meta-deauth
+https://miauchat.com.br/auth/meta-callback
+https://chatfmoteste.lovable.app/auth/meta-callback
 ```
 
-### Solicitacoes de exclusao de dados
-```
-https://miauchat.com.br/auth/meta-data-deletion
-```
+**OAuth Client Settings**:
+- ✅ Client OAuth Login: Sim
+- ✅ Web OAuth Login: Sim
+- ✅ Enforce HTTPS: Sim
+- ✅ Use Strict Mode for Redirect URIs: Sim
+- ❌ OAuth Login in Embedded Browser: Não
+- ❌ Force Web OAuth Reauthentication: Não
 
-(Esses dois ultimos podem ser URLs simples que retornam um JSON de confirmacao -- a Meta exige que existam mas nao precisa de logica complexa.)
+**IMPORTANTE**: Adicione APENAS os domínios RAIZ, não os subdomínios. O Meta aceita requisições de qualquer subdomínio do domínio raiz.
 
----
+### 2. VERIFICAÇÃO E MELHORIAS DO CÓDIGO
 
-## Mudancas no codigo
+**Arquivo `src/lib/meta-config.ts`**: ✅ Já está correto
+- `getFixedRedirectUri()` retorna domínios fixos, não subdomínios dinâmicos
+- Funciona para `miauchat.com.br` e `chatfmoteste.lovable.app`
 
-### Mudanca 1: Redirect URI fixo no `meta-config.ts`
+**Arquivo `src/pages/MetaAuthCallback.tsx`**: ✅ Já está correto
+- Usa `getFixedRedirectUri()` para garantir consistência
+- Suporta popup com `postMessage`
 
-Em vez de usar `window.location.origin` (que muda por subdominio), usar um dominio fixo. Detectar automaticamente se esta em producao (`miauchat.com.br`) ou desenvolvimento (`chatfmoteste.lovable.app`).
+**Arquivo `FacebookIntegration.tsx` e `InstagramIntegration.tsx`**: ✅ Já estão corretos
+- Abrem popup (não navegação direta)
+- Escutam `postMessage` para resultado
 
-```typescript
-function getFixedRedirectUri(): string {
-  const origin = window.location.origin;
-  if (origin.includes("miauchat.com.br")) {
-    return "https://miauchat.com.br/auth/meta-callback";
-  }
-  return "https://chatfmoteste.lovable.app/auth/meta-callback";
-}
-```
+**Edge Function `meta-oauth-callback/index.ts`**: ✅ Já está correto
+- Aceita `redirectUri` do frontend
+- Usa esse valor para trocar o código
 
-Usar essa funcao em `buildMetaOAuthUrl` para garantir que o `redirect_uri` sempre corresponda ao que esta cadastrado na Meta.
+## Fluxo Final (Após Configuração)
 
-### Mudanca 2: Voltar ao popup com postMessage
+1. Usuário em `suporte.miauchat.com.br` clica "Conectar com Instagram"
+2. `buildMetaOAuthUrl()` retorna:
+   ```
+   https://www.facebook.com/v21.0/dialog/oauth?client_id=...&redirect_uri=https%3A%2F%2Fmiauchat.com.br%2Fauth%2Fmeta-callback&...
+   ```
+   (Note: `redirect_uri` é sempre `miauchat.com.br`, nunca o subdomínio)
 
-**Arquivos:** `InstagramIntegration.tsx` e `FacebookIntegration.tsx`
+3. Meta abre OAuth nesse domínio fixo → Valida ✅
+4. Apos autenticação, redireciona para `/auth/meta-callback` em `miauchat.com.br`
+5. O callback processa, avisa a janela original via `postMessage`
+6. Popup fecha, conexão aparece em `suporte.miauchat.com.br`
 
-Trocar `window.location.href = authUrl` por:
-```typescript
-const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+## O que Você Precisa Fazer
 
-// Listener para receber resultado do popup
-const handleMessage = (event: MessageEvent) => {
-  if (event.data?.type === "meta-oauth-success") {
-    window.removeEventListener("message", handleMessage);
-    queryClient.invalidateQueries({ queryKey: ["meta-connection"] });
-    toast.success("Conectado com sucesso!");
-  }
-  if (event.data?.type === "meta-oauth-error") {
-    window.removeEventListener("message", handleMessage);
-    toast.error(event.data.message || "Erro ao conectar");
-  }
-};
-window.addEventListener("message", handleMessage);
-```
+**AGORA**: Ir ao Meta Developer Dashboard e atualizar os dois campos mencionados acima.
 
-### Mudanca 3: MetaAuthCallback usa postMessage + fecha popup
-
-**Arquivo:** `MetaAuthCallback.tsx`
-
-Apos processar o codigo OAuth com sucesso:
-- Se abriu como popup (`window.opener` existe): envia `postMessage` para a janela principal e fecha o popup
-- Se nao e popup (fallback): faz redirect normal
-
-```typescript
-// Apos sucesso:
-if (window.opener) {
-  window.opener.postMessage({ type: "meta-oauth-success" }, "*");
-  window.close();
-} else {
-  navigate("/settings?tab=integrations");
-}
-
-// Apos erro:
-if (window.opener) {
-  window.opener.postMessage({ type: "meta-oauth-error", message: "..." }, "*");
-  window.close();
-} else {
-  navigate("/settings");
-}
-```
-
-### Mudanca 4: Callback tambem usa redirect URI fixo
-
-No `MetaAuthCallback.tsx`, trocar:
-```typescript
-const redirectUri = `${window.location.origin}/auth/meta-callback`;
-```
-Por usar a mesma funcao `getFixedRedirectUri()` de `meta-config.ts`, garantindo que o `redirect_uri` enviado para trocar o codigo seja identico ao usado na URL de autorizacao.
-
-## Resultado
-
-- Clicar "Conectar" abre popup pequeno (600x700) com login da Meta
-- A Meta redireciona para o redirect URI fixo (`miauchat.com.br` ou `chatfmoteste.lovable.app`)
-- O callback processa tudo em uma chamada, avisa a janela principal via postMessage
-- O popup fecha automaticamente
-- A janela principal mostra toast de sucesso e atualiza o card
-- Funciona de qualquer subdominio (*.miauchat.com.br) porque o redirect URI e sempre fixo
+**Configuração é a chave** - o código já está preparado para lidar com subdomínios corretamente.
 
