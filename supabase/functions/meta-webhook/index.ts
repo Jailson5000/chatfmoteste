@@ -412,7 +412,7 @@ async function processWhatsAppCloudEntry(
     // Find connection by phone_number_id (stored as page_id for WABA)
     const { data: connection } = await supabase
       .from("meta_connections")
-      .select("id, law_firm_id, access_token_encrypted, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id")
+      .select("id, law_firm_id, access_token, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id")
       .eq("page_id", phoneNumberId)
       .eq("type", connectionType)
       .eq("is_active", true)
@@ -427,9 +427,9 @@ async function processWhatsAppCloudEntry(
 
     // Decrypt access token for media downloads
     let accessToken: string | null = null;
-    if (connection.access_token_encrypted) {
+    if (connection.access_token) {
       try {
-        accessToken = await decryptToken(connection.access_token_encrypted);
+        accessToken = await decryptToken(connection.access_token);
       } catch (err) {
         console.error("[meta-webhook] Failed to decrypt access token:", err);
       }

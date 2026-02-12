@@ -43,10 +43,13 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
     setIsCreating(true);
     try {
       // Encrypt the access token via edge function
-      const { data: encData } = await supabase.functions.invoke("meta-api", {
+      const { data: encData, error: encError } = await supabase.functions.invoke("meta-api", {
         body: { action: "encrypt_token", token: accessToken },
       });
 
+      if (encError) {
+        console.warn("Token encryption failed, storing as-is:", encError);
+      }
       const encryptedToken = encData?.encrypted || accessToken;
 
       // Insert meta_connection
@@ -55,7 +58,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
         type: "whatsapp_cloud",
         page_id: phoneNumberId.trim(),
         page_name: displayName.trim(),
-        access_token_encrypted: encryptedToken,
+        access_token: encryptedToken,
         is_active: true,
       } as any);
 
