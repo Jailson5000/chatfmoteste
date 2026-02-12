@@ -1,55 +1,129 @@
 
-# Atualizar MetaTestPage para cobrir TODAS as permissoes exigidas pela Meta
 
-## Contexto
-A pagina de testes em `/meta-test` precisa ser atualizada para cobrir exatamente as permissoes que a Meta lista na secao "Testar os casos de uso". Atualmente ela cobre apenas um subconjunto e inclui testes que nao sao pedidos.
+# Corrigir OAuth Meta: Popup + Redirect URI Fixo + Dominio miauchat.com.br
 
-## Permissoes a testar (por caso de uso)
+## O que configurar no Meta Developer Dashboard
 
-### Secao 1: Messenger (usa conexao Facebook)
-| Permissao | Endpoint para teste |
-|---|---|
-| pages_utility_messaging | GET /{page_id}/conversations?limit=3 |
-| pages_manage_metadata | GET /me/accounts?fields=id,name,category |
-| public_profile | GET /me?fields=id,name |
-| pages_messaging | GET /{page_id}/conversations?limit=3 |
-| instagram_manage_messages | GET /{page_id}/conversations?platform=instagram&limit=3 |
-| pages_show_list | GET /me/accounts?fields=id,name |
-| instagram_basic | GET /{ig_account_id}?fields=id,username |
-| business_management | GET /me/businesses?limit=3 |
+Na tela que voce esta vendo ("Login do Facebook para Empresas" > Configuracoes), preencha assim:
 
-### Secao 2: Instagram (usa conexao Instagram)
-| Permissao | Endpoint para teste |
-|---|---|
-| instagram_business_manage_messages | GET /{ig_account_id}/conversations?platform=instagram&limit=3 |
-| instagram_business_basic | GET /me?fields=id,name,username,profile_picture_url |
-| public_profile | GET /me?fields=id,name |
-| instagram_manage_comments | GET /{ig_account_id}/media?limit=3&fields=id,comments_count |
-| instagram_manage_messages | GET /{page_id}/conversations?platform=instagram&limit=3 |
-| pages_show_list | GET /me/accounts?fields=id,name |
-| instagram_basic | GET /{ig_account_id}?fields=id,username |
-| business_management | GET /me/businesses?limit=3 |
+### URIs de redirecionamento do OAuth validos
+Adicione estas URIs (uma por linha):
+```
+https://miauchat.com.br/auth/meta-callback
+https://chatfmoteste.lovable.app/auth/meta-callback
+```
 
-### Secao 3: WhatsApp (usa conexao WhatsApp Cloud)
-| Permissao | Endpoint para teste |
-|---|---|
-| whatsapp_business_messaging | GET /{phone_id}?fields=verified_name,display_phone_number |
-| public_profile | GET /me?fields=id,name |
-| whatsapp_business_management | GET /{waba_id}/phone_numbers |
-| business_management | GET /me/businesses?limit=3 |
+A primeira e para producao (seu dominio). A segunda e para testes no Lovable.
 
-## Mudancas
+### Dominios permitidos para o SDK do JavaScript
+```
+miauchat.com.br
+chatfmoteste.lovable.app
+```
 
-### Arquivo: `src/pages/admin/MetaTestPage.tsx`
-- Reorganizar os cards para refletir os 3 casos de uso da Meta (Messenger, Instagram, WhatsApp)
-- Adicionar botoes de teste para TODAS as permissoes listadas acima
-- Remover testes que nao sao pedidos pela Meta (`instagram_business_content_publish`, `instagram_business_manage_insights`)
-- Para permissoes que usam `page_id` ou `ig_account_id`, usar esses valores das conexoes salvas
-- Adicionar um botao "Testar Todos" em cada secao para rodar todos os testes de uma vez (facilita gravacao do video)
-- Mostrar indicadores visuais claros de obrigatorio vs opcional (como a Meta mostra)
+### Configuracoes de OAuth do cliente
+- **Login no OAuth do cliente**: Sim
+- **Login do OAuth na Web**: Sim
+- **Forcar HTTPS**: Sim
+- **Usar modo estrito para URIs de redirecionamento**: Sim
+- **Login OAuth no navegador incorporado**: Nao
+- **Forcar reautenticacao do OAuth na Web**: Nao
 
-### Arquivo: `supabase/functions/meta-api/index.ts`
-- Nenhuma mudanca necessaria. A acao `test_api` ja faz proxy de qualquer endpoint da Graph API.
+### Desautorizar URL de retorno de chamada
+```
+https://miauchat.com.br/auth/meta-deauth
+```
+
+### Solicitacoes de exclusao de dados
+```
+https://miauchat.com.br/auth/meta-data-deletion
+```
+
+(Esses dois ultimos podem ser URLs simples que retornam um JSON de confirmacao -- a Meta exige que existam mas nao precisa de logica complexa.)
+
+---
+
+## Mudancas no codigo
+
+### Mudanca 1: Redirect URI fixo no `meta-config.ts`
+
+Em vez de usar `window.location.origin` (que muda por subdominio), usar um dominio fixo. Detectar automaticamente se esta em producao (`miauchat.com.br`) ou desenvolvimento (`chatfmoteste.lovable.app`).
+
+```typescript
+function getFixedRedirectUri(): string {
+  const origin = window.location.origin;
+  if (origin.includes("miauchat.com.br")) {
+    return "https://miauchat.com.br/auth/meta-callback";
+  }
+  return "https://chatfmoteste.lovable.app/auth/meta-callback";
+}
+```
+
+Usar essa funcao em `buildMetaOAuthUrl` para garantir que o `redirect_uri` sempre corresponda ao que esta cadastrado na Meta.
+
+### Mudanca 2: Voltar ao popup com postMessage
+
+**Arquivos:** `InstagramIntegration.tsx` e `FacebookIntegration.tsx`
+
+Trocar `window.location.href = authUrl` por:
+```typescript
+const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+
+// Listener para receber resultado do popup
+const handleMessage = (event: MessageEvent) => {
+  if (event.data?.type === "meta-oauth-success") {
+    window.removeEventListener("message", handleMessage);
+    queryClient.invalidateQueries({ queryKey: ["meta-connection"] });
+    toast.success("Conectado com sucesso!");
+  }
+  if (event.data?.type === "meta-oauth-error") {
+    window.removeEventListener("message", handleMessage);
+    toast.error(event.data.message || "Erro ao conectar");
+  }
+};
+window.addEventListener("message", handleMessage);
+```
+
+### Mudanca 3: MetaAuthCallback usa postMessage + fecha popup
+
+**Arquivo:** `MetaAuthCallback.tsx`
+
+Apos processar o codigo OAuth com sucesso:
+- Se abriu como popup (`window.opener` existe): envia `postMessage` para a janela principal e fecha o popup
+- Se nao e popup (fallback): faz redirect normal
+
+```typescript
+// Apos sucesso:
+if (window.opener) {
+  window.opener.postMessage({ type: "meta-oauth-success" }, "*");
+  window.close();
+} else {
+  navigate("/settings?tab=integrations");
+}
+
+// Apos erro:
+if (window.opener) {
+  window.opener.postMessage({ type: "meta-oauth-error", message: "..." }, "*");
+  window.close();
+} else {
+  navigate("/settings");
+}
+```
+
+### Mudanca 4: Callback tambem usa redirect URI fixo
+
+No `MetaAuthCallback.tsx`, trocar:
+```typescript
+const redirectUri = `${window.location.origin}/auth/meta-callback`;
+```
+Por usar a mesma funcao `getFixedRedirectUri()` de `meta-config.ts`, garantindo que o `redirect_uri` enviado para trocar o codigo seja identico ao usado na URL de autorizacao.
 
 ## Resultado
-A pagina `/meta-test` vai espelhar exatamente os 3 casos de uso do painel Meta. Voce podera clicar "Testar Todos" em cada secao, ver todos ficarem verdes, e gravar o video mostrando que cada permissao funciona.
+
+- Clicar "Conectar" abre popup pequeno (600x700) com login da Meta
+- A Meta redireciona para o redirect URI fixo (`miauchat.com.br` ou `chatfmoteste.lovable.app`)
+- O callback processa tudo em uma chamada, avisa a janela principal via postMessage
+- O popup fecha automaticamente
+- A janela principal mostra toast de sucesso e atualiza o card
+- Funciona de qualquer subdominio (*.miauchat.com.br) porque o redirect URI e sempre fixo
+
