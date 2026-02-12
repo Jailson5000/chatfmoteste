@@ -19,6 +19,8 @@ interface ContactStatusTagsProps {
   conversationId: string;
   contactPhone: string | null;
   contactName: string | null;
+  onStatusChange?: (clientId: string, statusId: string | null) => void;
+  onTagsChange?: (conversationId: string, clientId: string, action: 'add' | 'remove', tagId: string, tagName: string) => void;
 }
 
 export function ContactStatusTags({
@@ -26,6 +28,8 @@ export function ContactStatusTags({
   conversationId,
   contactPhone,
   contactName,
+  onStatusChange,
+  onTagsChange,
 }: ContactStatusTagsProps) {
   const queryClient = useQueryClient();
   const { clients, updateClientStatus, createClient } = useClients();
@@ -62,16 +66,24 @@ export function ContactStatusTags({
   const handleStatusChange = async (statusId: string) => {
     if (!clientId) return;
     
+    const resolvedStatusId = statusId === "none" ? null : statusId;
+    
     // Get current and new status names for logging
     const currentStatus = statuses.find(s => s.id === linkedClient?.custom_status_id);
     const newStatus = statuses.find(s => s.id === statusId);
     const fromStatusName = currentStatus?.name || "Sem status";
     const toStatusName = statusId === "none" ? "Sem status" : (newStatus?.name || "Desconhecido");
     
-    await updateClientStatus.mutateAsync({
-      clientId,
-      statusId: statusId === "none" ? null : statusId,
-    });
+    // Use shared mutation if available (keeps allConversations in sync)
+    if (onStatusChange) {
+      onStatusChange(clientId, resolvedStatusId);
+    } else {
+      await updateClientStatus.mutateAsync({
+        clientId,
+        statusId: resolvedStatusId,
+      });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
     
     // Log the status change action
     if (fromStatusName !== toStatusName) {
@@ -83,9 +95,6 @@ export function ContactStatusTags({
         description: `alterou o status de ${fromStatusName} para ${toStatusName}`,
       });
     }
-    
-    // Force immediate refetch of conversations to sync sidebar
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleAddTag = async (tagId: string) => {
@@ -114,9 +123,13 @@ export function ContactStatusTags({
       return current.includes(tagId) ? current : [...current, tagId];
     });
 
+    // Notify parent to update allConversations
+    if (onTagsChange && tagToAdd) {
+      onTagsChange(conversationId, clientId, 'add', tagId, tagToAdd.name);
+    }
+
     queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleRemoveTag = async (tagId: string) => {
@@ -146,9 +159,13 @@ export function ContactStatusTags({
       return current.filter((id) => id !== tagId);
     });
 
+    // Notify parent to update allConversations
+    if (onTagsChange && tagToRemove) {
+      onTagsChange(conversationId, clientId, 'remove', tagId, tagToRemove.name);
+    }
+
     queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
   const handleLinkClient = async () => {

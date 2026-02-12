@@ -783,15 +783,36 @@ export function useConversations() {
       
       if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    onMutate: async ({ conversationId, tags }) => {
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+      const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
+
+      queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
+        if (!old) return old;
+        return old.map(conv => conv.id === conversationId ? { ...conv, tags } : conv);
+      });
+
+      setAllConversations(prev =>
+        prev.map(conv => conv.id === conversationId ? { ...conv, tags } : conv)
+      );
+
+      registerOptimisticUpdate(conversationId, { tags });
+
+      return { previousConversations };
     },
-    onError: (error) => {
+    onError: (error, _vars, context) => {
+      if (context?.previousConversations) {
+        queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
+        setAllConversations(context.previousConversations);
+      }
       toast({
         title: "Erro ao atualizar etiquetas",
         description: error.message,
         variant: "destructive",
       });
+    },
+    onSettled: (_data, _error, variables) => {
+      clearOptimisticUpdateAfterDelay(variables.conversationId);
     },
   });
 
@@ -837,17 +858,28 @@ export function useConversations() {
     onMutate: async ({ clientId, statusId }) => {
       await queryClient.cancelQueries({ queryKey: ["conversations"] });
 
+      // Lookup full status object from cache for immediate UI update
+      const cachedStatuses = queryClient.getQueryData<Array<{id: string; name: string; color: string}>>(
+        ["custom_statuses", lawFirm?.id]
+      );
+      const statusObj = statusId 
+        ? cachedStatuses?.find(s => s.id === statusId) || null 
+        : null;
+
       const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
+
+      const updateClient = (client: any) => ({
+        ...client,
+        custom_status_id: statusId,
+        custom_status: statusObj ? { id: statusObj.id, name: statusObj.name, color: statusObj.color } : null,
+      });
 
       queryClient.setQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id], (old) => {
         if (!old) return old;
         return old.map((conv) => {
           const client = conv.client as { id?: string; custom_status_id?: string | null } | null;
           if (client?.id === clientId) {
-            return {
-              ...conv,
-              client: { ...client, custom_status_id: statusId },
-            };
+            return { ...conv, client: updateClient(client) };
           }
           return conv;
         });
@@ -858,10 +890,7 @@ export function useConversations() {
         prev.map(conv => {
           const client = conv.client as { id?: string; custom_status_id?: string | null } | null;
           if (client?.id === clientId) {
-            return {
-              ...conv,
-              client: { ...client, custom_status_id: statusId },
-            };
+            return { ...conv, client: updateClient(client) };
           }
           return conv;
         })
@@ -873,7 +902,7 @@ export function useConversations() {
         return cl?.id === clientId;
       });
       if (targetConv) {
-        registerOptimisticUpdate(targetConv.id, { client: { custom_status_id: statusId } });
+        registerOptimisticUpdate(targetConv.id, { client: { custom_status_id: statusId, custom_status: statusObj } });
       }
 
       return { previousConversations, targetConvId: targetConv?.id };
