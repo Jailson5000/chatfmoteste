@@ -152,30 +152,27 @@ Deno.serve(async (req) => {
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
-    // --- Instagram / Facebook flow (existing) ---
-    // If no pageId specified, return available pages for user selection
-    if (!pageId) {
-      const pages = pagesData.data.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        hasInstagram: !!p.instagram_business_account?.id,
-        igAccountId: p.instagram_business_account?.id || null,
-      }));
-
-      return new Response(
-        JSON.stringify({ action: "select_page", pages }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // --- Instagram / Facebook flow ---
+    // Auto-select page: use pageId if provided, otherwise pick the first suitable page
+    let selectedPage: any;
+    if (pageId) {
+      selectedPage = pagesData.data.find((p: any) => p.id === pageId);
+    } else if (type === "instagram") {
+      // Pick first page that has an Instagram business account
+      selectedPage = pagesData.data.find((p: any) => !!p.instagram_business_account?.id) || pagesData.data[0];
+    } else {
+      // Facebook: pick first page
+      selectedPage = pagesData.data[0];
     }
 
-    // Step 4: Get the selected page's access token
-    const selectedPage = pagesData.data.find((p: any) => p.id === pageId);
     if (!selectedPage) {
-      return new Response(JSON.stringify({ error: "Selected page not found" }), {
+      return new Response(JSON.stringify({ error: "No suitable page found" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    
+    console.log("[meta-oauth] Auto-selected page:", selectedPage.name, selectedPage.id);
 
     const pageAccessToken = selectedPage.access_token;
     const pageName = selectedPage.name;

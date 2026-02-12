@@ -65,7 +65,7 @@ export function FacebookIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("facebook");
-    window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+    window.location.href = authUrl;
   }, []);
 
   if (!connection) {

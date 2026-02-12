@@ -88,7 +88,7 @@ export function InstagramIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("instagram");
-    window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+    window.location.href = authUrl;
   }, []);
 
   // Token expiry info

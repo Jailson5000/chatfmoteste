@@ -70,28 +70,6 @@ export default function MetaAuthCallback() {
           throw new Error(response.error.message || "Falha ao processar autenticação");
         }
 
-        // Handle page selection flow (Instagram/Facebook may need page choice)
-        if (response.data?.action === "select_page") {
-          // For now, auto-select the first page
-          const pages = response.data.pages;
-          if (pages?.length > 0) {
-            const pageResponse = await supabase.functions.invoke("meta-oauth-callback", {
-              body: { code, redirectUri, type: connectionType, pageId: pages[0].id },
-            });
-
-            if (pageResponse.error || !pageResponse.data?.success) {
-              throw new Error(pageResponse.data?.error || "Falha ao salvar conexão");
-            }
-
-            toast({
-              title: "Sucesso!",
-              description: `${connectionType === 'instagram' ? 'Instagram' : connectionType === 'facebook' ? 'Facebook' : 'WhatsApp Cloud'} conectado com sucesso.`,
-            });
-            navigate(connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations");
-            return;
-          }
-        }
-
         if (!response.data?.success) {
           throw new Error(response.data?.error || "Falha ao salvar conexão");
         }
