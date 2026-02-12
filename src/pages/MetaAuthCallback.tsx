@@ -22,6 +22,18 @@ export default function MetaAuthCallback() {
         const code = searchParams.get("code");
         const error = searchParams.get("error");
         const errorDescription = searchParams.get("error_description");
+        const stateParam = searchParams.get("state");
+
+        // Parse state to get the connection type
+        let connectionType = "instagram"; // default
+        if (stateParam) {
+          try {
+            const parsed = JSON.parse(stateParam);
+            connectionType = parsed.type || "instagram";
+          } catch { /* ignore parse errors */ }
+        }
+
+        const fallbackRoute = connectionType === "whatsapp_cloud" ? "/connections" : "/settings";
 
         if (error) {
           toast({
@@ -29,7 +41,7 @@ export default function MetaAuthCallback() {
             description: errorDescription || error,
             variant: "destructive",
           });
-          navigate("/settings");
+          navigate(fallbackRoute);
           return;
         }
 
@@ -39,14 +51,18 @@ export default function MetaAuthCallback() {
             description: "Código de autorização não encontrado",
             variant: "destructive",
           });
-          navigate("/settings");
+          navigate(fallbackRoute);
           return;
         }
+
+        const redirectUri = `${window.location.origin}/auth/meta-callback`;
 
         // Call the meta-oauth-callback edge function to exchange code for token
         const response = await supabase.functions.invoke("meta-oauth-callback", {
           body: {
             code,
+            redirectUri,
+            type: connectionType,
           },
         });
 
@@ -54,17 +70,43 @@ export default function MetaAuthCallback() {
           throw new Error(response.error.message || "Falha ao processar autenticação");
         }
 
+        // Handle page selection flow (Instagram/Facebook may need page choice)
+        if (response.data?.action === "select_page") {
+          // For now, auto-select the first page
+          const pages = response.data.pages;
+          if (pages?.length > 0) {
+            const pageResponse = await supabase.functions.invoke("meta-oauth-callback", {
+              body: { code, redirectUri, type: connectionType, pageId: pages[0].id },
+            });
+
+            if (pageResponse.error || !pageResponse.data?.success) {
+              throw new Error(pageResponse.data?.error || "Falha ao salvar conexão");
+            }
+
+            toast({
+              title: "Sucesso!",
+              description: `${connectionType === 'instagram' ? 'Instagram' : connectionType === 'facebook' ? 'Facebook' : 'WhatsApp Cloud'} conectado com sucesso.`,
+            });
+            navigate(connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations");
+            return;
+          }
+        }
+
         if (!response.data?.success) {
           throw new Error(response.data?.error || "Falha ao salvar conexão");
         }
 
+        const typeLabel = response.data.type === 'instagram' ? 'Instagram' 
+          : response.data.type === 'facebook' ? 'Facebook' 
+          : 'WhatsApp Cloud';
+
         toast({
           title: "Sucesso!",
-          description: `${response.data.type === 'instagram' ? 'Instagram' : response.data.type === 'facebook' ? 'Facebook' : 'WhatsApp'} conectado com sucesso.`,
+          description: `${typeLabel} conectado com sucesso.`,
         });
 
-        // Redirect back to settings with success
-        navigate("/settings?tab=integrations");
+        // Redirect based on type
+        navigate(connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations");
       } catch (error) {
         console.error("Meta callback error:", error);
         toast({
