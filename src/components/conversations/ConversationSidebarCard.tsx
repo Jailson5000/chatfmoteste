@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, Folder, Globe, Megaphone, Phone, Smartphone, Tag, User, UserX, X } from "lucide-react";
+import { Bot, Folder, Globe, Instagram, Megaphone, Phone, Smartphone, Tag, User, UserX, X, Facebook, MessageCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -82,6 +82,27 @@ function getConnectionInfo(
       isPhone: false, 
       isWidget: true,
       tooltipText: `Canal: ${upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin}`
+    };
+  }
+
+  // Instagram DM
+  if (upperOrigin === 'INSTAGRAM') {
+    return { label: "Instagram", isPhone: false, isWidget: false, tooltipText: "Instagram DM" };
+  }
+
+  // Facebook Messenger
+  if (upperOrigin === 'FACEBOOK') {
+    return { label: "Facebook", isPhone: false, isWidget: false, tooltipText: "Facebook Messenger" };
+  }
+
+  // WhatsApp Cloud API
+  if (upperOrigin === 'WHATSAPP_CLOUD') {
+    const digits = (phone || "").replace(/\D/g, "");
+    return { 
+      label: digits.length >= 4 ? `•••${digits.slice(-4)}` : "Cloud", 
+      isPhone: digits.length >= 4, 
+      isWidget: false, 
+      tooltipText: "WhatsApp Cloud API" 
     };
   }
   

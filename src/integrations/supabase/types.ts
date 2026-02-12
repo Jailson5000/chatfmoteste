@@ -3942,6 +3942,99 @@ export type Database = {
           },
         ]
       }
+      meta_connections: {
+        Row: {
+          access_token: string
+          created_at: string
+          default_automation_id: string | null
+          default_department_id: string | null
+          default_handler_type: string | null
+          default_human_agent_id: string | null
+          default_status_id: string | null
+          id: string
+          ig_account_id: string | null
+          is_active: boolean
+          law_firm_id: string
+          page_id: string
+          page_name: string | null
+          token_expires_at: string | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_handler_type?: string | null
+          default_human_agent_id?: string | null
+          default_status_id?: string | null
+          id?: string
+          ig_account_id?: string | null
+          is_active?: boolean
+          law_firm_id: string
+          page_id: string
+          page_name?: string | null
+          token_expires_at?: string | null
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          default_automation_id?: string | null
+          default_department_id?: string | null
+          default_handler_type?: string | null
+          default_human_agent_id?: string | null
+          default_status_id?: string | null
+          id?: string
+          ig_account_id?: string | null
+          is_active?: boolean
+          law_firm_id?: string
+          page_id?: string
+          page_name?: string | null
+          token_expires_at?: string | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_connections_default_automation_id_fkey"
+            columns: ["default_automation_id"]
+            isOneToOne: false
+            referencedRelation: "automations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_connections_default_department_id_fkey"
+            columns: ["default_department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_connections_default_human_agent_id_fkey"
+            columns: ["default_human_agent_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_connections_default_status_id_fkey"
+            columns: ["default_status_id"]
+            isOneToOne: false
+            referencedRelation: "custom_statuses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_connections_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           admin_user_id: string | null
