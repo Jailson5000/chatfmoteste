@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { decryptToken, isEncrypted } from "../_shared/encryption.ts";
+import { decryptToken, encryptToken, isEncrypted } from "../_shared/encryption.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 /**
@@ -32,6 +32,25 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const body = await req.json();
+
+    // Handle encrypt_token action (no auth required for this internal action)
+    if (body.action === "encrypt_token" && body.token) {
+      try {
+        const encrypted = await encryptToken(body.token);
+        return new Response(JSON.stringify({ encrypted }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (err) {
+        console.error("[meta-api] Encryption error:", err);
+        return new Response(JSON.stringify({ error: "Encryption failed" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Auth check
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -73,7 +92,6 @@ Deno.serve(async (req) => {
     }
 
     const lawFirmId = profile.law_firm_id;
-    const body = await req.json();
     const { conversationId, content, messageType = "text", mediaUrl, fileName } = body;
 
     if (!conversationId || !content) {
