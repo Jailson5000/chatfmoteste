@@ -14,7 +14,7 @@ import { useTags } from "@/hooks/useTags";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useAutomations } from "@/hooks/useAutomations";
-import { useClients } from "@/hooks/useClients";
+
 import { useUserDepartments } from "@/hooks/useUserDepartments";
 import { FilterBar } from "@/components/filters/FilterBar";
 import { KanbanColumn } from "@/components/kanban/KanbanColumn";
@@ -41,6 +41,7 @@ export default function Kanban() {
     updateConversationDepartment,
     updateConversation,
     transferHandler,
+    updateClientStatus: conversationUpdateClientStatus,
     loadMoreConversations,
     hasMoreConversations,
     isLoadingMoreConversations,
@@ -50,7 +51,7 @@ export default function Kanban() {
   const { statuses: customStatuses } = useCustomStatuses();
   const { members } = useTeamMembers();
   const { automations } = useAutomations();
-  const { updateClientStatus } = useClients();
+  
   const { canAccessArchived, hasFullAccess } = useUserDepartments();
   const { toast } = useToast();
   
@@ -252,7 +253,7 @@ export default function Kanban() {
       return;
     }
     
-    updateClientStatus.mutate({ 
+    conversationUpdateClientStatus.mutate({ 
       clientId: conversation.client_id, 
       statusId 
     }, {
@@ -553,7 +554,7 @@ export default function Kanban() {
                 onDrop={() => {
                   const conv = conversations.find(c => c.id === draggedConversation);
                   if (conv && conv.client_id) {
-                    updateClientStatus.mutate({ clientId: conv.client_id, statusId: null });
+                    conversationUpdateClientStatus.mutate({ clientId: conv.client_id, statusId: null });
                   }
                   setDraggedConversation(null);
                 }}
@@ -655,6 +656,7 @@ export default function Kanban() {
             updateConversationMutation={updateConversation}
             updateConversationDepartmentMutation={updateConversationDepartment}
             transferHandlerMutation={transferHandler}
+            updateClientStatusMutation={conversationUpdateClientStatus}
             onClose={() => {
               setSheetOpen(false);
               setSelectedConversationId(null);
