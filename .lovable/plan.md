@@ -1,76 +1,87 @@
 
 
-# Correcao: Conversas Antigas Nao Atualizam em Tempo Real no Kanban
+# Correcao: Painel de Conversa nao Atualiza o Kanban Board em Tempo Real
 
-## Causa Raiz Identificada
+## Causa Raiz
 
-O problema afeta especificamente conversas antigas porque elas estao **alem das primeiras 30 conversas** carregadas pelo sistema de paginacao. A cada evento Realtime ou invalidacao manual, o sistema **recarrega tudo do zero**, causando uma cascata de problemas.
+O `KanbanChatPanel` chama `useConversations()` na linha 1083, criando uma **segunda instancia** do hook, separada da instancia do `Kanban.tsx` (linha 38). Cada instancia tem seu proprio `allConversations` (useState) e `pendingOptimisticUpdates` (useRef).
 
-### Fluxo do Bug (Conversas Antigas)
+Quando o usuario muda departamento ou arquiva pelo painel lateral:
 
-1. Usuario muda departamento ou arquiva uma conversa antiga
-2. Update otimista funciona -- o card se move imediatamente
-3. Realtime dispara invalidacao apos ~300ms
-4. A query principal re-executa e retorna apenas as **30 conversas mais recentes**
-5. O `queryFn` **reseta `offsetRef = 0`**, fazendo `hasMore = true`
-6. O Kanban detecta `hasMore = true` e comeca a recarregar TODAS as paginas novamente
-7. Durante esse recarregamento de multiplas paginas, ocorrem varios re-renders
-8. Se o lock otimista de 3 segundos expirar antes de toda a re-paginacao completar, o dado otimista pode ser sobrescrito
-9. Alem disso, o `refetchQueries` no `handleArchive` (linha 2511) **espera o resultado** antes de continuar, criando uma race condition adicional
+1. `onMutate` chama `setAllConversations` -- mas atualiza o estado da **instancia do painel**, nao do board
+2. `registerOptimisticUpdate` registra o lock no **ref do painel**, nao no ref do board
+3. O board so atualiza quando o Realtime dispara, mas como o lock otimista esta no ref errado, o board nao tem protecao contra dados stale
+4. Conversas antigas (alem das 30 primeiras) nao estao no query cache, entao `setQueryData` tambem nao as afeta
 
-### Por que conversas NOVAS funcionam
+**Por que arrastar funciona:** O drag-and-drop e tratado diretamente no `Kanban.tsx`, que usa sua propria instancia de `useConversations()` -- entao `setAllConversations` e `registerOptimisticUpdate` atuam no estado correto.
 
-Conversas recentes estao dentro das primeiras 30 retornadas pela query. O merge com protecao otimista funciona perfeitamente para elas porque o dado fresh ja vem no primeiro lote, dentro do tempo do lock de 3 segundos.
+## Solucao
 
----
+Passar as mutacoes (`updateConversation`, `updateConversationDepartment`, `transferHandler`) da instancia do `Kanban.tsx` para o `KanbanChatPanel` via props. Assim, ambos operam sobre o mesmo estado compartilhado.
 
-## Correcoes Necessarias
+## Implementacao
 
-### Correcao 1: Remover `refetchQueries` do `handleArchive` (CRITICO)
+### Passo 1: Adicionar props de mutacoes ao `KanbanChatPanel`
+
 **Arquivo:** `src/components/kanban/KanbanChatPanel.tsx`
-- **Linha 2511:** Remover `await queryClient.refetchQueries({ queryKey: ["conversations"] });`
-- O `updateConversation.mutateAsync` ja executa o `onMutate` que atualiza o estado local via `setAllConversations`
-- O Realtime cuida da confirmacao automaticamente
 
-### Correcao 2: Remover `invalidateQueries` do `updateConversationStatus.onSuccess` (CRITICO)
-**Arquivo:** `src/hooks/useConversations.tsx`
-- **Linha 409:** Remover `queryClient.invalidateQueries({ queryKey: ["conversations"] });`
-- O `onMutate` ja atualiza o estado local, e o `onSettled` ja limpa o lock otimista
-- O Realtime via RealtimeSyncContext ja faz o refetch automaticamente
-- Manter apenas o toast de sucesso
+Adicionar 3 props opcionais na interface `KanbanChatPanelProps`:
 
-### Correcao 3: Evitar reset de paginacao em refetches Realtime (CRITICO)
-**Arquivo:** `src/hooks/useConversations.tsx`
-- **Linhas 146, 164-165:** Modificar o `queryFn` para NAO resetar `offsetRef.current` quando ja existem conversas carregadas
-- Atualmente, toda vez que o `queryFn` roda, ele faz `offsetRef.current = 0`, o que forca o Kanban a recarregar todas as paginas do zero
-- Correcao: Manter o offset atual quando for um refetch (nao um fetch inicial)
+```text
+updateConversationMutation?: typeof updateConversation
+updateConversationDepartmentMutation?: typeof updateConversationDepartment
+transferHandlerMutation?: typeof transferHandler
+```
 
-Logica proposta:
-- Se `lawFirmIdRef.current === lawFirm.id` (mesmo tenant, e um refetch), manter o `offsetRef.current` intacto
-- Apenas resetar quando for uma mudanca de tenant ou primeiro carregamento
+No corpo do componente (linha 1083), usar as props quando disponíveis, senão manter o fallback para a instancia local:
 
-### Correcao 4: Aplicar protecao otimista no `loadMoreConversations` (MEDIO)
-**Arquivo:** `src/hooks/useConversations.tsx`
-- **Linhas 269-275:** O `loadMoreConversations` atualmente apenas deduplica por ID, mas nao aplica `mergeWithOptimisticProtection`
-- Se uma conversa antiga ja existe no estado local com um update otimista, e o `loadMore` traz a mesma conversa do banco (possivelmente com dado stale), a deduplicacao impede que ela seja adicionada novamente -- isso esta correto
-- Porem, quando o offset e resetado (correcao 3 resolve isso), o `loadMore` pode trazer conversas que ja existem localmente. A deduplicacao atual funciona, mas por seguranca, adicionar merge com protecao otimista para conversas que ja existem
+```text
+const localHook = useConversations();
+const effectiveUpdateConversation = updateConversationMutation ?? localHook.updateConversation;
+const effectiveUpdateDepartment = updateConversationDepartmentMutation ?? localHook.updateConversationDepartment;
+const effectiveTransferHandler = transferHandlerMutation ?? localHook.transferHandler;
+```
 
-### Correcao 5: Remover `invalidateQueries(["conversations"])` do `updateClientStatus.onSettled` (MENOR)
-**Arquivo:** `src/hooks/useConversations.tsx`
-- Remover apenas a invalidacao de `["conversations"]`, manter `["clients"]`, `["scheduled-follow-ups"]` e `["all-scheduled-follow-ups"]`
-- A invalidacao de conversations e redundante pois o Realtime ja cuida disso
+Atualizar todos os usos de `updateConversation`, `updateConversationDepartment` e `transferHandler` no componente para usar as versoes `effective*`.
 
----
+### Passo 2: Passar as mutacoes do `Kanban.tsx` para o `KanbanChatPanel`
+
+**Arquivo:** `src/pages/Kanban.tsx`
+
+Na renderizacao do `KanbanChatPanel` (linha 630), adicionar as 3 props:
+
+```text
+<KanbanChatPanel
+  ...
+  updateConversationMutation={updateConversation}
+  updateConversationDepartmentMutation={updateConversationDepartment}
+  transferHandlerMutation={transferHandler}
+/>
+```
+
+### Passo 3: Remover `invalidateQueries(["conversations"])` residual
+
+**Arquivo:** `src/components/kanban/KanbanChatPanel.tsx`
+
+- **Linha 2672:** Remover `queryClient.invalidateQueries({ queryKey: ["conversations"] })` no handler de tags. Isso causa race condition que reverte o update otimista para conversas antigas.
+
+## Fluxo Corrigido
+
+1. Usuario clica em "Recepcao" no painel lateral da conversa
+2. `handleDepartmentChange` chama `updateConversationDepartment.mutate()` -- agora e a mutacao do **Kanban.tsx**
+3. O `onMutate` executa `setAllConversations` no estado do **board** -- card se move instantaneamente
+4. `registerOptimisticUpdate` registra o lock no ref do **board** -- protege contra dados stale
+5. Realtime confirma apos ~300ms -- merge respeita o lock ativo
 
 ## Arquivos Modificados
 
-| Arquivo | Correcao |
-|---------|----------|
-| `src/components/kanban/KanbanChatPanel.tsx` | Remover `refetchQueries` do `handleArchive` |
-| `src/hooks/useConversations.tsx` | Remover `invalidateQueries` redundantes, evitar reset de paginacao, protecao otimista no `loadMore` |
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/components/kanban/KanbanChatPanel.tsx` | Adicionar 3 props de mutacao, usar versoes efetivas, remover invalidateQueries residual |
+| `src/pages/Kanban.tsx` | Passar as 3 mutacoes como props |
 
 ## Risco
-- **Baixo**: Todas as correcoes removem codigo redundante que causa race conditions
-- **Nenhuma logica de negocio alterada**: Apenas otimizacao de sincronizacao de cache
-- **Realtime mantem a consistencia**: O RealtimeSyncContext garante que os dados sejam atualizados automaticamente
+- **Muito baixo**: As props sao opcionais com fallback para comportamento atual
+- **Sem breaking changes**: Nenhum outro componente que usa KanbanChatPanel precisa mudar
+- **Retrocompativel**: Se chamado sem as props, funciona exatamente como antes
 
