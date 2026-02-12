@@ -40,6 +40,7 @@ export default function Kanban() {
     isLoading: convsLoading, 
     updateConversationDepartment,
     updateConversation,
+    transferHandler,
     loadMoreConversations,
     hasMoreConversations,
     isLoadingMoreConversations,
@@ -651,6 +652,9 @@ export default function Kanban() {
             departments={departments}
             members={members}
             automations={automations}
+            updateConversationMutation={updateConversation}
+            updateConversationDepartmentMutation={updateConversationDepartment}
+            transferHandlerMutation={transferHandler}
             onClose={() => {
               setSheetOpen(false);
               setSelectedConversationId(null);
