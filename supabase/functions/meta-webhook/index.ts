@@ -33,6 +33,30 @@ const OBJECT_TO_TYPE: Record<string, string> = {
   whatsapp_business_account: "whatsapp_cloud",
 };
 
+// MIME type to file extension mapping
+const MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/3gpp": "3gp",
+  "audio/ogg": "ogg",
+  "audio/ogg; codecs=opus": "ogg",
+  "audio/mpeg": "mp3",
+  "audio/amr": "amr",
+  "audio/aac": "aac",
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/octet-stream": "bin",
+  "image/webp": "webp",
+};
+
+function getExtFromMime(mime: string): string {
+  return MIME_TO_EXT[mime] || mime.split("/").pop()?.split(";")[0] || "bin";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -79,7 +103,7 @@ Deno.serve(async (req) => {
 
     for (const entry of body.entry || []) {
       if (objectType === "whatsapp_business_account") {
-        await processWhatsAppCloudEntry(supabase, entry, origin, connectionType);
+        await processWhatsAppCloudEntry(supabase, entry, origin, connectionType, supabaseUrl);
       } else {
         await processMessagingEntry(supabase, entry, origin, connectionType);
       }
@@ -93,6 +117,82 @@ Deno.serve(async (req) => {
     return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
   }
 });
+
+/**
+ * Download media from WhatsApp Cloud API and upload to Supabase Storage.
+ * Returns the public URL of the uploaded file or null on failure.
+ */
+async function downloadAndStoreMedia(
+  supabase: any,
+  mediaId: string,
+  accessToken: string,
+  lawFirmId: string,
+  conversationId: string,
+  messageId: string,
+  mimeType: string,
+  supabaseUrl: string
+): Promise<string | null> {
+  try {
+    // Step 1: Get temporary download URL from Graph API
+    console.log("[meta-webhook] Fetching media URL for:", mediaId);
+    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!metaRes.ok) {
+      console.error("[meta-webhook] Graph API error:", metaRes.status, await metaRes.text());
+      return null;
+    }
+
+    const metaData = await metaRes.json();
+    const downloadUrl = metaData.url;
+
+    if (!downloadUrl) {
+      console.error("[meta-webhook] No download URL in response");
+      return null;
+    }
+
+    // Step 2: Download the binary file
+    console.log("[meta-webhook] Downloading media from:", downloadUrl.slice(0, 60) + "...");
+    const fileRes = await fetch(downloadUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!fileRes.ok) {
+      console.error("[meta-webhook] Download error:", fileRes.status);
+      return null;
+    }
+
+    const fileBuffer = await fileRes.arrayBuffer();
+    const ext = getExtFromMime(mimeType);
+    const storagePath = `${lawFirmId}/${conversationId}/${messageId}.${ext}`;
+
+    // Step 3: Upload to Supabase Storage
+    console.log("[meta-webhook] Uploading to storage:", storagePath, "size:", fileBuffer.byteLength);
+    const { error: uploadError } = await supabase.storage
+      .from("chat-media")
+      .upload(storagePath, fileBuffer, {
+        contentType: mimeType,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error("[meta-webhook] Storage upload error:", uploadError);
+      return null;
+    }
+
+    // Step 4: Get public URL
+    const { data: publicData } = supabase.storage
+      .from("chat-media")
+      .getPublicUrl(storagePath);
+
+    console.log("[meta-webhook] Media stored successfully:", publicData.publicUrl?.slice(0, 80));
+    return publicData.publicUrl;
+  } catch (err) {
+    console.error("[meta-webhook] Media download/upload error:", err);
+    return null;
+  }
+}
 
 /**
  * Process Instagram DM / Facebook Messenger entries.
@@ -298,7 +398,8 @@ async function processWhatsAppCloudEntry(
   supabase: any,
   entry: any,
   origin: string,
-  connectionType: string
+  connectionType: string,
+  supabaseUrl: string
 ) {
   for (const change of entry.changes || []) {
     if (change.field !== "messages") continue;
@@ -311,7 +412,7 @@ async function processWhatsAppCloudEntry(
     // Find connection by phone_number_id (stored as page_id for WABA)
     const { data: connection } = await supabase
       .from("meta_connections")
-      .select("id, law_firm_id, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id")
+      .select("id, law_firm_id, access_token_encrypted, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id")
       .eq("page_id", phoneNumberId)
       .eq("type", connectionType)
       .eq("is_active", true)
@@ -324,38 +425,54 @@ async function processWhatsAppCloudEntry(
 
     const lawFirmId = connection.law_firm_id;
 
+    // Decrypt access token for media downloads
+    let accessToken: string | null = null;
+    if (connection.access_token_encrypted) {
+      try {
+        accessToken = await decryptToken(connection.access_token_encrypted);
+      } catch (err) {
+        console.error("[meta-webhook] Failed to decrypt access token:", err);
+      }
+    }
+
     for (const msg of value.messages) {
       const senderPhone = msg.from; // E.164 format without +
       const remoteJid = senderPhone;
 
-      // Determine content
+      // Determine content and extract media_id
       let content = "";
       let messageType = "text";
       let mediaUrl: string | null = null;
       let mediaMimeType: string | null = null;
+      let mediaId: string | null = null;
 
       if (msg.type === "text") {
         content = msg.text?.body || "";
       } else if (msg.type === "image") {
         messageType = "image";
         content = msg.image?.caption || "[imagem]";
-        // Media needs to be downloaded via Graph API using msg.image.id
         mediaMimeType = msg.image?.mime_type || "image/jpeg";
+        mediaId = msg.image?.id || null;
       } else if (msg.type === "audio") {
         messageType = "audio";
         content = "[áudio]";
         mediaMimeType = msg.audio?.mime_type || "audio/ogg";
+        mediaId = msg.audio?.id || null;
       } else if (msg.type === "video") {
         messageType = "video";
         content = msg.video?.caption || "[vídeo]";
         mediaMimeType = msg.video?.mime_type || "video/mp4";
+        mediaId = msg.video?.id || null;
       } else if (msg.type === "document") {
         messageType = "document";
         content = msg.document?.filename || "[documento]";
         mediaMimeType = msg.document?.mime_type || "application/octet-stream";
+        mediaId = msg.document?.id || null;
       } else if (msg.type === "sticker") {
         messageType = "sticker";
         content = "[figurinha]";
+        mediaMimeType = msg.sticker?.mime_type || "image/webp";
+        mediaId = msg.sticker?.id || null;
       } else if (msg.type === "reaction") {
         // Skip reactions for now
         continue;
@@ -438,6 +555,23 @@ async function processWhatsAppCloudEntry(
 
       if (!conversationId) continue;
 
+      // Download media if applicable
+      if (mediaId && accessToken && conversationId) {
+        const storedUrl = await downloadAndStoreMedia(
+          supabase,
+          mediaId,
+          accessToken,
+          lawFirmId,
+          conversationId,
+          msg.id || mediaId,
+          mediaMimeType || "application/octet-stream",
+          supabaseUrl
+        );
+        if (storedUrl) {
+          mediaUrl = storedUrl;
+        }
+      }
+
       // Insert message
       await supabase.from("messages").insert({
         conversation_id: conversationId,
@@ -455,6 +589,7 @@ async function processWhatsAppCloudEntry(
         conversationId: conversationId?.slice(0, 8),
         from: senderPhone.slice(-4),
         type: messageType,
+        hasMedia: !!mediaUrl,
       });
     }
   }

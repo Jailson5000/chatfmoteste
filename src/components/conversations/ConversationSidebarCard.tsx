@@ -335,8 +335,14 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
                   "flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors",
                   connectionInfo.isWidget && "text-blue-500"
                 )}>
-                  {connectionInfo.isWidget ? (
+          {connectionInfo.isWidget ? (
                     <Globe className="h-3 w-3" />
+                  ) : conversation.origin?.toUpperCase() === 'INSTAGRAM' ? (
+                    <Instagram className="h-3 w-3 text-pink-500" />
+                  ) : conversation.origin?.toUpperCase() === 'FACEBOOK' ? (
+                    <Facebook className="h-3 w-3 text-[#1877F2]" />
+                  ) : conversation.origin?.toUpperCase() === 'WHATSAPP_CLOUD' ? (
+                    <MessageCircle className="h-3 w-3 text-[#25D366]" />
                   ) : connectionInfo.isPhone ? (
                     <Phone className="h-3 w-3" />
                   ) : (

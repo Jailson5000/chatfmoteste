@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone, Megaphone, X } from "lucide-react";
+import { Bot, User, CheckCheck, Image, Mic, Video, FileText, Tag, Globe, Phone, Megaphone, X, Instagram, Facebook, MessageCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
@@ -347,6 +347,12 @@ export function KanbanCard({
                 )}>
                   {connectionInfo.isWidget ? (
                     <Globe className="h-2.5 w-2.5" />
+                  ) : conversation.origin?.toUpperCase() === 'INSTAGRAM' ? (
+                    <Instagram className="h-2.5 w-2.5 text-pink-500" />
+                  ) : conversation.origin?.toUpperCase() === 'FACEBOOK' ? (
+                    <Facebook className="h-2.5 w-2.5 text-[#1877F2]" />
+                  ) : conversation.origin?.toUpperCase() === 'WHATSAPP_CLOUD' ? (
+                    <MessageCircle className="h-2.5 w-2.5 text-[#25D366]" />
                   ) : (
                     <Phone className="h-2.5 w-2.5" />
                   )}
