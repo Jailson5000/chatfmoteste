@@ -2508,7 +2508,6 @@ export function KanbanChatPanel({
       }
 
       await updateConversation.mutateAsync(updatePayload);
-      await queryClient.refetchQueries({ queryKey: ["conversations"] });
 
       toast({ title: "Conversa arquivada" });
       setArchiveDialogOpen(false);

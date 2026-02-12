@@ -142,8 +142,12 @@ export function useConversations() {
     queryFn: async () => {
       if (!lawFirm?.id) return [];
 
-      // Reset pagination state on fresh fetch
-      offsetRef.current = 0;
+      // Only reset pagination on tenant change or first load
+      // On refetch (same tenant), keep offset intact to avoid re-paginating from zero
+      const isRefetch = lawFirmIdRef.current === lawFirm.id;
+      if (!isRefetch) {
+        offsetRef.current = 0;
+      }
       
       const { data, error: rpcError } = await supabase
         .rpc('get_conversations_with_metadata', { 
@@ -160,9 +164,11 @@ export function useConversations() {
 
       const conversations = (data || []).map(mapRpcRowToConversation);
       
-      // Update pagination state
-      offsetRef.current = conversations.length;
-      setHasMore(conversations.length === CONVERSATIONS_BATCH_SIZE);
+      // Update pagination state only on initial fetch (not refetch)
+      if (!isRefetch) {
+        offsetRef.current = conversations.length;
+        setHasMore(conversations.length === CONVERSATIONS_BATCH_SIZE);
+      }
       
       return conversations;
     },
@@ -268,10 +274,23 @@ export function useConversations() {
       
       if (newConversations.length > 0) {
         setAllConversations(prev => {
-          // Deduplicate by ID
-          const existingIds = new Set(prev.map(c => c.id));
-          const uniqueNew = newConversations.filter(c => !existingIds.has(c.id));
-          return [...prev, ...uniqueNew];
+          const existingMap = new Map(prev.map(c => [c.id, c]));
+          const result = [...prev];
+          
+          for (const newConv of newConversations) {
+            const existing = existingMap.get(newConv.id);
+            if (existing) {
+              // Conversation already exists locally - merge with optimistic protection
+              const merged = mergeWithOptimisticProtection(newConv, existing);
+              const idx = result.findIndex(c => c.id === newConv.id);
+              if (idx !== -1) result[idx] = merged;
+            } else {
+              // Truly new conversation - add it
+              result.push(newConv);
+            }
+          }
+          
+          return result;
         });
         offsetRef.current += newConversations.length;
       }
@@ -282,7 +301,7 @@ export function useConversations() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [lawFirm?.id, isLoadingMore, hasMore]);
+  }, [lawFirm?.id, isLoadingMore, hasMore, mergeWithOptimisticProtection]);
 
   // Filter conversations based on user department access
   const conversations = useMemo(() => {
@@ -406,7 +425,8 @@ export function useConversations() {
       return { conversationId };
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      // NOTE: Removed invalidateQueries here - Realtime handles it via RealtimeSyncContext
+      // The optimistic lock protects against stale data from the delayed refetch
       toast({
         title: "Status atualizado",
         description: "O status da conversa foi atualizado com sucesso.",
@@ -862,7 +882,7 @@ export function useConversations() {
       });
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      // NOTE: Removed invalidateQueries(["conversations"]) - Realtime handles it
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
       queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
