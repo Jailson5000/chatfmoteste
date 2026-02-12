@@ -1,54 +1,33 @@
 
-# Correções Criticas -- Meta Integration Bugs
 
-## Resumo
+# Plano: WhatsApp Cloud via OAuth (Embedded Signup) em vez de Token Manual
 
-A analise completa revelou 3 bugs criticos que precisam ser corrigidos antes do deploy no VPS. As paginas de Conversas e Kanban estao visualmente corretas (icones diferenciados funcionando), mas o backend tem problemas que vao causar falhas silenciosas.
+## O Problema Atual
 
----
+O dialog atual pede ao cliente 3 campos manuais:
+- Nome da Conexao
+- Phone Number ID (que o cliente precisa achar no Meta Developers)
+- Access Token Permanente (que o cliente precisa gerar em System Users)
 
-## Bug 1: Coluna `access_token_encrypted` nao existe (CRITICO)
+Isso e inviavel para usuarios comuns. A segunda imagem de referencia (LiderHub) mostra o caminho correto: o cliente clica um botao, abre o popup do Facebook, loga, autoriza, e pronto.
 
-**Onde:** `meta-webhook/index.ts` (linha 415) e `NewWhatsAppCloudDialog.tsx` (linha 62)
+## A Boa Noticia
 
-**Problema:** O codigo referencia `access_token_encrypted`, mas a coluna real na tabela `meta_connections` se chama `access_token`. Isso causa:
-- O webhook nao consegue ler o token para baixar midias (retorna `null`)
-- O dialog de criacao tenta gravar em coluna inexistente (erro de insert)
+Voce **ja tem toda a infraestrutura pronta**:
+- `META_APP_ID` e `META_APP_SECRET` configurados como secrets
+- Edge Function `meta-oauth-callback` ja troca code por token, pega pages, encripta e salva na `meta_connections`
+- `MetaAuthCallback.tsx` ja processa o redirect
+- Instagram e Facebook ja usam exatamente esse fluxo
 
-**Correcao:**
-- No `meta-webhook/index.ts`: trocar `.select("... access_token_encrypted ...")` por `.select("... access_token ...")`  e `connection.access_token_encrypted` por `connection.access_token`
-- No `NewWhatsAppCloudDialog.tsx`: trocar `access_token_encrypted: encryptedToken` por `access_token: encryptedToken`
+## O Que Muda
 
----
+Em vez do formulario manual com 3 campos, o fluxo sera identico ao do Instagram/Facebook:
 
-## Bug 2: Acao `encrypt_token` inexistente na `meta-api` (CRITICO)
-
-**Onde:** `NewWhatsAppCloudDialog.tsx` (linha 50)
-
-**Problema:** O dialog chama `supabase.functions.invoke("meta-api", { body: { action: "encrypt_token", token: accessToken } })`, mas a edge function `meta-api` nao tem handler para essa acao -- ela so processa envio de mensagens. O resultado e que o try/catch usa o fallback `encData?.encrypted || accessToken`, salvando o token em texto puro.
-
-**Correcao:** Em vez de chamar uma edge function para encriptar, fazer a encriptacao diretamente no `meta-webhook` ao receber a primeira mensagem, ou salvar o token como esta (ja que `meta-api` e `meta-oauth-callback` ja usam `access_token` direto com `decryptToken` do shared). A abordagem mais simples e: adicionar a acao `encrypt_token` na `meta-api` usando o utilitario `encryptToken` que ja existe em `_shared/encryption.ts`.
-
----
-
-## Bug 3: Bucket `chat-media` e privado (MEDIO)
-
-**Onde:** Migracao SQL que criou o bucket
-
-**Problema:** O bucket foi criado com `public = false`, mas o codigo usa `getPublicUrl()` para gerar URLs de midia. URLs publicas de buckets privados retornam 400/403, e as imagens/audios/videos nao serao exibidos no chat.
-
-**Correcao:** Atualizar o bucket para `public = true` via SQL: `UPDATE storage.buckets SET public = true WHERE id = 'chat-media'`
-
----
-
-## Analise de Conversas e Kanban (OK)
-
-- `ConversationSidebarCard.tsx`: Icones corretos para Instagram (rosa), Facebook (azul), WhatsApp Cloud (verde), WhatsApp normal (Phone), Widget (Globe). Sem regressao.
-- `KanbanCard.tsx`: Mesma logica de icones, funcionando corretamente. Sem regressao.
-- `useConversationMapping.tsx`: Campo `origin` e `originMetadata` ja mapeados. OK.
-- `KanbanChatPanel.tsx`: Roteamento por origin para `meta-api` vs `evolution-api` ja implementado. OK.
-
----
+1. Cliente clica em "WhatsApp Cloud (API Oficial)" no dropdown
+2. Abre popup do Facebook com permissoes `whatsapp_business_management` + `whatsapp_business_messaging`
+3. Cliente loga no Facebook e autoriza
+4. Callback recebe o `code`, troca por token, busca o WABA (WhatsApp Business Account) e phone numbers automaticamente
+5. Salva na `meta_connections` com type `whatsapp_cloud`
 
 ## Secao Tecnica
 
@@ -56,15 +35,67 @@ A analise completa revelou 3 bugs criticos que precisam ser corrigidos antes do 
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `supabase/functions/meta-webhook/index.ts` | Trocar `access_token_encrypted` por `access_token` (linhas 415 e 430) |
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Trocar `access_token_encrypted` por `access_token` e remover chamada `encrypt_token` |
-| `supabase/functions/meta-api/index.ts` | Adicionar handler para acao `encrypt_token` |
-| Migracao SQL | `UPDATE storage.buckets SET public = true WHERE id = 'chat-media'` |
+| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Substituir formulario manual por fluxo OAuth com popup do Facebook (igual Instagram/Facebook) |
+| `supabase/functions/meta-oauth-callback/index.ts` | Adicionar tratamento para `type === "whatsapp_cloud"`: buscar WABA e phone numbers via Graph API apos OAuth |
+| `src/pages/MetaAuthCallback.tsx` | Ajustar para redirecionar para `/connections` (em vez de `/settings`) quando o type for `whatsapp_cloud` |
+| `src/pages/Connections.tsx` | Ajustar chamada ao dialog -- o dialog agora inicia o popup OAuth diretamente |
 
-### Ordem de execucao:
+### Fluxo detalhado:
 
-1. Migracao SQL (bucket publico)
-2. meta-webhook (corrigir nome da coluna)
-3. meta-api (adicionar acao encrypt_token)
-4. NewWhatsAppCloudDialog (corrigir nome da coluna)
-5. Re-deploy das edge functions
+```text
+1. Usuario clica "WhatsApp Cloud (API Oficial)"
+2. NewWhatsAppCloudDialog abre popup:
+   facebook.com/v21.0/dialog/oauth
+     ?client_id={META_APP_ID}
+     &redirect_uri={origin}/auth/meta-callback
+     &scope=whatsapp_business_management,whatsapp_business_messaging,business_management
+     &state={"type":"whatsapp_cloud"}
+     &response_type=code
+3. Usuario loga no Facebook e autoriza
+4. Redirect para /auth/meta-callback?code=XXX
+5. MetaAuthCallback chama meta-oauth-callback com code + type
+6. Edge Function:
+   a. Troca code por short-lived token
+   b. Troca por long-lived token (60 dias)
+   c. GET /me/accounts para listar paginas
+   d. Para cada pagina, busca phone_number_id via WABA
+   e. Salva na meta_connections
+7. Redireciona para /connections com toast de sucesso
+```
+
+### Mudanca no meta-oauth-callback para WhatsApp Cloud:
+
+Quando `type === "whatsapp_cloud"`, apos obter o token e as pages, precisa:
+1. Buscar o WABA ID vinculado a pagina: `GET /{page_id}?fields=whatsapp_business_account`
+2. Buscar os phone numbers do WABA: `GET /{waba_id}/phone_numbers`
+3. Salvar `page_id` = phone_number_id (para o webhook fazer match)
+4. Salvar `page_name` = display_phone_number ou nome da pagina
+
+### Mudanca no NewWhatsAppCloudDialog:
+
+O dialog deixa de ser um formulario e vira apenas um botao "Conectar com Facebook" que abre o popup OAuth, identico ao que `InstagramIntegration.tsx` e `FacebookIntegration.tsx` ja fazem (linhas 83-98 do Instagram).
+
+### Seguranca:
+
+- Token e obtido via OAuth server-side (mais seguro que colar token manual)
+- Token e automaticamente criptografado com AES-GCM antes de salvar
+- Token tem validade de 60 dias (long-lived) -- pode implementar renovacao futura
+- O `META_APP_SECRET` nunca sai do backend (edge function)
+- Nenhum dado sensivel e exposto no frontend
+
+### Vantagens sobre o fluxo manual:
+
+- Cliente nao precisa acessar Meta Developers
+- Cliente nao precisa gerar token permanente
+- O phone_number_id e detectado automaticamente
+- Mais seguro (token via OAuth em vez de colado manualmente)
+- Mesmo padrao visual do Instagram/Facebook (consistencia UX)
+
+### Ordem de implementacao:
+
+1. Atualizar `meta-oauth-callback` para tratar `whatsapp_cloud` (buscar WABA + phone numbers)
+2. Atualizar `NewWhatsAppCloudDialog` para usar popup OAuth em vez de formulario
+3. Atualizar `MetaAuthCallback` para redirecionar corretamente por tipo
+4. Atualizar `Connections.tsx` para integrar o novo fluxo
+5. Re-deploy da edge function
+
