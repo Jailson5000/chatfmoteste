@@ -23,10 +23,26 @@ export const META_SCOPES = {
 } as const;
 
 /**
+ * Returns a fixed redirect URI based on the current environment.
+ * This ensures the redirect_uri always matches what's registered in Meta,
+ * regardless of which subdomain the user is on.
+ */
+export function getFixedRedirectUri(): string {
+  if (typeof window === "undefined") {
+    return "https://miauchat.com.br/auth/meta-callback";
+  }
+  const origin = window.location.origin;
+  if (origin.includes("miauchat.com.br")) {
+    return "https://miauchat.com.br/auth/meta-callback";
+  }
+  return "https://chatfmoteste.lovable.app/auth/meta-callback";
+}
+
+/**
  * Build the OAuth URL for Instagram or Facebook login.
  */
 export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
-  const redirectUri = `${window.location.origin}/auth/meta-callback`;
+  const redirectUri = getFixedRedirectUri();
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
 
