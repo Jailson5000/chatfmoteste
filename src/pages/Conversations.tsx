@@ -454,10 +454,10 @@ export default function Conversations() {
 
   // Robust WhatsApp detection for audio button visibility
   const isWhatsAppConversation = useMemo(() => {
-    if (!selectedConversation) return false;
-    const origin = (selectedConversation.origin || '').toUpperCase();
-    const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-    if (nonWhatsAppOrigins.includes(origin)) return false;
+     if (!selectedConversation) return false;
+     const origin = (selectedConversation.origin || '').toUpperCase();
+     const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+     if (nonWhatsAppOrigins.includes(origin)) return false;
     
     // Positive check: must be explicitly WhatsApp
     return origin === 'WHATSAPP' || 
@@ -1320,10 +1320,10 @@ export default function Conversations() {
         // Note: Don't manually add to state - Realtime subscription will handle it
         // This prevents duplicate internal notes from appearing in the UI
       } else {
-        // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
-        const conversationOrigin = conversation.origin?.toUpperCase();
-        const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-        const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+         // Determine if this is a non-WhatsApp conversation (Widget, Tray, Site, Web, Meta channels)
+         const conversationOrigin = conversation.origin?.toUpperCase();
+         const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+         const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
 
         // Log for debugging channel routing
         console.log('[MessageSend] Channel routing:', {
@@ -1604,37 +1604,62 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
-      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web)
+      // Check if this is a non-WhatsApp conversation (Widget, Tray, Site, Web, Meta channels)
       const conversationOrigin = selectedConversation.origin?.toUpperCase();
-      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
       const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
 
       if (isNonWhatsAppConversation) {
-        // For Widget/Tray: save directly to database, don't use Evolution API
-        const { error: insertError } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: selectedConversationId,
-            content,
-            message_type: "text",
-            is_from_me: true,
-            sender_type: "human",
-            ai_generated: false,
+        const metaOrigins = ['INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+        const isMetaChannel = metaOrigins.includes(conversationOrigin);
+
+        if (isMetaChannel) {
+          // For Meta channels: use meta-api
+          const response = await supabase.functions.invoke("meta-api", {
+            body: {
+              conversationId: selectedConversationId,
+              content,
+              messageType: "text",
+            },
           });
-        
-        if (insertError) throw new Error('Falha ao salvar mensagem');
-        
-        // Delete the failed message
-        await supabase.from("messages").delete().eq("id", messageId);
-        
-        // Update conversation timestamp
-        await supabase
-          .from("conversations")
-          .update({ last_message_at: new Date().toISOString() })
-          .eq("id", selectedConversationId);
-        
-        // Remove old message from state (new one will come via realtime)
-        setMessages(prev => prev.filter(m => m.id !== messageId));
+
+          if (response.error || !response.data?.success) {
+            throw new Error(response.data?.error || "Falha ao enviar mensagem");
+          }
+
+          // Update to "sent"
+          setMessages(prev => prev.map(m => 
+            m.id === messageId 
+              ? { ...m, id: response.data.messageId || messageId, status: "sent" as MessageStatus }
+              : m
+          ));
+        } else {
+          // For Widget/Tray: save directly to database
+          const { error: insertError } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: selectedConversationId,
+              content,
+              message_type: "text",
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+            });
+          
+          if (insertError) throw new Error('Falha ao salvar mensagem');
+          
+          // Delete the failed message
+          await supabase.from("messages").delete().eq("id", messageId);
+          
+          // Update conversation timestamp
+          await supabase
+            .from("conversations")
+            .update({ last_message_at: new Date().toISOString() })
+            .eq("id", selectedConversationId);
+          
+          // Remove old message from state (new one will come via realtime)
+          setMessages(prev => prev.filter(m => m.id !== messageId));
+        }
       } else {
         // WhatsApp: use Evolution API
         const response = await supabase.functions.invoke("evolution-api", {
@@ -2138,10 +2163,10 @@ export default function Conversations() {
         });
       }
 
-      // CRITICAL: Determine channel routing - WhatsApp vs Chat Web
-      const conversationOrigin = selectedConversation.origin?.toUpperCase();
-      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+       // CRITICAL: Determine channel routing - WhatsApp vs Chat Web vs Meta channels
+       const conversationOrigin = selectedConversation.origin?.toUpperCase();
+       const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+       const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
       
       console.log('[MediaPreviewSend] Channel routing:', {
         conversationId: selectedConversationId,
@@ -2352,10 +2377,10 @@ export default function Conversations() {
     setIsSending(true);
     
     try {
-      // CRITICAL: Determine channel routing FIRST - WhatsApp vs Chat Web
-      const conversationOrigin = selectedConversation.origin?.toUpperCase();
-      const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
-      const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
+       // CRITICAL: Determine channel routing FIRST - WhatsApp vs Chat Web vs Meta channels
+       const conversationOrigin = selectedConversation.origin?.toUpperCase();
+       const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+       const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
       
       console.log('[AudioSend] Channel routing:', {
         conversationId: selectedConversationId,

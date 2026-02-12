@@ -10,7 +10,7 @@ const corsHeaders = {
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_CONTEXT_STRING_LENGTH = 255;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api', 'WIDGET'];
+const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api', 'WIDGET', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
 const WIDGET_ID_REGEX = /^widget_[a-zA-Z0-9_-]{10,100}$/;
 
 // Prompt injection detection patterns
