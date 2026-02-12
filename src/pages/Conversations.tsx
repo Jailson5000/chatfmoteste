@@ -194,6 +194,9 @@ export default function Conversations() {
     loadMoreConversations: loadMoreFromBackend,
     hasMoreConversations: hasMoreFromBackend,
     isLoadingMoreConversations: isLoadingMoreFromBackend,
+    setAllConversations,
+    registerOptimisticUpdate,
+    clearOptimisticUpdateAfterDelay,
   } = useConversations();
   const { counts: tabCounts } = useConversationCounts();
   const { members: teamMembers } = useTeamMembers();
@@ -2643,6 +2646,31 @@ export default function Conversations() {
     }
   };
 
+  // Shared status change handler for ContactStatusTags (uses shared mutation with optimistic lock)
+  const handleContactStatusChange = (clientId: string, statusId: string | null) => {
+    updateClientStatus.mutate({ clientId, statusId });
+  };
+
+  // Shared tags change handler for ContactStatusTags (updates allConversations directly)
+  const handleContactTagsChange = (convId: string, clientId: string, action: 'add' | 'remove', tagId: string, tagName: string) => {
+    // Update client_tags in allConversations for immediate sidebar card update
+    setAllConversations(prev =>
+      prev.map(conv => {
+        if (conv.id !== convId) return conv;
+        const currentTags = (conv as any).client_tags || [];
+        let updatedTags: any[];
+        if (action === 'add') {
+          updatedTags = [...currentTags, { tag_id: tagId, tags: { name: tagName } }];
+        } else {
+          updatedTags = currentTags.filter((t: any) => t.tag_id !== tagId);
+        }
+        return { ...conv, client_tags: updatedTags };
+      })
+    );
+    registerOptimisticUpdate(convId, { client_tags: true });
+    clearOptimisticUpdateAfterDelay(convId);
+  };
+
   const handleChangeTags = (tagNames: string[]) => {
     if (selectedConversation) {
       updateConversationTags.mutate({
@@ -4015,6 +4043,8 @@ export default function Conversations() {
                 conversationId={selectedConversation.id}
                 contactPhone={selectedConversation.contact_phone}
                 contactName={selectedConversation.contact_name}
+                onStatusChange={handleContactStatusChange}
+                onTagsChange={handleContactTagsChange}
               />
             </div>
 
