@@ -45,6 +45,9 @@ export default function Kanban() {
     loadMoreConversations,
     hasMoreConversations,
     isLoadingMoreConversations,
+    setAllConversations,
+    registerOptimisticUpdate,
+    clearOptimisticUpdateAfterDelay,
   } = useConversations();
   const { user } = useAuth();
   const { tags } = useTags();
@@ -657,6 +660,9 @@ export default function Kanban() {
             updateConversationDepartmentMutation={updateConversationDepartment}
             transferHandlerMutation={transferHandler}
             updateClientStatusMutation={conversationUpdateClientStatus}
+            setAllConversationsFn={setAllConversations}
+            registerOptimisticUpdateFn={registerOptimisticUpdate}
+            clearOptimisticUpdateAfterDelayFn={clearOptimisticUpdateAfterDelay}
             onClose={() => {
               setSheetOpen(false);
               setSelectedConversationId(null);

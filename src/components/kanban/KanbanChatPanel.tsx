@@ -1040,6 +1040,10 @@ interface KanbanChatPanelProps {
   updateConversationDepartmentMutation?: ReturnType<typeof useConversations>['updateConversationDepartment'];
   transferHandlerMutation?: ReturnType<typeof useConversations>['transferHandler'];
   updateClientStatusMutation?: ReturnType<typeof useConversations>['updateClientStatus'];
+  /** Shared state updaters for optimistic tag updates */
+  setAllConversationsFn?: ReturnType<typeof useConversations>['setAllConversations'];
+  registerOptimisticUpdateFn?: ReturnType<typeof useConversations>['registerOptimisticUpdate'];
+  clearOptimisticUpdateAfterDelayFn?: ReturnType<typeof useConversations>['clearOptimisticUpdateAfterDelay'];
 }
 
 export function KanbanChatPanel({
@@ -1071,6 +1075,9 @@ export function KanbanChatPanel({
   updateConversationDepartmentMutation,
   transferHandlerMutation,
   updateClientStatusMutation,
+  setAllConversationsFn,
+  registerOptimisticUpdateFn,
+  clearOptimisticUpdateAfterDelayFn,
 }: KanbanChatPanelProps) {
   // Determine if this is a WhatsApp conversation (robust detection)
   // Criteria: origin='whatsapp' OR remote_jid ends with @s.whatsapp.net
@@ -2679,16 +2686,34 @@ export function KanbanChatPanel({
       });
     }
     
-    // Invalidate queries to sync all components
+    // Invalidate client_tags query for this client
     queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
     
-    // Delayed invalidation for conversations to update Kanban board tags
-    // Tags are in client_tags table (no Realtime listener), so we need explicit refresh
-    setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    }, 1000);
-    
+    // Optimistic update: update allConversations locally so Kanban card reflects tag change immediately
+    if (setAllConversationsFn) {
+      // Build updated tag names array for this client
+      const currentTagNames = (conversationTags || []);
+      const updatedTagNames = hasTag
+        ? currentTagNames.filter(t => t !== tag.name && t !== tag.id)
+        : [...currentTagNames, tag.name];
+      
+      setAllConversationsFn(prev => prev.map(conv => {
+        const cl = conv.client as { id?: string } | null;
+        if (cl?.id === clientId) {
+          return { ...conv, tags: updatedTagNames };
+        }
+        return conv;
+      }));
+      
+      // Register optimistic lock to protect against stale refetch
+      if (registerOptimisticUpdateFn) {
+        registerOptimisticUpdateFn(conversationId, { tags: updatedTagNames });
+      }
+      if (clearOptimisticUpdateAfterDelayFn) {
+        clearOptimisticUpdateAfterDelayFn(conversationId);
+      }
+    }
     
     toast({ title: "Tags atualizadas" });
   };

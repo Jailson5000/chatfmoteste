@@ -867,7 +867,16 @@ export function useConversations() {
         })
       );
 
-      return { previousConversations };
+      // Register optimistic lock to protect against stale refetch
+      const targetConv = allConversations.find(c => {
+        const cl = c.client as { id?: string } | null;
+        return cl?.id === clientId;
+      });
+      if (targetConv) {
+        registerOptimisticUpdate(targetConv.id, { client: { custom_status_id: statusId } });
+      }
+
+      return { previousConversations, targetConvId: targetConv?.id };
     },
     onError: (error, _vars, context) => {
       // Rollback on error - both queryClient and local state
@@ -881,7 +890,11 @@ export function useConversations() {
         variant: "destructive",
       });
     },
-    onSettled: () => {
+    onSettled: (_data, _error, _variables, context) => {
+      // Clear optimistic lock after delay
+      if (context?.targetConvId) {
+        clearOptimisticUpdateAfterDelay(context.targetConvId);
+      }
       // NOTE: Removed invalidateQueries(["conversations"]) - Realtime handles it
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
@@ -1178,5 +1191,9 @@ export function useConversations() {
     changeWhatsAppInstance,
     // Helpers
     checkExistingConversationInDestination,
+    // State management for shared optimistic updates
+    setAllConversations,
+    registerOptimisticUpdate,
+    clearOptimisticUpdateAfterDelay,
   };
 }
