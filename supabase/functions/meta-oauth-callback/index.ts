@@ -2,27 +2,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encryptToken } from "../_shared/encryption.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
-/**
- * meta-oauth-callback
- * Handles OAuth callback from Meta (Facebook Login).
- * 
- * POST body:
- * {
- *   code: string,           // Authorization code from Meta
- *   redirectUri: string,     // The redirect URI used in the OAuth flow
- *   type: "instagram" | "facebook" | "whatsapp_cloud",
- *   pageId?: string,         // Selected Facebook Page ID (for multi-page accounts)
- * }
- * 
- * Flow:
- * 1. Exchange code for short-lived token
- * 2. Exchange short-lived token for long-lived token (60 days)
- * 3. Get list of pages the user manages
- * 4. Get page access token for the selected page
- * 5. If Instagram, get linked IG account
- * 6. Save encrypted token in meta_connections
- */
-
 const GRAPH_API_VERSION = "v21.0";
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
@@ -145,7 +124,7 @@ Deno.serve(async (req) => {
     }
 
     const userLongLivedToken = longLivedData.access_token;
-    const expiresIn = longLivedData.expires_in || 5184000; // Default 60 days
+    const expiresIn = longLivedData.expires_in || 5184000;
 
     // Step 3: Get pages managed by user
     console.log("[meta-oauth] Fetching managed pages...");
@@ -161,6 +140,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    // --- WhatsApp Cloud: auto-detect WABA and phone numbers ---
+    if (type === "whatsapp_cloud") {
+      return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
+    }
+
+    // --- Instagram / Facebook flow (existing) ---
     // If no pageId specified, return available pages for user selection
     if (!pageId) {
       const pages = pagesData.data.map((p: any) => ({
@@ -176,7 +161,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Step 4: Get the selected page's access token (which is already long-lived)
+    // Step 4: Get the selected page's access token
     const selectedPage = pagesData.data.find((p: any) => p.id === pageId);
     if (!selectedPage) {
       return new Response(JSON.stringify({ error: "Selected page not found" }), {
@@ -189,10 +174,9 @@ Deno.serve(async (req) => {
     const pageName = selectedPage.name;
     const igAccountId = selectedPage.instagram_business_account?.id || null;
 
-    // For Instagram type, ensure page has linked IG account
     if (type === "instagram" && !igAccountId) {
       return new Response(JSON.stringify({ 
-        error: "This Page has no linked Instagram Professional account. Link an Instagram Business or Creator account to this Page first." 
+        error: "This Page has no linked Instagram Professional account." 
       }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -209,7 +193,7 @@ Deno.serve(async (req) => {
         {
           law_firm_id: lawFirmId,
           type,
-          page_id: type === "whatsapp_cloud" ? pageId : pageId,
+          page_id: pageId,
           page_name: pageName,
           ig_account_id: igAccountId,
           access_token: encryptedToken,
@@ -229,12 +213,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log("[meta-oauth] Connection saved:", {
-      id: saved.id,
-      type,
-      pageName,
-      hasIG: !!igAccountId,
-    });
+    console.log("[meta-oauth] Connection saved:", { id: saved.id, type, pageName, hasIG: !!igAccountId });
 
     return new Response(
       JSON.stringify({
@@ -255,3 +234,116 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+/**
+ * Handle WhatsApp Cloud OAuth: detect WABA + phone numbers from pages
+ */
+async function handleWhatsAppCloud(
+  pages: any[],
+  userToken: string,
+  expiresIn: number,
+  lawFirmId: string,
+  supabaseAdmin: any
+) {
+  const savedConnections: any[] = [];
+  const errors: string[] = [];
+
+  for (const page of pages) {
+    try {
+      // Get WABA linked to this page
+      console.log(`[meta-oauth] Checking WABA for page ${page.name} (${page.id})...`);
+      const wabaRes = await fetch(
+        `${GRAPH_API_BASE}/${page.id}?fields=whatsapp_business_account&access_token=${userToken}`
+      );
+      const wabaData = await wabaRes.json();
+
+      const wabaId = wabaData.whatsapp_business_account?.id;
+      if (!wabaId) {
+        console.log(`[meta-oauth] Page ${page.name} has no WABA linked, skipping`);
+        continue;
+      }
+
+      // Get phone numbers from WABA
+      console.log(`[meta-oauth] Fetching phone numbers for WABA ${wabaId}...`);
+      const phonesRes = await fetch(
+        `${GRAPH_API_BASE}/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating&access_token=${userToken}`
+      );
+      const phonesData = await phonesRes.json();
+
+      if (!phonesData.data?.length) {
+        console.log(`[meta-oauth] WABA ${wabaId} has no phone numbers`);
+        errors.push(`Página "${page.name}" tem WABA mas sem números de telefone`);
+        continue;
+      }
+
+      // Save each phone number as a separate connection
+      for (const phone of phonesData.data) {
+        const phoneNumberId = phone.id;
+        const displayName = phone.verified_name || phone.display_phone_number || page.name;
+
+        // Use page access token (long-lived) for API calls
+        const encryptedToken = await encryptToken(page.access_token);
+        const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+        const { data: saved, error: saveError } = await supabaseAdmin
+          .from("meta_connections")
+          .upsert(
+            {
+              law_firm_id: lawFirmId,
+              type: "whatsapp_cloud",
+              page_id: phoneNumberId, // phone_number_id for webhook matching
+              page_name: `${displayName} (${phone.display_phone_number || ""})`.trim(),
+              access_token: encryptedToken,
+              token_expires_at: tokenExpiresAt,
+              is_active: true,
+            },
+            { onConflict: "law_firm_id,type,page_id" }
+          )
+          .select("id")
+          .single();
+
+        if (saveError) {
+          console.error(`[meta-oauth] Error saving WhatsApp Cloud connection:`, saveError);
+          errors.push(`Erro ao salvar número ${phone.display_phone_number}`);
+        } else {
+          console.log(`[meta-oauth] WhatsApp Cloud connection saved:`, {
+            id: saved.id,
+            phoneNumberId,
+            displayName,
+          });
+          savedConnections.push({
+            id: saved.id,
+            phoneNumberId,
+            displayName,
+            displayPhoneNumber: phone.display_phone_number,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[meta-oauth] Error processing page ${page.name}:`, err);
+      errors.push(`Erro ao processar página "${page.name}"`);
+    }
+  }
+
+  if (savedConnections.length === 0) {
+    return new Response(
+      JSON.stringify({
+        error: "Nenhum número WhatsApp Business encontrado nas suas páginas do Facebook.",
+        details: errors,
+      }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      type: "whatsapp_cloud",
+      connections: savedConnections,
+      connectionId: savedConnections[0].id,
+      pageName: savedConnections[0].displayName,
+      errors: errors.length > 0 ? errors : undefined,
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}

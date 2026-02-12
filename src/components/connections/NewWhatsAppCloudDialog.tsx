@@ -1,19 +1,14 @@
-import { useState } from "react";
-import { Loader2, MessageCircle } from "lucide-react";
+import { useState, useCallback } from "react";
+import { MessageCircle, Loader2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { useTenant } from "@/hooks/useTenant";
 
 interface NewWhatsAppCloudDialogProps {
   open: boolean;
@@ -22,132 +17,80 @@ interface NewWhatsAppCloudDialogProps {
 }
 
 export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsAppCloudDialogProps) {
-  const [displayName, setDisplayName] = useState("");
-  const [phoneNumberId, setPhoneNumberId] = useState("");
-  const [accessToken, setAccessToken] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const { toast } = useToast();
-  const { tenant } = useTenant();
-  const lawFirmId = tenant?.id;
 
-  const handleCreate = async () => {
-    if (!displayName.trim() || !phoneNumberId.trim() || !accessToken.trim()) {
-      toast({ title: "Preencha todos os campos", variant: "destructive" });
-      return;
-    }
-    if (!lawFirmId) {
-      toast({ title: "Erro de autenticação", variant: "destructive" });
+  const handleConnect = useCallback(() => {
+    const META_APP_ID = import.meta.env.VITE_META_APP_ID;
+    if (!META_APP_ID) {
+      toast({ title: "META_APP_ID não configurado", description: "Configure nas variáveis de ambiente.", variant: "destructive" });
       return;
     }
 
-    setIsCreating(true);
-    try {
-      // Encrypt the access token via edge function
-      const { data: encData, error: encError } = await supabase.functions.invoke("meta-api", {
-        body: { action: "encrypt_token", token: accessToken },
-      });
+    setIsConnecting(true);
 
-      if (encError) {
-        console.warn("Token encryption failed, storing as-is:", encError);
-      }
-      const encryptedToken = encData?.encrypted || accessToken;
+    const redirectUri = `${window.location.origin}/auth/meta-callback`;
+    const scope = "whatsapp_business_management,whatsapp_business_messaging,business_management";
+    const state = JSON.stringify({ type: "whatsapp_cloud" });
 
-      // Insert meta_connection
-      const { error } = await supabase.from("meta_connections").insert({
-        law_firm_id: lawFirmId,
-        type: "whatsapp_cloud",
-        page_id: phoneNumberId.trim(),
-        page_name: displayName.trim(),
-        access_token: encryptedToken,
-        is_active: true,
-      } as any);
+    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 
-      if (error) throw error;
+    window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
 
-      toast({ title: "Conexão WhatsApp Cloud criada com sucesso!" });
-      setDisplayName("");
-      setPhoneNumberId("");
-      setAccessToken("");
-      onCreated();
+    // Close dialog - MetaAuthCallback will handle the rest
+    setTimeout(() => {
+      setIsConnecting(false);
       onClose();
-    } catch (err: any) {
-      console.error("Error creating WhatsApp Cloud connection:", err);
-      toast({ title: "Erro ao criar conexão", description: err.message, variant: "destructive" });
-    } finally {
-      setIsCreating(false);
-    }
-  };
+    }, 1000);
+  }, [toast, onClose]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5 text-[#25D366]" />
-            Nova Conexão WhatsApp Cloud (API Oficial)
+            Conectar WhatsApp Cloud (API Oficial)
           </DialogTitle>
           <DialogDescription>
-            Configure a API oficial do WhatsApp via Meta Business Platform
+            Conecte sua conta do WhatsApp Business diretamente pelo Facebook. Basta fazer login e autorizar.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label>Nome da Conexão</Label>
-            <Input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Ex: WhatsApp Comercial"
-              disabled={isCreating}
-            />
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+            <h4 className="text-sm font-medium">Como funciona:</h4>
+            <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+              <li>Clique em "Conectar com Facebook"</li>
+              <li>Faça login na sua conta do Facebook</li>
+              <li>Autorize o acesso ao WhatsApp Business</li>
+              <li>Pronto! Sua conexão será criada automaticamente</li>
+            </ol>
           </div>
 
-          <div className="space-y-2">
-            <Label>Phone Number ID</Label>
-            <Input
-              value={phoneNumberId}
-              onChange={(e) => setPhoneNumberId(e.target.value)}
-              placeholder="Ex: 123456789012345"
-              disabled={isCreating}
-            />
-            <p className="text-xs text-muted-foreground">
-              Encontre em Meta Developers → WhatsApp → API Setup
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Access Token (Permanente)</Label>
-            <Input
-              type="password"
-              value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-              placeholder="Token de acesso permanente"
-              disabled={isCreating}
-            />
-            <p className="text-xs text-muted-foreground">
-              Gere um token permanente em Meta Business Settings → System Users
-            </p>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isCreating}>
-            Cancelar
-          </Button>
           <Button
-            onClick={handleCreate}
-            disabled={isCreating || !displayName.trim() || !phoneNumberId.trim() || !accessToken.trim()}
+            onClick={handleConnect}
+            disabled={isConnecting}
+            className="w-full bg-[#1877F2] hover:bg-[#166FE5] text-white"
+            size="lg"
           >
-            {isCreating ? (
+            {isConnecting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Criando...
+                Abrindo Facebook...
               </>
             ) : (
-              "Criar Conexão"
+              <>
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Conectar com Facebook
+              </>
             )}
           </Button>
-        </DialogFooter>
+
+          <p className="text-xs text-muted-foreground text-center">
+            Seu token é obtido de forma segura via OAuth e criptografado automaticamente.
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );
