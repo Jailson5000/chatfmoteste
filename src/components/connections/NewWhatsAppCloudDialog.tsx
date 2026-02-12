@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { META_APP_ID, META_CONFIG_ID } from "@/lib/meta-config";
 
 declare global {
   interface Window {
@@ -29,8 +30,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
   const [sdkReady, setSdkReady] = useState(false);
   const { toast } = useToast();
 
-  const META_APP_ID = import.meta.env.VITE_META_APP_ID;
-  const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID;
+  // META_APP_ID and META_CONFIG_ID imported from meta-config
 
   // Initialize Facebook SDK
   useEffect(() => {

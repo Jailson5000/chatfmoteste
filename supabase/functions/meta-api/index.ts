@@ -51,6 +51,69 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Handle test_api action - proxy Graph API calls for testing
+    if (body.action === "test_api" && body.connectionId && body.endpoint) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token);
+      if (claimsError || !claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const testUserId = claimsData.claims.sub;
+
+      const supabaseAdmin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: testProfile } = await supabaseAdmin.from("profiles").select("law_firm_id").eq("id", testUserId).single();
+      if (!testProfile?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Get the connection and verify tenant
+      const { data: testConn } = await supabaseAdmin.from("meta_connections")
+        .select("id, access_token, law_firm_id")
+        .eq("id", body.connectionId)
+        .eq("law_firm_id", testProfile.law_firm_id)
+        .single();
+
+      if (!testConn) {
+        return new Response(JSON.stringify({ error: "Connection not found or access denied" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let testAccessToken = testConn.access_token;
+      if (isEncrypted(testAccessToken)) {
+        testAccessToken = await decryptToken(testAccessToken);
+      }
+
+      // Call Graph API
+      const graphUrl = `${GRAPH_API_BASE}${body.endpoint}`;
+      console.log("[meta-api] test_api calling:", graphUrl);
+      const graphRes = await fetch(graphUrl, {
+        headers: { Authorization: `Bearer ${testAccessToken}` },
+      });
+      const graphData = await graphRes.json();
+
+      return new Response(JSON.stringify(graphData), {
+        status: graphRes.ok ? 200 : 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Auth check
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
