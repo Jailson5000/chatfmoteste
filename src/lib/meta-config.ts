@@ -8,7 +8,7 @@
  */
 
 // App ID from Meta Developers console
-export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1447135433693990";
+export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1237829051015100";
 
 // Config ID for WhatsApp Embedded Signup (set via VITE_META_CONFIG_ID when available)
 export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "";
@@ -18,7 +18,7 @@ export const META_GRAPH_API_VERSION = "v21.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish",
+  instagram: "instagram_business_basic,instagram_business_manage_messages",
   facebook: "pages_messaging,pages_manage_metadata",
 } as const;
 
