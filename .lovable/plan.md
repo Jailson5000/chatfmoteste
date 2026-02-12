@@ -1,70 +1,33 @@
 
-## Status Atual dos Secrets Meta
 
-**Boas notícias:** Os secrets já estão configurados corretamente no projeto:
-- ✅ **META_APP_ID** já existe como secret
-- ✅ **META_APP_SECRET** já existe como secret
+# Corrigir PLATFORM_INVALID_APP_ID no OAuth do Instagram/Facebook
 
-Os valores estão sendo acessados corretamente:
-1. **No backend (Edge Functions)**: As funções `meta-oauth-callback` e `meta-api` acessam via `Deno.env.get("META_APP_ID")` e `Deno.env.get("META_APP_SECRET")`
-2. **No frontend**: O arquivo `src/lib/meta-config.ts` usa `import.meta.env.VITE_META_APP_ID`, que contém o valor público (1447135433693990)
+## Problema
+O erro `PLATFORM_INVALID_APP_ID` ocorre porque o App ID hardcoded no arquivo `src/lib/meta-config.ts` esta errado.
 
-## O que falta fazer para que tudo funcione
+- **Valor atual (errado):** `1447135433693990`
+- **Valor correto (do painel Meta):** `1237829051015100`
 
-### Problema identificado:
-A página `/meta-test` mostra "Não conectado" para Instagram, Facebook e WhatsApp porque nenhuma integração foi conectada ainda. A página de teste está funcionando corretamente, mas depende de ter conexões salvas no banco de dados.
+## Correcao
 
-### Passos para preparar para o vídeo de App Review:
+### Arquivo: `src/lib/meta-config.ts`
+Alterar a linha do `META_APP_ID` de:
+```
+export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1447135433693990";
+```
+Para:
+```
+export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1237829051015100";
+```
 
-1. **Conectar Instagram** (via Configurações > Integrações)
-   - Clique em "Conectar Instagram"
-   - Faça login na sua conta Meta/Facebook
-   - Selecione uma página com Instagram vinculada
-   - Isto salva a conexão e permite testar `instagram_business_basic`, `instagram_business_manage_messages`, etc.
+### Arquivo: `src/lib/meta-config.ts` - Simplificar scopes
+Como voce so precisa de **receber e enviar mensagens**, reduzir os scopes para o minimo:
 
-2. **Conectar Facebook** (via Configurações > Integrações)
-   - Clique em "Conectar Facebook"
-   - Faça login na sua conta Meta/Facebook
-   - Selecione uma página do Facebook
-   - Isto permite testar `pages_messaging` e `pages_manage_metadata`
+- **Instagram:** `instagram_business_basic,instagram_business_manage_messages`
+- **Facebook:** `pages_messaging,pages_manage_metadata`
 
-3. **Conectar WhatsApp Cloud** (via Conexões)
-   - Use o Embedded Signup wizard
-   - Conecte ao seu WhatsApp Business Account
-   - Isto permite testar `whatsapp_business_management` e `whatsapp_business_messaging`
+Remover `instagram_business_manage_comments` e `instagram_business_content_publish` que nao sao necessarios.
 
-4. **Testar cada permissão** em `/meta-test`
-   - Cada botão "Testar" faz uma chamada real à Graph API da Meta
-   - Os resultados aparecem na tela (perfeito para gravar o vídeo)
-   - Se houver erro "Meta app not configured", significa que META_APP_SECRET não está recebido pela edge function
-
-### Configuração necessária no Meta Developers (antes de gravar):
-
-**Valid OAuth Redirect URIs:**
-- Adicione: `https://chatfmoteste.lovable.app/auth/meta-callback`
-- Adicione versão preview se necessário: `https://id-preview--39ee3e91-be33-4c6a-91f1-0c6513b5b19e.lovable.app/auth/meta-callback`
-
-**Domínios permitidos para JavaScript SDK:**
-- `chatfmoteste.lovable.app`
-- `id-preview--39ee3e91-be33-4c6a-91f1-0c6513b5b19e.lovable.app` (preview)
-
-## Verificação rápida: Os secrets estão funcionando?
-
-Os secrets estão OK se:
-- ✅ A página `/meta-test` carrega sem erros
-- ✅ O App ID (1447135433693990) é exibido corretamente
-- ⚠️ Os botões de teste aparecem desabilitados (esperado - sem conexões)
-- ⚠️ Após conectar uma integração, os botões ficam habilitados
-
-Se ao testar uma permissão você ver: "Meta app not configured" → isto significa que `META_APP_SECRET` não está sendo passado corretamente à edge function. Neste caso, verifique se o secret foi configurado e está visível na lista de secrets do projeto.
-
-## Próximos passos recomendados:
-
-1. Ir para **Configurações > Integrações**
-2. Conectar Instagram (testa instagram_basic e instagram_manage_messages)
-3. Conectar Facebook (testa pages_messaging e pages_manage_metadata)
-4. Ir para **Conexões**
-5. Conectar WhatsApp Cloud com Embedded Signup
-6. Voltar para `/meta-test` e testar cada permissão
-7. Gravar vídeo mostrando as respostas da Graph API
+## Resultado
+Apos essa correcao, ao clicar "Conectar" no Instagram ou Facebook, o popup do Meta vai abrir corretamente em vez de mostrar "ID do app invalido".
 
