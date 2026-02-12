@@ -1,79 +1,70 @@
 
+## Status Atual dos Secrets Meta
 
-# Plano: Preparar Instagram, Facebook e WhatsApp Cloud para Gravacao do Video Meta App Review
+**Boas notícias:** Os secrets já estão configurados corretamente no projeto:
+- ✅ **META_APP_ID** já existe como secret
+- ✅ **META_APP_SECRET** já existe como secret
 
-## Resumo
+Os valores estão sendo acessados corretamente:
+1. **No backend (Edge Functions)**: As funções `meta-oauth-callback` e `meta-api` acessam via `Deno.env.get("META_APP_ID")` e `Deno.env.get("META_APP_SECRET")`
+2. **No frontend**: O arquivo `src/lib/meta-config.ts` usa `import.meta.env.VITE_META_APP_ID`, que contém o valor público (1447135433693990)
 
-Existem ajustes necessarios no codigo e na configuracao para que os tres canais (Instagram DM, Facebook Messenger e WhatsApp Cloud API) funcionem em modo teste e possam ser demonstrados no video para aprovacao da Meta.
+## O que falta fazer para que tudo funcione
 
-## Problemas Identificados
+### Problema identificado:
+A página `/meta-test` mostra "Não conectado" para Instagram, Facebook e WhatsApp porque nenhuma integração foi conectada ainda. A página de teste está funcionando corretamente, mas depende de ter conexões salvas no banco de dados.
 
-1. **VITE_META_APP_ID nao esta disponivel no frontend** - O App ID da Meta esta configurado apenas como secret do backend (`META_APP_ID`), mas os componentes Instagram e Facebook usam `import.meta.env.VITE_META_APP_ID`, que nao existe no `.env`
-2. **Permissoes do Instagram desatualizadas** - O codigo usa permissoes antigas (`instagram_basic`, `instagram_manage_messages`). A Meta migrou para `instagram_business_basic`, `instagram_business_manage_messages`
-3. **Falta pagina de teste interna** - Nao existe uma pagina para testar chamadas individuais a cada permissao (listar paginas, enviar mensagem, buscar WABA)
-4. **VITE_META_CONFIG_ID nao configurado** - Necessario para o Embedded Signup do WhatsApp Cloud
+### Passos para preparar para o vídeo de App Review:
 
-## Etapas de Implementacao
+1. **Conectar Instagram** (via Configurações > Integrações)
+   - Clique em "Conectar Instagram"
+   - Faça login na sua conta Meta/Facebook
+   - Selecione uma página com Instagram vinculada
+   - Isto salva a conexão e permite testar `instagram_business_basic`, `instagram_business_manage_messages`, etc.
 
-### 1. Configurar VITE_META_APP_ID no frontend
+2. **Conectar Facebook** (via Configurações > Integrações)
+   - Clique em "Conectar Facebook"
+   - Faça login na sua conta Meta/Facebook
+   - Selecione uma página do Facebook
+   - Isto permite testar `pages_messaging` e `pages_manage_metadata`
 
-Como o App ID da Meta e um identificador publico (nao e segredo), ele pode ser adicionado diretamente no codigo. Vamos criar uma constante compartilhada que os tres componentes usam, obtendo o valor do `META_APP_ID` ja configurado como secret.
+3. **Conectar WhatsApp Cloud** (via Conexões)
+   - Use o Embedded Signup wizard
+   - Conecte ao seu WhatsApp Business Account
+   - Isto permite testar `whatsapp_business_management` e `whatsapp_business_messaging`
 
-- Criar `src/lib/meta-config.ts` com o App ID exportado
-- Atualizar `InstagramIntegration.tsx`, `FacebookIntegration.tsx` e `NewWhatsAppCloudDialog.tsx` para usar essa constante
+4. **Testar cada permissão** em `/meta-test`
+   - Cada botão "Testar" faz uma chamada real à Graph API da Meta
+   - Os resultados aparecem na tela (perfeito para gravar o vídeo)
+   - Se houver erro "Meta app not configured", significa que META_APP_SECRET não está recebido pela edge function
 
-### 2. Atualizar permissoes do Instagram para a nova API
+### Configuração necessária no Meta Developers (antes de gravar):
 
-Alterar o escopo OAuth do Instagram de:
-- `instagram_basic, instagram_manage_messages` (deprecated)
+**Valid OAuth Redirect URIs:**
+- Adicione: `https://chatfmoteste.lovable.app/auth/meta-callback`
+- Adicione versão preview se necessário: `https://id-preview--39ee3e91-be33-4c6a-91f1-0c6513b5b19e.lovable.app/auth/meta-callback`
 
-Para:
-- `instagram_business_basic, instagram_business_manage_messages` (nova API)
+**Domínios permitidos para JavaScript SDK:**
+- `chatfmoteste.lovable.app`
+- `id-preview--39ee3e91-be33-4c6a-91f1-0c6513b5b19e.lovable.app` (preview)
 
-Arquivo: `src/components/settings/integrations/InstagramIntegration.tsx`
+## Verificação rápida: Os secrets estão funcionando?
 
-### 3. Criar pagina /admin/meta-test
+Os secrets estão OK se:
+- ✅ A página `/meta-test` carrega sem erros
+- ✅ O App ID (1447135433693990) é exibido corretamente
+- ⚠️ Os botões de teste aparecem desabilitados (esperado - sem conexões)
+- ⚠️ Após conectar uma integração, os botões ficam habilitados
 
-Criar uma pagina de teste interna acessivel em `/admin/meta-test` com botoes para:
+Se ao testar uma permissão você ver: "Meta app not configured" → isto significa que `META_APP_SECRET` não está sendo passado corretamente à edge function. Neste caso, verifique se o secret foi configurado e está visível na lista de secrets do projeto.
 
-- **instagram_business_basic**: `GET /me?fields=id,name,username` - Mostra dados da conta conectada
-- **instagram_business_manage_messages**: Enviar mensagem teste via conversa existente
-- **pages_messaging**: Enviar mensagem teste via Messenger
-- **pages_manage_metadata**: `GET /me/accounts` - Listar paginas gerenciadas
-- **whatsapp_business_management**: `GET /{waba_id}/phone_numbers` - Listar numeros do WABA
-- **whatsapp_business_messaging**: Enviar mensagem teste via WhatsApp Cloud
+## Próximos passos recomendados:
 
-Cada botao executa a chamada, mostra o resultado (JSON) e o status (sucesso/erro) na tela - perfeito para gravar o video de demonstracao.
-
-### 4. Adicionar rota no App.tsx
-
-Registrar a nova pagina `/admin/meta-test` no roteador, protegida para administradores.
-
-## Detalhes Tecnicos
-
-### Arquivos a criar:
-- `src/lib/meta-config.ts` - Constantes Meta compartilhadas
-- `src/pages/admin/MetaTestPage.tsx` - Pagina de teste das permissoes
-
-### Arquivos a modificar:
-- `src/components/settings/integrations/InstagramIntegration.tsx` - Atualizar permissoes OAuth
-- `src/components/settings/integrations/FacebookIntegration.tsx` - Usar meta-config
-- `src/components/connections/NewWhatsAppCloudDialog.tsx` - Usar meta-config
-- `src/App.tsx` - Adicionar rota /admin/meta-test
-
-### Configuracao necessaria (pelo usuario):
-- Definir `VITE_META_APP_ID` com o valor do App ID da Meta (1447135433693990 conforme screenshot)
-- Definir `VITE_META_CONFIG_ID` quando a Meta aprovar a conta (para WhatsApp Embedded Signup)
-- Configurar o webhook URL no Meta Dashboard apontando para a edge function `meta-webhook`
-- Adicionar os redirect URIs corretos no Meta Dashboard
-
-## Fluxo de Gravacao do Video
-
-Apos a implementacao, o roteiro de gravacao sera:
-
-1. Abrir `/admin/meta-test`
-2. Clicar em cada botao de permissao, mostrando a resposta da API
-3. Navegar para Configuracoes > Integracoes e conectar Instagram e Facebook
-4. Navegar para Conexoes e conectar WhatsApp Cloud
-5. Ir para Conversas e demonstrar envio/recebimento de mensagens nos tres canais
+1. Ir para **Configurações > Integrações**
+2. Conectar Instagram (testa instagram_basic e instagram_manage_messages)
+3. Conectar Facebook (testa pages_messaging e pages_manage_metadata)
+4. Ir para **Conexões**
+5. Conectar WhatsApp Cloud com Embedded Signup
+6. Voltar para `/meta-test` e testar cada permissão
+7. Gravar vídeo mostrando as respostas da Graph API
 
