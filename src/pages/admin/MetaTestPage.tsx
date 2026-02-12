@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy } from "lucide-react";
+import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy, PlayCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -15,11 +15,17 @@ interface TestResult {
   error?: string;
 }
 
+interface PermissionTest {
+  key: string;
+  permission: string;
+  endpoint: string;
+  required: boolean;
+}
+
 export default function MetaTestPage() {
   const { user } = useAuth();
   const [results, setResults] = useState<Record<string, TestResult>>({});
 
-  // Fetch all meta connections for this tenant
   const { data: connections } = useQuery({
     queryKey: ["meta-connections-test", user?.id],
     queryFn: async () => {
@@ -29,7 +35,6 @@ export default function MetaTestPage() {
         .eq("id", user?.id)
         .single();
       if (!profile?.law_firm_id) return [];
-
       const { data } = await supabase
         .from("meta_connections")
         .select("*")
@@ -39,21 +44,19 @@ export default function MetaTestPage() {
     enabled: !!user?.id,
   });
 
+  const igConnection = connections?.find((c: any) => c.type === "instagram");
+  const fbConnection = connections?.find((c: any) => c.type === "facebook");
+  const waConnection = connections?.find((c: any) => c.type === "whatsapp_cloud");
+
   const setTestResult = (key: string, result: TestResult) => {
     setResults((prev) => ({ ...prev, [key]: result }));
   };
 
-  const callMetaApi = async (key: string, endpoint: string, connection: any) => {
+  const callMetaApi = useCallback(async (key: string, endpoint: string, connection: any) => {
     setTestResult(key, { status: "loading" });
     try {
-      // We call the Graph API via the meta-api edge function proxy or directly
-      // For test purposes, we use the edge function to decrypt tokens
       const { data, error } = await supabase.functions.invoke("meta-api", {
-        body: {
-          action: "test_api",
-          connectionId: connection.id,
-          endpoint,
-        },
+        body: { action: "test_api", connectionId: connection.id, endpoint },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -61,17 +64,63 @@ export default function MetaTestPage() {
     } catch (err: any) {
       setTestResult(key, { status: "error", error: err.message });
     }
-  };
+  }, []);
 
   const getResult = (key: string): TestResult => results[key] || { status: "idle" };
 
-  const igConnection = connections?.find((c: any) => c.type === "instagram");
-  const fbConnection = connections?.find((c: any) => c.type === "facebook");
-  const waConnection = connections?.find((c: any) => c.type === "whatsapp_cloud");
+  const runAllTests = async (tests: PermissionTest[], connection: any) => {
+    if (!connection) return;
+    for (const t of tests) {
+      await callMetaApi(t.key, t.endpoint, connection);
+    }
+    toast.success("Todos os testes da seção concluídos!");
+  };
 
   const copyJson = (data: any) => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     toast.success("JSON copiado!");
+  };
+
+  // Build dynamic endpoints
+  const fbPageId = (fbConnection as any)?.page_id || "PAGE_ID";
+  const fbIgAccountId = (fbConnection as any)?.ig_account_id || "IG_ID";
+  const igPageId = (igConnection as any)?.page_id || "PAGE_ID";
+  const igAccountId = (igConnection as any)?.ig_account_id || "IG_ID";
+  const waPhoneId = (waConnection as any)?.page_id || "PHONE_ID";
+  const wabaId = (waConnection as any)?.waba_id || "WABA_ID";
+
+  const messengerTests: PermissionTest[] = [
+    { key: "msg_pages_utility", permission: "pages_utility_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
+    { key: "msg_pages_metadata", permission: "pages_manage_metadata", endpoint: `/me/accounts?fields=id,name,category`, required: true },
+    { key: "msg_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
+    { key: "msg_pages_messaging", permission: "pages_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
+    { key: "msg_ig_messages", permission: "instagram_manage_messages", endpoint: `/${fbPageId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "msg_pages_show", permission: "pages_show_list", endpoint: `/me/accounts?fields=id,name`, required: true },
+    { key: "msg_ig_basic", permission: "instagram_basic", endpoint: `/${fbIgAccountId}?fields=id,username`, required: true },
+    { key: "msg_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
+  ];
+
+  const instagramTests: PermissionTest[] = [
+    { key: "ig_manage_messages", permission: "instagram_business_manage_messages", endpoint: `/${igAccountId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "ig_business_basic", permission: "instagram_business_basic", endpoint: `/me?fields=id,name,username,profile_picture_url`, required: true },
+    { key: "ig_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
+    { key: "ig_manage_comments", permission: "instagram_manage_comments", endpoint: `/${igAccountId}/media?limit=3&fields=id,comments_count`, required: true },
+    { key: "ig_messages", permission: "instagram_manage_messages", endpoint: `/${igPageId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "ig_pages_show", permission: "pages_show_list", endpoint: `/me/accounts?fields=id,name`, required: true },
+    { key: "ig_basic", permission: "instagram_basic", endpoint: `/${igAccountId}?fields=id,username`, required: true },
+    { key: "ig_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
+  ];
+
+  const whatsappTests: PermissionTest[] = [
+    { key: "wa_messaging", permission: "whatsapp_business_messaging", endpoint: `/${waPhoneId}?fields=verified_name,display_phone_number`, required: true },
+    { key: "wa_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
+    { key: "wa_management", permission: "whatsapp_business_management", endpoint: `/${wabaId}/phone_numbers`, required: true },
+    { key: "wa_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
+  ];
+
+  const sectionSuccessCount = (tests: PermissionTest[]) => {
+    const success = tests.filter((t) => getResult(t.key).status === "success").length;
+    return `${success}/${tests.length}`;
   };
 
   const ResultDisplay = ({ testKey }: { testKey: string }) => {
@@ -92,10 +141,75 @@ export default function MetaTestPage() {
             </Button>
           )}
         </div>
-        <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-60 whitespace-pre-wrap">
+        <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-40 whitespace-pre-wrap">
           {r.status === "success" ? JSON.stringify(r.data, null, 2) : r.error}
         </pre>
       </div>
+    );
+  };
+
+  const TestSection = ({
+    title,
+    icon,
+    connection,
+    tests,
+    connectionLabel,
+  }: {
+    title: string;
+    icon: React.ReactNode;
+    connection: any;
+    tests: PermissionTest[];
+    connectionLabel?: string;
+  }) => {
+    const isRunningAll = tests.some((t) => getResult(t.key).status === "loading");
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 flex-wrap">
+            {icon}
+            {title}
+            <Badge variant="outline" className="ml-auto">{sectionSuccessCount(tests)}</Badge>
+            {connection ? (
+              <Badge variant="default" className="bg-green-600">{connectionLabel || connection.page_name}</Badge>
+            ) : (
+              <Badge variant="secondary">Não conectado</Badge>
+            )}
+          </CardTitle>
+          <div className="pt-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!connection || isRunningAll}
+              onClick={() => runAllTests(tests, connection)}
+            >
+              {isRunningAll ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <PlayCircle className="h-3 w-3 mr-1" />}
+              Testar Todos
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {tests.map((t) => (
+            <div key={t.key} className="border-b pb-3 last:border-0 last:pb-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{t.permission}</p>
+                {t.required && <Badge variant="outline" className="text-xs">Obrigatória</Badge>}
+                {getResult(t.key).status === "success" && <CheckCircle2 className="h-4 w-4 text-green-600 ml-auto" />}
+                {getResult(t.key).status === "error" && <XCircle className="h-4 w-4 text-destructive ml-auto" />}
+              </div>
+              <p className="text-xs text-muted-foreground mb-2 font-mono">GET {t.endpoint}</p>
+              <Button
+                size="sm"
+                disabled={!connection || getResult(t.key).status === "loading"}
+                onClick={() => callMetaApi(t.key, t.endpoint, connection)}
+              >
+                {getResult(t.key).status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Testar
+              </Button>
+              <ResultDisplay testKey={t.key} />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     );
   };
 
@@ -104,179 +218,42 @@ export default function MetaTestPage() {
       <div>
         <h1 className="text-2xl font-bold">Meta API Test Console</h1>
         <p className="text-muted-foreground mt-1">
-          Teste cada permissão da Meta para gravação do vídeo de App Review.
+          Teste cada permissão por caso de uso para gravação do vídeo de App Review.
         </p>
-        <Badge variant="outline" className="mt-2">App ID: {META_APP_ID}</Badge>
-        <Badge variant="outline" className="ml-2">API: {META_GRAPH_API_VERSION}</Badge>
+        <div className="flex gap-2 mt-2">
+          <Badge variant="outline">App ID: {META_APP_ID}</Badge>
+          <Badge variant="outline">API: {META_GRAPH_API_VERSION}</Badge>
+        </div>
       </div>
 
-      {/* Instagram */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Instagram className="h-5 w-5" />
-            Instagram Business
-            {igConnection ? (
-              <Badge variant="default" className="bg-green-600 ml-auto">Conectado: {igConnection.page_name}</Badge>
-            ) : (
-              <Badge variant="secondary" className="ml-auto">Não conectado</Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm font-medium">instagram_business_basic</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me?fields=id,name,username,profile_picture_url</p>
-            <Button
-              size="sm"
-              disabled={!igConnection || getResult("ig_basic").status === "loading"}
-              onClick={() => callMetaApi("ig_basic", "/me?fields=id,name,username,profile_picture_url", igConnection)}
-            >
-              {getResult("ig_basic").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="ig_basic" />
-          </div>
+      {/* Seção 1: Messenger */}
+      <TestSection
+        title="Caso de Uso 1: Messenger"
+        icon={<Facebook className="h-5 w-5" />}
+        connection={fbConnection}
+        tests={messengerTests}
+        connectionLabel={fbConnection?.page_name}
+      />
 
-          <div>
-            <p className="text-sm font-medium">instagram_business_manage_messages</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me/conversations?platform=instagram</p>
-            <Button
-              size="sm"
-              disabled={!igConnection || getResult("ig_messages").status === "loading"}
-              onClick={() => callMetaApi("ig_messages", "/me/conversations?platform=instagram&limit=3", igConnection)}
-            >
-              {getResult("ig_messages").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="ig_messages" />
-          </div>
+      {/* Seção 2: Instagram */}
+      <TestSection
+        title="Caso de Uso 2: Instagram"
+        icon={<Instagram className="h-5 w-5" />}
+        connection={igConnection}
+        tests={instagramTests}
+        connectionLabel={igConnection?.page_name}
+      />
 
-          <div>
-            <p className="text-sm font-medium">instagram_business_content_publish</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me/media?limit=3</p>
-            <Button
-              size="sm"
-              disabled={!igConnection || getResult("ig_content").status === "loading"}
-              onClick={() => callMetaApi("ig_content", "/me/media?limit=3", igConnection)}
-            >
-              {getResult("ig_content").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="ig_content" />
-          </div>
+      {/* Seção 3: WhatsApp */}
+      <TestSection
+        title="Caso de Uso 3: WhatsApp"
+        icon={<MessageCircle className="h-5 w-5" />}
+        connection={waConnection}
+        tests={whatsappTests}
+        connectionLabel={waConnection?.page_name}
+      />
 
-          <div>
-            <p className="text-sm font-medium">instagram_business_manage_insights</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me/insights?metric=impressions&period=day</p>
-            <Button
-              size="sm"
-              disabled={!igConnection || getResult("ig_insights").status === "loading"}
-              onClick={() => callMetaApi("ig_insights", "/me/insights?metric=impressions&period=day", igConnection)}
-            >
-              {getResult("ig_insights").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="ig_insights" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Facebook */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Facebook className="h-5 w-5" />
-            Facebook Messenger
-            {fbConnection ? (
-              <Badge variant="default" className="bg-green-600 ml-auto">Conectado: {fbConnection.page_name}</Badge>
-            ) : (
-              <Badge variant="secondary" className="ml-auto">Não conectado</Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm font-medium">pages_manage_metadata</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me/accounts?fields=id,name,access_token</p>
-            <Button
-              size="sm"
-              disabled={!fbConnection || getResult("fb_pages").status === "loading"}
-              onClick={() => callMetaApi("fb_pages", "/me/accounts?fields=id,name,category", fbConnection)}
-            >
-              {getResult("fb_pages").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="fb_pages" />
-          </div>
-
-          <div>
-            <p className="text-sm font-medium">pages_messaging</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /me/conversations?platform=messenger&limit=3</p>
-            <Button
-              size="sm"
-              disabled={!fbConnection || getResult("fb_messaging").status === "loading"}
-              onClick={() => callMetaApi("fb_messaging", "/me/conversations?limit=3", fbConnection)}
-            >
-              {getResult("fb_messaging").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="fb_messaging" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* WhatsApp Cloud */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageCircle className="h-5 w-5" />
-            WhatsApp Cloud API
-            {waConnection ? (
-              <Badge variant="default" className="bg-green-600 ml-auto">Conectado: {waConnection.page_name}</Badge>
-            ) : (
-              <Badge variant="secondary" className="ml-auto">Não conectado</Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm font-medium">whatsapp_business_management</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /WABA_ID/phone_numbers</p>
-            <Button
-              size="sm"
-              disabled={!waConnection || getResult("wa_phones").status === "loading"}
-              onClick={() => {
-                const wabaId = (waConnection as any)?.waba_id;
-                callMetaApi("wa_phones", `/${wabaId}/phone_numbers`, waConnection);
-              }}
-            >
-              {getResult("wa_phones").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="wa_phones" />
-          </div>
-
-          <div>
-            <p className="text-sm font-medium">whatsapp_business_messaging</p>
-            <p className="text-xs text-muted-foreground mb-2">GET /PHONE_NUMBER_ID (verifica número)</p>
-            <Button
-              size="sm"
-              disabled={!waConnection || getResult("wa_number").status === "loading"}
-              onClick={() => {
-                const phoneId = (waConnection as any)?.page_id;
-                callMetaApi("wa_number", `/${phoneId}?fields=verified_name,display_phone_number,quality_rating`, waConnection);
-              }}
-            >
-              {getResult("wa_number").status === "loading" && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Testar
-            </Button>
-            <ResultDisplay testKey="wa_number" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Connection Summary */}
+      {/* Raw Data */}
       <Card>
         <CardHeader>
           <CardTitle>Conexões Raw Data</CardTitle>
@@ -284,13 +261,9 @@ export default function MetaTestPage() {
         <CardContent>
           <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-60 whitespace-pre-wrap">
             {JSON.stringify(connections?.map((c: any) => ({
-              type: c.type,
-              page_name: c.page_name,
-              page_id: c.page_id,
-              ig_account_id: c.ig_account_id,
-              waba_id: c.waba_id,
-              is_active: c.is_active,
-              token_expires_at: c.token_expires_at,
+              type: c.type, page_name: c.page_name, page_id: c.page_id,
+              ig_account_id: c.ig_account_id, waba_id: c.waba_id,
+              is_active: c.is_active, token_expires_at: c.token_expires_at,
             })), null, 2)}
           </pre>
         </CardContent>
