@@ -364,9 +364,9 @@ export function useConversations() {
       // Clear optimistic lock after delay (gives DB time to propagate)
       clearOptimisticUpdateAfterDelay(variables.id);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
       // Revert on error by refetching
-      pendingOptimisticUpdates.current.delete(error.message); // cleanup
+      pendingOptimisticUpdates.current.delete(variables.id); // cleanup using conversation ID
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao atualizar conversa",
@@ -388,6 +388,22 @@ export function useConversations() {
         .eq("law_firm_id", lawFirm.id); // Tenant isolation
       
       if (error) throw error;
+      return { conversationId, status };
+    },
+    onMutate: async ({ conversationId, status }) => {
+      await queryClient.cancelQueries({ queryKey: ["conversations"] });
+      
+      const optimisticFields = { status };
+      registerOptimisticUpdate(conversationId, optimisticFields);
+      
+      // Optimistically update local state
+      setAllConversations(prev =>
+        prev.map(conv =>
+          conv.id === conversationId ? { ...conv, status: status as Conversation["status"] } : conv
+        )
+      );
+      
+      return { conversationId };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -396,7 +412,12 @@ export function useConversations() {
         description: "O status da conversa foi atualizado com sucesso.",
       });
     },
-    onError: (error) => {
+    onSettled: (_data, _error, variables) => {
+      clearOptimisticUpdateAfterDelay(variables.conversationId);
+    },
+    onError: (error, variables) => {
+      pendingOptimisticUpdates.current.delete(variables.conversationId);
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast({
         title: "Erro ao atualizar status",
         description: error.message,
@@ -557,7 +578,7 @@ export function useConversations() {
     onMutate: async (variables) => {
       // Cancel outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: ["conversations"] });
-      const previousConversations = queryClient.getQueryData(["conversations"]);
+      const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
 
       const optimisticFields = {
         current_handler: variables.handlerType,
@@ -596,7 +617,7 @@ export function useConversations() {
     onError: (error, _variables, context) => {
       // Rollback optimistic update on error
       if (context?.previousConversations) {
-        queryClient.setQueryData(["conversations"], context.previousConversations);
+        queryClient.setQueryData(["conversations", lawFirm?.id], context.previousConversations);
       }
       pendingOptimisticUpdates.current.delete(_variables.conversationId);
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
