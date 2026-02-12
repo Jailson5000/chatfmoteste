@@ -6064,6 +6064,7 @@ export type Database = {
         Args: { _company_id: string; _law_firm_id: string }
         Returns: Json
       }
+      confirm_appointment_by_token: { Args: { _token: string }; Returns: Json }
       create_default_task_categories: {
         Args: { _law_firm_id: string }
         Returns: undefined
