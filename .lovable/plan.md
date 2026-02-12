@@ -1,133 +1,70 @@
 
-
-# Plano: Media Download WhatsApp Cloud + Icones Visuais + Coexistencia de Conexoes
+# Correções Criticas -- Meta Integration Bugs
 
 ## Resumo
 
-Este plano cobre 3 frentes: (1) download de midias do WhatsApp Cloud API no meta-webhook, (2) icones visuais diferenciados para Instagram/Facebook/WhatsApp Cloud em conversas e kanban, e (3) coexistencia do WhatsApp normal (Evolution API) com WhatsApp Cloud (API Oficial) na pagina de Conexoes, incluindo botao "+" com opcao de escolha.
+A analise completa revelou 3 bugs criticos que precisam ser corrigidos antes do deploy no VPS. As paginas de Conversas e Kanban estao visualmente corretas (icones diferenciados funcionando), mas o backend tem problemas que vao causar falhas silenciosas.
 
 ---
 
-## Parte 1 -- Download de Midias do WhatsApp Cloud API
+## Bug 1: Coluna `access_token_encrypted` nao existe (CRITICO)
 
-Atualmente o `meta-webhook` recebe mensagens de midia (imagem, audio, video, documento) mas **nao faz download** -- salva `media_url = null` e apenas o placeholder como conteudo.
+**Onde:** `meta-webhook/index.ts` (linha 415) e `NewWhatsAppCloudDialog.tsx` (linha 62)
 
-### O que sera feito:
+**Problema:** O codigo referencia `access_token_encrypted`, mas a coluna real na tabela `meta_connections` se chama `access_token`. Isso causa:
+- O webhook nao consegue ler o token para baixar midias (retorna `null`)
+- O dialog de criacao tenta gravar em coluna inexistente (erro de insert)
 
-1. **No `meta-webhook/index.ts`**, na funcao `processWhatsAppCloudEntry`:
-   - Quando `msg.type` for `image`, `audio`, `video`, `document` ou `sticker`, extrair o `media_id` (ex: `msg.image.id`)
-   - Buscar o token de acesso da `meta_connections` (decriptografar com `decryptToken`)
-   - Fazer GET para `https://graph.facebook.com/v21.0/{media_id}` com header `Authorization: Bearer {token}` para obter a URL temporaria do arquivo
-   - Fazer GET na URL retornada para baixar os bytes do arquivo
-   - Fazer upload do arquivo para o Supabase Storage (bucket `chat-media`, path: `{law_firm_id}/{conversation_id}/{msg.id}.{ext}`)
-   - Salvar a URL publica do Storage no campo `media_url` da mensagem
-
-2. **Criar bucket `chat-media`** (se nao existir) via migracao SQL com politica RLS para leitura por membros do tenant
-
-### Fluxo tecnico:
-
-```text
-WhatsApp Cloud --> meta-webhook (POST)
-  |
-  +--> msg.image.id = "123456"
-  +--> GET graph.facebook.com/v21.0/123456 (com Bearer token)
-  +--> Retorna { url: "https://lookaside.fbsbx.com/..." }
-  +--> GET https://lookaside.fbsbx.com/... (download binario)
-  +--> Upload para Supabase Storage: chat-media/{law_firm_id}/...
-  +--> Salva media_url com URL publica do Storage
-```
+**Correcao:**
+- No `meta-webhook/index.ts`: trocar `.select("... access_token_encrypted ...")` por `.select("... access_token ...")`  e `connection.access_token_encrypted` por `connection.access_token`
+- No `NewWhatsAppCloudDialog.tsx`: trocar `access_token_encrypted: encryptedToken` por `access_token: encryptedToken`
 
 ---
 
-## Parte 2 -- Icones Visuais Diferenciados
+## Bug 2: Acao `encrypt_token` inexistente na `meta-api` (CRITICO)
 
-### 2.1 ConversationSidebarCard (lista de conversas)
+**Onde:** `NewWhatsAppCloudDialog.tsx` (linha 50)
 
-Na funcao `getConnectionInfo`, ao inves de usar icone generico `Phone` ou `Smartphone` para Instagram/Facebook/WhatsApp Cloud, usar icones especificos:
+**Problema:** O dialog chama `supabase.functions.invoke("meta-api", { body: { action: "encrypt_token", token: accessToken } })`, mas a edge function `meta-api` nao tem handler para essa acao -- ela so processa envio de mensagens. O resultado e que o try/catch usa o fallback `encData?.encrypted || accessToken`, salvando o token em texto puro.
 
-| Origin | Icone | Cor | Label |
-|--------|-------|-----|-------|
-| INSTAGRAM | `Instagram` (lucide) | Gradiente rosa/roxo | "Instagram" |
-| FACEBOOK | `Facebook` (lucide) | Azul #1877F2 | "Facebook" |
-| WHATSAPP_CLOUD | `MessageCircle` ou icone WhatsApp SVG | Verde #25D366 | Ultimos 4 digitos |
-| WhatsApp normal (Evolution) | `Phone` (lucide) | Verde padrao | Ultimos 4 digitos |
-| Widget/Site | `Globe` (lucide) | Azul (ja funciona) | "Site" |
-
-Os icones `Instagram` e `Facebook` ja estao importados no arquivo mas nao sao usados no render.
-
-### 2.2 KanbanCard
-
-Mesma logica na funcao `getConnectionInfo` do `KanbanCard.tsx`, diferenciando os icones por origin.
+**Correcao:** Em vez de chamar uma edge function para encriptar, fazer a encriptacao diretamente no `meta-webhook` ao receber a primeira mensagem, ou salvar o token como esta (ja que `meta-api` e `meta-oauth-callback` ja usam `access_token` direto com `decryptToken` do shared). A abordagem mais simples e: adicionar a acao `encrypt_token` na `meta-api` usando o utilitario `encryptToken` que ja existe em `_shared/encryption.ts`.
 
 ---
 
-## Parte 3 -- Coexistencia WhatsApp Normal + API Oficial na Pagina de Conexoes
+## Bug 3: Bucket `chat-media` e privado (MEDIO)
 
-### 3.1 Botao "Nova Conexao" com escolha de tipo
+**Onde:** Migracao SQL que criou o bucket
 
-Substituir o botao `Nova Conexao` por um `DropdownMenu` com 2 opcoes:
-- **WhatsApp (QR Code)** -- fluxo atual via Evolution API
-- **WhatsApp Cloud (API Oficial)** -- novo fluxo via Meta Graph API (cria registro na `meta_connections` com type `whatsapp_cloud`)
+**Problema:** O bucket foi criado com `public = false`, mas o codigo usa `getPublicUrl()` para gerar URLs de midia. URLs publicas de buckets privados retornam 400/403, e as imagens/audios/videos nao serao exibidos no chat.
 
-### 3.2 Linhas do WhatsApp Cloud na tabela de Conexoes
+**Correcao:** Atualizar o bucket para `public = true` via SQL: `UPDATE storage.buckets SET public = true WHERE id = 'chat-media'`
 
-Alem das instancias Evolution (WhatsApp normal) e do Chat Web, listar as `meta_connections` de tipo `whatsapp_cloud` na mesma tabela com:
-- Icone verde diferenciado com badge "API OFICIAL"
-- Status de conexao (baseado em `is_active` e presenca de `access_token`)
-- Configuracoes padrao (departamento, status, responsavel) -- ja existem na tabela `meta_connections`
-- Menu de acoes: Ativar/Desativar, Ver detalhes, Excluir
+---
 
-### 3.3 Painel de detalhes do WhatsApp Cloud
+## Analise de Conversas e Kanban (OK)
 
-Ao clicar na linha do WhatsApp Cloud, abrir um `Sheet` similar ao Chat Web com:
-- Nome da pagina/conta (page_name)
-- phone_number_id
-- Status (Ativo/Inativo)
-- Configuracoes padrao (departamento, status, tipo de atendimento, agente IA ou humano)
-
-### 3.4 Dialog de criacao do WhatsApp Cloud
-
-Um formulario simples para o usuario preencher:
-- Nome da conexao (display)
-- Phone Number ID (do painel Meta Developers > WhatsApp > API Setup)
-- Access Token (sera criptografado e salvo na `meta_connections`)
-- Opcoes de departamento/status/responsavel padrao
-
-### 3.5 Exibicao de Instagram e Facebook (futuro)
-
-As conexoes de Instagram e Facebook ja podem ser listadas nessa mesma tabela tambem, com icones proprios (gradiente rosa para Instagram, azul para Facebook). Por ora, so as que ja existem via OAuth continuam gerenciadas em Settings > Integracoes.
+- `ConversationSidebarCard.tsx`: Icones corretos para Instagram (rosa), Facebook (azul), WhatsApp Cloud (verde), WhatsApp normal (Phone), Widget (Globe). Sem regressao.
+- `KanbanCard.tsx`: Mesma logica de icones, funcionando corretamente. Sem regressao.
+- `useConversationMapping.tsx`: Campo `origin` e `originMetadata` ja mapeados. OK.
+- `KanbanChatPanel.tsx`: Roteamento por origin para `meta-api` vs `evolution-api` ja implementado. OK.
 
 ---
 
 ## Secao Tecnica
 
-### Arquivos que serao modificados:
+### Arquivos a modificar:
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `supabase/functions/meta-webhook/index.ts` | Adicionar download de midia via Graph API + upload para Storage |
-| `src/components/conversations/ConversationSidebarCard.tsx` | Icones diferenciados por origin (Instagram, Facebook, WhatsApp Cloud) |
-| `src/components/kanban/KanbanCard.tsx` | Icones diferenciados por origin |
-| `src/pages/Connections.tsx` | Botao dropdown "Nova Conexao", listar meta_connections tipo whatsapp_cloud, painel de detalhes |
-| `src/components/connections/NewInstanceDialog.tsx` | Renomear para "Nova Conexao WhatsApp (QR Code)" |
+| `supabase/functions/meta-webhook/index.ts` | Trocar `access_token_encrypted` por `access_token` (linhas 415 e 430) |
+| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Trocar `access_token_encrypted` por `access_token` e remover chamada `encrypt_token` |
+| `supabase/functions/meta-api/index.ts` | Adicionar handler para acao `encrypt_token` |
+| Migracao SQL | `UPDATE storage.buckets SET public = true WHERE id = 'chat-media'` |
 
-### Novos arquivos:
+### Ordem de execucao:
 
-| Arquivo | Proposito |
-|---------|-----------|
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Dialog para criar conexao WhatsApp Cloud API |
-| `src/components/connections/WhatsAppCloudDetailPanel.tsx` | Sheet de detalhes da conexao WhatsApp Cloud |
-| Migracao SQL | Criar bucket `chat-media` com RLS |
-
-### Dependencias:
-
-- Nenhuma nova dependencia npm necessaria
-- Os icones `Instagram`, `Facebook`, `MessageCircle` ja existem no lucide-react
-
-### Ordem de implementacao:
-
-1. Migracao SQL (bucket chat-media)
-2. meta-webhook (download de midias)
-3. Icones visuais (ConversationSidebarCard + KanbanCard)
-4. Pagina de Conexoes (dropdown + listagem + detalhes do WhatsApp Cloud)
-
+1. Migracao SQL (bucket publico)
+2. meta-webhook (corrigir nome da coluna)
+3. meta-api (adicionar acao encrypt_token)
+4. NewWhatsAppCloudDialog (corrigir nome da coluna)
+5. Re-deploy das edge functions
