@@ -12,6 +12,8 @@ import {
   Bot,
   Phone,
   QrCode,
+  MessageCircle,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,17 +42,22 @@ import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useToast } from "@/hooks/use-toast";
 import { useTrayIntegration } from "@/hooks/useTrayIntegration";
+import { useTenant } from "@/hooks/useTenant";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
+import { NewWhatsAppCloudDialog } from "@/components/connections/NewWhatsAppCloudDialog";
+import { WhatsAppCloudDetailPanel } from "@/components/connections/WhatsAppCloudDetailPanel";
 import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
 import { ConnectionDetailPanel } from "@/components/connections/ConnectionDetailPanel";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Connections() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { isAdmin } = useUserRole();
+  const { tenant } = useTenant();
   const { evolutionApiUrl, evolutionApiKey, isConfigured: isApiConfigured } = useLawFirmSettings();
   const { departments } = useDepartments();
   const { members: teamMembers } = useTeamMembers();
@@ -85,10 +92,29 @@ export default function Connections() {
     updateDefaultResponsible,
   } = useWhatsAppInstances();
 
+  // WhatsApp Cloud connections from meta_connections
+  const { data: cloudConnections = [], refetch: refetchCloud } = useQuery({
+    queryKey: ["meta_connections_cloud", tenant?.id],
+    queryFn: async () => {
+      if (!tenant?.id) return [];
+      const { data, error } = await supabase
+        .from("meta_connections")
+        .select("*")
+        .eq("law_firm_id", tenant.id)
+        .eq("type", "whatsapp_cloud")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!tenant?.id,
+  });
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedInstance, setSelectedInstance] = useState<WhatsAppInstance | null>(null);
+  const [selectedCloudConnection, setSelectedCloudConnection] = useState<any>(null);
   const [isTrayDetailOpen, setIsTrayDetailOpen] = useState(false);
   const [isNewInstanceOpen, setIsNewInstanceOpen] = useState(false);
+  const [isNewCloudOpen, setIsNewCloudOpen] = useState(false);
   const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
   const [currentQRCode, setCurrentQRCode] = useState<string | null>(null);
   const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
@@ -475,10 +501,25 @@ export default function Connections() {
             </p>
           </div>
 
-          <Button onClick={() => setIsNewInstanceOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Conexão
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Nova Conexão
+                <ChevronDown className="h-4 w-4 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setIsNewInstanceOpen(true)}>
+                <QrCode className="h-4 w-4 mr-2" />
+                WhatsApp (QR Code)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsNewCloudOpen(true)}>
+                <MessageCircle className="h-4 w-4 mr-2 text-[#25D366]" />
+                WhatsApp Cloud (API Oficial)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Search */}
@@ -829,6 +870,96 @@ export default function Connections() {
                   );
                 })
               )}
+
+              {/* WhatsApp Cloud API Connections */}
+              {cloudConnections.map((conn: any) => (
+                <tr
+                  key={`cloud-${conn.id}`}
+                  className={`hover:bg-muted/20 cursor-pointer transition-colors bg-gradient-to-r from-[#25D366]/5 to-transparent ${
+                    selectedCloudConnection?.id === conn.id ? "bg-muted/30" : ""
+                  }`}
+                  onClick={() => setSelectedCloudConnection(conn)}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-[#25D366]/10 flex items-center justify-center">
+                        <MessageCircle className="h-5 w-5 text-[#25D366]" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-[#25D366]">{conn.page_name || "WhatsApp Cloud"}</p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span className="font-mono text-xs">{conn.page_id}</span>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-[#25D366]/10 text-[#25D366] border-[#25D366]/20">
+                            API OFICIAL
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {conn.default_status_id ? (() => {
+                      const s = statuses.find((st: any) => st.id === conn.default_status_id);
+                      return s ? <Badge variant="outline" style={{ borderColor: s.color, color: s.color }}>{s.name}</Badge> : <span className="text-muted-foreground">—</span>;
+                    })() : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {conn.default_department_id ? (() => {
+                      const d = departments.find((dp: any) => dp.id === conn.default_department_id);
+                      return d ? <Badge variant="outline" style={{ borderColor: d.color, color: d.color }}>{d.name}</Badge> : <span className="text-muted-foreground">—</span>;
+                    })() : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {conn.default_handler_type === 'ai' && conn.default_automation_id ? (() => {
+                      const agent = automations.find((a: any) => a.id === conn.default_automation_id);
+                      return agent ? (
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-3 w-3 text-blue-500" />
+                          <span className="text-sm">{agent.name}</span>
+                          <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">IA</Badge>
+                        </div>
+                      ) : <span className="text-muted-foreground">—</span>;
+                    })() : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    {conn.created_at ? formatDistanceToNow(new Date(conn.created_at), { addSuffix: true, locale: ptBR }) : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {conn.is_active ? (
+                      <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
+                        Ativo
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-muted-foreground">
+                        <XCircle className="h-3 w-3 mr-1" />
+                        Inativo
+                      </Badge>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setSelectedCloudConnection(conn)}>Ver detalhes</DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await supabase.from("meta_connections").delete().eq("id", conn.id);
+                            refetchCloud();
+                          }}
+                        >
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -1146,6 +1277,30 @@ export default function Connections() {
         pollCount={pollCount}
         maxPolls={MAX_POLLS}
       />
+
+      {/* WhatsApp Cloud Dialog */}
+      <NewWhatsAppCloudDialog
+        open={isNewCloudOpen}
+        onClose={() => setIsNewCloudOpen(false)}
+        onCreated={() => refetchCloud()}
+      />
+
+      {/* WhatsApp Cloud Detail Panel */}
+      <Sheet open={!!selectedCloudConnection} onOpenChange={(open) => { if (!open) setSelectedCloudConnection(null); }}>
+        <SheetContent className="w-[500px] sm:max-w-[500px] p-0 overflow-hidden">
+          {selectedCloudConnection && (
+            <WhatsAppCloudDetailPanel
+              connection={selectedCloudConnection}
+              onClose={() => setSelectedCloudConnection(null)}
+              onDeleted={() => { setSelectedCloudConnection(null); refetchCloud(); }}
+              departments={departments}
+              statuses={statuses}
+              automations={automations}
+              teamMembers={teamMembers}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
