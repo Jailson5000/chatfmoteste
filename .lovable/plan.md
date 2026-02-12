@@ -1,33 +1,40 @@
 
+# Plano: Trocar OAuth Simples pelo Meta Embedded Signup
 
-# Plano: WhatsApp Cloud via OAuth (Embedded Signup) em vez de Token Manual
+## Resumo
 
-## O Problema Atual
+O fluxo atual abre um popup com OAuth generico do Facebook que apenas pede permissoes. O LiderHub (nas imagens de referencia) usa o **Meta Embedded Signup** -- um fluxo guiado dentro do popup onde o proprio cliente:
 
-O dialog atual pede ao cliente 3 campos manuais:
-- Nome da Conexao
-- Phone Number ID (que o cliente precisa achar no Meta Developers)
-- Access Token Permanente (que o cliente precisa gerar em System Users)
+1. Seleciona/cria o portfolio empresarial
+2. Seleciona/cria a conta WhatsApp Business
+3. Insere os dados da empresa (nome, pais, site, setor)
+4. Insere e verifica o numero de telefone
 
-Isso e inviavel para usuarios comuns. A segunda imagem de referencia (LiderHub) mostra o caminho correto: o cliente clica um botao, abre o popup do Facebook, loga, autoriza, e pronto.
-
-## A Boa Noticia
-
-Voce **ja tem toda a infraestrutura pronta**:
-- `META_APP_ID` e `META_APP_SECRET` configurados como secrets
-- Edge Function `meta-oauth-callback` ja troca code por token, pega pages, encripta e salva na `meta_connections`
-- `MetaAuthCallback.tsx` ja processa o redirect
-- Instagram e Facebook ja usam exatamente esse fluxo
+Esse fluxo retorna diretamente o `code`, `waba_id` e `phone_number_id` no callback JavaScript -- sem necessidade de buscar via Graph API depois.
 
 ## O Que Muda
 
-Em vez do formulario manual com 3 campos, o fluxo sera identico ao do Instagram/Facebook:
+### Antes (OAuth simples):
+- Popup redireciona para `facebook.com/dialog/oauth`
+- Retorna `code` via redirect para `/auth/meta-callback`
+- Edge function precisa buscar WABA e phone numbers via Graph API
 
-1. Cliente clica em "WhatsApp Cloud (API Oficial)" no dropdown
-2. Abre popup do Facebook com permissoes `whatsapp_business_management` + `whatsapp_business_messaging`
-3. Cliente loga no Facebook e autoriza
-4. Callback recebe o `code`, troca por token, busca o WABA (WhatsApp Business Account) e phone numbers automaticamente
-5. Salva na `meta_connections` com type `whatsapp_cloud`
+### Depois (Embedded Signup):
+- Facebook JS SDK carregado na pagina
+- `FB.login()` com `config_id` abre o wizard guiado
+- Callback JavaScript recebe `code` + `phone_number_id` + `waba_id` diretamente
+- Edge function so precisa trocar o `code` por token e salvar
+- SEM redirect de pagina -- tudo acontece no popup + callback JS
+
+## Pre-requisito
+
+Voce precisa criar um **Facebook Login for Business Configuration** no Meta App Dashboard:
+1. App Dashboard > Facebook Login for Business > Configurations
+2. Criar nova configuracao com variante "Embedded Signup"
+3. Selecionar produto "WhatsApp - Cloud API"
+4. Copiar o `config_id` gerado
+
+Esse `config_id` sera salvo como variavel de ambiente `VITE_META_CONFIG_ID`.
 
 ## Secao Tecnica
 
@@ -35,67 +42,66 @@ Em vez do formulario manual com 3 campos, o fluxo sera identico ao do Instagram/
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Substituir formulario manual por fluxo OAuth com popup do Facebook (igual Instagram/Facebook) |
-| `supabase/functions/meta-oauth-callback/index.ts` | Adicionar tratamento para `type === "whatsapp_cloud"`: buscar WABA e phone numbers via Graph API apos OAuth |
-| `src/pages/MetaAuthCallback.tsx` | Ajustar para redirecionar para `/connections` (em vez de `/settings`) quando o type for `whatsapp_cloud` |
-| `src/pages/Connections.tsx` | Ajustar chamada ao dialog -- o dialog agora inicia o popup OAuth diretamente |
+| `index.html` | Adicionar script do Facebook SDK (`connect.facebook.net/pt_BR/sdk.js`) |
+| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Reescrever para usar `FB.login()` com `config_id` e capturar `code` + `phone_number_id` + `waba_id` via callback JS, depois chamar edge function diretamente |
+| `supabase/functions/meta-oauth-callback/index.ts` | Simplificar o handler `whatsapp_cloud`: receber `code` + `phoneNumberId` + `wabaId` do frontend, trocar code por token, salvar -- sem precisar buscar WABA/phones via Graph API |
 
 ### Fluxo detalhado:
 
 ```text
-1. Usuario clica "WhatsApp Cloud (API Oficial)"
-2. NewWhatsAppCloudDialog abre popup:
-   facebook.com/v21.0/dialog/oauth
-     ?client_id={META_APP_ID}
-     &redirect_uri={origin}/auth/meta-callback
-     &scope=whatsapp_business_management,whatsapp_business_messaging,business_management
-     &state={"type":"whatsapp_cloud"}
-     &response_type=code
-3. Usuario loga no Facebook e autoriza
-4. Redirect para /auth/meta-callback?code=XXX
-5. MetaAuthCallback chama meta-oauth-callback com code + type
-6. Edge Function:
-   a. Troca code por short-lived token
-   b. Troca por long-lived token (60 dias)
-   c. GET /me/accounts para listar paginas
-   d. Para cada pagina, busca phone_number_id via WABA
-   e. Salva na meta_connections
-7. Redireciona para /connections com toast de sucesso
+1. Usuario clica "Conectar com Facebook" no dialog
+2. FB.login() abre popup do Embedded Signup com config_id
+3. Cliente passa pelo wizard guiado:
+   a. Seleciona portfolio empresarial
+   b. Cria/seleciona conta WhatsApp Business
+   c. Insere dados da empresa
+   d. Insere e verifica numero de telefone
+4. Callback JS recebe: { code, phone_number_id, waba_id }
+5. Frontend chama meta-oauth-callback com esses dados
+6. Edge function:
+   a. Troca code por token (sem redirect_uri!)
+   b. Encripta token
+   c. Salva na meta_connections
+7. Dialog mostra toast de sucesso e fecha
 ```
 
-### Mudanca no meta-oauth-callback para WhatsApp Cloud:
+### Codigo do FB.login (conceito):
 
-Quando `type === "whatsapp_cloud"`, apos obter o token e as pages, precisa:
-1. Buscar o WABA ID vinculado a pagina: `GET /{page_id}?fields=whatsapp_business_account`
-2. Buscar os phone numbers do WABA: `GET /{waba_id}/phone_numbers`
-3. Salvar `page_id` = phone_number_id (para o webhook fazer match)
-4. Salvar `page_name` = display_phone_number ou nome da pagina
+```text
+FB.login((response) => {
+  if (response.authResponse) {
+    const code = response.authResponse.code;
+    // sessionInfoListener retorna waba_id e phone_number_id
+  }
+}, {
+  config_id: VITE_META_CONFIG_ID,
+  response_type: 'code',
+  override_default_response_type: true,
+  extras: { setup: {} }
+});
+```
 
-### Mudanca no NewWhatsAppCloudDialog:
+### Mudanca no meta-oauth-callback:
 
-O dialog deixa de ser um formulario e vira apenas um botao "Conectar com Facebook" que abre o popup OAuth, identico ao que `InstagramIntegration.tsx` e `FacebookIntegration.tsx` ja fazem (linhas 83-98 do Instagram).
+Quando `type === "whatsapp_cloud"` e `phoneNumberId` + `wabaId` vierem do frontend:
+- Nao precisa mais fazer `GET /page_id?fields=whatsapp_business_account`
+- Nao precisa mais fazer `GET /waba_id/phone_numbers`
+- So troca code por token e salva direto
 
-### Seguranca:
+A troca de code por token no Embedded Signup **nao usa redirect_uri** -- usa `https://graph.facebook.com/oauth/access_token?client_id=X&client_secret=Y&code=Z`
 
-- Token e obtido via OAuth server-side (mais seguro que colar token manual)
-- Token e automaticamente criptografado com AES-GCM antes de salvar
-- Token tem validade de 60 dias (long-lived) -- pode implementar renovacao futura
-- O `META_APP_SECRET` nunca sai do backend (edge function)
-- Nenhum dado sensivel e exposto no frontend
+### Sobre o MetaAuthCallback.tsx:
 
-### Vantagens sobre o fluxo manual:
+A pagina `/auth/meta-callback` **nao muda** e continua funcionando para Instagram e Facebook (que usam redirect). O WhatsApp Cloud nao vai mais usar redirect -- tudo fica no callback JS do `FB.login()`.
 
-- Cliente nao precisa acessar Meta Developers
-- Cliente nao precisa gerar token permanente
-- O phone_number_id e detectado automaticamente
-- Mais seguro (token via OAuth em vez de colado manualmente)
-- Mesmo padrao visual do Instagram/Facebook (consistencia UX)
+### Nova variavel de ambiente necessaria:
+
+- `VITE_META_CONFIG_ID` -- o Configuration ID do Facebook Login for Business (criado no Meta App Dashboard)
 
 ### Ordem de implementacao:
 
-1. Atualizar `meta-oauth-callback` para tratar `whatsapp_cloud` (buscar WABA + phone numbers)
-2. Atualizar `NewWhatsAppCloudDialog` para usar popup OAuth em vez de formulario
-3. Atualizar `MetaAuthCallback` para redirecionar corretamente por tipo
-4. Atualizar `Connections.tsx` para integrar o novo fluxo
+1. Pedir ao usuario o `VITE_META_CONFIG_ID`
+2. Adicionar Facebook SDK no `index.html`
+3. Reescrever `NewWhatsAppCloudDialog.tsx` com Embedded Signup
+4. Simplificar handler `whatsapp_cloud` no `meta-oauth-callback`
 5. Re-deploy da edge function
-
