@@ -88,8 +88,21 @@ export function InstagramIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("instagram");
-    window.location.href = authUrl;
-  }, []);
+    const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "meta-oauth-success") {
+        window.removeEventListener("message", handleMessage);
+        queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
+        toast.success("Instagram conectado com sucesso!");
+      }
+      if (event.data?.type === "meta-oauth-error") {
+        window.removeEventListener("message", handleMessage);
+        toast.error(event.data.message || "Erro ao conectar Instagram");
+      }
+    };
+    window.addEventListener("message", handleMessage);
+  }, [queryClient]);
 
   // Token expiry info
   const tokenExpiresAt = connection?.token_expires_at ? new Date(connection.token_expires_at) : null;

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { getFixedRedirectUri } from "@/lib/meta-config";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -9,6 +10,8 @@ import { Loader2 } from "lucide-react";
  * 
  * This page handles the redirect from Meta's OAuth flow for Instagram/Facebook integrations.
  * It exchanges the authorization code for a long-lived token and saves it to the database.
+ * 
+ * When opened as a popup, it communicates back to the opener via postMessage and closes itself.
  */
 export default function MetaAuthCallback() {
   const navigate = useNavigate();
@@ -18,6 +21,8 @@ export default function MetaAuthCallback() {
 
   useEffect(() => {
     const handleCallback = async () => {
+      const isPopup = !!window.opener;
+
       try {
         const code = searchParams.get("code");
         const error = searchParams.get("error");
@@ -36,9 +41,15 @@ export default function MetaAuthCallback() {
         const fallbackRoute = connectionType === "whatsapp_cloud" ? "/connections" : "/settings";
 
         if (error) {
+          const errorMsg = errorDescription || error;
+          if (isPopup) {
+            window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
+            window.close();
+            return;
+          }
           toast({
             title: "Erro na autenticação",
-            description: errorDescription || error,
+            description: errorMsg,
             variant: "destructive",
           });
           navigate(fallbackRoute);
@@ -46,16 +57,23 @@ export default function MetaAuthCallback() {
         }
 
         if (!code) {
+          const errorMsg = "Código de autorização não encontrado";
+          if (isPopup) {
+            window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
+            window.close();
+            return;
+          }
           toast({
             title: "Erro",
-            description: "Código de autorização não encontrado",
+            description: errorMsg,
             variant: "destructive",
           });
           navigate(fallbackRoute);
           return;
         }
 
-        const redirectUri = `${window.location.origin}/auth/meta-callback`;
+        // Use the same fixed redirect URI that was used in the OAuth URL
+        const redirectUri = getFixedRedirectUri();
 
         // Call the meta-oauth-callback edge function to exchange code for token
         const response = await supabase.functions.invoke("meta-oauth-callback", {
@@ -74,6 +92,13 @@ export default function MetaAuthCallback() {
           throw new Error(response.data?.error || "Falha ao salvar conexão");
         }
 
+        // Success!
+        if (isPopup) {
+          window.opener.postMessage({ type: "meta-oauth-success", data: response.data }, "*");
+          window.close();
+          return;
+        }
+
         const typeLabel = response.data.type === 'instagram' ? 'Instagram' 
           : response.data.type === 'facebook' ? 'Facebook' 
           : 'WhatsApp Cloud';
@@ -83,13 +108,20 @@ export default function MetaAuthCallback() {
           description: `${typeLabel} conectado com sucesso.`,
         });
 
-        // Redirect based on type
         navigate(connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations");
       } catch (error) {
         console.error("Meta callback error:", error);
+        const errorMsg = error instanceof Error ? error.message : "Falha ao conectar com Meta";
+
+        if (isPopup) {
+          window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
+          window.close();
+          return;
+        }
+
         toast({
           title: "Erro ao conectar",
-          description: error instanceof Error ? error.message : "Falha ao conectar com Meta",
+          description: errorMsg,
           variant: "destructive",
         });
         navigate("/settings");

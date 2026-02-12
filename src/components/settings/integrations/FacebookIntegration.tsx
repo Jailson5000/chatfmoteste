@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { Facebook } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { toast } from "sonner";
@@ -65,8 +65,21 @@ export function FacebookIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("facebook");
-    window.location.href = authUrl;
-  }, []);
+    const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "meta-oauth-success") {
+        window.removeEventListener("message", handleMessage);
+        queryClient.invalidateQueries({ queryKey: ["meta-connection", "facebook"] });
+        toast.success("Facebook conectado com sucesso!");
+      }
+      if (event.data?.type === "meta-oauth-error") {
+        window.removeEventListener("message", handleMessage);
+        toast.error(event.data.message || "Erro ao conectar Facebook");
+      }
+    };
+    window.addEventListener("message", handleMessage);
+  }, [queryClient]);
 
   if (!connection) {
     return (
