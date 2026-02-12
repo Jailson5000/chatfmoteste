@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { META_APP_ID, buildMetaOAuthUrl } from "@/lib/meta-config";
 
 function InstagramIcon() {
   return (
@@ -81,19 +82,12 @@ export function InstagramIntegration() {
   });
 
   const handleConnect = useCallback(() => {
-    // Meta OAuth flow - opens popup
-    const META_APP_ID = import.meta.env.VITE_META_APP_ID;
     if (!META_APP_ID) {
       toast.error("META_APP_ID não configurado. Configure nas variáveis de ambiente.");
       return;
     }
 
-    const redirectUri = `${window.location.origin}/auth/meta-callback`;
-    const scope = "instagram_basic,instagram_manage_messages,pages_manage_metadata,pages_messaging";
-    const state = JSON.stringify({ type: "instagram" });
-
-    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
-
+    const authUrl = buildMetaOAuthUrl("instagram");
     window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
   }, []);
 

@@ -62,6 +62,7 @@ import {
 } from "./pages/global-admin";
 import Support from "./pages/Support";
 import Tutorials from "./pages/Tutorials";
+import MetaTestPage from "./pages/admin/MetaTestPage";
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
 const queryClient = new QueryClient();
@@ -277,6 +278,18 @@ const App = () => (
           {/* Redirect /admin to /settings for backwards compatibility */}
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
           <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
+          
+          {/* Meta Test Page - internal admin tool */}
+          <Route
+            path="/meta-test"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<MetaTestPage />} />
+          </Route>
           
           {/* Global Admin Routes - MiauChat SaaS Administration */}
           <Route
