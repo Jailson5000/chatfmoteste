@@ -1,6 +1,8 @@
 import { Link2, PenTool } from "lucide-react";
 import { TrayChatIntegration } from "./integrations/TrayChatIntegration";
 import { AgendaProIntegration } from "./integrations/AgendaProIntegration";
+import { InstagramIntegration } from "./integrations/InstagramIntegration";
+import { FacebookIntegration } from "./integrations/FacebookIntegration";
 import { IntegrationCard } from "./IntegrationCard";
 import { SettingsHelpCollapsible } from "./SettingsHelpCollapsible";
 
@@ -57,6 +59,8 @@ export function IntegrationsSettings() {
         {/* Active Integrations - Available first */}
         <AgendaProIntegration />
         <TrayChatIntegration />
+        <InstagramIntegration />
+        <FacebookIntegration />
         
         {/* Coming Soon Integrations */}
         <IntegrationCard

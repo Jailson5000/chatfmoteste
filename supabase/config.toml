@@ -50,3 +50,9 @@ verify_jwt = false
 
 [functions.check-infrastructure-alerts]
 verify_jwt = false
+
+[functions.meta-webhook]
+verify_jwt = false
+
+[functions.meta-oauth-callback]
+verify_jwt = false

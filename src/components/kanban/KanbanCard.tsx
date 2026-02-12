@@ -142,6 +142,17 @@ export function KanbanCard({
     if (upperOrigin === 'WIDGET' || upperOrigin === 'TRAY' || upperOrigin === 'SITE' || upperOrigin === 'WEB') {
       return { label: "Site", isWidget: true, tooltipText: upperOrigin === 'WIDGET' ? 'Chat do Site' : upperOrigin };
     }
+    if (upperOrigin === 'INSTAGRAM') {
+      return { label: "Instagram", isWidget: false, tooltipText: "Instagram DM" };
+    }
+    if (upperOrigin === 'FACEBOOK') {
+      return { label: "Facebook", isWidget: false, tooltipText: "Facebook Messenger" };
+    }
+    if (upperOrigin === 'WHATSAPP_CLOUD') {
+      const phoneNumber = conversation.whatsapp_instance?.phone_number;
+      const digits = (phoneNumber || "").replace(/\D/g, "");
+      return { label: digits.length >= 4 ? `•••${digits.slice(-4)}` : "Cloud", isWidget: false, tooltipText: "WhatsApp Cloud API" };
+    }
     const phoneNumber = conversation.whatsapp_instance?.phone_number;
     if (phoneNumber) {
       const digits = phoneNumber.replace(/\D/g, "");
