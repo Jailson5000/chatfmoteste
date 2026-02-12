@@ -1039,6 +1039,7 @@ interface KanbanChatPanelProps {
   updateConversationMutation?: ReturnType<typeof useConversations>['updateConversation'];
   updateConversationDepartmentMutation?: ReturnType<typeof useConversations>['updateConversationDepartment'];
   transferHandlerMutation?: ReturnType<typeof useConversations>['transferHandler'];
+  updateClientStatusMutation?: ReturnType<typeof useConversations>['updateClientStatus'];
 }
 
 export function KanbanChatPanel({
@@ -1069,6 +1070,7 @@ export function KanbanChatPanel({
   updateConversationMutation,
   updateConversationDepartmentMutation,
   transferHandlerMutation,
+  updateClientStatusMutation,
 }: KanbanChatPanelProps) {
   // Determine if this is a WhatsApp conversation (robust detection)
   // Criteria: origin='whatsapp' OR remote_jid ends with @s.whatsapp.net
@@ -1091,7 +1093,8 @@ export function KanbanChatPanel({
   const transferHandler = transferHandlerMutation ?? localConversations.transferHandler;
   const updateConversation = updateConversationMutation ?? localConversations.updateConversation;
   const updateConversationDepartment = updateConversationDepartmentMutation ?? localConversations.updateConversationDepartment;
-  const { updateClientStatus, updateClient } = useClients();
+  const updateClientStatus = updateClientStatusMutation ?? localConversations.updateClientStatus;
+  const { updateClient } = useClients();
   const { lawFirm } = useLawFirm();
   const lawFirmId = lawFirm?.id;
 
@@ -2679,6 +2682,12 @@ export function KanbanChatPanel({
     // Invalidate queries to sync all components
     queryClient.invalidateQueries({ queryKey: ["client_tags", clientId] });
     queryClient.invalidateQueries({ queryKey: ["clients"] });
+    
+    // Delayed invalidation for conversations to update Kanban board tags
+    // Tags are in client_tags table (no Realtime listener), so we need explicit refresh
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }, 1000);
     
     
     toast({ title: "Tags atualizadas" });
