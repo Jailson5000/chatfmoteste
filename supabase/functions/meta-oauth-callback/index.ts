@@ -60,10 +60,10 @@ Deno.serve(async (req) => {
 
     const lawFirmId = profile.law_firm_id;
     const body = await req.json();
-    const { code, redirectUri, type, pageId } = body;
+    const { code, redirectUri, type, pageId, phoneNumberId, wabaId } = body;
 
-    if (!code || !redirectUri || !type) {
-      return new Response(JSON.stringify({ error: "Missing code, redirectUri, or type" }), {
+    if (!code || !type) {
+      return new Response(JSON.stringify({ error: "Missing code or type" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -79,16 +79,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Step 1: Exchange code for short-lived user token
+    // Step 1: Exchange code for token
+    // For Embedded Signup (whatsapp_cloud), no redirect_uri is needed
     console.log("[meta-oauth] Exchanging code for token...");
+    const tokenParams: Record<string, string> = {
+      client_id: META_APP_ID,
+      client_secret: META_APP_SECRET,
+      code,
+    };
+    if (redirectUri) {
+      tokenParams.redirect_uri = redirectUri;
+    }
     const tokenRes = await fetch(
-      `${GRAPH_API_BASE}/oauth/access_token?` +
-        new URLSearchParams({
-          client_id: META_APP_ID,
-          client_secret: META_APP_SECRET,
-          redirect_uri: redirectUri,
-          code,
-        })
+      `${GRAPH_API_BASE}/oauth/access_token?` + new URLSearchParams(tokenParams)
     );
 
     const tokenData = await tokenRes.json();
@@ -140,8 +143,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- WhatsApp Cloud: auto-detect WABA and phone numbers ---
+    // --- WhatsApp Cloud via Embedded Signup (phoneNumberId + wabaId from frontend) ---
     if (type === "whatsapp_cloud") {
+      if (phoneNumberId && wabaId) {
+        return await handleWhatsAppCloudEmbedded(phoneNumberId, wabaId, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
+      }
+      // Fallback: auto-detect from pages (legacy OAuth flow)
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
@@ -346,4 +353,76 @@ async function handleWhatsAppCloud(
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
+}
+
+/**
+ * Handle WhatsApp Cloud via Embedded Signup: phoneNumberId and wabaId come directly from frontend
+ */
+async function handleWhatsAppCloudEmbedded(
+  phoneNumberId: string,
+  wabaId: string,
+  userToken: string,
+  expiresIn: number,
+  lawFirmId: string,
+  supabaseAdmin: any
+) {
+  try {
+    // Fetch phone number details from Graph API for display name
+    console.log(`[meta-oauth] Embedded Signup: fetching phone ${phoneNumberId} details...`);
+    const phoneRes = await fetch(
+      `${GRAPH_API_BASE}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating&access_token=${userToken}`
+    );
+    const phoneData = await phoneRes.json();
+
+    const displayName = phoneData.verified_name || phoneData.display_phone_number || phoneNumberId;
+    const displayPhone = phoneData.display_phone_number || "";
+
+    const encryptedToken = await encryptToken(userToken);
+    const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+    const { data: saved, error: saveError } = await supabaseAdmin
+      .from("meta_connections")
+      .upsert(
+        {
+          law_firm_id: lawFirmId,
+          type: "whatsapp_cloud",
+          page_id: phoneNumberId,
+          page_name: `${displayName} (${displayPhone})`.trim(),
+          access_token: encryptedToken,
+          token_expires_at: tokenExpiresAt,
+          is_active: true,
+        },
+        { onConflict: "law_firm_id,type,page_id" }
+      )
+      .select("id")
+      .single();
+
+    if (saveError) {
+      console.error("[meta-oauth] Error saving Embedded Signup connection:", saveError);
+      return new Response(JSON.stringify({ error: "Failed to save connection" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log("[meta-oauth] Embedded Signup connection saved:", { id: saved.id, phoneNumberId, wabaId, displayName });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        type: "whatsapp_cloud",
+        connectionId: saved.id,
+        pageName: `${displayName} (${displayPhone})`.trim(),
+        phoneNumberId,
+        wabaId,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (err) {
+    console.error("[meta-oauth] Embedded Signup error:", err);
+    return new Response(
+      JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
 }
