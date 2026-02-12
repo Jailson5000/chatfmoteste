@@ -1,107 +1,79 @@
 
-# Plano: Trocar OAuth Simples pelo Meta Embedded Signup
+
+# Plano: Preparar Instagram, Facebook e WhatsApp Cloud para Gravacao do Video Meta App Review
 
 ## Resumo
 
-O fluxo atual abre um popup com OAuth generico do Facebook que apenas pede permissoes. O LiderHub (nas imagens de referencia) usa o **Meta Embedded Signup** -- um fluxo guiado dentro do popup onde o proprio cliente:
+Existem ajustes necessarios no codigo e na configuracao para que os tres canais (Instagram DM, Facebook Messenger e WhatsApp Cloud API) funcionem em modo teste e possam ser demonstrados no video para aprovacao da Meta.
 
-1. Seleciona/cria o portfolio empresarial
-2. Seleciona/cria a conta WhatsApp Business
-3. Insere os dados da empresa (nome, pais, site, setor)
-4. Insere e verifica o numero de telefone
+## Problemas Identificados
 
-Esse fluxo retorna diretamente o `code`, `waba_id` e `phone_number_id` no callback JavaScript -- sem necessidade de buscar via Graph API depois.
+1. **VITE_META_APP_ID nao esta disponivel no frontend** - O App ID da Meta esta configurado apenas como secret do backend (`META_APP_ID`), mas os componentes Instagram e Facebook usam `import.meta.env.VITE_META_APP_ID`, que nao existe no `.env`
+2. **Permissoes do Instagram desatualizadas** - O codigo usa permissoes antigas (`instagram_basic`, `instagram_manage_messages`). A Meta migrou para `instagram_business_basic`, `instagram_business_manage_messages`
+3. **Falta pagina de teste interna** - Nao existe uma pagina para testar chamadas individuais a cada permissao (listar paginas, enviar mensagem, buscar WABA)
+4. **VITE_META_CONFIG_ID nao configurado** - Necessario para o Embedded Signup do WhatsApp Cloud
 
-## O Que Muda
+## Etapas de Implementacao
 
-### Antes (OAuth simples):
-- Popup redireciona para `facebook.com/dialog/oauth`
-- Retorna `code` via redirect para `/auth/meta-callback`
-- Edge function precisa buscar WABA e phone numbers via Graph API
+### 1. Configurar VITE_META_APP_ID no frontend
 
-### Depois (Embedded Signup):
-- Facebook JS SDK carregado na pagina
-- `FB.login()` com `config_id` abre o wizard guiado
-- Callback JavaScript recebe `code` + `phone_number_id` + `waba_id` diretamente
-- Edge function so precisa trocar o `code` por token e salvar
-- SEM redirect de pagina -- tudo acontece no popup + callback JS
+Como o App ID da Meta e um identificador publico (nao e segredo), ele pode ser adicionado diretamente no codigo. Vamos criar uma constante compartilhada que os tres componentes usam, obtendo o valor do `META_APP_ID` ja configurado como secret.
 
-## Pre-requisito
+- Criar `src/lib/meta-config.ts` com o App ID exportado
+- Atualizar `InstagramIntegration.tsx`, `FacebookIntegration.tsx` e `NewWhatsAppCloudDialog.tsx` para usar essa constante
 
-Voce precisa criar um **Facebook Login for Business Configuration** no Meta App Dashboard:
-1. App Dashboard > Facebook Login for Business > Configurations
-2. Criar nova configuracao com variante "Embedded Signup"
-3. Selecionar produto "WhatsApp - Cloud API"
-4. Copiar o `config_id` gerado
+### 2. Atualizar permissoes do Instagram para a nova API
 
-Esse `config_id` sera salvo como variavel de ambiente `VITE_META_CONFIG_ID`.
+Alterar o escopo OAuth do Instagram de:
+- `instagram_basic, instagram_manage_messages` (deprecated)
 
-## Secao Tecnica
+Para:
+- `instagram_business_basic, instagram_business_manage_messages` (nova API)
+
+Arquivo: `src/components/settings/integrations/InstagramIntegration.tsx`
+
+### 3. Criar pagina /admin/meta-test
+
+Criar uma pagina de teste interna acessivel em `/admin/meta-test` com botoes para:
+
+- **instagram_business_basic**: `GET /me?fields=id,name,username` - Mostra dados da conta conectada
+- **instagram_business_manage_messages**: Enviar mensagem teste via conversa existente
+- **pages_messaging**: Enviar mensagem teste via Messenger
+- **pages_manage_metadata**: `GET /me/accounts` - Listar paginas gerenciadas
+- **whatsapp_business_management**: `GET /{waba_id}/phone_numbers` - Listar numeros do WABA
+- **whatsapp_business_messaging**: Enviar mensagem teste via WhatsApp Cloud
+
+Cada botao executa a chamada, mostra o resultado (JSON) e o status (sucesso/erro) na tela - perfeito para gravar o video de demonstracao.
+
+### 4. Adicionar rota no App.tsx
+
+Registrar a nova pagina `/admin/meta-test` no roteador, protegida para administradores.
+
+## Detalhes Tecnicos
+
+### Arquivos a criar:
+- `src/lib/meta-config.ts` - Constantes Meta compartilhadas
+- `src/pages/admin/MetaTestPage.tsx` - Pagina de teste das permissoes
 
 ### Arquivos a modificar:
+- `src/components/settings/integrations/InstagramIntegration.tsx` - Atualizar permissoes OAuth
+- `src/components/settings/integrations/FacebookIntegration.tsx` - Usar meta-config
+- `src/components/connections/NewWhatsAppCloudDialog.tsx` - Usar meta-config
+- `src/App.tsx` - Adicionar rota /admin/meta-test
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `index.html` | Adicionar script do Facebook SDK (`connect.facebook.net/pt_BR/sdk.js`) |
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Reescrever para usar `FB.login()` com `config_id` e capturar `code` + `phone_number_id` + `waba_id` via callback JS, depois chamar edge function diretamente |
-| `supabase/functions/meta-oauth-callback/index.ts` | Simplificar o handler `whatsapp_cloud`: receber `code` + `phoneNumberId` + `wabaId` do frontend, trocar code por token, salvar -- sem precisar buscar WABA/phones via Graph API |
+### Configuracao necessaria (pelo usuario):
+- Definir `VITE_META_APP_ID` com o valor do App ID da Meta (1447135433693990 conforme screenshot)
+- Definir `VITE_META_CONFIG_ID` quando a Meta aprovar a conta (para WhatsApp Embedded Signup)
+- Configurar o webhook URL no Meta Dashboard apontando para a edge function `meta-webhook`
+- Adicionar os redirect URIs corretos no Meta Dashboard
 
-### Fluxo detalhado:
+## Fluxo de Gravacao do Video
 
-```text
-1. Usuario clica "Conectar com Facebook" no dialog
-2. FB.login() abre popup do Embedded Signup com config_id
-3. Cliente passa pelo wizard guiado:
-   a. Seleciona portfolio empresarial
-   b. Cria/seleciona conta WhatsApp Business
-   c. Insere dados da empresa
-   d. Insere e verifica numero de telefone
-4. Callback JS recebe: { code, phone_number_id, waba_id }
-5. Frontend chama meta-oauth-callback com esses dados
-6. Edge function:
-   a. Troca code por token (sem redirect_uri!)
-   b. Encripta token
-   c. Salva na meta_connections
-7. Dialog mostra toast de sucesso e fecha
-```
+Apos a implementacao, o roteiro de gravacao sera:
 
-### Codigo do FB.login (conceito):
+1. Abrir `/admin/meta-test`
+2. Clicar em cada botao de permissao, mostrando a resposta da API
+3. Navegar para Configuracoes > Integracoes e conectar Instagram e Facebook
+4. Navegar para Conexoes e conectar WhatsApp Cloud
+5. Ir para Conversas e demonstrar envio/recebimento de mensagens nos tres canais
 
-```text
-FB.login((response) => {
-  if (response.authResponse) {
-    const code = response.authResponse.code;
-    // sessionInfoListener retorna waba_id e phone_number_id
-  }
-}, {
-  config_id: VITE_META_CONFIG_ID,
-  response_type: 'code',
-  override_default_response_type: true,
-  extras: { setup: {} }
-});
-```
-
-### Mudanca no meta-oauth-callback:
-
-Quando `type === "whatsapp_cloud"` e `phoneNumberId` + `wabaId` vierem do frontend:
-- Nao precisa mais fazer `GET /page_id?fields=whatsapp_business_account`
-- Nao precisa mais fazer `GET /waba_id/phone_numbers`
-- So troca code por token e salva direto
-
-A troca de code por token no Embedded Signup **nao usa redirect_uri** -- usa `https://graph.facebook.com/oauth/access_token?client_id=X&client_secret=Y&code=Z`
-
-### Sobre o MetaAuthCallback.tsx:
-
-A pagina `/auth/meta-callback` **nao muda** e continua funcionando para Instagram e Facebook (que usam redirect). O WhatsApp Cloud nao vai mais usar redirect -- tudo fica no callback JS do `FB.login()`.
-
-### Nova variavel de ambiente necessaria:
-
-- `VITE_META_CONFIG_ID` -- o Configuration ID do Facebook Login for Business (criado no Meta App Dashboard)
-
-### Ordem de implementacao:
-
-1. Pedir ao usuario o `VITE_META_CONFIG_ID`
-2. Adicionar Facebook SDK no `index.html`
-3. Reescrever `NewWhatsAppCloudDialog.tsx` com Embedded Signup
-4. Simplificar handler `whatsapp_cloud` no `meta-oauth-callback`
-5. Re-deploy da edge function
