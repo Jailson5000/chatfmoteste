@@ -14,6 +14,7 @@ import { TabSessionProvider } from "@/contexts/TabSessionContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
+import MetaAuthCallback from "./pages/MetaAuthCallback";
 import ResetPassword from "./pages/ResetPassword";
 import ChangePassword from "./pages/ChangePassword";
 import Dashboard from "./pages/Dashboard";
@@ -80,7 +81,8 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/login" element={<Navigate to="/auth" replace />} />
           <Route path="/auth" element={<Auth />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
+           <Route path="/auth/callback" element={<AuthCallback />} />
+           <Route path="/auth/meta-callback" element={<MetaAuthCallback />} />
           <Route path="/register" element={<Register />} />
           <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/reset-password" element={<ResetPassword />} />

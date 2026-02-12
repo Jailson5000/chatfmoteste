@@ -1083,7 +1083,7 @@ export function KanbanChatPanel({
   // Criteria: origin='whatsapp' OR remote_jid ends with @s.whatsapp.net
   // Inverse: NOT widget/tray/site/web origins
   const conversationOrigin = (origin || '').toUpperCase();
-  const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB'];
+  const nonWhatsAppOrigins = ['WIDGET', 'TRAY', 'SITE', 'WEB', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
   const isNonWhatsAppConversation = conversationOrigin && nonWhatsAppOrigins.includes(conversationOrigin);
   
   // isWhatsAppConversation: used to show/hide audio recorder
@@ -1847,42 +1847,72 @@ export function KanbanChatPanel({
         
         // Check if this is a non-WhatsApp conversation
         if (isNonWhatsAppConversation) {
-          // Widget/Tray: save directly to database, don't use Evolution API
-          console.log('[Kanban] Widget/Tray channel - saving directly to DB');
-          const { error: insertError } = await supabase
-            .from("messages")
-            .insert({
-              conversation_id: conversationId,
-              content: messageToSend,
-              message_type: "text",
-              is_from_me: true,
-              sender_type: "human",
-              sender_id: currentUserId,
-              ai_generated: false,
-              is_pontual: wasPontualMode,
-              reply_to_message_id: replyToId,
-              status: "sent", // Ensure status is set for proper Realtime detection
+          const metaOrigins = ['INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+          const isMetaChannel = metaOrigins.includes(conversationOrigin);
+
+          if (isMetaChannel) {
+            // Meta channels: use meta-api
+            console.log('[Kanban] Meta channel - routing to meta-api');
+            const response = await supabase.functions.invoke("meta-api", {
+              body: {
+                conversationId,
+                content: messageToSend,
+                messageType: "text",
+              },
             });
-          
-          if (insertError) throw new Error('Falha ao salvar mensagem');
-          
-          // Update conversation timestamp and unarchive if needed
-          await supabase
-            .from("conversations")
-            .update({ 
-              last_message_at: new Date().toISOString(),
-              archived_at: null,
-              archived_reason: null,
-            })
-            .eq("id", conversationId);
-          
-          // Force cache invalidation for Kanban sync
-           
-          
-          // Update optimistic message status
-          setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "sent" } : m
-          ));
+
+            if (response.error) {
+              throw new Error(response.error.message || "Falha ao enviar mensagem");
+            }
+
+            if (!response.data?.success) {
+              throw new Error(response.data?.error || "Falha ao enviar mensagem");
+            }
+            
+            // Update optimistic message with real data
+            setMessages(prev => prev.map(m => 
+              m.id === tempId 
+                ? { ...m, id: response.data.messageId || tempId, status: "sent" }
+                : m
+            ));
+          } else {
+            // Widget/Tray: save directly to database
+            console.log('[Kanban] Widget/Tray channel - saving directly to DB');
+            const { error: insertError } = await supabase
+              .from("messages")
+              .insert({
+                conversation_id: conversationId,
+                content: messageToSend,
+                message_type: "text",
+                is_from_me: true,
+                sender_type: "human",
+                sender_id: currentUserId,
+                ai_generated: false,
+                is_pontual: wasPontualMode,
+                reply_to_message_id: replyToId,
+                status: "sent", // Ensure status is set for proper Realtime detection
+              });
+            
+            if (insertError) throw new Error('Falha ao salvar mensagem');
+            
+            // Update conversation timestamp and unarchive if needed
+            await supabase
+              .from("conversations")
+              .update({ 
+                last_message_at: new Date().toISOString(),
+                archived_at: null,
+                archived_reason: null,
+              })
+              .eq("id", conversationId);
+            
+            // Force cache invalidation for Kanban sync
+             
+            
+            // Update optimistic message status
+            setMessages(prev => prev.map(m => 
+              m.id === tempId ? { ...m, status: "sent" } : m
+            ));
+          }
         } else {
           // WhatsApp: use Evolution API
           const response = await supabase.functions.invoke("evolution-api", {
