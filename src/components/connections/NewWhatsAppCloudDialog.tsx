@@ -159,7 +159,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
         }
 
         window.FB.login(
-          async (response: any) => {
+          (response: any) => {
             clearTimeout(connectionTimeout);
             window.removeEventListener("message", sessionInfoListener);
             console.log("[embedded-signup] FB.login callback fired, authResponse:", !!response.authResponse);
@@ -198,50 +198,54 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
               return;
             }
 
-            try {
-              const { data: sessionData } = await supabase.auth.getSession();
-              const accessToken = sessionData?.session?.access_token;
+            // Wrap async work in a non-async callback
+            const handleResponse = async () => {
+              try {
+                const { data: sessionData } = await supabase.auth.getSession();
+                const accessToken = sessionData?.session?.access_token;
 
-              if (!accessToken) {
+                if (!accessToken) {
+                  toast({
+                    title: "Sessão expirada",
+                    description: "Faça login novamente.",
+                    variant: "destructive",
+                  });
+                  setIsConnecting(false);
+                  return;
+                }
+
+                const res = await supabase.functions.invoke("meta-oauth-callback", {
+                  body: {
+                    code,
+                    type: "whatsapp_cloud",
+                    phoneNumberId,
+                    wabaId,
+                  },
+                });
+
+                if (res.error || res.data?.error) {
+                  throw new Error(res.data?.error || res.error?.message || "Erro ao salvar conexão");
+                }
+
                 toast({
-                  title: "Sessão expirada",
-                  description: "Faça login novamente.",
+                  title: "WhatsApp conectado!",
+                  description: `Número ${res.data?.pageName || phoneNumberId} conectado com sucesso.`,
+                });
+
+                onCreated();
+                onClose();
+              } catch (err: any) {
+                console.error("[embedded-signup] Error saving connection:", err);
+                toast({
+                  title: "Erro ao conectar",
+                  description: err.message || "Tente novamente.",
                   variant: "destructive",
                 });
+              } finally {
                 setIsConnecting(false);
-                return;
               }
-
-              const res = await supabase.functions.invoke("meta-oauth-callback", {
-                body: {
-                  code,
-                  type: "whatsapp_cloud",
-                  phoneNumberId,
-                  wabaId,
-                },
-              });
-
-              if (res.error || res.data?.error) {
-                throw new Error(res.data?.error || res.error?.message || "Erro ao salvar conexão");
-              }
-
-              toast({
-                title: "WhatsApp conectado!",
-                description: `Número ${res.data?.pageName || phoneNumberId} conectado com sucesso.`,
-              });
-
-              onCreated();
-              onClose();
-            } catch (err: any) {
-              console.error("[embedded-signup] Error saving connection:", err);
-              toast({
-                title: "Erro ao conectar",
-                description: err.message || "Tente novamente.",
-                variant: "destructive",
-              });
-            } finally {
-              setIsConnecting(false);
-            }
+            };
+            handleResponse();
           },
           {
             config_id: META_CONFIG_ID,
@@ -251,7 +255,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
             extras: {
               setup: {},
               featureType: "",
-              sessionInfoVersion: 2,
+              sessionInfoVersion: 3,
             },
           }
         );
