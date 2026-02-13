@@ -1,88 +1,118 @@
 
 
-# Corrigir erro business_management e melhorar Templates
+# Exibir conteudo real de mensagens de template
 
-## 1. Erro `business_management` - "(#100) Missing Permission"
+## Problema
 
-**Isso NAO e bug do codigo.** O token temporario gerado na pagina "API Setup" do WhatsApp NAO inclui a permissao `business_management`. Isso e uma limitacao do tipo de token.
+Quando um template WhatsApp e enviado (via Cloud API ou Evolution API), o chat mostra apenas `[Mensagem de template]` ou `[template: hello_world]` em vez do conteudo real da mensagem (texto, botoes, header, etc).
 
-**Solucao**: Marcar esse teste como **opcional** no WhatsApp (ja que os outros 3 testes passaram com sucesso). O `business_management` so funciona com token de System User ou OAuth completo. Para o App Review, os 3 testes que passaram (`whatsapp_business_messaging`, `public_profile`, `whatsapp_business_management`) ja sao suficientes.
+Isso acontece em dois locais:
 
-**Alteracao em `src/pages/admin/MetaTestPage.tsx`**: Mudar `required: false` no teste `wa_business` e adicionar uma nota explicativa.
+1. **`supabase/functions/meta-api/index.ts`** (linha 399-400): Ao enviar template de teste, salva `[template: hello_world]` como conteudo fixo, sem buscar o corpo real do template.
 
-## 2. Templates completos (HEADER + BODY + FOOTER + BUTTONS)
+2. **`supabase/functions/evolution-webhook/index.ts`** (linhas 4856-4863): Quando o payload `templateMessage` nao tem `hydratedTemplate`, cai no fallback `[Mensagem de template]`.
 
-O formulario atual so tem campo BODY. A Meta espera templates com componentes completos. Vou adicionar suporte a:
+## Solucao
 
-- **HEADER** (texto ou imagem)
-- **BODY** (texto com variaveis `{{1}}`, `{{2}}`)
-- **FOOTER** (texto curto)
-- **BUTTONS** (Quick Reply e/ou URL)
+### 1. `meta-api/index.ts` - Buscar conteudo real do template antes de salvar
 
-### Alteracoes em `src/components/connections/WhatsAppTemplatesManager.tsx`:
-
-Adicionar campos no dialogo de criacao:
-- Campo de Header (tipo: texto ou nenhum)
-- Campo de Footer (texto opcional)
-- Secao de botoes com opcoes:
-  - Quick Reply (ate 3 botoes com texto)
-  - URL (texto + url)
-- Montar o array `components` dinamicamente com todos os tipos preenchidos
-
-### Alteracoes em `supabase/functions/meta-api/index.ts`:
-
-Nenhuma alteracao necessaria - o endpoint `create_template` ja envia o array `components` que recebe do frontend. A logica e passthrough.
-
-## Detalhes tecnicos do formulario de template
+Quando `useTemplate = true`, apos enviar com sucesso, buscar o template na Graph API para extrair o conteudo real:
 
 ```text
-+----------------------------------+
-| Novo Template de Mensagem        |
-+----------------------------------+
-| Nome: [________________]         |
-| Categoria: [UTILITY v]          |
-| Idioma: [pt_BR v]               |
-+----------------------------------+
-| HEADER (opcional)                |
-| Tipo: [Nenhum | Texto v]        |
-| Texto: [________________]       |
-+----------------------------------+
-| BODY (obrigatorio)              |
-| [                    ]           |
-| Use {{1}}, {{2}} para variaveis |
-+----------------------------------+
-| FOOTER (opcional)               |
-| [________________]               |
-+----------------------------------+
-| BOTOES (opcional)               |
-| [+ Quick Reply] [+ URL]        |
-| - "Confirmar" (QUICK_REPLY)  X |
-| - "Ver site" -> url         X  |
-+----------------------------------+
+GET /v22.0/{WABA_ID}/message_templates?name={templateName}
 ```
 
-O array `components` sera montado assim:
+Extrair os componentes (HEADER, BODY, FOOTER, BUTTONS) e montar o conteudo legivel:
+
+```
+[Header texto se houver]
+Corpo do template com {{1}} etc
+---
+[Opcoes: Botao1 | Botao2]
+```
+
+Se a busca falhar (ex: permissao), usar fallback: `[template: {nome}]` (comportamento atual).
+
+**Alteracao** (linhas 394-406):
 ```typescript
-const components = [];
-if (headerText) components.push({ type: "HEADER", format: "TEXT", text: headerText });
-components.push({ type: "BODY", text: bodyText });
-if (footerText) components.push({ type: "FOOTER", text: footerText });
-if (buttons.length > 0) {
-  components.push({
-    type: "BUTTONS",
-    buttons: buttons.map(b => 
-      b.type === "QUICK_REPLY" 
-        ? { type: "QUICK_REPLY", text: b.text }
-        : { type: "URL", text: b.text, url: b.url }
-    )
-  });
+// Montar conteudo legivel do template
+let templateContent = `[template: ${templateName || "hello_world"}]`;
+if (useTemplate && conn.waba_id) {
+  try {
+    const tplRes = await fetch(
+      `${GRAPH_API_BASE}/${conn.waba_id}/message_templates?name=${templateName || "hello_world"}`,
+      { headers: { Authorization: `Bearer ${testToken}` } }
+    );
+    if (tplRes.ok) {
+      const tplData = await tplRes.json();
+      const tpl = tplData.data?.[0];
+      if (tpl?.components) {
+        const parts: string[] = [];
+        for (const comp of tpl.components) {
+          if (comp.type === "HEADER" && comp.text) parts.push(comp.text);
+          if (comp.type === "BODY" && comp.text) parts.push(comp.text);
+          if (comp.type === "FOOTER" && comp.text) parts.push(`_${comp.text}_`);
+          if (comp.type === "BUTTONS") {
+            const btnTexts = comp.buttons?.map(b => b.text).filter(Boolean);
+            if (btnTexts?.length) parts.push(`[Opcoes: ${btnTexts.join(" | ")}]`);
+          }
+        }
+        if (parts.length > 0) templateContent = parts.join("\n\n");
+      }
+    }
+  } catch (e) { /* manter fallback */ }
+}
+// Inserir com conteudo real
+await supabaseAdmin.from("messages").insert({
+  content: useTemplate ? templateContent : (message || "Mensagem de teste"),
+  ...
+});
+```
+
+### 2. `evolution-webhook/index.ts` - Melhorar fallback de template
+
+Quando `templateMessage` existe mas nao tem `hydratedTemplate`, tentar extrair dados de outras estruturas comuns do payload:
+
+**Alteracao** (linhas 4856-4864):
+```typescript
+} else if (template.fourRowTemplate) {
+  // fourRowTemplate format
+  const frt = template.fourRowTemplate;
+  messageContent = frt.hydratedContentText || frt.content?.namespace || '';
+  // Tentar botoes do fourRowTemplate
+  if (frt.hydratedButtons?.length) {
+    const btns = frt.hydratedButtons.map(b =>
+      b.quickReplyButton?.displayText || b.urlButton?.displayText || null
+    ).filter(Boolean);
+    if (btns.length) messageContent += '\n\n[Opcoes: ' + btns.join(' | ') + ']';
+  }
+  if (!messageContent) messageContent = '[Mensagem de template]';
+} else {
+  // Fallback: tentar extrair qualquer texto do payload
+  const raw = JSON.stringify(template);
+  // Procurar por campos de texto conhecidos
+  const textMatch = raw.match(/"(?:text|body|content)"\s*:\s*"([^"]{5,})"/);
+  if (textMatch) {
+    messageContent = textMatch[1];
+  } else {
+    messageContent = '[Mensagem de template]';
+    // Logar payload completo para debug
+    console.warn('[evolution-webhook] Unknown template format:', raw.slice(0, 500));
+  }
 }
 ```
 
-## Resumo
+### 3. `MessageBubble.tsx` - Renderizar `[template: X]` de forma visual
+
+Verificar se o conteudo comeca com `[template:` e renderizar com icone e nome, ao inves de texto cru.
+
+## Resumo de arquivos
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `MetaTestPage.tsx` | Marcar `wa_business` como `required: false` + nota |
-| `WhatsAppTemplatesManager.tsx` | Formulario completo com Header, Footer, Botoes |
+| `supabase/functions/meta-api/index.ts` | Buscar conteudo real do template na Graph API antes de salvar no banco |
+| `supabase/functions/evolution-webhook/index.ts` | Melhorar parsing de `templateMessage` com fallbacks mais inteligentes |
+| `src/components/conversations/MessageBubble.tsx` | Renderizar visualmente mensagens que comecam com `[template:` |
+
+Deploy: `meta-api` e `evolution-webhook`
 
