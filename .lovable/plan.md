@@ -1,92 +1,105 @@
 
 
-# Correcao Completa: Mensagens Vazias + Nome/Foto + WhatsApp Popup
+# Correcao: WhatsApp Cloud Embedded Signup - FB.login() falhando
 
-## Problema 1 (CRITICO): Mensagens nao aparecem no Instagram e Facebook
+## Diagnostico
 
-**Causa raiz confirmada nos logs (01:19:46 UTC):**
-```
-Could not find the 'external_id' column of 'messages' in the schema cache
-```
+O erro **"O Facebook SDK nao respondeu corretamente"** ocorre porque `FB.login()` lanca uma excecao no `catch` (linha 228 do `NewWhatsAppCloudDialog.tsx`). Isso acontece **mesmo com popups permitidos**.
 
-A conversa e criada com sucesso, mas a insercao da **mensagem** falha porque o codigo tenta gravar na coluna `external_id` que **nao existe** na tabela `messages`. Por isso as conversas aparecem como "Sem mensagens".
+Baseado na analise do artigo da ZDG e do codigo atual, identifiquei **2 causas**:
 
-**Correcao em 2 partes:**
+### Causa 1: Dominios nao configurados na Meta (3 lugares)
 
-1. **Migracao SQL**: Adicionar a coluna `external_id` na tabela `messages`:
-```sql
-ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS external_id text;
-```
+O artigo da ZDG e bem claro: para o popup do Embedded Signup funcionar, os dominios precisam estar cadastrados em **3 lugares diferentes** no Meta Developer Console:
 
-2. **Resiliencia no codigo** (backup): No `meta-webhook/index.ts`, remover `external_id` da insercao direta e usar uma abordagem que nao quebre se a coluna nao existir. Isso evita que qualquer futuro schema cache issue bloqueie mensagens.
+1. **Login com o Facebook > Configuracoes** - URIs de redirecionamento do OAuth validas
+   - Adicionar: `https://miauchat.com.br`, `https://suporte.miauchat.com.br`
+   
+2. **Configuracoes > Basica** - Dominios do aplicativo
+   - Adicionar: `miauchat.com.br`
 
-**Arquivos afetados:**
-- Migracao SQL (nova)
-- `supabase/functions/meta-webhook/index.ts` (linhas 401-408 e 607-615)
+3. **Cadastro Incorporado > Gerenciamento de dominios**
+   - Adicionar: `miauchat.com.br`, `suporte.miauchat.com.br`, `chatfmoteste.lovable.app`
 
----
+Sem essas configuracoes, o SDK bloqueia a chamada `FB.login()` e lanca uma excecao.
 
-## Problema 2: Nomes genericos ("INSTAGRAM 5644", "FACEBOOK 6806")
+### Causa 2: Inicializacao do SDK com race condition
 
-**Causa:** Na funcao `processMessagingEntry` (linha 337), ao criar um novo cliente, o nome e definido como:
-```
-name: `${origin} ${remoteJid.slice(-4)}`
-```
+O SDK carrega via `<script async defer>` no `index.html`. O `useEffect` no componente tenta `FB.init()` apenas uma vez no mount. Se o SDK ainda nao carregou quando o componente monta, define `window.fbAsyncInit`. Porem, se o SDK ja carregou ANTES do React montar (cached pelo browser), `fbAsyncInit` nunca e chamado porque o SDK ja disparou esse callback.
 
-O webhook do Instagram/Facebook nao envia o nome do perfil no payload. Precisamos buscas via Graph API.
-
-**Correcao:**
-- Adicionar `access_token` ao `selectFields` da query de `meta_connections`
-- Apos criar a conversa, fazer uma chamada `GET /{senderId}?fields=name,username&access_token=...` para buscar o nome real
-- Usar o nome retornado para atualizar `clients.name` e `conversations.contact_name`
-- Fallback: manter o nome generico se a API falhar
-
-**Arquivo afetado:** `supabase/functions/meta-webhook/index.ts`
+Alem disso, o `useEffect` depende de `[META_APP_ID]` que e uma constante - entao so roda uma vez. Se `window.FB` nao existia nesse momento, `sdkReady` fica `false` para sempre (botao desabilitado) ou, em alguns cenarios, `window.FB` existe mas `FB.init` nao completou.
 
 ---
 
-## Problema 3: Foto do perfil nao aparece
+## Plano de Correcao
 
-**Correcao:** Na mesma chamada Graph API do Problema 2, adicionar o campo `profile_pic` (Instagram) ou usar o endpoint de foto do Facebook. Salvar a URL da foto no campo `avatar_url` do cliente.
+### Parte 1: Correcao robusta do carregamento do SDK (codigo)
 
-**Arquivo afetado:** `supabase/functions/meta-webhook/index.ts`
+**Arquivo:** `src/components/connections/NewWhatsAppCloudDialog.tsx`
+
+Substituir a logica de inicializacao do SDK por uma abordagem mais robusta:
+
+- Usar um **polling** com `setInterval` que verifica `window.FB` a cada 500ms por ate 15 segundos
+- Quando encontrar `window.FB`, chamar `FB.init()` e depois `FB.getLoginStatus()` para confirmar
+- Adicionar logs detalhados em cada etapa para diagnosticar problemas futuros
+- No `FB.login()`, capturar o **erro real** (`fbErr.message`) e mostrar no toast em vez da mensagem generica
+- Adicionar `scope: "whatsapp_business_management,whatsapp_business_messaging,business_management"` ao `FB.login()` conforme recomendado pela ZDG
+
+### Parte 2: Configuracoes manuais no Meta Developer Console (voce faz)
+
+Voce precisa acessar `developers.facebook.com/apps/1237829051015100` e configurar:
+
+**2.1 - Login com o Facebook > Configuracoes:**
+- URIs de redirecionamento OAuth validas: 
+  - `https://miauchat.com.br/auth/meta-callback`
+  - `https://chatfmoteste.lovable.app/auth/meta-callback`
+
+**2.2 - Configuracoes > Basica:**
+- Dominios do aplicativo: `miauchat.com.br`, `lovable.app`
+
+**2.3 - Casos de uso > WhatsApp > Cadastro Incorporado > Gerenciamento de dominios:**
+- Adicionar: `miauchat.com.br`, `suporte.miauchat.com.br`, `chatfmoteste.lovable.app`
+
+**2.4 - Verificar permissoes no Cadastro Incorporado:**
+- `whatsapp_business_management`
+- `whatsapp_business_messaging`
+- `business_management`
+
+### Parte 3: Token de Usuario do Sistema (para enviar/receber mensagens)
+
+Conforme o artigo da ZDG, para enviar e receber mensagens via WhatsApp Cloud API, voce precisa de um **System User Token** (token permanente):
+
+1. No Business Manager (`business.facebook.com`), va em **Usuarios > Usuarios do sistema**
+2. Crie um usuario Admin (ou use existente)
+3. Gere um token com expiracao **Nunca** e as permissoes:
+   - `whatsapp_business_management`
+   - `whatsapp_business_messaging`  
+   - `business_management`
+4. Esse token sera usado pelo `meta-oauth-callback` para salvar na conexao
+
+**Importante:** O token gerado pelo Embedded Signup (OAuth) tem validade de 60 dias. Para producao, o ideal e usar o System User Token. Porem, o fluxo Embedded Signup ja funciona para testes iniciais.
 
 ---
 
-## Problema 4: WhatsApp Cloud - Popup bloqueado mesmo com permissao
-
-**Diagnostico:** O screenshot mostra que o popup esta **permitido** nas configuracoes do navegador, mas o toast "Erro ao abrir popup" ainda aparece. Isso significa que `FB.login()` esta lancando uma excecao (caindo no `catch`), nao que o popup foi bloqueado.
-
-**Causas provaveis:**
-1. O FB SDK carrega de forma **assincrona** (`async defer`). Se o usuario clica rapido, `window.FB` pode existir mas `FB.login` pode nao estar pronto
-2. O `FB.init` pode nao ter completado quando `FB.login` e chamado
-3. O `sdkReady` pode estar `true` antes do SDK estar realmente operacional
-
-**Correcao:**
-- Adicionar `console.log` detalhado **antes** do `FB.login` para capturar o estado exato do SDK
-- Verificar `window.FB.getLoginStatus` antes de chamar `FB.login` para confirmar que o SDK esta operacional
-- Envolver o `FB.login` em uma verificacao mais robusta do estado do SDK
-- Adicionar uma segunda tentativa automatica se o primeiro `FB.login` falhar
-- Mudar a mensagem de erro para ser mais especifica sobre o que aconteceu
-
-**Arquivo afetado:** `src/components/connections/NewWhatsAppCloudDialog.tsx`
-
----
-
-## Resumo das alteracoes
+## Resumo das alteracoes de codigo
 
 | Arquivo | Mudanca |
 |---------|---------|
-| Migracao SQL | `ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS external_id text;` |
-| `supabase/functions/meta-webhook/index.ts` | Buscar nome e foto de perfil via Graph API; adicionar `access_token` ao select da conexao |
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Melhorar verificacao do SDK, adicionar retry, logs detalhados |
+| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Polling robusto para SDK, scope no FB.login, erro detalhado no toast |
 
-## Ordem de implementacao
+## Configuracoes manuais (Meta Developer Console)
 
-1. Executar migracao SQL para adicionar `external_id` (resolve "Sem mensagens" imediatamente)
-2. Atualizar `meta-webhook` para buscar nome/foto via Graph API
-3. Melhorar logica do popup no `NewWhatsAppCloudDialog`
-4. Redeployar `meta-webhook`
-5. Testar: enviar mensagem no Instagram e Facebook para verificar nome + conteudo
-6. Testar: clicar em "Conectar com Facebook" no WhatsApp Cloud
+| Local | O que configurar |
+|-------|-----------------|
+| Login com Facebook > Config | URIs de redirect |
+| Config > Basica | Dominios do app |
+| Cadastro Incorporado | Dominios permitidos |
+| Business Manager | System User Token (opcional para teste) |
+
+## Resultado esperado
+
+1. O SDK carrega de forma confiavel em qualquer cenario de cache
+2. O `FB.login()` abre o popup do Embedded Signup sem excecoes
+3. Se houver erro, a mensagem mostra a causa real (nao mensagem generica)
+4. Apos configurar os dominios, o fluxo completo funciona: popup abre > usuario configura WABA > conexao e salva
 
