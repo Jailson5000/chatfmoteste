@@ -1,61 +1,95 @@
 
-# Corrigir Conexao Facebook e Instagram
+# Corrigir Webhook Meta: Mensagens Nao Chegam na Plataforma
 
-## Problema 1: Facebook - page_id null
+## Problemas Identificados
 
-Os logs do backend mostram claramente o erro:
-
+### Problema 1: Lookup do Instagram no webhook esta errado
+Os logs mostram claramente:
 ```
-null value in column "page_id" of relation "meta_connections" violates not-null constraint
+No active connection for page: 17841479...
 ```
+O webhook recebe mensagens do Instagram com `recipient.id = 17841479677897649` (ID da conta Instagram), mas a tabela `meta_connections` armazena `page_id: 977414192123496` (ID da pagina Facebook). O lookup `eq("page_id", recipientId)` falha para Instagram.
 
-O codigo seleciona a pagina corretamente (`MIAU chat`, ID `977414192123496`), mas na hora de salvar usa `pageId` (variavel do body da requisicao, que e `undefined`) em vez de `selectedPage.id`.
+### Problema 2: Pagina nao inscrita no webhook
+Apos conectar via OAuth, o sistema nao chama `POST /{page-id}/subscribed_apps` na Graph API. Sem isso, a Meta nao envia eventos de mensagens para o webhook. Isso explica por que mensagens do Facebook Messenger tambem nao chegam.
 
-**Correcao**: No edge function `meta-oauth-callback/index.ts`, linha ~186, trocar `page_id: pageId` por `page_id: selectedPage.id`.
+### Problema 3: Separacao Instagram vs Facebook nos botoes
+Os dois botoes (Instagram e Facebook) ambos abrem o login do Facebook - isso e normal porque Instagram Business e vinculado a uma Pagina do Facebook. Os escopos ja sao diferentes e criam conexoes separadas. Nao ha como evitar que a Meta mostre a tela de selecao de pagina.
 
-## Problema 2: Instagram - Escopos invalidos
-
-O erro "Invalid Scopes: instagram_business_basic, instagram_business_manage_messages" acontece porque esses escopos pertencem ao produto **Instagram API**, que e diferente do **Facebook Login for Business** configurado no app principal (1237829051015100).
-
-Existem duas opcoes:
-
-**Opcao A (recomendada)**: Trocar os escopos no codigo para os que funcionam com Facebook Login:
-- `instagram_basic` (em vez de `instagram_business_basic`)
-- `instagram_manage_messages` (em vez de `instagram_business_manage_messages`)
-
-**Opcao B**: Adicionar o produto "Instagram API" ao app 1237829051015100 no Meta Dashboard. Mas isso requer configuracao adicional e pode complicar o App Review.
-
-A Opcao A e mais simples e compativel com o setup atual.
+---
 
 ## Mudancas no Codigo
 
-### Arquivo 1: `supabase/functions/meta-oauth-callback/index.ts`
+### Mudanca 1: Webhook - corrigir lookup para Instagram
+**Arquivo:** `supabase/functions/meta-webhook/index.ts`
 
-Na secao de upsert (por volta da linha 186), trocar:
-```
-page_id: pageId,
-```
-por:
-```
-page_id: selectedPage.id,
-```
+Na funcao `processMessagingEntry`, quando o `origin` e "INSTAGRAM", o `recipientId` e o ID da conta Instagram, nao o page_id. Corrigir para buscar por `ig_account_id` quando o tipo e Instagram:
 
-Isso corrige o bug do Facebook imediatamente.
-
-### Arquivo 2: `src/lib/meta-config.ts`
-
-Trocar os escopos do Instagram:
 ```typescript
-export const META_SCOPES = {
-  instagram: "instagram_basic,instagram_manage_messages,pages_show_list",
-  facebook: "pages_messaging,pages_manage_metadata,pages_show_list",
-} as const;
+let connection;
+if (connectionType === "instagram") {
+  // Instagram sends IG account ID as recipient, not page ID
+  const { data } = await supabase
+    .from("meta_connections")
+    .select("id, law_firm_id, ...")
+    .eq("ig_account_id", recipientId)
+    .eq("type", connectionType)
+    .eq("is_active", true)
+    .maybeSingle();
+  connection = data;
+} else {
+  // Facebook sends page ID as recipient
+  const { data } = await supabase
+    .from("meta_connections")
+    .select("id, law_firm_id, ...")
+    .eq("page_id", recipientId)
+    .eq("type", connectionType)
+    .eq("is_active", true)
+    .maybeSingle();
+  connection = data;
+}
 ```
 
-Esses escopos sao compativeis com "Facebook Login for Business" e cobrem o necessario para receber/enviar DMs.
+### Mudanca 2: Inscrever pagina no webhook apos OAuth
+**Arquivo:** `supabase/functions/meta-oauth-callback/index.ts`
 
-## Resultado
+Apos salvar a conexao com sucesso, chamar a Graph API para inscrever a pagina nos webhooks. Sem isso, a Meta nao envia eventos:
 
-- **Facebook**: Popup abre, autentica, salva a conexao (com page_id correto) e fecha o popup.
-- **Instagram**: Popup abre sem erro de "Invalid Scopes", autentica, salva a conexao e fecha o popup.
-- Funciona de qualquer subdominio (*.miauchat.com.br) porque o redirect_uri ja e fixo.
+```typescript
+// Subscribe page to webhooks (required for receiving messages)
+await fetch(
+  `${GRAPH_API_BASE}/${selectedPage.id}/subscribed_apps`,
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subscribed_fields: ["messages", "messaging_postbacks", "messaging_optins"],
+      access_token: pageAccessToken,
+    }),
+  }
+);
+```
+
+Para Instagram, tambem precisa inscrever os campos de mensagens do Instagram na pagina vinculada.
+
+### Mudanca 3: Redeployar edge functions
+Apos as correcoes, redeployar `meta-webhook` e `meta-oauth-callback`.
+
+---
+
+## Sobre a Separacao dos Botoes
+
+Ambos os botoes (Instagram e Facebook) abrem a mesma tela de login da Meta - isso e por design da Meta, nao ha como mudar. A diferenca e nos **escopos** solicitados:
+- **Instagram**: `instagram_basic, instagram_manage_messages, pages_show_list`
+- **Facebook**: `pages_messaging, pages_manage_metadata, pages_show_list`
+
+O resultado e que cada botao cria um registro `meta_connections` com `type` diferente ("instagram" vs "facebook"), o que e o comportamento correto.
+
+---
+
+## Resultado Esperado
+
+Apos as correcoes:
+- Mensagens enviadas para o Instagram da pagina conectada chegarao na plataforma
+- Mensagens enviadas para o Facebook Messenger da pagina conectada chegarao na plataforma
+- O webhook conseguira encontrar a conexao correta para cada canal
