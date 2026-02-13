@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
         {
           law_firm_id: lawFirmId,
           type,
-          page_id: pageId,
+          page_id: selectedPage.id,
           page_name: pageName,
           ig_account_id: igAccountId,
           access_token: encryptedToken,
