@@ -14,6 +14,15 @@ import { encryptToken, decryptToken } from "../_shared/encryption.ts";
  *   - "whatsapp_business_account"  → WhatsApp Cloud API
  */
 
+/**
+ * Normalize a timestamp to milliseconds.
+ * Instagram sends timestamps in milliseconds, WhatsApp/Facebook in seconds.
+ * If ts > 10_000_000_000 it's already in ms; otherwise multiply by 1000.
+ */
+function normalizeTimestamp(ts: number): number {
+  return ts > 10_000_000_000 ? ts : ts * 1000;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type",
@@ -341,7 +350,7 @@ async function processMessagingEntry(
 
       // Unarchive if archived
       const updatePayload: Record<string, any> = {
-        last_message_at: new Date(timestamp * 1000).toISOString(),
+        last_message_at: new Date(normalizeTimestamp(timestamp)).toISOString(),
         updated_at: new Date().toISOString(),
       };
       if (existingConv.archived_at) {
@@ -371,7 +380,7 @@ async function processMessagingEntry(
           current_handler: connection.default_handler_type === "ai" ? "ai" : "human",
           assigned_to: connection.default_handler_type === "human" ? connection.default_human_agent_id : null,
           status: "active",
-          last_message_at: new Date(timestamp * 1000).toISOString(),
+          last_message_at: new Date(normalizeTimestamp(timestamp)).toISOString(),
         })
         .select("id")
         .single();
