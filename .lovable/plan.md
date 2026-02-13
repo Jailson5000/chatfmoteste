@@ -1,58 +1,57 @@
 
-# Corrigir deploy do meta-webhook e fluxo completo de mensagens
+# Resolver envio e recebimento de mensagens WhatsApp Cloud
 
-## Problema raiz
+## Problema 1: Mensagens enviadas nao chegam no WhatsApp
 
-O **meta-webhook nao esta deployado** (retorna 404). Isso significa:
-- A Meta nao consegue verificar o webhook (GET com challenge)
-- Nenhuma mensagem recebida chega ao sistema
-- O subscribe de "messages" no painel Meta nao adianta se o endpoint nao existe
+A Meta retorna `"message_status": "accepted"` mas **nao entrega** a mensagem. O log mostra:
+- Input: `5563984622450` -> Meta resolveu para `wa_id: 556384622450` (removeu o 9)
+- Isso indica que o numero esta correto, mas o app em **modo de desenvolvimento** so entrega para numeros cadastrados como "destinatarios de teste"
 
-A causa e o import `esm.sh` na linha 1 do arquivo, que gera timeout no bundle (mesmo bug ja corrigido no `meta-api`).
+**Solucao**: Voce precisa adicionar o numero destinatario na lista de teste:
+1. Meta Developers > WhatsApp > API Setup > "To" field
+2. Adicionar o numero `+55 63 98462-2450` como destinatario de teste
+3. O destinatario vai receber um codigo de verificacao no WhatsApp e precisa confirmar
 
-## Alteracoes
+## Problema 2: Webhook nao recebe respostas (verify token errado)
 
-### 1. Corrigir import do meta-webhook
+O log mostra `tokenMatch: false` - o token configurado no painel Meta nao bate com o secret `META_WEBHOOK_VERIFY_TOKEN`.
 
-**Arquivo:** `supabase/functions/meta-webhook/index.ts` (linha 1)
+**Solucao em 2 passos:**
 
-Mudar:
-```typescript
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-```
-Para:
-```typescript
-import { createClient } from "npm:@supabase/supabase-js@2";
-```
+### Passo 1: Atualizar o secret para um valor conhecido
+Vou atualizar o secret `META_WEBHOOK_VERIFY_TOKEN` para o valor: `miauchat_webhook_2026`
 
-### 2. Deployar o meta-webhook
+Voce pode escolher outro valor se preferir - o importante e que seja o MESMO no secret e no painel Meta.
 
-Apos a correcao do import, fazer o deploy da funcao. Isso tornara o endpoint disponivel em:
-```
-https://jiragtersejnarxruqyd.supabase.co/functions/v1/meta-webhook
-```
-
-### 3. Testar o webhook via curl
-
-Fazer uma chamada GET de teste para verificar que o endpoint responde corretamente a verificacao da Meta.
-
-## O que voce precisa fazer no painel Meta (manual)
-
-1. Ir em **WhatsApp > Configuration > Webhook**
-2. Colocar a URL: `https://jiragtersejnarxruqyd.supabase.co/functions/v1/meta-webhook`
-3. Colocar o **Verify Token** (o mesmo valor configurado no secret `META_WEBHOOK_VERIFY_TOKEN`)
+### Passo 2: Configurar no painel Meta
+1. Meta Developers > WhatsApp > Configuration > Webhook
+2. Callback URL: `https://jiragtersejnarxruqyd.supabase.co/functions/v1/meta-webhook`
+3. Verify Token: `miauchat_webhook_2026` (exatamente este valor)
 4. Clicar "Verificar e salvar"
-5. O campo **messages** ja esta assinado (conforme sua imagem)
 
-## Sobre os tokens no Global Admin
+## Alteracao tecnica
 
-**Nao precisa criar campos extras.** A arquitetura esta correta:
-- Tokens globais (`META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`) sao da plataforma - ja estao nos secrets
-- Tokens por cliente sao gerados automaticamente pelo OAuth e salvos na tabela `meta_connections` criptografados
-- Apos o App Review, o fluxo OAuth funciona para qualquer cliente sem intervencao manual
+### Atualizar secret
+- Atualizar `META_WEBHOOK_VERIFY_TOKEN` com o novo valor
+
+### Adicionar logs de debug no webhook
+**Arquivo:** `supabase/functions/meta-webhook/index.ts`
+- No GET de verificacao: logar os primeiros 4 caracteres do token recebido e do esperado para facilitar debug
+- No POST de mensagens: logar o payload completo para confirmar que mensagens estao chegando
+
+### Deploy
+- Deployar `meta-webhook` com os logs adicionais
+
+## Checklist completo para funcionar
+
+1. Atualizar o secret (eu faco)
+2. Adicionar numero de teste no painel Meta - API Setup (voce faz)
+3. Configurar webhook URL e verify token no painel Meta - Configuration (voce faz)
+4. Enviar mensagem de teste pelo sistema
+5. Responder pelo WhatsApp fisico e verificar se aparece no sistema
 
 ## Resultado esperado
 
-1. Webhook responde a verificacao da Meta (GET com challenge)
-2. Mensagens enviadas pelo WhatsApp chegam ao sistema via webhook (POST)
-3. Fluxo completo: enviar pelo sistema -> chega no WhatsApp -> resposta volta ao sistema
+1. Mensagem enviada pelo sistema chega no WhatsApp do destinatario
+2. Resposta do destinatario chega no sistema via webhook
+3. Conversa bidirecional funciona
