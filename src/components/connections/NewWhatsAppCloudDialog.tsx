@@ -37,13 +37,21 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
     if (!META_APP_ID) return;
 
     const initFB = () => {
-      window.FB.init({
-        appId: META_APP_ID,
-        cookie: true,
-        xfbml: false,
-        version: "v21.0",
-      });
-      setSdkReady(true);
+      try {
+        window.FB.init({
+          appId: META_APP_ID,
+          cookie: true,
+          xfbml: false,
+          version: "v21.0",
+        });
+        // Verify SDK is actually operational
+        window.FB.getLoginStatus(() => {
+          console.log("[embedded-signup] FB SDK fully initialized and operational");
+          setSdkReady(true);
+        });
+      } catch (err) {
+        console.error("[embedded-signup] FB.init failed:", err);
+      }
     };
 
     if (window.FB) {
@@ -113,114 +121,132 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
 
     window.addEventListener("message", sessionInfoListener);
 
-    try {
-      window.FB.login(
-        async (response: any) => {
-          clearTimeout(connectionTimeout);
-          window.removeEventListener("message", sessionInfoListener);
-          console.log("[embedded-signup] FB.login callback fired, authResponse:", !!response.authResponse);
-
-        if (!response.authResponse) {
-          console.log("[embedded-signup] User cancelled or failed login");
-          setIsConnecting(false);
-          return;
+    const attemptLogin = (retryCount = 0) => {
+      try {
+        console.log("[embedded-signup] Attempting FB.login, retry:", retryCount, "FB exists:", !!window.FB, "FB.login type:", typeof window.FB?.login);
+        
+        if (!window.FB?.login) {
+          throw new Error("FB.login is not available");
         }
 
-        const code = response.authResponse.code;
-        if (!code) {
-          toast({
-            title: "Erro na autenticação",
-            description: "Nenhum código de autorização recebido.",
-            variant: "destructive",
-          });
-          setIsConnecting(false);
-          return;
-        }
+        window.FB.login(
+          async (response: any) => {
+            clearTimeout(connectionTimeout);
+            window.removeEventListener("message", sessionInfoListener);
+            console.log("[embedded-signup] FB.login callback fired, authResponse:", !!response.authResponse);
 
-        // Get embedded signup data (phone_number_id, waba_id)
-        const embeddedData = (window as any).__waEmbeddedSignupData || {};
-        delete (window as any).__waEmbeddedSignupData;
+            if (!response.authResponse) {
+              console.log("[embedded-signup] User cancelled or failed login");
+              setIsConnecting(false);
+              return;
+            }
 
-        const phoneNumberId = embeddedData.phone_number_id;
-        const wabaId = embeddedData.waba_id;
+            const code = response.authResponse.code;
+            if (!code) {
+              toast({
+                title: "Erro na autenticação",
+                description: "Nenhum código de autorização recebido.",
+                variant: "destructive",
+              });
+              setIsConnecting(false);
+              return;
+            }
 
-        if (!phoneNumberId || !wabaId) {
-          toast({
-            title: "Dados incompletos",
-            description: "Não foi possível obter o número do WhatsApp. Tente novamente.",
-            variant: "destructive",
-          });
-          setIsConnecting(false);
-          return;
-        }
+            // Get embedded signup data (phone_number_id, waba_id)
+            const embeddedData = (window as any).__waEmbeddedSignupData || {};
+            delete (window as any).__waEmbeddedSignupData;
 
-        try {
-          // Call edge function to exchange code for token and save
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
+            const phoneNumberId = embeddedData.phone_number_id;
+            const wabaId = embeddedData.waba_id;
 
-          if (!accessToken) {
-            toast({
-              title: "Sessão expirada",
-              description: "Faça login novamente.",
-              variant: "destructive",
-            });
-            setIsConnecting(false);
-            return;
-          }
+            if (!phoneNumberId || !wabaId) {
+              toast({
+                title: "Dados incompletos",
+                description: "Não foi possível obter o número do WhatsApp. Tente novamente.",
+                variant: "destructive",
+              });
+              setIsConnecting(false);
+              return;
+            }
 
-          const res = await supabase.functions.invoke("meta-oauth-callback", {
-            body: {
-              code,
-              type: "whatsapp_cloud",
-              phoneNumberId,
-              wabaId,
+            try {
+              const { data: sessionData } = await supabase.auth.getSession();
+              const accessToken = sessionData?.session?.access_token;
+
+              if (!accessToken) {
+                toast({
+                  title: "Sessão expirada",
+                  description: "Faça login novamente.",
+                  variant: "destructive",
+                });
+                setIsConnecting(false);
+                return;
+              }
+
+              const res = await supabase.functions.invoke("meta-oauth-callback", {
+                body: {
+                  code,
+                  type: "whatsapp_cloud",
+                  phoneNumberId,
+                  wabaId,
+                },
+              });
+
+              if (res.error || res.data?.error) {
+                throw new Error(res.data?.error || res.error?.message || "Erro ao salvar conexão");
+              }
+
+              toast({
+                title: "WhatsApp conectado!",
+                description: `Número ${res.data?.pageName || phoneNumberId} conectado com sucesso.`,
+              });
+
+              onCreated();
+              onClose();
+            } catch (err: any) {
+              console.error("[embedded-signup] Error saving connection:", err);
+              toast({
+                title: "Erro ao conectar",
+                description: err.message || "Tente novamente.",
+                variant: "destructive",
+              });
+            } finally {
+              setIsConnecting(false);
+            }
+          },
+          {
+            config_id: META_CONFIG_ID,
+            response_type: "code",
+            override_default_response_type: true,
+            extras: {
+              setup: {},
+              featureType: "",
+              sessionInfoVersion: 2,
             },
-          });
-
-          if (res.error || res.data?.error) {
-            throw new Error(res.data?.error || res.error?.message || "Erro ao salvar conexão");
           }
-
-          toast({
-            title: "WhatsApp conectado!",
-            description: `Número ${res.data?.pageName || phoneNumberId} conectado com sucesso.`,
-          });
-
-          onCreated();
-          onClose();
-        } catch (err: any) {
-          console.error("[embedded-signup] Error saving connection:", err);
-          toast({
-            title: "Erro ao conectar",
-            description: err.message || "Tente novamente.",
-            variant: "destructive",
-          });
-        } finally {
-          setIsConnecting(false);
+        );
+      } catch (fbErr) {
+        console.error("[embedded-signup] FB.login threw an error (attempt " + retryCount + "):", fbErr);
+        
+        // Retry once after a short delay
+        if (retryCount < 1) {
+          console.log("[embedded-signup] Retrying FB.login in 1 second...");
+          setTimeout(() => attemptLogin(retryCount + 1), 1000);
+          return;
         }
-      },
-      {
-        config_id: META_CONFIG_ID,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          setup: {},
-          featureType: "",
-          sessionInfoVersion: 2,
-        },
+        
+        clearTimeout(connectionTimeout);
+        window.removeEventListener("message", sessionInfoListener);
+        setIsConnecting(false);
+        toast({
+          title: "Erro ao iniciar conexão",
+          description: "O Facebook SDK não respondeu corretamente. Recarregue a página e tente novamente.",
+          variant: "destructive",
+        });
       }
-    );
-    } catch (fbErr) {
-      clearTimeout(connectionTimeout);
-      console.error("[embedded-signup] FB.login threw an error:", fbErr);
-      setIsConnecting(false);
-      toast({
-        title: "Erro ao abrir popup",
-        description: "O popup do Facebook pode ter sido bloqueado. Permita popups e tente novamente.",
-        variant: "destructive",
-      });
-    }
+    };
+
+    attemptLogin();
   }, [toast, onClose, onCreated, META_APP_ID, META_CONFIG_ID, sdkReady]);
 
   return (

@@ -3836,6 +3836,7 @@ export type Database = {
           conversation_id: string
           created_at: string
           delivered_at: string | null
+          external_id: string | null
           id: string
           is_from_me: boolean
           is_internal: boolean
@@ -3864,6 +3865,7 @@ export type Database = {
           conversation_id: string
           created_at?: string
           delivered_at?: string | null
+          external_id?: string | null
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
@@ -3892,6 +3894,7 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           delivered_at?: string | null
+          external_id?: string | null
           id?: string
           is_from_me?: boolean
           is_internal?: boolean
