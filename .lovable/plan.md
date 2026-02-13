@@ -1,66 +1,69 @@
 
-# Adição do META_CONFIG_ID ao Projeto
 
-## Objetivo
-Configurar o `VITE_META_CONFIG_ID` com o valor obtido do Meta Developer Console (`1461954655333752`) para que o fluxo de WhatsApp Embedded Signup funcione corretamente.
+# Correção: WhatsApp Cloud travado + Instagram/Facebook sem receber mensagens
 
-## Contexto
-- O Configuration ID foi criado com sucesso na Meta Developer Console
-- O ID é: `1461954655333752`
-- Este ID é necessário para que o `FB.login()` no componente `NewWhatsAppCloudDialog.tsx` funcione corretamente
-- O arquivo `.env` já contém as variáveis Supabase, apenas precisa da nova linha
+## Problema 1: Instagram/Facebook - Erro de timestamp
 
-## Mudanças Necessárias
+**Causa raiz**: O webhook da Meta envia o `timestamp` do Instagram em **milissegundos**, mas o codigo trata como se fosse em **segundos** (faz `timestamp * 1000`). Isso gera datas absurdas como o ano 58088, causando o erro do PostgreSQL:
 
-### 1. Atualizar `.env`
-- Adicionar a nova variável ao final do arquivo `.env`:
-  ```
-  VITE_META_CONFIG_ID="1461954655333752"
-  ```
+```
+time zone displacement out of range: "+058088-12-27T23:58:22.000Z"
+```
 
-### 2. Verificação no Componente
-- O componente `src/components/connections/NewWhatsAppCloudDialog.tsx` já importa `META_CONFIG_ID` de `src/lib/meta-config.ts`
-- O arquivo `src/lib/meta-config.ts` já possui a lógica para ler a variável:
-  ```typescript
-  export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "";
-  ```
-- Após adicionar a variável ao `.env`, o sistema automaticamente carregará o valor
+Isso impede a criacao de novas conversas e a atualizacao de conversas existentes.
 
-### 3. Comportamento Esperado
-- O banner de erro "META_APP_ID ou META_CONFIG_ID não configurados" desaparecerá
-- O botão "Conectar com Facebook" ficará habilitado
-- Clicar no botão abrirá o fluxo de Embedded Signup do WhatsApp
+**Solucao**: Criar uma funcao auxiliar `normalizeTimestamp` que detecta automaticamente se o timestamp esta em milissegundos ou segundos e normaliza para milissegundos:
 
-## Fluxo de Teste Após Implementação
+```text
+normalizeTimestamp(ts):
+  se ts > 10000000000 -> ja esta em milissegundos
+  senao -> multiplicar por 1000
+```
 
-1. **Ir para a página de Conexões**
-   - Navigate para `/connections`
+**Arquivos afetados**: `supabase/functions/meta-webhook/index.ts`
 
-2. **Procurar por "WhatsApp Cloud (API Oficial)"**
-   - O botão "Conectar com Facebook" deve estar ativo
+**Linhas a alterar** (3 ocorrencias na funcao `processMessagingEntry`):
+- Linha 344: `new Date(timestamp * 1000)` -> `new Date(normalizeTimestamp(timestamp))`
+- Linha 374: `new Date(timestamp * 1000)` -> `new Date(normalizeTimestamp(timestamp))`
+- Apos a correcao, mensagens do Instagram e Facebook voltarao a ser processadas normalmente.
 
-3. **Clicar no botão de conexão**
-   - Deve abrir um popup de login do Facebook
-   - Aceitar o fluxo de Embedded Signup
-   - Você verá um modal solicitando a seleção/criação de um portfólio e conta WhatsApp
+---
 
-4. **Completar o fluxo**
-   - Selecionar ou criar uma conta WhatsApp Business
-   - Inserir e verificar um número de telefone
-   - Confirmar para completar a conexão
+## Problema 2: WhatsApp Cloud - "Conectando..." infinito
 
-5. **Verificação no Painel de Conexão**
-   - Após conectar, a conexão aparecerá na lista
-   - Abrir o painel de detalhes
-   - A seção "Templates de Mensagem" deve aparecer e listar templates (se houver)
+**Causa raiz**: A funcao `FB.login` abre o popup do Facebook, mas o callback so e chamado quando o usuario **fecha o popup ou completa o fluxo**. Se o popup nao abre (bloqueado pelo navegador) ou se a configuracao do Embedded Signup (config_id) esta incorreta, o callback nunca e chamado, e o botao fica preso em "Conectando..." para sempre.
 
-## Próximas Etapas
+**Problemas identificados**:
+1. **Sem timeout**: Nao ha mecanismo de timeout para detectar quando o popup falhou
+2. **Sem deteccao de popup bloqueado**: Se o navegador bloqueia o popup, o usuario nao recebe feedback
+3. **Sem log de debug**: Nenhum console.log antes/depois do FB.login para ajudar na depuracao
 
-Após adicionar o `META_CONFIG_ID`:
+**Solucao**:
+1. Adicionar um **timeout de 3 minutos** que reseta o estado `isConnecting` caso o callback nunca seja chamado
+2. Adicionar **logs de debug** no `FB.login` para diagnosticar o problema
+3. Adicionar **deteccao de popup bloqueado** verificando se o popup foi aberto com sucesso
+4. Mostrar um **toast informativo** se o timeout for atingido
 
-1. **Teste o fluxo de conexão** - Verifique se o Embedded Signup funciona corretamente
-2. **Configure o webhook** - Adicione a Callback URL do webhook na Meta Developer Console
-3. **Crie um template de teste** - Use a seção de Templates para criar um template simples
-4. **Teste envio/recebimento** - Envie uma mensagem através do sistema
+**Arquivo afetado**: `src/components/connections/NewWhatsAppCloudDialog.tsx`
 
-Isso preparará tudo para gravar os vídeos de demonstração exigidos pela Meta para o App Review.
+**Mudancas especificas**:
+- Envolver o `FB.login` em um try/catch
+- Adicionar `console.log` antes e depois do `FB.login` para rastreamento
+- Adicionar `setTimeout` de 180 segundos que reseta `isConnecting` e mostra toast de aviso
+- Limpar o timeout quando o callback e chamado com sucesso
+
+---
+
+## Resumo das alteracoes
+
+| Arquivo | Mudanca |
+|---------|---------|
+| `supabase/functions/meta-webhook/index.ts` | Adicionar funcao `normalizeTimestamp()` e usar nas 3 ocorrencias de `new Date(timestamp * 1000)` na funcao `processMessagingEntry` |
+| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Adicionar timeout de 3 min, logs de debug, e deteccao de falha no popup do FB.login |
+
+## Ordem de implementacao
+
+1. Corrigir o timestamp no `meta-webhook` (resolve Instagram/Facebook imediatamente)
+2. Adicionar timeout e logs no `NewWhatsAppCloudDialog` (resolve UX do WhatsApp Cloud)
+3. Redeployar o `meta-webhook`
+
