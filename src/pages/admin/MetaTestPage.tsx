@@ -123,7 +123,12 @@ export default function MetaTestPage() {
         },
       });
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (data?.error) {
+        const errMsg = typeof data.error === 'object' 
+          ? JSON.stringify(data.error, null, 2) 
+          : String(data.error);
+        throw new Error(errMsg);
+      }
       toast.success(`Conexão salva! ID: ${data.connectionId}`);
       refetchConnections();
     } catch (err: any) {
