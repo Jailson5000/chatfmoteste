@@ -315,9 +315,92 @@ Deno.serve(async (req) => {
         body: JSON.stringify(msgBody),
       });
       const data = await res.json();
-
       console.log("[meta-api] send_test_message result:", res.status, JSON.stringify(data));
-      return new Response(JSON.stringify(data), {
+
+      // If send succeeded, persist client + conversation + message in database
+      let conversationId: string | null = null;
+      if (res.ok && data?.messages?.[0]?.id) {
+        try {
+          const externalMsgId = data.messages[0].id;
+          const lawFirmId = prof.law_firm_id;
+          const remoteJid = recipientPhone.includes("@") ? recipientPhone : `${recipientPhone}@s.whatsapp.net`;
+          const msgContent = useTemplate
+            ? `[template: ${templateName || "hello_world"}]`
+            : (message || "Mensagem de teste do MiauChat");
+
+          // 1. Find or create client
+          let clientId: string | null = null;
+          const { data: existingClient } = await supabaseAdmin.from("clients")
+            .select("id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("phone", recipientPhone)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingClient) {
+            clientId = existingClient.id;
+          } else {
+            const { data: newClient } = await supabaseAdmin.from("clients")
+              .insert({ law_firm_id: lawFirmId, name: recipientPhone, phone: recipientPhone })
+              .select("id")
+              .single();
+            clientId = newClient?.id || null;
+          }
+
+          // 2. Find or create conversation
+          const { data: existingConv } = await supabaseAdmin.from("conversations")
+            .select("id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("remote_jid", remoteJid)
+            .eq("origin", "WHATSAPP_CLOUD")
+            .limit(1)
+            .maybeSingle();
+
+          if (existingConv) {
+            conversationId = existingConv.id;
+            await supabaseAdmin.from("conversations")
+              .update({ last_message_at: new Date().toISOString(), archived_at: null })
+              .eq("id", conversationId);
+          } else {
+            const { data: newConv } = await supabaseAdmin.from("conversations")
+              .insert({
+                law_firm_id: lawFirmId,
+                remote_jid: remoteJid,
+                contact_name: recipientPhone,
+                contact_phone: recipientPhone,
+                origin: "WHATSAPP_CLOUD",
+                origin_metadata: { phone_number_id: conn.page_id, connection_type: "whatsapp_cloud", connection_id: conn.id },
+                client_id: clientId,
+                status: "novo_contato",
+                current_handler: "human",
+                last_message_at: new Date().toISOString(),
+              })
+              .select("id")
+              .single();
+            conversationId = newConv?.id || null;
+          }
+
+          // 3. Insert message
+          if (conversationId) {
+            await supabaseAdmin.from("messages").insert({
+              conversation_id: conversationId,
+              law_firm_id: lawFirmId,
+              content: msgContent,
+              sender_type: "agent",
+              is_from_me: true,
+              message_type: "text",
+              external_id: externalMsgId,
+            });
+          }
+
+          console.log("[meta-api] send_test_message persisted: conv=", conversationId, "client=", clientId);
+        } catch (persistErr) {
+          console.error("[meta-api] send_test_message persist error:", persistErr);
+          // Don't fail the response - message was sent successfully
+        }
+      }
+
+      return new Response(JSON.stringify({ ...data, conversationId }), {
         status: res.ok ? 200 : 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
