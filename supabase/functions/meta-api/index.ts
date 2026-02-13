@@ -323,10 +323,11 @@ Deno.serve(async (req) => {
         try {
           const externalMsgId = data.messages[0].id;
           const lawFirmId = prof.law_firm_id;
-          const remoteJid = recipientPhone.replace(/[^0-9]/g, "");
-          const msgContent = useTemplate
-            ? `[template: ${templateName || "hello_world"}]`
-            : (message || "Mensagem de teste do MiauChat");
+          // Use wa_id returned by Meta (normalized number) as remote_jid
+          const rawPhone = recipientPhone.replace(/[^0-9]/g, "");
+          const waId = data.contacts?.[0]?.wa_id;
+          const remoteJid = waId || rawPhone;
+          console.log("[meta-api] send_test_message wa_id normalization:", { rawPhone, waId, remoteJid });
 
           // 1. Find or create client
           let clientId: string | null = null;
@@ -347,19 +348,29 @@ Deno.serve(async (req) => {
             clientId = newClient?.id || null;
           }
 
-          // 2. Find or create conversation
+          // 2. Find or create conversation - try both formats to avoid duplicates
+          const possibleJids = [remoteJid];
+          if (rawPhone !== remoteJid) possibleJids.push(rawPhone);
+          
           const { data: existingConv } = await supabaseAdmin.from("conversations")
-            .select("id")
+            .select("id, remote_jid")
             .eq("law_firm_id", lawFirmId)
-            .eq("remote_jid", remoteJid)
+            .in("remote_jid", possibleJids)
             .eq("origin", "WHATSAPP_CLOUD")
             .limit(1)
             .maybeSingle();
 
           if (existingConv) {
             conversationId = existingConv.id;
+            // Also fix remote_jid if it was stored in wrong format
+            const updateData: any = { last_message_at: new Date().toISOString(), archived_at: null };
+            if (existingConv.remote_jid !== remoteJid) {
+              updateData.remote_jid = remoteJid;
+              updateData.contact_phone = remoteJid;
+              console.log("[meta-api] send_test_message fixing remote_jid:", existingConv.remote_jid, "->", remoteJid);
+            }
             await supabaseAdmin.from("conversations")
-              .update({ last_message_at: new Date().toISOString(), archived_at: null })
+              .update(updateData)
               .eq("id", conversationId);
           } else {
             const { data: newConv } = await supabaseAdmin.from("conversations")
@@ -367,7 +378,7 @@ Deno.serve(async (req) => {
                 law_firm_id: lawFirmId,
                 remote_jid: remoteJid,
                 contact_name: recipientPhone,
-                contact_phone: recipientPhone,
+                contact_phone: remoteJid,
                 origin: "WHATSAPP_CLOUD",
                 origin_metadata: { phone_number_id: conn.page_id, connection_type: "whatsapp_cloud", connection_id: conn.id },
                 client_id: clientId,
@@ -617,6 +628,16 @@ Deno.serve(async (req) => {
         status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Normalize remote_jid using wa_id returned by Meta (fixes Brazilian number format issues)
+    const returnedWaId = graphResult.contacts?.[0]?.wa_id;
+    if (origin === "WHATSAPP_CLOUD" && returnedWaId && returnedWaId !== recipientId) {
+      console.log("[meta-api] Normalizing remote_jid:", recipientId, "->", returnedWaId);
+      await supabaseAdmin
+        .from("conversations")
+        .update({ remote_jid: returnedWaId, contact_phone: returnedWaId })
+        .eq("id", conversationId);
     }
 
     // Save outgoing message to database
