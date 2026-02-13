@@ -16,7 +16,7 @@ import { corsHeaders } from "../_shared/cors.ts";
  * }
  */
 
-const GRAPH_API_VERSION = "v21.0";
+const GRAPH_API_VERSION = "v22.0";
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 Deno.serve(async (req) => {
@@ -323,7 +323,7 @@ Deno.serve(async (req) => {
         try {
           const externalMsgId = data.messages[0].id;
           const lawFirmId = prof.law_firm_id;
-          const remoteJid = recipientPhone.includes("@") ? recipientPhone : `${recipientPhone}@s.whatsapp.net`;
+          const remoteJid = recipientPhone.replace(/[^0-9]/g, "");
           const msgContent = useTemplate
             ? `[template: ${templateName || "hello_world"}]`
             : (message || "Mensagem de teste do MiauChat");
@@ -551,14 +551,33 @@ Deno.serve(async (req) => {
     const connectionType = typeMap[origin];
 
     // Find the active connection
-    const { data: connection, error: connError } = await supabaseAdmin
-      .from("meta_connections")
-      .select("id, access_token, page_id")
-      .eq("law_firm_id", lawFirmId)
-      .eq("type", connectionType)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
+    // First try connection_id from origin_metadata (most reliable for WHATSAPP_CLOUD)
+    let connection: any = null;
+    const originConnectionId = conversation.origin_metadata?.connection_id;
+    
+    if (originConnectionId) {
+      const { data: specificConn } = await supabaseAdmin
+        .from("meta_connections")
+        .select("id, access_token, page_id")
+        .eq("id", originConnectionId)
+        .eq("law_firm_id", lawFirmId)
+        .eq("is_active", true)
+        .maybeSingle();
+      connection = specificConn;
+    }
+    
+    // Fallback: find by type
+    if (!connection) {
+      const { data: fallbackConn } = await supabaseAdmin
+        .from("meta_connections")
+        .select("id, access_token, page_id")
+        .eq("law_firm_id", lawFirmId)
+        .eq("type", connectionType)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      connection = fallbackConn;
+    }
 
     if (!connection) {
       return new Response(JSON.stringify({ error: `No active ${connectionType} connection` }), {
@@ -573,7 +592,13 @@ Deno.serve(async (req) => {
       accessToken = await decryptToken(accessToken);
     }
 
-    const recipientId = conversation.remote_jid;
+    let recipientId = conversation.remote_jid;
+    
+    // WhatsApp Cloud API needs just the phone number, strip @s.whatsapp.net suffix
+    if (origin === "WHATSAPP_CLOUD" && recipientId?.includes("@")) {
+      recipientId = recipientId.split("@")[0];
+    }
+    
     let graphResponse: Response;
 
     if (origin === "WHATSAPP_CLOUD") {
