@@ -160,6 +160,169 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Handle save_test_connection action - manually save Meta credentials for testing
+    if (body.action === "save_test_connection") {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const tkn = authHeader.replace("Bearer ", "");
+      const { data: claims, error: claimsErr } = await supabaseAuth.auth.getClaims(tkn);
+      if (claimsErr || !claims?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const uid = claims.claims.sub;
+      const supabaseAdmin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: prof } = await supabaseAdmin.from("profiles").select("law_firm_id").eq("id", uid).single();
+      if (!prof?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { accessToken: rawToken, phoneNumberId, wabaId: inputWabaId } = body;
+      if (!rawToken || !phoneNumberId) {
+        return new Response(JSON.stringify({ error: "Missing accessToken or phoneNumberId" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const encryptedToken = await encryptToken(rawToken);
+
+      // Upsert a whatsapp_cloud connection for this tenant
+      const { data: existing } = await supabaseAdmin.from("meta_connections")
+        .select("id")
+        .eq("law_firm_id", prof.law_firm_id)
+        .eq("type", "whatsapp_cloud")
+        .maybeSingle();
+
+      let connectionId: string;
+      if (existing) {
+        await supabaseAdmin.from("meta_connections").update({
+          access_token: encryptedToken,
+          page_id: phoneNumberId,
+          waba_id: inputWabaId || null,
+          is_active: true,
+          page_name: "Teste WhatsApp Cloud",
+        }).eq("id", existing.id);
+        connectionId = existing.id;
+      } else {
+        const { data: inserted } = await supabaseAdmin.from("meta_connections").insert({
+          law_firm_id: prof.law_firm_id,
+          type: "whatsapp_cloud",
+          access_token: encryptedToken,
+          page_id: phoneNumberId,
+          waba_id: inputWabaId || null,
+          is_active: true,
+          page_name: "Teste WhatsApp Cloud",
+        }).select("id").single();
+        connectionId = inserted?.id;
+      }
+
+      console.log("[meta-api] save_test_connection success:", connectionId);
+      return new Response(JSON.stringify({ success: true, connectionId }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle send_test_message action - send a test WhatsApp message directly
+    if (body.action === "send_test_message" && body.connectionId) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const tkn = authHeader.replace("Bearer ", "");
+      const { data: claims, error: claimsErr } = await supabaseAuth.auth.getClaims(tkn);
+      if (claimsErr || !claims?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const uid = claims.claims.sub;
+      const supabaseAdmin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: prof } = await supabaseAdmin.from("profiles").select("law_firm_id").eq("id", uid).single();
+      if (!prof?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: conn } = await supabaseAdmin.from("meta_connections")
+        .select("id, access_token, page_id, waba_id, law_firm_id")
+        .eq("id", body.connectionId)
+        .eq("law_firm_id", prof.law_firm_id)
+        .single();
+
+      if (!conn) {
+        return new Response(JSON.stringify({ error: "Connection not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let testToken = conn.access_token;
+      if (isEncrypted(testToken)) {
+        testToken = await decryptToken(testToken);
+      }
+
+      const { recipientPhone, message, useTemplate, templateName, templateLang } = body;
+      if (!recipientPhone) {
+        return new Response(JSON.stringify({ error: "Missing recipientPhone" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let msgBody: any = {
+        messaging_product: "whatsapp",
+        to: recipientPhone,
+      };
+
+      if (useTemplate) {
+        msgBody.type = "template";
+        msgBody.template = {
+          name: templateName || "hello_world",
+          language: { code: templateLang || "en_US" },
+        };
+      } else {
+        msgBody.type = "text";
+        msgBody.text = { body: message || "Mensagem de teste do MiauChat" };
+      }
+
+      const phoneNumberId = conn.page_id;
+      const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
+      console.log("[meta-api] send_test_message:", url, JSON.stringify(msgBody));
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${testToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(msgBody),
+      });
+      const data = await res.json();
+
+      console.log("[meta-api] send_test_message result:", res.status, JSON.stringify(data));
+      return new Response(JSON.stringify(data), {
+        status: res.ok ? 200 : 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle test_api action - proxy Graph API calls for testing
     if (body.action === "test_api" && body.connectionId && body.endpoint) {
       const authHeader = req.headers.get("Authorization");
