@@ -46,6 +46,9 @@ export function WhatsAppTemplatesManager({ connectionId }: WhatsAppTemplatesMana
       });
 
       if (res.error) throw new Error(res.error.message);
+      if (res.data?.error) {
+        throw new Error(res.data.error.message || JSON.stringify(res.data.error));
+      }
       setTemplates(res.data?.data || []);
     } catch (err: any) {
       toast({ title: "Erro ao listar templates", description: err.message, variant: "destructive" });

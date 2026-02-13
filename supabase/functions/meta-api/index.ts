@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
         const res = await fetch(url, { headers: { Authorization: `Bearer ${tplAccessToken}` } });
         const data = await res.json();
         return new Response(JSON.stringify(data), {
-          status: res.ok ? 200 : 502,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -130,11 +130,11 @@ Deno.serve(async (req) => {
         const res = await fetch(url, {
           method: "POST",
           headers: { Authorization: `Bearer ${tplAccessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name, category, language, components }),
+          body: JSON.stringify({ name, category, language, components, allow_category_change: true }),
         });
         const data = await res.json();
         return new Response(JSON.stringify(data), {
-          status: res.ok ? 200 : 502,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
         });
         const data = await res.json();
         return new Response(JSON.stringify(data), {
-          status: res.ok ? 200 : 502,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -414,7 +414,7 @@ Deno.serve(async (req) => {
       }
 
       return new Response(JSON.stringify({ ...data, conversationId }), {
-        status: res.ok ? 200 : 502,
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
