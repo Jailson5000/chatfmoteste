@@ -396,7 +396,9 @@ Deno.serve(async (req) => {
             await supabaseAdmin.from("messages").insert({
               conversation_id: conversationId,
               law_firm_id: lawFirmId,
-              content: msgContent,
+              content: useTemplate
+                ? `[template: ${templateName || "hello_world"}]`
+                : (message || "Mensagem de teste do MiauChat"),
               sender_type: "agent",
               is_from_me: true,
               message_type: "text",
@@ -475,7 +477,7 @@ Deno.serve(async (req) => {
       const graphData = await graphRes.json();
 
       return new Response(JSON.stringify(graphData), {
-        status: graphRes.ok ? 200 : 502,
+        status: 200, // Always 200 so frontend can display the actual Meta error details
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
