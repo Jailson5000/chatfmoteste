@@ -2,12 +2,16 @@ import { useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy, PlayCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy, PlayCircle, Send, Save, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { META_APP_ID, META_GRAPH_API_VERSION } from "@/lib/meta-config";
 import { useQuery } from "@tanstack/react-query";
+import { WhatsAppTemplatesManager } from "@/components/connections/WhatsAppTemplatesManager";
 
 interface TestResult {
   status: "idle" | "loading" | "success" | "error";
@@ -26,7 +30,20 @@ export default function MetaTestPage() {
   const { user } = useAuth();
   const [results, setResults] = useState<Record<string, TestResult>>({});
 
-  const { data: connections } = useQuery({
+  // Test connection form state
+  const [testToken, setTestToken] = useState("");
+  const [testPhoneNumberId, setTestPhoneNumberId] = useState("920102187863212");
+  const [testWabaId, setTestWabaId] = useState("1243984223971997");
+  const [savingConnection, setSavingConnection] = useState(false);
+
+  // Test message form state
+  const [recipientPhone, setRecipientPhone] = useState("5563984622450");
+  const [testMessage, setTestMessage] = useState("Mensagem de teste do MiauChat");
+  const [sendingTemplate, setSendingTemplate] = useState(false);
+  const [sendingText, setSendingText] = useState(false);
+  const [sendResult, setSendResult] = useState<TestResult>({ status: "idle" });
+
+  const { data: connections, refetch: refetchConnections } = useQuery({
     queryKey: ["meta-connections-test", user?.id],
     queryFn: async () => {
       const { data: profile } = await supabase
@@ -81,13 +98,84 @@ export default function MetaTestPage() {
     toast.success("JSON copiado!");
   };
 
+  // Save test connection
+  const handleSaveTestConnection = async () => {
+    if (!testToken.trim()) {
+      toast.error("Cole o token temporário do painel da Meta");
+      return;
+    }
+    setSavingConnection(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("meta-api", {
+        body: {
+          action: "save_test_connection",
+          accessToken: testToken.trim(),
+          phoneNumberId: testPhoneNumberId.trim(),
+          wabaId: testWabaId.trim(),
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success(`Conexão salva! ID: ${data.connectionId}`);
+      refetchConnections();
+    } catch (err: any) {
+      toast.error(`Erro: ${err.message}`);
+    } finally {
+      setSavingConnection(false);
+    }
+  };
+
+  // Send test message
+  const handleSendTestMessage = async (useTemplate: boolean) => {
+    if (!waConnection) {
+      toast.error("Salve a conexão de teste primeiro");
+      return;
+    }
+    if (!recipientPhone.trim()) {
+      toast.error("Informe o número de destino");
+      return;
+    }
+
+    useTemplate ? setSendingTemplate(true) : setSendingText(true);
+    setSendResult({ status: "loading" });
+
+    try {
+      const { data, error } = await supabase.functions.invoke("meta-api", {
+        body: {
+          action: "send_test_message",
+          connectionId: (waConnection as any).id,
+          recipientPhone: recipientPhone.trim(),
+          message: testMessage.trim(),
+          useTemplate,
+          templateName: "hello_world",
+          templateLang: "en_US",
+        },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        setSendResult({ status: "error", error: JSON.stringify(data.error, null, 2) });
+        toast.error("Erro ao enviar mensagem");
+      } else {
+        const msgId = data?.messages?.[0]?.id || data?.message_id || "OK";
+        setSendResult({ status: "success", data });
+        toast.success(`Mensagem enviada! ID: ${msgId}`);
+      }
+    } catch (err: any) {
+      setSendResult({ status: "error", error: err.message });
+      toast.error(`Erro: ${err.message}`);
+    } finally {
+      setSendingTemplate(false);
+      setSendingText(false);
+    }
+  };
+
   // Build dynamic endpoints
   const fbPageId = (fbConnection as any)?.page_id || "PAGE_ID";
   const fbIgAccountId = (fbConnection as any)?.ig_account_id || "IG_ID";
   const igPageId = (igConnection as any)?.page_id || "PAGE_ID";
   const igAccountId = (igConnection as any)?.ig_account_id || "IG_ID";
   const waPhoneId = (waConnection as any)?.page_id || "PHONE_ID";
-  const wabaId = (waConnection as any)?.waba_id || "WABA_ID";
+  const wabaIdVal = (waConnection as any)?.waba_id || "WABA_ID";
 
   const messengerTests: PermissionTest[] = [
     { key: "msg_pages_utility", permission: "pages_utility_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
@@ -114,7 +202,7 @@ export default function MetaTestPage() {
   const whatsappTests: PermissionTest[] = [
     { key: "wa_messaging", permission: "whatsapp_business_messaging", endpoint: `/${waPhoneId}?fields=verified_name,display_phone_number`, required: true },
     { key: "wa_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
-    { key: "wa_management", permission: "whatsapp_business_management", endpoint: `/${wabaId}/phone_numbers`, required: true },
+    { key: "wa_management", permission: "whatsapp_business_management", endpoint: `/${wabaIdVal}/phone_numbers`, required: true },
     { key: "wa_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
   ];
 
@@ -226,7 +314,166 @@ export default function MetaTestPage() {
         </div>
       </div>
 
-      {/* Seção 1: Messenger */}
+      {/* ===== SEÇÃO: Conexão Manual de Teste ===== */}
+      <Card className="border-2 border-primary/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Save className="h-5 w-5" />
+            1. Conexão Manual de Teste (WhatsApp Cloud)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Cole o token temporário do painel Meta Developer &gt; WhatsApp &gt; Configuração da API.
+            Os valores de Phone Number ID e WABA ID já estão preenchidos com o número de teste da Meta.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="testToken">Token Temporário (Access Token)</Label>
+            <Textarea
+              id="testToken"
+              placeholder="EAARlzIjg37wBO..."
+              value={testToken}
+              onChange={(e) => setTestToken(e.target.value)}
+              rows={3}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="phoneNumberId">Phone Number ID</Label>
+              <Input
+                id="phoneNumberId"
+                value={testPhoneNumberId}
+                onChange={(e) => setTestPhoneNumberId(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wabaId">WABA ID</Label>
+              <Input
+                id="wabaId"
+                value={testWabaId}
+                onChange={(e) => setTestWabaId(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+          </div>
+          <Button onClick={handleSaveTestConnection} disabled={savingConnection || !testToken.trim()}>
+            {savingConnection ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Salvar Conexão de Teste
+          </Button>
+          {waConnection && (
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <span className="text-green-600 font-medium">Conexão WhatsApp Cloud ativa</span>
+              <span className="text-muted-foreground">({(waConnection as any).page_id})</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== SEÇÃO: Envio de Mensagem de Teste ===== */}
+      <Card className="border-2 border-primary/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Send className="h-5 w-5" />
+            2. Envio de Mensagem de Teste
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Envie uma mensagem para demonstrar a capacidade de envio.
+            A primeira mensagem deve ser um <strong>template</strong> (hello_world). 
+            Após o destinatário responder, você pode enviar texto livre na janela de 24h.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="recipientPhone">Número de Destino (com código do país)</Label>
+            <Input
+              id="recipientPhone"
+              placeholder="5511999999999"
+              value={recipientPhone}
+              onChange={(e) => setRecipientPhone(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="testMsg">Mensagem (para texto livre)</Label>
+            <Textarea
+              id="testMsg"
+              value={testMessage}
+              onChange={(e) => setTestMessage(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => handleSendTestMessage(true)}
+              disabled={sendingTemplate || !waConnection}
+              variant="default"
+            >
+              {sendingTemplate ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Enviar Template hello_world
+            </Button>
+            <Button
+              onClick={() => handleSendTestMessage(false)}
+              disabled={sendingText || !waConnection}
+              variant="outline"
+            >
+              {sendingText ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Enviar Texto Livre
+            </Button>
+          </div>
+          {!waConnection && (
+            <p className="text-sm text-amber-600">⚠️ Salve a conexão de teste primeiro (passo 1)</p>
+          )}
+          {sendResult.status !== "idle" && (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-2">
+                {sendResult.status === "loading" && <Loader2 className="h-4 w-4 animate-spin" />}
+                {sendResult.status === "success" && (
+                  <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" /> Enviado</Badge>
+                )}
+                {sendResult.status === "error" && (
+                  <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Erro</Badge>
+                )}
+                {sendResult.data && (
+                  <Button variant="ghost" size="sm" onClick={() => copyJson(sendResult.data)}>
+                    <Copy className="h-3 w-3 mr-1" /> Copiar
+                  </Button>
+                )}
+              </div>
+              <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-40 whitespace-pre-wrap">
+                {sendResult.status === "success"
+                  ? JSON.stringify(sendResult.data, null, 2)
+                  : sendResult.error}
+              </pre>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== SEÇÃO: Templates (para App Review whatsapp_business_management) ===== */}
+      <Card className="border-2 border-primary/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            3. Gerenciamento de Templates (whatsapp_business_management)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Crie, liste e exclua templates de mensagem. Use esta seção para o vídeo do App Review 
+            da permissão <strong>whatsapp_business_management</strong>.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {waConnection ? (
+            <WhatsAppTemplatesManager connectionId={(waConnection as any).id} />
+          ) : (
+            <p className="text-sm text-amber-600">⚠️ Salve a conexão de teste primeiro (passo 1)</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== Seções de teste de permissões existentes ===== */}
       <TestSection
         title="Caso de Uso 1: Messenger"
         icon={<Facebook className="h-5 w-5" />}
@@ -235,7 +482,6 @@ export default function MetaTestPage() {
         connectionLabel={fbConnection?.page_name}
       />
 
-      {/* Seção 2: Instagram */}
       <TestSection
         title="Caso de Uso 2: Instagram"
         icon={<Instagram className="h-5 w-5" />}
@@ -244,7 +490,6 @@ export default function MetaTestPage() {
         connectionLabel={igConnection?.page_name}
       />
 
-      {/* Seção 3: WhatsApp */}
       <TestSection
         title="Caso de Uso 3: WhatsApp"
         icon={<MessageCircle className="h-5 w-5" />}
