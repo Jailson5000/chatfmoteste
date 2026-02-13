@@ -73,6 +73,18 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
     }
 
     setIsConnecting(true);
+    console.log("[embedded-signup] Starting FB.login with config_id:", META_CONFIG_ID);
+
+    // Timeout: reset after 3 minutes if callback never fires
+    const connectionTimeout = setTimeout(() => {
+      console.warn("[embedded-signup] Timeout: FB.login callback never fired after 3 minutes");
+      setIsConnecting(false);
+      toast({
+        title: "Tempo esgotado",
+        description: "O fluxo de conexão não respondeu. Verifique se o popup foi bloqueado pelo navegador e tente novamente.",
+        variant: "destructive",
+      });
+    }, 180_000);
 
     // Embedded Signup session info listener
     const sessionInfoListener = (event: MessageEvent) => {
@@ -101,9 +113,12 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
 
     window.addEventListener("message", sessionInfoListener);
 
-    window.FB.login(
-      async (response: any) => {
-        window.removeEventListener("message", sessionInfoListener);
+    try {
+      window.FB.login(
+        async (response: any) => {
+          clearTimeout(connectionTimeout);
+          window.removeEventListener("message", sessionInfoListener);
+          console.log("[embedded-signup] FB.login callback fired, authResponse:", !!response.authResponse);
 
         if (!response.authResponse) {
           console.log("[embedded-signup] User cancelled or failed login");
@@ -196,6 +211,16 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
         },
       }
     );
+    } catch (fbErr) {
+      clearTimeout(connectionTimeout);
+      console.error("[embedded-signup] FB.login threw an error:", fbErr);
+      setIsConnecting(false);
+      toast({
+        title: "Erro ao abrir popup",
+        description: "O popup do Facebook pode ter sido bloqueado. Permita popups e tente novamente.",
+        variant: "destructive",
+      });
+    }
   }, [toast, onClose, onCreated, META_APP_ID, META_CONFIG_ID, sdkReady]);
 
   return (
