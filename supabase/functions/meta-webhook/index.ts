@@ -232,16 +232,36 @@ async function processMessagingEntry(
     });
 
     // Find the meta_connection for this page/account
-    const { data: connection, error: connError } = await supabase
-      .from("meta_connections")
-      .select("id, law_firm_id, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id")
-      .eq("page_id", recipientId)
-      .eq("type", connectionType)
-      .eq("is_active", true)
-      .maybeSingle();
+    const selectFields = "id, law_firm_id, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id";
+    let connection: any = null;
+    let connError: any = null;
+
+    if (connectionType === "instagram") {
+      // Instagram sends IG account ID as recipient, not page ID
+      const { data, error } = await supabase
+        .from("meta_connections")
+        .select(selectFields)
+        .eq("ig_account_id", recipientId)
+        .eq("type", connectionType)
+        .eq("is_active", true)
+        .maybeSingle();
+      connection = data;
+      connError = error;
+    } else {
+      // Facebook sends page ID as recipient
+      const { data, error } = await supabase
+        .from("meta_connections")
+        .select(selectFields)
+        .eq("page_id", recipientId)
+        .eq("type", connectionType)
+        .eq("is_active", true)
+        .maybeSingle();
+      connection = data;
+      connError = error;
+    }
 
     if (connError || !connection) {
-      console.warn("[meta-webhook] No active connection for page:", recipientId?.slice(0, 8));
+      console.warn("[meta-webhook] No active connection for", connectionType, "recipient:", recipientId?.slice(0, 12));
       continue;
     }
 
