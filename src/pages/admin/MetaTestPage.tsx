@@ -195,9 +195,9 @@ export default function MetaTestPage() {
     { key: "msg_pages_metadata", permission: "pages_manage_metadata", endpoint: `/me/accounts?fields=id,name,category`, required: true },
     { key: "msg_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
     { key: "msg_pages_messaging", permission: "pages_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
-    { key: "msg_ig_messages", permission: "instagram_manage_messages", endpoint: `/${fbPageId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "msg_ig_messages", permission: "instagram_business_manage_messages", endpoint: `/${fbPageId}/conversations?platform=instagram&limit=3`, required: true },
     { key: "msg_pages_show", permission: "pages_show_list", endpoint: `/me/accounts?fields=id,name`, required: true },
-    { key: "msg_ig_basic", permission: "instagram_basic", endpoint: `/${fbIgAccountId}?fields=id,username`, required: true },
+    { key: "msg_ig_basic", permission: "instagram_business_basic", endpoint: `/${fbIgAccountId}?fields=id,username`, required: true },
     { key: "msg_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
   ];
 
