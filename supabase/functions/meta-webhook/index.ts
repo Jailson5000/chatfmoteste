@@ -241,7 +241,7 @@ async function processMessagingEntry(
     });
 
     // Find the meta_connection for this page/account
-    const selectFields = "id, law_firm_id, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id";
+    const selectFields = "id, law_firm_id, access_token, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id";
     let connection: any = null;
     let connError: any = null;
 
@@ -315,12 +315,13 @@ async function processMessagingEntry(
     if (existingClient) {
       clientId = existingClient.id;
     } else {
-      // Create new client
+      // Create new client with generic name first
+      const genericName = `${origin} ${remoteJid.slice(-4)}`;
       const { data: newClient, error: clientErr } = await supabase
         .from("clients")
         .insert({
           law_firm_id: lawFirmId,
-          name: `${origin} ${remoteJid.slice(-4)}`,
+          name: genericName,
           phone: remoteJid,
           custom_status_id: connection.default_status_id || null,
         })
@@ -332,6 +333,35 @@ async function processMessagingEntry(
         continue;
       }
       clientId = newClient.id;
+
+      // Try to fetch real profile name and photo from Graph API
+      if (connection.access_token) {
+        try {
+          const token = await decryptToken(connection.access_token);
+          const fields = connectionType === "instagram" 
+            ? "name,username,profile_pic" 
+            : "name,profile_pic";
+          const profileRes = await fetch(
+            `https://graph.facebook.com/v21.0/${senderId}?fields=${fields}&access_token=${token}`
+          );
+          if (profileRes.ok) {
+            const profile = await profileRes.json();
+            const realName = profile.name || profile.username || null;
+            const avatarUrl = profile.profile_pic || null;
+            if (realName || avatarUrl) {
+              const updateData: Record<string, any> = {};
+              if (realName) updateData.name = realName;
+              if (avatarUrl) updateData.avatar_url = avatarUrl;
+              await supabase.from("clients").update(updateData).eq("id", clientId);
+              console.log("[meta-webhook] Profile fetched:", { name: realName, hasAvatar: !!avatarUrl });
+            }
+          } else {
+            console.warn("[meta-webhook] Profile fetch failed:", profileRes.status);
+          }
+        } catch (profileErr) {
+          console.warn("[meta-webhook] Could not fetch profile:", profileErr);
+        }
+      }
     }
 
     // Find or create conversation
@@ -364,13 +394,20 @@ async function processMessagingEntry(
         .update(updatePayload)
         .eq("id", conversationId);
     } else {
+      // Get the client name (may have been updated with real profile name)
+      let contactDisplayName = `${origin} ${remoteJid.slice(-4)}`;
+      if (clientId) {
+        const { data: clientData } = await supabase.from("clients").select("name").eq("id", clientId).single();
+        if (clientData?.name) contactDisplayName = clientData.name;
+      }
+
       // Create new conversation
       const { data: newConv, error: convErr } = await supabase
         .from("conversations")
         .insert({
           law_firm_id: lawFirmId,
           remote_jid: remoteJid,
-          contact_name: `${origin} ${remoteJid.slice(-4)}`,
+          contact_name: contactDisplayName,
           contact_phone: remoteJid,
           origin: origin,
           origin_metadata: { page_id: recipientId, connection_type: connectionType },
