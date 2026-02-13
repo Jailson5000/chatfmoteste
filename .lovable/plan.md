@@ -1,105 +1,56 @@
 
 
-# Correcao: WhatsApp Cloud Embedded Signup - FB.login() falhando
+# Fix: WhatsApp Embedded Signup - "Expression is of type asyncfunction, not function"
 
-## Diagnostico
+## Root Cause
 
-O erro **"O Facebook SDK nao respondeu corretamente"** ocorre porque `FB.login()` lanca uma excecao no `catch` (linha 228 do `NewWhatsAppCloudDialog.tsx`). Isso acontece **mesmo com popups permitidos**.
+The error message is explicit: **"Expression is of type asyncfunction, not function"**. The Facebook SDK validates the callback type and rejects `async` functions.
 
-Baseado na analise do artigo da ZDG e do codigo atual, identifiquei **2 causas**:
+In `NewWhatsAppCloudDialog.tsx` line 162, the callback passed to `FB.login()` is declared as `async (response: any) => {...}`. The SDK internally checks `typeof callback` and throws because async functions have a different type signature than regular functions.
 
-### Causa 1: Dominios nao configurados na Meta (3 lugares)
+## Additional Issue
 
-O artigo da ZDG e bem claro: para o popup do Embedded Signup funcionar, os dominios precisam estar cadastrados em **3 lugares diferentes** no Meta Developer Console:
+The Meta Developer Console screenshot shows **sessionInfoVersion: 3** and **version: v3**, but the code uses `sessionInfoVersion: 2`. This mismatch could cause the session info listener to not receive the expected data format.
 
-1. **Login com o Facebook > Configuracoes** - URIs de redirecionamento do OAuth validas
-   - Adicionar: `https://miauchat.com.br`, `https://suporte.miauchat.com.br`
-   
-2. **Configuracoes > Basica** - Dominios do aplicativo
-   - Adicionar: `miauchat.com.br`
+## Changes
 
-3. **Cadastro Incorporado > Gerenciamento de dominios**
-   - Adicionar: `miauchat.com.br`, `suporte.miauchat.com.br`, `chatfmoteste.lovable.app`
+**File:** `src/components/connections/NewWhatsAppCloudDialog.tsx`
 
-Sem essas configuracoes, o SDK bloqueia a chamada `FB.login()` e lanca uma excecao.
+### Change 1: Remove `async` from FB.login callback (line 162)
+- Change `async (response: any) => {` to `(response: any) => {`
+- Wrap the async operations inside the callback in a separate `async` function call (using an immediately invoked async function or `.then()` chain)
+- This way the callback signature is a regular function (which the SDK accepts), but async operations still work inside
 
-### Causa 2: Inicializacao do SDK com race condition
+### Change 2: Update sessionInfoVersion to 3 (line 254)
+- Change `sessionInfoVersion: 2` to `sessionInfoVersion: 3`
+- This matches the configuration shown in the Meta Developer Console
 
-O SDK carrega via `<script async defer>` no `index.html`. O `useEffect` no componente tenta `FB.init()` apenas uma vez no mount. Se o SDK ainda nao carregou quando o componente monta, define `window.fbAsyncInit`. Porem, se o SDK ja carregou ANTES do React montar (cached pelo browser), `fbAsyncInit` nunca e chamado porque o SDK ja disparou esse callback.
+## Technical Detail
 
-Alem disso, o `useEffect` depende de `[META_APP_ID]` que e uma constante - entao so roda uma vez. Se `window.FB` nao existia nesse momento, `sdkReady` fica `false` para sempre (botao desabilitado) ou, em alguns cenarios, `window.FB` existe mas `FB.init` nao completou.
+```typescript
+// BEFORE (broken):
+window.FB.login(
+  async (response: any) => {
+    // ... await calls inside
+  },
+  { config_id: META_CONFIG_ID, ... }
+);
 
----
+// AFTER (fixed):
+window.FB.login(
+  (response: any) => {
+    // Wrap async work in a non-async callback
+    const handleResponse = async () => {
+      // ... await calls inside
+    };
+    handleResponse();
+  },
+  { config_id: META_CONFIG_ID, ..., extras: { sessionInfoVersion: 3 } }
+);
+```
 
-## Plano de Correcao
+## Expected Result
 
-### Parte 1: Correcao robusta do carregamento do SDK (codigo)
-
-**Arquivo:** `src/components/connections/NewWhatsAppCloudDialog.tsx`
-
-Substituir a logica de inicializacao do SDK por uma abordagem mais robusta:
-
-- Usar um **polling** com `setInterval` que verifica `window.FB` a cada 500ms por ate 15 segundos
-- Quando encontrar `window.FB`, chamar `FB.init()` e depois `FB.getLoginStatus()` para confirmar
-- Adicionar logs detalhados em cada etapa para diagnosticar problemas futuros
-- No `FB.login()`, capturar o **erro real** (`fbErr.message`) e mostrar no toast em vez da mensagem generica
-- Adicionar `scope: "whatsapp_business_management,whatsapp_business_messaging,business_management"` ao `FB.login()` conforme recomendado pela ZDG
-
-### Parte 2: Configuracoes manuais no Meta Developer Console (voce faz)
-
-Voce precisa acessar `developers.facebook.com/apps/1237829051015100` e configurar:
-
-**2.1 - Login com o Facebook > Configuracoes:**
-- URIs de redirecionamento OAuth validas: 
-  - `https://miauchat.com.br/auth/meta-callback`
-  - `https://chatfmoteste.lovable.app/auth/meta-callback`
-
-**2.2 - Configuracoes > Basica:**
-- Dominios do aplicativo: `miauchat.com.br`, `lovable.app`
-
-**2.3 - Casos de uso > WhatsApp > Cadastro Incorporado > Gerenciamento de dominios:**
-- Adicionar: `miauchat.com.br`, `suporte.miauchat.com.br`, `chatfmoteste.lovable.app`
-
-**2.4 - Verificar permissoes no Cadastro Incorporado:**
-- `whatsapp_business_management`
-- `whatsapp_business_messaging`
-- `business_management`
-
-### Parte 3: Token de Usuario do Sistema (para enviar/receber mensagens)
-
-Conforme o artigo da ZDG, para enviar e receber mensagens via WhatsApp Cloud API, voce precisa de um **System User Token** (token permanente):
-
-1. No Business Manager (`business.facebook.com`), va em **Usuarios > Usuarios do sistema**
-2. Crie um usuario Admin (ou use existente)
-3. Gere um token com expiracao **Nunca** e as permissoes:
-   - `whatsapp_business_management`
-   - `whatsapp_business_messaging`  
-   - `business_management`
-4. Esse token sera usado pelo `meta-oauth-callback` para salvar na conexao
-
-**Importante:** O token gerado pelo Embedded Signup (OAuth) tem validade de 60 dias. Para producao, o ideal e usar o System User Token. Porem, o fluxo Embedded Signup ja funciona para testes iniciais.
-
----
-
-## Resumo das alteracoes de codigo
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Polling robusto para SDK, scope no FB.login, erro detalhado no toast |
-
-## Configuracoes manuais (Meta Developer Console)
-
-| Local | O que configurar |
-|-------|-----------------|
-| Login com Facebook > Config | URIs de redirect |
-| Config > Basica | Dominios do app |
-| Cadastro Incorporado | Dominios permitidos |
-| Business Manager | System User Token (opcional para teste) |
-
-## Resultado esperado
-
-1. O SDK carrega de forma confiavel em qualquer cenario de cache
-2. O `FB.login()` abre o popup do Embedded Signup sem excecoes
-3. Se houver erro, a mensagem mostra a causa real (nao mensagem generica)
-4. Apos configurar os dominios, o fluxo completo funciona: popup abre > usuario configura WABA > conexao e salva
-
+1. `FB.login()` no longer throws "Expression is of type asyncfunction"
+2. The popup opens correctly for the Embedded Signup flow
+3. Session info version matches the Meta console configuration
