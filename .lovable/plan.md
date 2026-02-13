@@ -1,56 +1,42 @@
 
 
-# Correção: WhatsApp Cloud travado + Instagram/Facebook sem receber mensagens
+# Correcao: Instagram/Facebook sem receber mensagens + WhatsApp Cloud nao conecta
 
-## Problema 1: Instagram/Facebook - Erro de timestamp
+## Problema 1: Instagram/Facebook - Erro de enum
 
-**Causa raiz**: O webhook da Meta envia o `timestamp` do Instagram em **milissegundos**, mas o codigo trata como se fosse em **segundos** (faz `timestamp * 1000`). Isso gera datas absurdas como o ano 58088, causando o erro do PostgreSQL:
-
+**Causa raiz encontrada nos logs:**
 ```
-time zone displacement out of range: "+058088-12-27T23:58:22.000Z"
-```
-
-Isso impede a criacao de novas conversas e a atualizacao de conversas existentes.
-
-**Solucao**: Criar uma funcao auxiliar `normalizeTimestamp` que detecta automaticamente se o timestamp esta em milissegundos ou segundos e normaliza para milissegundos:
-
-```text
-normalizeTimestamp(ts):
-  se ts > 10000000000 -> ja esta em milissegundos
-  senao -> multiplicar por 1000
+invalid input value for enum case_status: "active"
 ```
 
-**Arquivos afetados**: `supabase/functions/meta-webhook/index.ts`
+O campo `status` da tabela `conversations` usa um enum `case_status` com os valores:
+- `novo_contato`, `triagem_ia`, `aguardando_documentos`, `em_analise`, `em_andamento`, `encerrado`
 
-**Linhas a alterar** (3 ocorrencias na funcao `processMessagingEntry`):
-- Linha 344: `new Date(timestamp * 1000)` -> `new Date(normalizeTimestamp(timestamp))`
-- Linha 374: `new Date(timestamp * 1000)` -> `new Date(normalizeTimestamp(timestamp))`
-- Apos a correcao, mensagens do Instagram e Facebook voltarao a ser processadas normalmente.
+O codigo no `meta-webhook` (linha 382) tenta inserir `status: "active"`, que **nao existe** no enum. O timestamp ja foi corrigido na alteracao anterior, mas **este** e o erro real que impede a criacao de conversas.
+
+**Correcao:**
+- Arquivo: `supabase/functions/meta-webhook/index.ts`
+- Linha 382: Trocar `status: "active"` por `status: "novo_contato"`
 
 ---
 
 ## Problema 2: WhatsApp Cloud - "Conectando..." infinito
 
-**Causa raiz**: A funcao `FB.login` abre o popup do Facebook, mas o callback so e chamado quando o usuario **fecha o popup ou completa o fluxo**. Se o popup nao abre (bloqueado pelo navegador) ou se a configuracao do Embedded Signup (config_id) esta incorreta, o callback nunca e chamado, e o botao fica preso em "Conectando..." para sempre.
+**Causa raiz encontrada no codigo:**
 
-**Problemas identificados**:
-1. **Sem timeout**: Nao ha mecanismo de timeout para detectar quando o popup falhou
-2. **Sem deteccao de popup bloqueado**: Se o navegador bloqueia o popup, o usuario nao recebe feedback
-3. **Sem log de debug**: Nenhum console.log antes/depois do FB.login para ajudar na depuracao
+No `meta-oauth-callback/index.ts`, o fluxo e sequencial:
+1. Troca o code por token (OK)
+2. Busca long-lived token (OK)
+3. **Busca paginas via `me/accounts`** (linhas 134-137)
+4. **Se nao encontrar paginas, retorna erro** (linhas 139-144)
+5. So **depois** verifica se e WhatsApp Cloud Embedded Signup (linha 147)
 
-**Solucao**:
-1. Adicionar um **timeout de 3 minutos** que reseta o estado `isConnecting` caso o callback nunca seja chamado
-2. Adicionar **logs de debug** no `FB.login` para diagnosticar o problema
-3. Adicionar **deteccao de popup bloqueado** verificando se o popup foi aberto com sucesso
-4. Mostrar um **toast informativo** se o timeout for atingido
+O Embedded Signup gera um token de **system user** que nao tem paginas associadas. Por isso, `me/accounts` retorna vazio e a funcao aborta com "No Facebook Pages found" **antes** de chegar ao handler do WhatsApp Cloud.
 
-**Arquivo afetado**: `src/components/connections/NewWhatsAppCloudDialog.tsx`
-
-**Mudancas especificas**:
-- Envolver o `FB.login` em um try/catch
-- Adicionar `console.log` antes e depois do `FB.login` para rastreamento
-- Adicionar `setTimeout` de 180 segundos que reseta `isConnecting` e mostra toast de aviso
-- Limpar o timeout quando o callback e chamado com sucesso
+**Correcao:**
+- Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
+- Mover a verificacao de `type === "whatsapp_cloud"` com `phoneNumberId && wabaId` para **antes** da chamada `me/accounts`
+- Assim, o Embedded Signup nao precisa de paginas e vai direto para `handleWhatsAppCloudEmbedded`
 
 ---
 
@@ -58,12 +44,11 @@ normalizeTimestamp(ts):
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `supabase/functions/meta-webhook/index.ts` | Adicionar funcao `normalizeTimestamp()` e usar nas 3 ocorrencias de `new Date(timestamp * 1000)` na funcao `processMessagingEntry` |
-| `src/components/connections/NewWhatsAppCloudDialog.tsx` | Adicionar timeout de 3 min, logs de debug, e deteccao de falha no popup do FB.login |
+| `supabase/functions/meta-webhook/index.ts` | Linha 382: `status: "active"` -> `status: "novo_contato"` |
+| `supabase/functions/meta-oauth-callback/index.ts` | Mover handler do WhatsApp Embedded Signup para antes da busca de paginas |
 
-## Ordem de implementacao
+## Resultado esperado
 
-1. Corrigir o timestamp no `meta-webhook` (resolve Instagram/Facebook imediatamente)
-2. Adicionar timeout e logs no `NewWhatsAppCloudDialog` (resolve UX do WhatsApp Cloud)
-3. Redeployar o `meta-webhook`
+1. **Instagram/Facebook**: Mensagens recebidas criarao conversas com `status: "novo_contato"` sem erro de enum
+2. **WhatsApp Cloud**: O fluxo Embedded Signup ira direto para o handler correto sem exigir paginas, finalizando a conexao normalmente
 
