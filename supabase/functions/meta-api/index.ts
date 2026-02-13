@@ -51,6 +51,115 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Handle template management actions
+    if (["list_templates", "create_template", "delete_template"].includes(body.action) && body.connectionId) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const tkn = authHeader.replace("Bearer ", "");
+      const { data: tplClaims, error: tplClaimsErr } = await supabaseAuth.auth.getClaims(tkn);
+      if (tplClaimsErr || !tplClaims?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const tplUserId = tplClaims.claims.sub;
+
+      const supabaseAdminTpl = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: tplProfile } = await supabaseAdminTpl.from("profiles").select("law_firm_id").eq("id", tplUserId).single();
+      if (!tplProfile?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: tplConn } = await supabaseAdminTpl.from("meta_connections")
+        .select("id, access_token, waba_id, law_firm_id")
+        .eq("id", body.connectionId)
+        .eq("law_firm_id", tplProfile.law_firm_id)
+        .single();
+
+      if (!tplConn) {
+        return new Response(JSON.stringify({ error: "Connection not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!tplConn.waba_id) {
+        return new Response(JSON.stringify({ error: "WABA ID not configured for this connection. Please reconnect." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let tplAccessToken = tplConn.access_token;
+      if (isEncrypted(tplAccessToken)) {
+        tplAccessToken = await decryptToken(tplAccessToken);
+      }
+
+      const wabaId = tplConn.waba_id;
+
+      if (body.action === "list_templates") {
+        const url = `${GRAPH_API_BASE}/${wabaId}/message_templates?fields=name,status,category,language,components&limit=100`;
+        console.log("[meta-api] list_templates:", url);
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${tplAccessToken}` } });
+        const data = await res.json();
+        return new Response(JSON.stringify(data), {
+          status: res.ok ? 200 : 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (body.action === "create_template") {
+        const { name, category, language, components } = body;
+        if (!name || !category || !language || !components) {
+          return new Response(JSON.stringify({ error: "Missing required fields: name, category, language, components" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const url = `${GRAPH_API_BASE}/${wabaId}/message_templates`;
+        console.log("[meta-api] create_template:", url);
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${tplAccessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name, category, language, components }),
+        });
+        const data = await res.json();
+        return new Response(JSON.stringify(data), {
+          status: res.ok ? 200 : 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (body.action === "delete_template") {
+        const { templateName } = body;
+        if (!templateName) {
+          return new Response(JSON.stringify({ error: "Missing templateName" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const url = `${GRAPH_API_BASE}/${wabaId}/message_templates?name=${encodeURIComponent(templateName)}`;
+        console.log("[meta-api] delete_template:", url);
+        const res = await fetch(url, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${tplAccessToken}` },
+        });
+        const data = await res.json();
+        return new Response(JSON.stringify(data), {
+          status: res.ok ? 200 : 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Handle test_api action - proxy Graph API calls for testing
     if (body.action === "test_api" && body.connectionId && body.endpoint) {
       const authHeader = req.headers.get("Authorization");
