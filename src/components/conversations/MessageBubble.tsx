@@ -1860,14 +1860,44 @@ export function MessageBubble({
       if (looksLikeFileName) return "";
     }
 
-    // Render [template: X] with a visual label instead of raw text
-    const templateMatch = normalized.match(/^\[template:\s*(.+)\]$/i);
-    if (templateMatch) {
-      return `📋 Template: ${templateMatch[1]}`;
-    }
+    // Detect [template: X] - will render as card below, suppress text
+    const templateOnlyMatch = normalized.match(/^\[template:\s*(.+)\]$/i);
+    if (templateOnlyMatch) return "";
 
     return normalized;
   })();
+
+  // Template card detection
+  const rawContent = content || "";
+  const templateNameMatch = rawContent.match(/^\[template:\s*(.+)\]$/i);
+  const hasOptionsLine = /\[Opç?o?e?s?:\s*.+\|.+\]/i.test(rawContent);
+  const isTemplateCard = !!templateNameMatch || hasOptionsLine;
+  const templateCardName = templateNameMatch?.[1];
+
+  // Parse expanded template content into sections
+  const parseTemplateContent = (text: string) => {
+    const lines = text.split('\n').filter(l => l.trim());
+    const body: string[] = [];
+    let footer = '';
+    const buttons: string[] = [];
+
+    for (const line of lines) {
+      const optMatch = line.match(/\[Opç?o?e?s?:\s*(.+)\]/i);
+      if (optMatch) {
+        buttons.push(...optMatch[1].split('|').map(b => b.trim()).filter(Boolean));
+        continue;
+      }
+      const footerMatch = line.match(/^_(.+)_$/);
+      if (footerMatch) {
+        footer = footerMatch[1];
+        continue;
+      }
+      // Skip the [template: X] line itself
+      if (/^\[template:/i.test(line)) continue;
+      body.push(line);
+    }
+    return { body, footer, buttons };
+  };
 
   return (
     <div
@@ -2037,8 +2067,40 @@ export function MessageBubble({
           </div>
         )}
         
+        {/* Template message card */}
+        {isTemplateCard && (() => {
+          const parsed = parseTemplateContent(rawContent);
+          return (
+            <div className="border-l-4 border-green-500 bg-green-50 dark:bg-green-950/30 rounded-r-lg p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
+                <FileText className="h-3.5 w-3.5" />
+                <span>Template{templateCardName ? `: ${templateCardName}` : ''}</span>
+              </div>
+              {parsed.body.length > 0 && (
+                <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {renderWithLinks(parsed.body.join('\n'))}
+                </p>
+              )}
+              {parsed.footer && (
+                <p className="text-xs text-muted-foreground italic border-t border-green-200 dark:border-green-800 pt-1">
+                  {parsed.footer}
+                </p>
+              )}
+              {parsed.buttons.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1 border-t border-green-200 dark:border-green-800">
+                  {parsed.buttons.map((btn, i) => (
+                    <span key={i} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white dark:bg-green-900/50 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700">
+                      {btn}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Render text content with linkified URLs */}
-        {displayContent && (
+        {displayContent && !isTemplateCard && (
           <p className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] [word-break:break-word]">
             {highlightText ? highlightText(displayContent) : renderWithLinks(displayContent)}
           </p>
