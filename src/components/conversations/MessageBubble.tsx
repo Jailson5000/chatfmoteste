@@ -1860,6 +1860,12 @@ export function MessageBubble({
       if (looksLikeFileName) return "";
     }
 
+    // Render [template: X] with a visual label instead of raw text
+    const templateMatch = normalized.match(/^\[template:\s*(.+)\]$/i);
+    if (templateMatch) {
+      return `📋 Template: ${templateMatch[1]}`;
+    }
+
     return normalized;
   })();
 

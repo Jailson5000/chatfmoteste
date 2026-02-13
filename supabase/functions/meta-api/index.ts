@@ -391,14 +391,44 @@ Deno.serve(async (req) => {
             conversationId = newConv?.id || null;
           }
 
-          // 3. Insert message
+          // 3. Build template content (fetch real template from Graph API)
+          let finalContent = message || "Mensagem de teste do MiauChat";
+          if (useTemplate) {
+            const tplName = templateName || "hello_world";
+            finalContent = `[template: ${tplName}]`; // fallback
+            if (conn.waba_id) {
+              try {
+                const tplRes = await fetch(
+                  `${GRAPH_API_BASE}/${conn.waba_id}/message_templates?name=${encodeURIComponent(tplName)}`,
+                  { headers: { Authorization: `Bearer ${testToken}` } }
+                );
+                if (tplRes.ok) {
+                  const tplData = await tplRes.json();
+                  const tpl = tplData.data?.[0];
+                  if (tpl?.components) {
+                    const parts: string[] = [];
+                    for (const comp of tpl.components) {
+                      if (comp.type === "HEADER" && comp.text) parts.push(comp.text);
+                      if (comp.type === "BODY" && comp.text) parts.push(comp.text);
+                      if (comp.type === "FOOTER" && comp.text) parts.push(`_${comp.text}_`);
+                      if (comp.type === "BUTTONS") {
+                        const btnTexts = comp.buttons?.map((b: any) => b.text).filter(Boolean);
+                        if (btnTexts?.length) parts.push(`[Opções: ${btnTexts.join(" | ")}]`);
+                      }
+                    }
+                    if (parts.length > 0) finalContent = parts.join("\n\n");
+                  }
+                }
+              } catch (_e) { /* keep fallback */ }
+            }
+          }
+
+          // 4. Insert message
           if (conversationId) {
             await supabaseAdmin.from("messages").insert({
               conversation_id: conversationId,
               law_firm_id: lawFirmId,
-              content: useTemplate
-                ? `[template: ${templateName || "hello_world"}]`
-                : (message || "Mensagem de teste do MiauChat"),
+              content: finalContent,
               sender_type: "agent",
               is_from_me: true,
               message_type: "text",
