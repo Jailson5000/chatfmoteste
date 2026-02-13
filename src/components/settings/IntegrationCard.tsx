@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { Settings2, Loader2 } from "lucide-react";
+import { Settings2, Loader2, Unplug } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ interface IntegrationCardProps {
   onToggle?: (checked: boolean) => void;
   onSettings?: () => void;
   onConnect?: () => void;
+  onDisconnect?: () => void;
   toggleDisabled?: boolean;
 }
 
@@ -30,6 +31,7 @@ export function IntegrationCard({
   onToggle,
   onSettings,
   onConnect,
+  onDisconnect,
   toggleDisabled = false,
 }: IntegrationCardProps) {
   if (isLoading) {
@@ -86,15 +88,28 @@ export function IntegrationCard({
             </>
           ) : isConnected ? (
             <>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-7 px-2 text-xs"
-                onClick={onSettings}
-              >
-                <Settings2 className="h-3.5 w-3.5 mr-1" />
-                Configurações
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 px-2 text-xs"
+                  onClick={onSettings}
+                >
+                  <Settings2 className="h-3.5 w-3.5 mr-1" />
+                  Configurações
+                </Button>
+                {onDisconnect && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                    onClick={onDisconnect}
+                  >
+                    <Unplug className="h-3.5 w-3.5 mr-1" />
+                    Desconectar
+                  </Button>
+                )}
+              </div>
               <Switch
                 checked={isActive}
                 onCheckedChange={onToggle}

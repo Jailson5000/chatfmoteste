@@ -42,6 +42,22 @@ export function FacebookIntegration() {
     enabled: !!user?.id,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!connection?.id) throw new Error("No connection");
+      const { error } = await supabase
+        .from("meta_connections")
+        .delete()
+        .eq("id", connection.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["meta-connection", "facebook"] });
+      toast.success("Conexão removida");
+    },
+    onError: () => toast.error("Erro ao remover conexão"),
+  });
+
   const toggleMutation = useMutation({
     mutationFn: async (isActive: boolean) => {
       if (!connection?.id) throw new Error("No connection");
@@ -105,6 +121,11 @@ export function FacebookIntegration() {
       toggleDisabled={toggleMutation.isPending}
       onSettings={() => {
         toast.info(`Página: ${connection.page_name}`);
+      }}
+      onDisconnect={() => {
+        if (window.confirm("Deseja desconectar o Facebook? Você poderá reconectar depois.")) {
+          deleteMutation.mutate();
+        }
       }}
     />
   );
