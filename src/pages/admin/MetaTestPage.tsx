@@ -216,7 +216,7 @@ export default function MetaTestPage() {
     { key: "wa_messaging", permission: "whatsapp_business_messaging", endpoint: `/${waPhoneId}?fields=verified_name,display_phone_number`, required: true },
     { key: "wa_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
     { key: "wa_management", permission: "whatsapp_business_management", endpoint: `/${wabaIdVal}/phone_numbers`, required: true },
-    { key: "wa_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
+    { key: "wa_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: false },
   ];
 
   const sectionSuccessCount = (tests: PermissionTest[]) => {
@@ -293,7 +293,7 @@ export default function MetaTestPage() {
             <div key={t.key} className="border-b pb-3 last:border-0 last:pb-0">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium">{t.permission}</p>
-                {t.required && <Badge variant="outline" className="text-xs">Obrigatória</Badge>}
+                {t.required ? <Badge variant="outline" className="text-xs">Obrigatória</Badge> : <Badge variant="secondary" className="text-xs">Opcional</Badge>}
                 {getResult(t.key).status === "success" && <CheckCircle2 className="h-4 w-4 text-green-600 ml-auto" />}
                 {getResult(t.key).status === "error" && <XCircle className="h-4 w-4 text-destructive ml-auto" />}
               </div>
