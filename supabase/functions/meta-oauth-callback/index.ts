@@ -219,6 +219,30 @@ Deno.serve(async (req) => {
 
     console.log("[meta-oauth] Connection saved:", { id: saved.id, type, pageName, hasIG: !!igAccountId });
 
+    // Subscribe page to webhooks (required for receiving messages)
+    try {
+      const subscribeFields = type === "instagram"
+        ? "messages,messaging_postbacks,messaging_optins"
+        : "messages,messaging_postbacks,messaging_optins";
+
+      console.log("[meta-oauth] Subscribing page to webhooks:", selectedPage.id);
+      const subRes = await fetch(
+        `${GRAPH_API_BASE}/${selectedPage.id}/subscribed_apps`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subscribed_fields: subscribeFields,
+            access_token: pageAccessToken,
+          }),
+        }
+      );
+      const subData = await subRes.json();
+      console.log("[meta-oauth] Subscribe result:", subData);
+    } catch (subErr) {
+      console.error("[meta-oauth] Failed to subscribe page (non-blocking):", subErr);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
