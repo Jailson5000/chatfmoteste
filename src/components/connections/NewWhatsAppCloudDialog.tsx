@@ -32,21 +32,25 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
 
   // META_APP_ID and META_CONFIG_ID imported from meta-config
 
-  // Initialize Facebook SDK
+  // Initialize Facebook SDK with robust polling
   useEffect(() => {
     if (!META_APP_ID) return;
 
-    const initFB = () => {
+    let cancelled = false;
+
+    const tryInit = () => {
+      if (cancelled || sdkReady) return;
       try {
+        console.log("[embedded-signup] Calling FB.init with appId:", META_APP_ID);
         window.FB.init({
           appId: META_APP_ID,
           cookie: true,
           xfbml: false,
           version: "v21.0",
         });
-        // Verify SDK is actually operational
-        window.FB.getLoginStatus(() => {
-          console.log("[embedded-signup] FB SDK fully initialized and operational");
+        window.FB.getLoginStatus((status: any) => {
+          if (cancelled) return;
+          console.log("[embedded-signup] FB SDK operational, loginStatus:", status?.status);
           setSdkReady(true);
         });
       } catch (err) {
@@ -54,12 +58,37 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
       }
     };
 
+    // If FB already loaded (cached), init immediately
     if (window.FB) {
-      initFB();
+      tryInit();
     } else {
-      window.fbAsyncInit = initFB;
+      // Set fbAsyncInit AND poll as fallback
+      window.fbAsyncInit = tryInit;
     }
-  }, [META_APP_ID]);
+
+    // Polling fallback: check every 500ms for up to 15s
+    const interval = setInterval(() => {
+      if (sdkReady || cancelled) { clearInterval(interval); return; }
+      if (window.FB) {
+        console.log("[embedded-signup] Polling found window.FB, initializing...");
+        clearInterval(interval);
+        tryInit();
+      }
+    }, 500);
+
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      if (!sdkReady && !cancelled) {
+        console.warn("[embedded-signup] SDK not ready after 15s");
+      }
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [sdkReady]);
 
   const handleConnect = useCallback(() => {
     if (!META_APP_ID || !META_CONFIG_ID) {
@@ -218,6 +247,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
             config_id: META_CONFIG_ID,
             response_type: "code",
             override_default_response_type: true,
+            scope: "whatsapp_business_management,whatsapp_business_messaging,business_management",
             extras: {
               setup: {},
               featureType: "",
@@ -238,9 +268,11 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
         clearTimeout(connectionTimeout);
         window.removeEventListener("message", sessionInfoListener);
         setIsConnecting(false);
+        const errMsg = fbErr instanceof Error ? fbErr.message : String(fbErr);
+        console.error("[embedded-signup] FB.login error detail:", errMsg);
         toast({
           title: "Erro ao iniciar conexão",
-          description: "O Facebook SDK não respondeu corretamente. Recarregue a página e tente novamente.",
+          description: `FB.login falhou: ${errMsg}. Verifique se os domínios estão configurados no Meta Developer Console.`,
           variant: "destructive",
         });
       }
