@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MessageCircle, Loader2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,15 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { META_APP_ID, META_CONFIG_ID } from "@/lib/meta-config";
-
-declare global {
-  interface Window {
-    FB: any;
-    fbAsyncInit: () => void;
-  }
-}
+import { META_APP_ID, META_CONFIG_ID, META_GRAPH_API_VERSION, getFixedRedirectUri } from "@/lib/meta-config";
 
 interface NewWhatsAppCloudDialogProps {
   open: boolean;
@@ -27,68 +19,48 @@ interface NewWhatsAppCloudDialogProps {
 
 export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsAppCloudDialogProps) {
   const [isConnecting, setIsConnecting] = useState(false);
-  const [sdkReady, setSdkReady] = useState(false);
   const { toast } = useToast();
 
-  // META_APP_ID and META_CONFIG_ID imported from meta-config
-
-  // Initialize Facebook SDK with robust polling
+  // Listen for postMessage from MetaAuthCallback popup
   useEffect(() => {
-    if (!META_APP_ID) return;
-
-    let cancelled = false;
-
-    const tryInit = () => {
-      if (cancelled || sdkReady) return;
-      try {
-        console.log("[embedded-signup] Calling FB.init with appId:", META_APP_ID);
-        window.FB.init({
-          appId: META_APP_ID,
-          cookie: true,
-          xfbml: false,
-          version: "v21.0",
-        });
-        window.FB.getLoginStatus((status: any) => {
-          if (cancelled) return;
-          console.log("[embedded-signup] FB SDK operational, loginStatus:", status?.status);
-          setSdkReady(true);
-        });
-      } catch (err) {
-        console.error("[embedded-signup] FB.init failed:", err);
-      }
-    };
-
-    // If FB already loaded (cached), init immediately
-    if (window.FB) {
-      tryInit();
-    } else {
-      // Set fbAsyncInit AND poll as fallback
-      window.fbAsyncInit = tryInit;
-    }
-
-    // Polling fallback: check every 500ms for up to 15s
-    const interval = setInterval(() => {
-      if (sdkReady || cancelled) { clearInterval(interval); return; }
-      if (window.FB) {
-        console.log("[embedded-signup] Polling found window.FB, initializing...");
-        clearInterval(interval);
-        tryInit();
-      }
-    }, 500);
+    if (!isConnecting) return;
 
     const timeout = setTimeout(() => {
-      clearInterval(interval);
-      if (!sdkReady && !cancelled) {
-        console.warn("[embedded-signup] SDK not ready after 15s");
-      }
-    }, 15000);
+      setIsConnecting(false);
+      toast({
+        title: "Tempo esgotado",
+        description: "O fluxo de conexão não respondeu em 3 minutos. Tente novamente.",
+        variant: "destructive",
+      });
+    }, 180_000);
 
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearTimeout(timeout);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "meta-oauth-success") {
+        clearTimeout(timeout);
+        setIsConnecting(false);
+        toast({
+          title: "WhatsApp conectado!",
+          description: "Sua conta WhatsApp Business foi conectada com sucesso.",
+        });
+        onCreated();
+        onClose();
+      } else if (event.data?.type === "meta-oauth-error") {
+        clearTimeout(timeout);
+        setIsConnecting(false);
+        toast({
+          title: "Erro ao conectar",
+          description: event.data.message || "Tente novamente.",
+          variant: "destructive",
+        });
+      }
     };
-  }, [sdkReady]);
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [isConnecting, toast, onCreated, onClose]);
 
   const handleConnect = useCallback(() => {
     if (!META_APP_ID || !META_CONFIG_ID) {
@@ -100,190 +72,34 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
       return;
     }
 
-    if (!window.FB || !sdkReady) {
+    const redirectUri = getFixedRedirectUri();
+    const state = JSON.stringify({ type: "whatsapp_cloud" });
+    const scope = "whatsapp_business_management,whatsapp_business_messaging,business_management";
+
+    const oauthUrl = `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&config_id=${META_CONFIG_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&override_default_response_type=true&scope=${scope}&state=${encodeURIComponent(state)}`;
+
+    const width = 700;
+    const height = 800;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      oauthUrl,
+      "whatsapp_cloud_signup",
+      `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`
+    );
+
+    if (!popup) {
       toast({
-        title: "SDK não carregado",
-        description: "Aguarde o carregamento do Facebook SDK e tente novamente.",
+        title: "Popup bloqueado",
+        description: "Permita popups neste site e tente novamente.",
         variant: "destructive",
       });
       return;
     }
 
     setIsConnecting(true);
-    console.log("[embedded-signup] Starting FB.login with config_id:", META_CONFIG_ID);
-
-    // Timeout: reset after 3 minutes if callback never fires
-    const connectionTimeout = setTimeout(() => {
-      console.warn("[embedded-signup] Timeout: FB.login callback never fired after 3 minutes");
-      setIsConnecting(false);
-      toast({
-        title: "Tempo esgotado",
-        description: "O fluxo de conexão não respondeu. Verifique se o popup foi bloqueado pelo navegador e tente novamente.",
-        variant: "destructive",
-      });
-    }, 180_000);
-
-    // Embedded Signup session info listener
-    const sessionInfoListener = (event: MessageEvent) => {
-      if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
-      
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "WA_EMBEDDED_SIGNUP") {
-          // data.data contains { phone_number_id, waba_id }
-          if (data.data) {
-            console.log("[embedded-signup] Session info:", data.data);
-            // Store for use in the FB.login callback
-            (window as any).__waEmbeddedSignupData = data.data;
-          }
-          if (data.event === "FINISH") {
-            console.log("[embedded-signup] User finished the signup flow");
-          } else if (data.event === "CANCEL") {
-            console.log("[embedded-signup] User cancelled the signup flow");
-            setIsConnecting(false);
-          }
-        }
-      } catch {
-        // Not our message, ignore
-      }
-    };
-
-    window.addEventListener("message", sessionInfoListener);
-
-    const attemptLogin = (retryCount = 0) => {
-      try {
-        console.log("[embedded-signup] Attempting FB.login, retry:", retryCount, "FB exists:", !!window.FB, "FB.login type:", typeof window.FB?.login);
-        
-        if (!window.FB?.login) {
-          throw new Error("FB.login is not available");
-        }
-
-        window.FB.login(
-          (response: any) => {
-            clearTimeout(connectionTimeout);
-            window.removeEventListener("message", sessionInfoListener);
-            console.log("[embedded-signup] FB.login callback fired, authResponse:", !!response.authResponse);
-
-            if (!response.authResponse) {
-              console.log("[embedded-signup] User cancelled or failed login");
-              setIsConnecting(false);
-              return;
-            }
-
-            const code = response.authResponse.code;
-            if (!code) {
-              toast({
-                title: "Erro na autenticação",
-                description: "Nenhum código de autorização recebido.",
-                variant: "destructive",
-              });
-              setIsConnecting(false);
-              return;
-            }
-
-            // Get embedded signup data (phone_number_id, waba_id)
-            const embeddedData = (window as any).__waEmbeddedSignupData || {};
-            delete (window as any).__waEmbeddedSignupData;
-
-            const phoneNumberId = embeddedData.phone_number_id;
-            const wabaId = embeddedData.waba_id;
-
-            if (!phoneNumberId || !wabaId) {
-              toast({
-                title: "Dados incompletos",
-                description: "Não foi possível obter o número do WhatsApp. Tente novamente.",
-                variant: "destructive",
-              });
-              setIsConnecting(false);
-              return;
-            }
-
-            // Wrap async work in a non-async callback
-            const handleResponse = async () => {
-              try {
-                const { data: sessionData } = await supabase.auth.getSession();
-                const accessToken = sessionData?.session?.access_token;
-
-                if (!accessToken) {
-                  toast({
-                    title: "Sessão expirada",
-                    description: "Faça login novamente.",
-                    variant: "destructive",
-                  });
-                  setIsConnecting(false);
-                  return;
-                }
-
-                const res = await supabase.functions.invoke("meta-oauth-callback", {
-                  body: {
-                    code,
-                    type: "whatsapp_cloud",
-                    phoneNumberId,
-                    wabaId,
-                  },
-                });
-
-                if (res.error || res.data?.error) {
-                  throw new Error(res.data?.error || res.error?.message || "Erro ao salvar conexão");
-                }
-
-                toast({
-                  title: "WhatsApp conectado!",
-                  description: `Número ${res.data?.pageName || phoneNumberId} conectado com sucesso.`,
-                });
-
-                onCreated();
-                onClose();
-              } catch (err: any) {
-                console.error("[embedded-signup] Error saving connection:", err);
-                toast({
-                  title: "Erro ao conectar",
-                  description: err.message || "Tente novamente.",
-                  variant: "destructive",
-                });
-              } finally {
-                setIsConnecting(false);
-              }
-            };
-            handleResponse();
-          },
-          {
-            config_id: META_CONFIG_ID,
-            response_type: "code",
-            override_default_response_type: true,
-            scope: "whatsapp_business_management,whatsapp_business_messaging,business_management",
-            extras: {
-              setup: {},
-              featureType: "",
-              sessionInfoVersion: 3,
-            },
-          }
-        );
-      } catch (fbErr) {
-        console.error("[embedded-signup] FB.login threw an error (attempt " + retryCount + "):", fbErr);
-        
-        // Retry once after a short delay
-        if (retryCount < 1) {
-          console.log("[embedded-signup] Retrying FB.login in 1 second...");
-          setTimeout(() => attemptLogin(retryCount + 1), 1000);
-          return;
-        }
-        
-        clearTimeout(connectionTimeout);
-        window.removeEventListener("message", sessionInfoListener);
-        setIsConnecting(false);
-        const errMsg = fbErr instanceof Error ? fbErr.message : String(fbErr);
-        console.error("[embedded-signup] FB.login error detail:", errMsg);
-        toast({
-          title: "Erro ao iniciar conexão",
-          description: `FB.login falhou: ${errMsg}. Verifique se os domínios estão configurados no Meta Developer Console.`,
-          variant: "destructive",
-        });
-      }
-    };
-
-    attemptLogin();
-  }, [toast, onClose, onCreated, META_APP_ID, META_CONFIG_ID, sdkReady]);
+  }, [toast]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -313,7 +129,7 @@ export function NewWhatsAppCloudDialog({ open, onClose, onCreated }: NewWhatsApp
 
           <Button
             onClick={handleConnect}
-            disabled={isConnecting || !sdkReady}
+            disabled={isConnecting}
             className="w-full bg-[#1877F2] hover:bg-[#166FE5] text-white"
             size="lg"
           >
