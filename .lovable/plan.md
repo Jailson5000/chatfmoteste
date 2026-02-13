@@ -1,64 +1,64 @@
 
-# Corrigir: Mensagem de Teste deve aparecer no Chat
 
-## Problema
+# Corrigir envio e recebimento de mensagens WhatsApp Cloud
 
-A action `send_test_message` envia a mensagem pela Graph API mas **nao cria nenhum registro no banco de dados** (nem conversa, nem mensagem). Por isso a mensagem nao aparece na tela de Conversas.
+## Diagnostico
 
-## Solucao
+Analisando os logs do backend, a Meta **aceitou** a mensagem (HTTP 200, `message_status: "accepted"`). Porem, a mensagem nao chegou no WhatsApp fisico. Ha dois problemas identificados:
 
-Alterar a action `send_test_message` no backend para, apos enviar com sucesso pela Graph API, tambem:
-1. Buscar ou criar o **cliente** pelo numero de telefone
-2. Buscar ou criar a **conversa** (origin: `WHATSAPP_CLOUD`, remote_jid: numero do destinatario)
-3. Inserir a **mensagem** enviada no banco (sender_type: `agent`, is_from_me: `true`)
-4. Atualizar o `last_message_at` da conversa
+### Problema 1: Versao da API desatualizada
+- O curl de referencia do painel da Meta usa `v22.0`
+- Nosso codigo usa `v21.0`
+- Isso pode causar incompatibilidade com o numero de teste da Meta
 
-Isso espelha exatamente o que o fluxo normal de envio faz (linhas 514-538 do `meta-api`), mas criando a conversa caso nao exista.
+### Problema 2: Conversa sem vinculo com a meta_connection
+- A conversa foi criada com `whatsapp_instance_id = NULL`
+- Ela nao tem vinculo com nenhuma conexao, por isso aparece o banner vermelho "WhatsApp sem conexao"
+- Quando voce tenta responder pela interface, o sistema nao sabe qual conexao usar para enviar
+
+### Problema 3: Webhook nao esta recebendo nada
+- Nenhum log no `meta-webhook` - as respostas do destinatario nao estao chegando
+- Pode ser que o webhook nao esteja configurado no painel da Meta, ou o verify_token esteja errado
 
 ## Alteracoes
 
-### Arquivo: `supabase/functions/meta-api/index.ts`
+### 1. Atualizar versao da API para v22.0
 
-Na action `send_test_message` (linhas 238-324), **apos** o envio bem-sucedido pela Graph API (linha 317), adicionar:
+**Arquivo:** `supabase/functions/meta-api/index.ts`
+- Mudar `GRAPH_API_VERSION` de `"v21.0"` para `"v22.0"`
 
-1. **Buscar ou criar cliente**:
-   - Buscar em `clients` por `phone = recipientPhone` e `law_firm_id`
-   - Se nao existir, criar com `name = recipientPhone`
+**Arquivo:** `src/lib/meta-config.ts`
+- Mudar `META_GRAPH_API_VERSION` de `"v21.0"` para `"v22.0"`
 
-2. **Buscar ou criar conversa**:
-   - Buscar em `conversations` por `remote_jid = recipientPhone`, `origin = 'WHATSAPP_CLOUD'`, `law_firm_id`
-   - Se nao existir, criar com:
-     - `remote_jid`: numero do destinatario
-     - `contact_name`: numero do destinatario
-     - `contact_phone`: numero do destinatario
-     - `origin`: `WHATSAPP_CLOUD`
-     - `origin_metadata`: `{ phone_number_id: conn.page_id, connection_type: "whatsapp_cloud" }`
-     - `client_id`: ID do cliente criado/encontrado
-     - `status`: `novo_contato`
-     - `current_handler`: `human`
-   - Se existir, atualizar `last_message_at`
+### 2. Vincular conversa a meta_connection para permitir envio/recebimento
 
-3. **Inserir mensagem**:
-   - `conversation_id`: ID da conversa
-   - `law_firm_id`: tenant do usuario
-   - `content`: texto da mensagem ou "[template: hello_world]" para templates
-   - `sender_type`: `agent`
-   - `is_from_me`: `true`
-   - `message_type`: `text`
-   - `external_id`: message_id retornado pela Graph API (`data.messages?.[0]?.id`)
+**Arquivo:** `supabase/functions/meta-api/index.ts`
 
-4. **Retornar** o `conversationId` na resposta para que o frontend possa redirecionar
+Na action `send_test_message`, ao criar/encontrar a conversa:
+- Salvar `origin_metadata.connection_id` na conversa (ja faz isso)
+- Garantir que o fluxo de envio normal (action padrao de send message) consiga usar a `connection_id` da `origin_metadata` para buscar o token e enviar
 
-### Arquivo: `src/pages/admin/MetaTestPage.tsx`
+### 3. Corrigir o fluxo de envio normal para conversas WHATSAPP_CLOUD
 
-Apos envio bem-sucedido:
-- Exibir o `conversationId` retornado
-- Adicionar um botao/link "Ver conversa" que navega para `/conversations?id={conversationId}` para facilitar a demonstracao no video
+**Arquivo:** `supabase/functions/meta-api/index.ts`
+
+O fluxo principal de envio de mensagem (que a tela de Conversas usa) precisa:
+- Verificar se a conversa tem `origin = 'WHATSAPP_CLOUD'`
+- Buscar a `connection_id` do `origin_metadata`
+- Usar essa conexao para enviar via Graph API
+- Isso permitira responder mensagens diretamente pela interface
+
+### 4. Verificar e logar o webhook
+
+**Arquivo:** `supabase/functions/meta-webhook/index.ts`
+- Adicionar logs mais detalhados para debug
+- Garantir que o webhook aceita GET (verificacao) e POST (mensagens)
+- Verificar se o `verify_token` esta correto
 
 ## Resultado esperado
 
-1. Enviar mensagem de teste pela MetaTestPage
-2. Mensagem aparece imediatamente na tela de Conversas (enviada pelo agente)
-3. Destinatario recebe no WhatsApp e responde
-4. Resposta chega via `meta-webhook` e aparece na mesma conversa
-5. Video mostra o fluxo completo de envio e recebimento
+1. Mensagem enviada pelo teste chega no WhatsApp fisico
+2. Resposta do destinatario chega via webhook e aparece na conversa
+3. E possivel responder pela interface de Conversas sem o banner vermelho
+4. Fluxo completo de envio e recebimento funciona para o video do App Review
+
