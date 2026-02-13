@@ -1,122 +1,66 @@
 
-# WhatsApp Cloud: Templates e Preparacao para App Review
+# Adição do META_CONFIG_ID ao Projeto
 
-## Resumo
+## Objetivo
+Configurar o `VITE_META_CONFIG_ID` com o valor obtido do Meta Developer Console (`1461954655333752`) para que o fluxo de WhatsApp Embedded Signup funcione corretamente.
 
-Da imagem do Meta Developer Console, temos:
-- Phone Number ID: `920102187863212`
-- WABA ID: `1243984223971997`
-- Numero de teste: `+1 555 159 0933`
-- Destinatario de teste: `+55 63 98462 2450`
+## Contexto
+- O Configuration ID foi criado com sucesso na Meta Developer Console
+- O ID é: `1461954655333752`
+- Este ID é necessário para que o `FB.login()` no componente `NewWhatsAppCloudDialog.tsx` funcione corretamente
+- O arquivo `.env` já contém as variáveis Supabase, apenas precisa da nova linha
 
-Para gravar os videos de demonstracao para liberar o WhatsApp no App Review, precisamos implementar o gerenciamento de templates (exigido para `whatsapp_business_management`) e garantir que o envio/recebimento funciona (para `whatsapp_business_messaging`).
+## Mudanças Necessárias
 
----
+### 1. Atualizar `.env`
+- Adicionar a nova variável ao final do arquivo `.env`:
+  ```
+  VITE_META_CONFIG_ID="1461954655333752"
+  ```
 
-## Mudancas
+### 2. Verificação no Componente
+- O componente `src/components/connections/NewWhatsAppCloudDialog.tsx` já importa `META_CONFIG_ID` de `src/lib/meta-config.ts`
+- O arquivo `src/lib/meta-config.ts` já possui a lógica para ler a variável:
+  ```typescript
+  export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "";
+  ```
+- Após adicionar a variável ao `.env`, o sistema automaticamente carregará o valor
 
-### 1. Migracao: Adicionar coluna `waba_id` na tabela `meta_connections`
+### 3. Comportamento Esperado
+- O banner de erro "META_APP_ID ou META_CONFIG_ID não configurados" desaparecerá
+- O botão "Conectar com Facebook" ficará habilitado
+- Clicar no botão abrirá o fluxo de Embedded Signup do WhatsApp
 
-A tabela nao tem `waba_id`. Sem ela, nao temos como chamar `GET /{waba_id}/message_templates`.
+## Fluxo de Teste Após Implementação
 
-```sql
-ALTER TABLE meta_connections ADD COLUMN waba_id TEXT;
-```
+1. **Ir para a página de Conexões**
+   - Navigate para `/connections`
 
-### 2. Edge Function `meta-oauth-callback`: salvar `waba_id`
+2. **Procurar por "WhatsApp Cloud (API Oficial)"**
+   - O botão "Conectar com Facebook" deve estar ativo
 
-Nas funcoes `handleWhatsAppCloudEmbedded` e `handleWhatsAppCloud`, adicionar `waba_id` no upsert:
+3. **Clicar no botão de conexão**
+   - Deve abrir um popup de login do Facebook
+   - Aceitar o fluxo de Embedded Signup
+   - Você verá um modal solicitando a seleção/criação de um portfólio e conta WhatsApp
 
-- **`handleWhatsAppCloudEmbedded`** (linha ~406): ja recebe `wabaId` como parametro, basta incluir no objeto de upsert
-- **`handleWhatsAppCloud`** (linha ~318): ja tem `wabaId` na variavel local, basta incluir no upsert
+4. **Completar o fluxo**
+   - Selecionar ou criar uma conta WhatsApp Business
+   - Inserir e verificar um número de telefone
+   - Confirmar para completar a conexão
 
-### 3. Edge Function `meta-api`: adicionar acoes de templates
+5. **Verificação no Painel de Conexão**
+   - Após conectar, a conexão aparecerá na lista
+   - Abrir o painel de detalhes
+   - A seção "Templates de Mensagem" deve aparecer e listar templates (se houver)
 
-Adicionar 3 novas acoes antes do fluxo de envio de mensagens:
+## Próximas Etapas
 
-- **`list_templates`**: Recebe `connectionId`, busca `waba_id` da conexao, chama `GET /{waba_id}/message_templates?fields=name,status,category,language,components`
-- **`create_template`**: Recebe `connectionId`, `name`, `category`, `language`, `components`, chama `POST /{waba_id}/message_templates`
-- **`delete_template`**: Recebe `connectionId`, `templateName`, chama `DELETE /{waba_id}/message_templates?name={templateName}`
+Após adicionar o `META_CONFIG_ID`:
 
-Todas as acoes validam autenticacao, tenant, e buscam o token descriptografado da conexao.
+1. **Teste o fluxo de conexão** - Verifique se o Embedded Signup funciona corretamente
+2. **Configure o webhook** - Adicione a Callback URL do webhook na Meta Developer Console
+3. **Crie um template de teste** - Use a seção de Templates para criar um template simples
+4. **Teste envio/recebimento** - Envie uma mensagem através do sistema
 
-### 4. Componente `WhatsAppTemplatesManager.tsx`
-
-Novo componente em `src/components/connections/WhatsAppTemplatesManager.tsx`:
-
-- Recebe `connectionId` como prop
-- Ao montar, chama `meta-api` com `action: "list_templates"` para listar templates
-- Mostra tabela com: nome, status (badge colorido: verde=APPROVED, amarelo=PENDING, vermelho=REJECTED), categoria, idioma
-- Botao "Novo Template" abre Dialog com campos:
-  - Nome (snake_case, obrigatorio)
-  - Categoria: MARKETING, UTILITY, AUTHENTICATION (Select)
-  - Idioma: pt_BR (Select, com opcoes comuns)
-  - Corpo da mensagem (Textarea)
-- Botao deletar em cada template com `window.confirm`
-
-### 5. Integrar no `WhatsAppCloudDetailPanel.tsx`
-
-Adicionar secao "Templates de Mensagem" entre as configuracoes padrao e a zona de perigo, renderizando o componente `WhatsAppTemplatesManager` passando `connection.id`.
-
-### 6. Deploy das edge functions
-
-Redeployar `meta-api` e `meta-oauth-callback`.
-
----
-
-## Detalhes Tecnicos
-
-### Fluxo das novas acoes no `meta-api`
-
-Para cada acao de template, o fluxo e:
-1. Validar auth (Bearer token)
-2. Buscar `law_firm_id` do usuario
-3. Buscar conexao por `connectionId` + `law_firm_id` (seguranca multi-tenant)
-4. Verificar que `waba_id` existe na conexao
-5. Descriptografar `access_token`
-6. Chamar Graph API com o `waba_id`
-7. Retornar resultado
-
-### Endpoints da Graph API para Templates
-
-```text
-Listar:  GET  https://graph.facebook.com/v21.0/{waba_id}/message_templates
-         ?fields=name,status,category,language,components
-         
-Criar:   POST https://graph.facebook.com/v21.0/{waba_id}/message_templates
-         Body: { name, category, language, components: [{ type: "BODY", text: "..." }] }
-         
-Deletar: DELETE https://graph.facebook.com/v21.0/{waba_id}/message_templates
-         ?name={template_name}
-```
-
-### Estrutura do componente WhatsAppTemplatesManager
-
-```text
-+------------------------------------------+
-| Templates de Mensagem    [+ Novo Template]|
-+------------------------------------------+
-| Nome       | Status    | Categoria | Acao |
-| hello_world| APPROVED  | UTILITY   | [X]  |
-| promo_jan  | PENDING   | MARKETING | [X]  |
-+------------------------------------------+
-```
-
-O dialog de criacao tera campos basicos para permitir criar um template simples (apenas BODY text), que e suficiente para o video de demonstracao.
-
-## Sequencia de Implementacao
-
-1. Migracao SQL (adicionar `waba_id`)
-2. Editar `meta-oauth-callback` (salvar `waba_id`)
-3. Editar `meta-api` (acoes de templates)
-4. Criar `WhatsAppTemplatesManager.tsx`
-5. Editar `WhatsAppCloudDetailPanel.tsx` (integrar templates)
-6. Deploy das edge functions
-
-## Nota para o Video
-
-Apos implementar:
-1. Reconecte o WhatsApp Cloud (para salvar o `waba_id`)
-2. Abra o painel de detalhes da conexao WhatsApp Cloud
-3. Na secao "Templates", crie um template, liste, e delete - isso demonstra `whatsapp_business_management`
-4. Envie/receba uma mensagem pela interface - isso demonstra `whatsapp_business_messaging`
+Isso preparará tudo para gravar os vídeos de demonstração exigidos pela Meta para o App Review.
