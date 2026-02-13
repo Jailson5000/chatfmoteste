@@ -1,11 +1,12 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy, PlayCircle, Send, Save, FileText } from "lucide-react";
+import { Loader2, Instagram, Facebook, MessageCircle, CheckCircle2, XCircle, Copy, PlayCircle, Send, Save, FileText, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -28,6 +29,7 @@ interface PermissionTest {
 
 export default function MetaTestPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [results, setResults] = useState<Record<string, TestResult>>({});
 
   // Test connection form state
@@ -447,6 +449,16 @@ export default function MetaTestPage() {
                   ? JSON.stringify(sendResult.data, null, 2)
                   : sendResult.error}
               </pre>
+              {sendResult.status === "success" && sendResult.data?.conversationId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => navigate(`/conversations?id=${sendResult.data.conversationId}`)}
+                >
+                  <ExternalLink className="h-3 w-3 mr-1" /> Ver conversa
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
