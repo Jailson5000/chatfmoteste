@@ -82,7 +82,12 @@ Deno.serve(async (req) => {
     const token = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge");
 
-    console.log("[meta-webhook] Verification request:", { mode, tokenMatch: token === verifyToken });
+    console.log("[meta-webhook] Verification request:", { 
+      mode, 
+      tokenMatch: token === verifyToken,
+      tokenReceived: token ? token.slice(0, 4) + "***" : "null",
+      tokenExpected: verifyToken ? verifyToken.slice(0, 4) + "***" : "null",
+    });
 
     if (mode === "subscribe" && token === verifyToken) {
       return new Response(challenge, { status: 200, headers: corsHeaders });
@@ -103,6 +108,7 @@ Deno.serve(async (req) => {
       object: objectType, 
       entries: body.entry?.length || 0,
       rawKeys: Object.keys(body),
+      fullPayload: JSON.stringify(body).slice(0, 2000),
     });
 
     if (!objectType || !OBJECT_TO_ORIGIN[objectType]) {
