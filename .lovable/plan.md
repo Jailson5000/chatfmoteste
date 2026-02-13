@@ -1,73 +1,50 @@
 
 
-# Renderizar templates como cards visuais no chat
+# Corrigir permissoes OAuth do Instagram (API antiga vs nova)
 
-## Problema atual
+## Problema raiz
 
-Na screenshot, as mensagens antigas salvas como `[template: hello_world]` aparecem como texto cru. A ultima mensagem (20:31) ja mostra o conteudo real porque foi enviada apos o fix anterior. Mas o visual ainda e texto simples sem destaque.
+O codigo atual solicita os scopes **antigos** da API do Instagram no OAuth:
+- `instagram_basic`
+- `instagram_manage_messages`
 
-## O que vou fazer
+Porem, o app no Meta Developers esta configurado com a **nova API Instagram Business**, que exige:
+- `instagram_business_basic`
+- `instagram_business_manage_messages`
+- `instagram_business_manage_comments` (opcional, para comentarios)
 
-### 1. MessageBubble.tsx - Card visual para templates
+Resultado: o token OAuth nao recebe as permissoes corretas para enviar/receber mensagens.
 
-Substituir a renderizacao simples de emoji+texto por um card estilizado quando o conteudo e um template:
+Alem disso, o backend (`meta-oauth-callback`) usa Graph API **v21.0** enquanto o frontend usa **v22.0** -- isso pode causar inconsistencias.
 
-- Se o conteudo comecar com `[template: X]`, renderizar um card com icone FileText, nome do template e badge "Template"
-- Se o conteudo tiver o formato do template expandido (Header + Body + Footer + Botoes), renderizar com separadores visuais e botoes estilizados
+## Alteracoes
 
-O card tera:
-- Borda lateral verde (estilo WhatsApp)
-- Icone de template no topo
-- Secoes visuais para Header, Body, Footer
-- Botoes renderizados como chips clicaveis (estilo WhatsApp)
+### 1. `src/lib/meta-config.ts` - Atualizar scopes do Instagram
 
-### 2. Detectar e parsear conteudo de template expandido
+```
+ANTES:
+instagram: "instagram_basic,instagram_manage_messages,pages_show_list"
 
-Templates ja expandidos (como o da mensagem das 20:31) contem patterns como:
-- Linhas com `[Opcoes: X | Y]` no final
-- Texto com `_footer_` em italico
-
-Vou detectar esses patterns e renderizar com o mesmo card visual.
-
-### Alteracoes tecnicas
-
-**`src/components/conversations/MessageBubble.tsx`**:
-
-Linhas 1863-1867: Substituir a renderizacao simples por deteccao de template e flag:
-
-```typescript
-// Detect template messages
-const isTemplateMessage = normalized.startsWith('[template:') || 
-  normalized.match(/^\[template:\s*(.+)\]$/i);
-const templateName = normalized.match(/^\[template:\s*(.+)\]$/i)?.[1];
-
-// For [template: X] show nothing in text - will render as card below
-if (templateName && !normalized.includes('\n')) return ""; 
+DEPOIS:
+instagram: "instagram_business_basic,instagram_business_manage_messages,pages_show_list"
 ```
 
-Linhas 2040-2044: Antes do bloco de texto, adicionar renderizacao de card de template:
+Isso faz com que o popup OAuth solicite as permissoes corretas da nova API.
 
-```typescript
-{/* Template message card */}
-{isTemplateCard && (
-  <div className="border-l-4 border-green-500 bg-green-50 dark:bg-green-950/30 rounded-r-lg p-3 space-y-1">
-    <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
-      <FileText className="h-3.5 w-3.5" />
-      Template: {templateName}
-    </div>
-  </div>
-)}
-```
+### 2. `supabase/functions/meta-oauth-callback/index.ts` - Alinhar versao da API
 
-Para templates com conteudo expandido (Body, Footer, Botoes), parsear as secoes e renderizar cada uma:
-- `[Opcoes: X | Y]` vira botoes visuais
-- `_texto_` vira italico (footer)
-- Resto e body normal
+Linha 5: Mudar de `v21.0` para `v22.0` para consistencia com o resto do sistema.
 
-### Resumo
+### 3. `src/pages/admin/MetaTestPage.tsx` - Corrigir testes de permissoes
+
+Os testes do Messenger (linhas 196-201) ainda referenciam `instagram_basic` e `instagram_manage_messages`. Atualizar para os nomes corretos das novas permissoes para que os testes reflitam o que o app realmente usa.
+
+## Resumo
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `MessageBubble.tsx` | Card visual estilizado para `[template: X]` e deteccao de botoes/footer em templates expandidos |
+| `src/lib/meta-config.ts` | Trocar scopes antigos por `instagram_business_basic` + `instagram_business_manage_messages` |
+| `supabase/functions/meta-oauth-callback/index.ts` | Atualizar Graph API de v21.0 para v22.0 |
+| `src/pages/admin/MetaTestPage.tsx` | Atualizar nomes das permissoes nos testes |
 
-Nenhuma alteracao no backend - o conteudo ja esta sendo salvo corretamente.
+**Importante**: Apos a correcao, sera necessario **reconectar o Instagram** (desconectar e conectar novamente) para que o novo token seja gerado com as permissoes corretas.
