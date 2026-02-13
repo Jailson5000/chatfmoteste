@@ -4855,12 +4855,26 @@ serve(async (req) => {
             }
           } else if (template.fourRowTemplate) {
             // Older template format (fourRowTemplate) - less common but still supported
-            messageContent = template.fourRowTemplate.hydratedContentText || 
-                             template.fourRowTemplate.content?.namespace || 
-                             '[Mensagem de template]';
+            const frt = template.fourRowTemplate;
+            messageContent = frt.hydratedContentText || '';
+            // Try buttons from fourRowTemplate
+            if (frt.hydratedButtons?.length) {
+              const btns = frt.hydratedButtons.map((b: any) =>
+                b.quickReplyButton?.displayText || b.urlButton?.displayText || b.callButton?.displayText || null
+              ).filter(Boolean);
+              if (btns.length) messageContent += '\n\n[Opções: ' + btns.join(' | ') + ']';
+            }
+            if (!messageContent.trim()) messageContent = '[Mensagem de template]';
           } else {
-            // Fallback for unknown template structure
-            messageContent = '[Mensagem de template]';
+            // Fallback: try to extract any text from the payload
+            const raw = JSON.stringify(template);
+            const textMatch = raw.match(/"(?:text|body|content|hydratedContentText)"\s*:\s*"([^"]{5,})"/);
+            if (textMatch) {
+              messageContent = textMatch[1];
+            } else {
+              messageContent = '[Mensagem de template]';
+              console.warn('[evolution-webhook] Unknown template format:', raw.slice(0, 500));
+            }
           }
           
           logDebug('WABA_TEMPLATE', 'Template message processed', { 
