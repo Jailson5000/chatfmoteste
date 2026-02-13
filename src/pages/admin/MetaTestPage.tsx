@@ -78,7 +78,13 @@ export default function MetaTestPage() {
         body: { action: "test_api", connectionId: connection.id, endpoint },
       });
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (data?.error) {
+        const errMsg = typeof data.error === 'object' 
+          ? JSON.stringify(data.error, null, 2) 
+          : String(data.error);
+        setTestResult(key, { status: "error", error: errMsg });
+        return;
+      }
       setTestResult(key, { status: "success", data });
     } catch (err: any) {
       setTestResult(key, { status: "error", error: err.message });
