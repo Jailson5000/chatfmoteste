@@ -316,15 +316,16 @@ async function handleWhatsAppCloud(
         const { data: saved, error: saveError } = await supabaseAdmin
           .from("meta_connections")
           .upsert(
-            {
-              law_firm_id: lawFirmId,
-              type: "whatsapp_cloud",
-              page_id: phoneNumberId, // phone_number_id for webhook matching
-              page_name: `${displayName} (${phone.display_phone_number || ""})`.trim(),
-              access_token: encryptedToken,
-              token_expires_at: tokenExpiresAt,
-              is_active: true,
-            },
+        {
+          law_firm_id: lawFirmId,
+          type: "whatsapp_cloud",
+          page_id: phoneNumberId, // phone_number_id for webhook matching
+          page_name: `${displayName} (${phone.display_phone_number || ""})`.trim(),
+          access_token: encryptedToken,
+          token_expires_at: tokenExpiresAt,
+          is_active: true,
+          waba_id: wabaId,
+        },
             { onConflict: "law_firm_id,type,page_id" }
           )
           .select("id")
@@ -412,6 +413,7 @@ async function handleWhatsAppCloudEmbedded(
           access_token: encryptedToken,
           token_expires_at: tokenExpiresAt,
           is_active: true,
+          waba_id: wabaId,
         },
         { onConflict: "law_firm_id,type,page_id" }
       )

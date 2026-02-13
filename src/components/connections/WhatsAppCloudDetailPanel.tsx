@@ -1,4 +1,5 @@
 import { MessageCircle, Bot, Phone, Trash2 } from "lucide-react";
+import { WhatsAppTemplatesManager } from "./WhatsAppTemplatesManager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -241,6 +242,9 @@ export function WhatsAppCloudDetailPanel({
             )}
           </div>
         </div>
+
+        {/* Templates de Mensagem */}
+        <WhatsAppTemplatesManager connectionId={connection.id} />
 
         {/* Danger zone */}
         <div className="border-t pt-6">

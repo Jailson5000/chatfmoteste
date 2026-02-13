@@ -3960,6 +3960,7 @@ export type Database = {
           token_expires_at: string | null
           type: string
           updated_at: string
+          waba_id: string | null
         }
         Insert: {
           access_token: string
@@ -3978,6 +3979,7 @@ export type Database = {
           token_expires_at?: string | null
           type: string
           updated_at?: string
+          waba_id?: string | null
         }
         Update: {
           access_token?: string
@@ -3996,6 +3998,7 @@ export type Database = {
           token_expires_at?: string | null
           type?: string
           updated_at?: string
+          waba_id?: string | null
         }
         Relationships: [
           {
