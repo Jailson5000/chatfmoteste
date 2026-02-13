@@ -1,118 +1,73 @@
 
 
-# Exibir conteudo real de mensagens de template
+# Renderizar templates como cards visuais no chat
 
-## Problema
+## Problema atual
 
-Quando um template WhatsApp e enviado (via Cloud API ou Evolution API), o chat mostra apenas `[Mensagem de template]` ou `[template: hello_world]` em vez do conteudo real da mensagem (texto, botoes, header, etc).
+Na screenshot, as mensagens antigas salvas como `[template: hello_world]` aparecem como texto cru. A ultima mensagem (20:31) ja mostra o conteudo real porque foi enviada apos o fix anterior. Mas o visual ainda e texto simples sem destaque.
 
-Isso acontece em dois locais:
+## O que vou fazer
 
-1. **`supabase/functions/meta-api/index.ts`** (linha 399-400): Ao enviar template de teste, salva `[template: hello_world]` como conteudo fixo, sem buscar o corpo real do template.
+### 1. MessageBubble.tsx - Card visual para templates
 
-2. **`supabase/functions/evolution-webhook/index.ts`** (linhas 4856-4863): Quando o payload `templateMessage` nao tem `hydratedTemplate`, cai no fallback `[Mensagem de template]`.
+Substituir a renderizacao simples de emoji+texto por um card estilizado quando o conteudo e um template:
 
-## Solucao
+- Se o conteudo comecar com `[template: X]`, renderizar um card com icone FileText, nome do template e badge "Template"
+- Se o conteudo tiver o formato do template expandido (Header + Body + Footer + Botoes), renderizar com separadores visuais e botoes estilizados
 
-### 1. `meta-api/index.ts` - Buscar conteudo real do template antes de salvar
+O card tera:
+- Borda lateral verde (estilo WhatsApp)
+- Icone de template no topo
+- Secoes visuais para Header, Body, Footer
+- Botoes renderizados como chips clicaveis (estilo WhatsApp)
 
-Quando `useTemplate = true`, apos enviar com sucesso, buscar o template na Graph API para extrair o conteudo real:
+### 2. Detectar e parsear conteudo de template expandido
 
-```text
-GET /v22.0/{WABA_ID}/message_templates?name={templateName}
-```
+Templates ja expandidos (como o da mensagem das 20:31) contem patterns como:
+- Linhas com `[Opcoes: X | Y]` no final
+- Texto com `_footer_` em italico
 
-Extrair os componentes (HEADER, BODY, FOOTER, BUTTONS) e montar o conteudo legivel:
+Vou detectar esses patterns e renderizar com o mesmo card visual.
 
-```
-[Header texto se houver]
-Corpo do template com {{1}} etc
----
-[Opcoes: Botao1 | Botao2]
-```
+### Alteracoes tecnicas
 
-Se a busca falhar (ex: permissao), usar fallback: `[template: {nome}]` (comportamento atual).
+**`src/components/conversations/MessageBubble.tsx`**:
 
-**Alteracao** (linhas 394-406):
+Linhas 1863-1867: Substituir a renderizacao simples por deteccao de template e flag:
+
 ```typescript
-// Montar conteudo legivel do template
-let templateContent = `[template: ${templateName || "hello_world"}]`;
-if (useTemplate && conn.waba_id) {
-  try {
-    const tplRes = await fetch(
-      `${GRAPH_API_BASE}/${conn.waba_id}/message_templates?name=${templateName || "hello_world"}`,
-      { headers: { Authorization: `Bearer ${testToken}` } }
-    );
-    if (tplRes.ok) {
-      const tplData = await tplRes.json();
-      const tpl = tplData.data?.[0];
-      if (tpl?.components) {
-        const parts: string[] = [];
-        for (const comp of tpl.components) {
-          if (comp.type === "HEADER" && comp.text) parts.push(comp.text);
-          if (comp.type === "BODY" && comp.text) parts.push(comp.text);
-          if (comp.type === "FOOTER" && comp.text) parts.push(`_${comp.text}_`);
-          if (comp.type === "BUTTONS") {
-            const btnTexts = comp.buttons?.map(b => b.text).filter(Boolean);
-            if (btnTexts?.length) parts.push(`[Opcoes: ${btnTexts.join(" | ")}]`);
-          }
-        }
-        if (parts.length > 0) templateContent = parts.join("\n\n");
-      }
-    }
-  } catch (e) { /* manter fallback */ }
-}
-// Inserir com conteudo real
-await supabaseAdmin.from("messages").insert({
-  content: useTemplate ? templateContent : (message || "Mensagem de teste"),
-  ...
-});
+// Detect template messages
+const isTemplateMessage = normalized.startsWith('[template:') || 
+  normalized.match(/^\[template:\s*(.+)\]$/i);
+const templateName = normalized.match(/^\[template:\s*(.+)\]$/i)?.[1];
+
+// For [template: X] show nothing in text - will render as card below
+if (templateName && !normalized.includes('\n')) return ""; 
 ```
 
-### 2. `evolution-webhook/index.ts` - Melhorar fallback de template
+Linhas 2040-2044: Antes do bloco de texto, adicionar renderizacao de card de template:
 
-Quando `templateMessage` existe mas nao tem `hydratedTemplate`, tentar extrair dados de outras estruturas comuns do payload:
-
-**Alteracao** (linhas 4856-4864):
 ```typescript
-} else if (template.fourRowTemplate) {
-  // fourRowTemplate format
-  const frt = template.fourRowTemplate;
-  messageContent = frt.hydratedContentText || frt.content?.namespace || '';
-  // Tentar botoes do fourRowTemplate
-  if (frt.hydratedButtons?.length) {
-    const btns = frt.hydratedButtons.map(b =>
-      b.quickReplyButton?.displayText || b.urlButton?.displayText || null
-    ).filter(Boolean);
-    if (btns.length) messageContent += '\n\n[Opcoes: ' + btns.join(' | ') + ']';
-  }
-  if (!messageContent) messageContent = '[Mensagem de template]';
-} else {
-  // Fallback: tentar extrair qualquer texto do payload
-  const raw = JSON.stringify(template);
-  // Procurar por campos de texto conhecidos
-  const textMatch = raw.match(/"(?:text|body|content)"\s*:\s*"([^"]{5,})"/);
-  if (textMatch) {
-    messageContent = textMatch[1];
-  } else {
-    messageContent = '[Mensagem de template]';
-    // Logar payload completo para debug
-    console.warn('[evolution-webhook] Unknown template format:', raw.slice(0, 500));
-  }
-}
+{/* Template message card */}
+{isTemplateCard && (
+  <div className="border-l-4 border-green-500 bg-green-50 dark:bg-green-950/30 rounded-r-lg p-3 space-y-1">
+    <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400">
+      <FileText className="h-3.5 w-3.5" />
+      Template: {templateName}
+    </div>
+  </div>
+)}
 ```
 
-### 3. `MessageBubble.tsx` - Renderizar `[template: X]` de forma visual
+Para templates com conteudo expandido (Body, Footer, Botoes), parsear as secoes e renderizar cada uma:
+- `[Opcoes: X | Y]` vira botoes visuais
+- `_texto_` vira italico (footer)
+- Resto e body normal
 
-Verificar se o conteudo comeca com `[template:` e renderizar com icone e nome, ao inves de texto cru.
-
-## Resumo de arquivos
+### Resumo
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `supabase/functions/meta-api/index.ts` | Buscar conteudo real do template na Graph API antes de salvar no banco |
-| `supabase/functions/evolution-webhook/index.ts` | Melhorar parsing de `templateMessage` com fallbacks mais inteligentes |
-| `src/components/conversations/MessageBubble.tsx` | Renderizar visualmente mensagens que comecam com `[template:` |
+| `MessageBubble.tsx` | Card visual estilizado para `[template: X]` e deteccao de botoes/footer em templates expandidos |
 
-Deploy: `meta-api` e `evolution-webhook`
-
+Nenhuma alteracao no backend - o conteudo ja esta sendo salvo corretamente.
