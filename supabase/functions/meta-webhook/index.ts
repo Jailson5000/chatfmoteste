@@ -99,10 +99,14 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const objectType = body.object;
 
-    console.log("[meta-webhook] Received event:", { object: objectType, entries: body.entry?.length || 0 });
+    console.log("[meta-webhook] Received event:", { 
+      object: objectType, 
+      entries: body.entry?.length || 0,
+      rawKeys: Object.keys(body),
+    });
 
     if (!objectType || !OBJECT_TO_ORIGIN[objectType]) {
-      console.warn("[meta-webhook] Unknown object type:", objectType);
+      console.warn("[meta-webhook] Unknown object type:", objectType, "Full body keys:", Object.keys(body));
       return new Response("OK", { status: 200, headers: corsHeaders });
     }
 
@@ -144,7 +148,7 @@ async function downloadAndStoreMedia(
   try {
     // Step 1: Get temporary download URL from Graph API
     console.log("[meta-webhook] Fetching media URL for:", mediaId);
-    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+    const metaRes = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -342,7 +346,7 @@ async function processMessagingEntry(
             ? "name,username,profile_pic" 
             : "name,profile_pic";
           const profileRes = await fetch(
-            `https://graph.facebook.com/v21.0/${senderId}?fields=${fields}&access_token=${token}`
+            `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
           );
           if (profileRes.ok) {
             const profile = await profileRes.json();
@@ -605,7 +609,7 @@ async function processWhatsAppCloudEntry(
             contact_name: contactName,
             contact_phone: remoteJid,
             origin,
-            origin_metadata: { phone_number_id: phoneNumberId, connection_type: connectionType },
+            origin_metadata: { phone_number_id: phoneNumberId, connection_type: connectionType, connection_id: connection.id },
             client_id: clientId,
             department_id: connection.default_department_id || null,
             current_automation_id: connection.default_handler_type === "ai" ? connection.default_automation_id : null,

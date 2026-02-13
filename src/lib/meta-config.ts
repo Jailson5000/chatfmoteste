@@ -14,7 +14,7 @@ export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1237829051015100
 export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "1461954655333752";
 
 // Graph API version used across all Meta integrations
-export const META_GRAPH_API_VERSION = "v21.0";
+export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
