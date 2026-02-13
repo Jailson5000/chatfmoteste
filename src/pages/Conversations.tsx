@@ -475,8 +475,8 @@ export default function Conversations() {
     
     // Skip connection check for widget/site conversations (they don't use WhatsApp)
     const origin = selectedConversation.origin?.toUpperCase();
-    if (origin === 'WIDGET' || origin === 'SITE' || origin === 'WEB' || origin === 'TRAY') {
-      return null; // Not a WhatsApp conversation - no connection check needed
+    if (['WIDGET', 'SITE', 'WEB', 'TRAY', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'].includes(origin || '')) {
+      return null; // Not an Evolution API conversation - no connection check needed
     }
     
     const instanceId = selectedConversation.whatsapp_instance_id;
@@ -1336,9 +1336,10 @@ export default function Conversations() {
         // For Widget/Tray/Site conversations: save to DB directly (no WhatsApp sending)
         // The message will be visible in the panel and the widget will fetch it via polling/realtime
         if (isNonWhatsAppConversation) {
-          console.log('[MessageSend] Widget/Site channel - saving directly to DB');
-          
-          // Transfer to human if needed
+          const metaOrigins = ['INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+          const isMetaChannel = metaOrigins.includes(conversationOrigin || '');
+
+          // Transfer to human if needed (common for both Meta and Widget)
           const shouldTransfer = !wasPontualMode && (
             conversation.current_handler === "ai" || 
             !conversation.assigned_to ||
@@ -1352,43 +1353,69 @@ export default function Conversations() {
               assignedTo: user?.id,
             });
           }
-          
-          // Save message directly to database for widget/tray conversations
-          // NEVER call Evolution API for these channels
-          const { error: insertError } = await supabase
-            .from("messages")
-            .insert({
-              conversation_id: conversationId,
-              content: messageToSend,
-              message_type: "text",
-              is_from_me: true,
-              sender_type: "human",
-              ai_generated: false,
-              is_pontual: wasPontualMode,
-              status: "sent", // Ensure status is set for proper Realtime detection
+
+          if (isMetaChannel) {
+            // ============ META CHANNEL PATH (Instagram/Facebook/WhatsApp Cloud) ============
+            console.log('[MessageSend] Meta channel - sending via meta-api');
+            
+            const response = await supabase.functions.invoke("meta-api", {
+              body: {
+                conversationId,
+                content: messageToSend,
+                messageType: "text",
+              },
             });
-          
-          if (insertError) {
-            console.error('[MessageSend] Widget insert error:', insertError);
-            throw new Error('Falha ao salvar mensagem');
+            
+            if (response.error || !response.data?.success) {
+              console.error('[MessageSend] Meta API error:', response.error || response.data);
+              throw new Error(response.data?.error || "Falha ao enviar mensagem via Meta");
+            }
+            
+            // Update temp message to sent
+            setMessages(prev => prev.map(m => 
+              m.id === tempId ? { ...m, id: response.data.messageId || tempId, status: "sent" as MessageStatus } : m
+            ));
+            
+            console.log('[MessageSend] Meta message sent successfully');
+          } else {
+            // ============ WIDGET/TRAY/SITE PATH ============
+            console.log('[MessageSend] Widget/Site channel - saving directly to DB');
+            
+            const { error: insertError } = await supabase
+              .from("messages")
+              .insert({
+                conversation_id: conversationId,
+                content: messageToSend,
+                message_type: "text",
+                is_from_me: true,
+                sender_type: "human",
+                ai_generated: false,
+                is_pontual: wasPontualMode,
+                status: "sent",
+              });
+            
+            if (insertError) {
+              console.error('[MessageSend] Widget insert error:', insertError);
+              throw new Error('Falha ao salvar mensagem');
+            }
+            
+            // Update conversation last_message_at
+            await supabase
+              .from("conversations")
+              .update({ 
+                last_message_at: new Date().toISOString(),
+                archived_at: null,
+                archived_reason: null,
+              })
+              .eq("id", conversationId);
+            
+            // Update temp message to saved
+            setMessages(prev => prev.map(m => 
+              m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
+            ));
+            
+            console.log('[MessageSend] Widget message saved successfully');
           }
-          
-          // Update conversation last_message_at
-          await supabase
-            .from("conversations")
-            .update({ 
-              last_message_at: new Date().toISOString(),
-              archived_at: null,
-              archived_reason: null,
-            })
-            .eq("id", conversationId);
-          
-          // Update temp message to saved
-          setMessages(prev => prev.map(m => 
-            m.id === tempId ? { ...m, status: "sent" as MessageStatus } : m
-          ));
-          
-          console.log('[MessageSend] Widget message saved successfully');
         } else {
           // WhatsApp message - send via Evolution API
           console.log('[MessageSend] WhatsApp channel - sending via Evolution API');
@@ -2218,77 +2245,114 @@ export default function Conversations() {
       const uniqueFileName = `${mediaPreview.mediaType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
       if (isNonWhatsAppConversation) {
-        // ============ CHAT WEB PATH (Widget/Tray/Site) ============
-        console.log('[MediaPreviewSend] Non-WhatsApp conversation, using direct storage path');
-        
-        // Get law_firm_id for storage path RLS compliance
-        const { data: convData } = await supabase
-          .from("conversations")
-          .select("law_firm_id")
-          .eq("id", selectedConversationId)
-          .single();
-        
-        const lawFirmId = convData?.law_firm_id;
-        if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
-        
-        // RLS-compliant path: {law_firm_id}/{conversation_id}/{fileName}
-        const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
-        
-        // Upload to storage
-        if (mediaPreview.file) {
-          const { error: uploadError } = await supabase.storage
-            .from("chat-media")
-            .upload(storagePath, mediaPreview.file, {
-              contentType: mimeType,
-              upsert: false,
-            });
+        const metaOrigins = ['INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+        const isMetaChannel = metaOrigins.includes(conversationOrigin || '');
+
+        if (isMetaChannel) {
+          // ============ META CHANNEL PATH (Instagram/Facebook/WhatsApp Cloud) ============
+          console.log('[MediaPreviewSend] Meta channel - sending via meta-api');
           
-          if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
-        } else if (mediaUrl) {
-          // For template URLs, fetch and upload
-          const resp = await fetch(mediaUrl);
-          const blob = await resp.blob();
-          const { error: uploadError } = await supabase.storage
-            .from("chat-media")
-            .upload(storagePath, blob, {
-              contentType: mimeType,
-              upsert: false,
-            });
+          // For Meta channels, upload to storage first, then send URL via meta-api
+          const { data: convData } = await supabase
+            .from("conversations")
+            .select("law_firm_id")
+            .eq("id", selectedConversationId)
+            .single();
           
-          if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
-        }
-        
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from("chat-media")
-          .getPublicUrl(storagePath);
-        
-        const publicMediaUrl = urlData?.publicUrl;
-        
-        // Insert message record directly
-        const { error: insertError } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: selectedConversationId,
-            law_firm_id: lawFirmId,
-            content: caption || `[${fileName}]`,
-            message_type: mediaPreview.mediaType,
-            media_url: publicMediaUrl,
-            media_mime_type: mimeType,
-            is_from_me: true,
-            sender_type: "human",
-            ai_generated: false,
+          const lawFirmId = convData?.law_firm_id;
+          if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
+          
+          const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
+          
+          // Upload to storage
+          if (mediaPreview.file) {
+            const { error: uploadError } = await supabase.storage
+              .from("chat-media")
+              .upload(storagePath, mediaPreview.file, { contentType: mimeType, upsert: false });
+            if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+          } else if (mediaUrl) {
+            const resp = await fetch(mediaUrl);
+            const blob = await resp.blob();
+            const { error: uploadError } = await supabase.storage
+              .from("chat-media")
+              .upload(storagePath, blob, { contentType: mimeType, upsert: false });
+            if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+          }
+          
+          const { data: urlData } = supabase.storage.from("chat-media").getPublicUrl(storagePath);
+          const publicMediaUrl = urlData?.publicUrl;
+          
+          const response = await supabase.functions.invoke("meta-api", {
+            body: {
+              conversationId: selectedConversationId,
+              content: caption || `[${fileName}]`,
+              messageType: mediaPreview.mediaType,
+              mediaUrl: publicMediaUrl,
+              mimeType,
+            },
           });
-        
-        if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
-        
-        // Update conversation timestamp
-        await supabase
-          .from("conversations")
-          .update({ last_message_at: new Date().toISOString() })
-          .eq("id", selectedConversationId);
           
-        console.log('[MediaPreviewSend] Widget media saved successfully');
+          if (response.error || !response.data?.success) {
+            console.error('[MediaPreviewSend] Meta API error:', response.error || response.data);
+            throw new Error(response.data?.error || "Falha ao enviar mídia via Meta");
+          }
+          
+          console.log('[MediaPreviewSend] Meta media sent successfully');
+        } else {
+          // ============ CHAT WEB PATH (Widget/Tray/Site) ============
+          console.log('[MediaPreviewSend] Non-WhatsApp conversation, using direct storage path');
+          
+          const { data: convData } = await supabase
+            .from("conversations")
+            .select("law_firm_id")
+            .eq("id", selectedConversationId)
+            .single();
+          
+          const lawFirmId = convData?.law_firm_id;
+          if (!lawFirmId) throw new Error("Conversa sem law_firm_id");
+          
+          const storagePath = `${lawFirmId}/${selectedConversationId}/${uniqueFileName}`;
+          
+          if (mediaPreview.file) {
+            const { error: uploadError } = await supabase.storage
+              .from("chat-media")
+              .upload(storagePath, mediaPreview.file, { contentType: mimeType, upsert: false });
+            if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+          } else if (mediaUrl) {
+            const resp = await fetch(mediaUrl);
+            const blob = await resp.blob();
+            const { error: uploadError } = await supabase.storage
+              .from("chat-media")
+              .upload(storagePath, blob, { contentType: mimeType, upsert: false });
+            if (uploadError) throw new Error(`Falha no upload: ${uploadError.message}`);
+          }
+          
+          const { data: urlData } = supabase.storage.from("chat-media").getPublicUrl(storagePath);
+          const publicMediaUrl = urlData?.publicUrl;
+          
+          const { error: insertError } = await supabase
+            .from("messages")
+            .insert({
+              conversation_id: selectedConversationId,
+              law_firm_id: lawFirmId,
+              content: caption || `[${fileName}]`,
+              message_type: mediaPreview.mediaType,
+              media_url: publicMediaUrl,
+              media_mime_type: mimeType,
+              is_from_me: true,
+              sender_type: "human",
+              ai_generated: false,
+            });
+          
+          if (insertError) throw new Error(`Falha ao salvar mensagem: ${insertError.message}`);
+          
+          await supabase
+            .from("conversations")
+            .update({ last_message_at: new Date().toISOString() })
+            .eq("id", selectedConversationId);
+            
+          console.log('[MediaPreviewSend] Widget media saved successfully');
+        }
       } else {
         // ============ WHATSAPP PATH ============
         console.log('[MediaPreviewSend] WhatsApp conversation, using Evolution API (async)');
