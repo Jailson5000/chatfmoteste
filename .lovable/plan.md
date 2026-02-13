@@ -1,64 +1,58 @@
 
+# Corrigir deploy do meta-webhook e fluxo completo de mensagens
 
-# Corrigir envio e recebimento de mensagens WhatsApp Cloud
+## Problema raiz
 
-## Diagnostico
+O **meta-webhook nao esta deployado** (retorna 404). Isso significa:
+- A Meta nao consegue verificar o webhook (GET com challenge)
+- Nenhuma mensagem recebida chega ao sistema
+- O subscribe de "messages" no painel Meta nao adianta se o endpoint nao existe
 
-Analisando os logs do backend, a Meta **aceitou** a mensagem (HTTP 200, `message_status: "accepted"`). Porem, a mensagem nao chegou no WhatsApp fisico. Ha dois problemas identificados:
-
-### Problema 1: Versao da API desatualizada
-- O curl de referencia do painel da Meta usa `v22.0`
-- Nosso codigo usa `v21.0`
-- Isso pode causar incompatibilidade com o numero de teste da Meta
-
-### Problema 2: Conversa sem vinculo com a meta_connection
-- A conversa foi criada com `whatsapp_instance_id = NULL`
-- Ela nao tem vinculo com nenhuma conexao, por isso aparece o banner vermelho "WhatsApp sem conexao"
-- Quando voce tenta responder pela interface, o sistema nao sabe qual conexao usar para enviar
-
-### Problema 3: Webhook nao esta recebendo nada
-- Nenhum log no `meta-webhook` - as respostas do destinatario nao estao chegando
-- Pode ser que o webhook nao esteja configurado no painel da Meta, ou o verify_token esteja errado
+A causa e o import `esm.sh` na linha 1 do arquivo, que gera timeout no bundle (mesmo bug ja corrigido no `meta-api`).
 
 ## Alteracoes
 
-### 1. Atualizar versao da API para v22.0
+### 1. Corrigir import do meta-webhook
 
-**Arquivo:** `supabase/functions/meta-api/index.ts`
-- Mudar `GRAPH_API_VERSION` de `"v21.0"` para `"v22.0"`
+**Arquivo:** `supabase/functions/meta-webhook/index.ts` (linha 1)
 
-**Arquivo:** `src/lib/meta-config.ts`
-- Mudar `META_GRAPH_API_VERSION` de `"v21.0"` para `"v22.0"`
+Mudar:
+```typescript
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+```
+Para:
+```typescript
+import { createClient } from "npm:@supabase/supabase-js@2";
+```
 
-### 2. Vincular conversa a meta_connection para permitir envio/recebimento
+### 2. Deployar o meta-webhook
 
-**Arquivo:** `supabase/functions/meta-api/index.ts`
+Apos a correcao do import, fazer o deploy da funcao. Isso tornara o endpoint disponivel em:
+```
+https://jiragtersejnarxruqyd.supabase.co/functions/v1/meta-webhook
+```
 
-Na action `send_test_message`, ao criar/encontrar a conversa:
-- Salvar `origin_metadata.connection_id` na conversa (ja faz isso)
-- Garantir que o fluxo de envio normal (action padrao de send message) consiga usar a `connection_id` da `origin_metadata` para buscar o token e enviar
+### 3. Testar o webhook via curl
 
-### 3. Corrigir o fluxo de envio normal para conversas WHATSAPP_CLOUD
+Fazer uma chamada GET de teste para verificar que o endpoint responde corretamente a verificacao da Meta.
 
-**Arquivo:** `supabase/functions/meta-api/index.ts`
+## O que voce precisa fazer no painel Meta (manual)
 
-O fluxo principal de envio de mensagem (que a tela de Conversas usa) precisa:
-- Verificar se a conversa tem `origin = 'WHATSAPP_CLOUD'`
-- Buscar a `connection_id` do `origin_metadata`
-- Usar essa conexao para enviar via Graph API
-- Isso permitira responder mensagens diretamente pela interface
+1. Ir em **WhatsApp > Configuration > Webhook**
+2. Colocar a URL: `https://jiragtersejnarxruqyd.supabase.co/functions/v1/meta-webhook`
+3. Colocar o **Verify Token** (o mesmo valor configurado no secret `META_WEBHOOK_VERIFY_TOKEN`)
+4. Clicar "Verificar e salvar"
+5. O campo **messages** ja esta assinado (conforme sua imagem)
 
-### 4. Verificar e logar o webhook
+## Sobre os tokens no Global Admin
 
-**Arquivo:** `supabase/functions/meta-webhook/index.ts`
-- Adicionar logs mais detalhados para debug
-- Garantir que o webhook aceita GET (verificacao) e POST (mensagens)
-- Verificar se o `verify_token` esta correto
+**Nao precisa criar campos extras.** A arquitetura esta correta:
+- Tokens globais (`META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`) sao da plataforma - ja estao nos secrets
+- Tokens por cliente sao gerados automaticamente pelo OAuth e salvos na tabela `meta_connections` criptografados
+- Apos o App Review, o fluxo OAuth funciona para qualquer cliente sem intervencao manual
 
 ## Resultado esperado
 
-1. Mensagem enviada pelo teste chega no WhatsApp fisico
-2. Resposta do destinatario chega via webhook e aparece na conversa
-3. E possivel responder pela interface de Conversas sem o banner vermelho
-4. Fluxo completo de envio e recebimento funciona para o video do App Review
-
+1. Webhook responde a verificacao da Meta (GET com challenge)
+2. Mensagens enviadas pelo WhatsApp chegam ao sistema via webhook (POST)
+3. Fluxo completo: enviar pelo sistema -> chega no WhatsApp -> resposta volta ao sistema
