@@ -379,7 +379,7 @@ async function processMessagingEntry(
           current_automation_id: connection.default_handler_type === "ai" ? connection.default_automation_id : null,
           current_handler: connection.default_handler_type === "ai" ? "ai" : "human",
           assigned_to: connection.default_handler_type === "human" ? connection.default_human_agent_id : null,
-          status: "active",
+          status: "novo_contato",
           last_message_at: new Date(normalizeTimestamp(timestamp)).toISOString(),
         })
         .select("id")
@@ -574,7 +574,7 @@ async function processWhatsAppCloudEntry(
             current_automation_id: connection.default_handler_type === "ai" ? connection.default_automation_id : null,
             current_handler: connection.default_handler_type === "ai" ? "ai" : "human",
             assigned_to: connection.default_handler_type === "human" ? connection.default_human_agent_id : null,
-            status: "active",
+            status: "novo_contato",
             last_message_at: new Date(parseInt(msg.timestamp) * 1000).toISOString(),
           })
           .select("id")

@@ -129,6 +129,13 @@ Deno.serve(async (req) => {
     const userLongLivedToken = longLivedData.access_token;
     const expiresIn = longLivedData.expires_in || 5184000;
 
+    // --- WhatsApp Cloud via Embedded Signup (phoneNumberId + wabaId from frontend) ---
+    // Must be checked BEFORE me/accounts, because Embedded Signup tokens don't have Pages
+    if (type === "whatsapp_cloud" && phoneNumberId && wabaId) {
+      console.log("[meta-oauth] WhatsApp Cloud Embedded Signup detected, skipping page fetch");
+      return await handleWhatsAppCloudEmbedded(phoneNumberId, wabaId, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
+    }
+
     // Step 3: Get pages managed by user
     console.log("[meta-oauth] Fetching managed pages...");
     const pagesRes = await fetch(
@@ -143,12 +150,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- WhatsApp Cloud via Embedded Signup (phoneNumberId + wabaId from frontend) ---
+    // --- WhatsApp Cloud via legacy OAuth flow (auto-detect from pages) ---
     if (type === "whatsapp_cloud") {
-      if (phoneNumberId && wabaId) {
-        return await handleWhatsAppCloudEmbedded(phoneNumberId, wabaId, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
-      }
-      // Fallback: auto-detect from pages (legacy OAuth flow)
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
