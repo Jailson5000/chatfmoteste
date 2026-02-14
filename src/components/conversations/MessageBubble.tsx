@@ -1874,11 +1874,8 @@ export function MessageBubble({
   const templateNameMatchSingle = rawContent.match(/^\[template:\s*(.+)\]$/i);
   const templateNameMatchMulti = rawContent.match(/^\[template:\s*(.+)\]/im);
   const hasOptionsLine = /\[Opç?o?e?s?:\s*.+\|.+\]/i.test(rawContent);
-  // Fallback: detect templates by structural pattern (footer in _text_ format + from me)
-  const hasItalicFooter = /^_[^_]+_$/m.test(rawContent);
-  const looksLikeTemplate = isFromMe && !templateNameMatchMulti && hasItalicFooter && rawContent.split('\n').filter(l => l.trim()).length >= 2;
-  const isTemplateCard = !!templateNameMatchMulti || hasOptionsLine || looksLikeTemplate;
-  const templateCardName = templateNameMatchSingle?.[1] || templateNameMatchMulti?.[1] || (looksLikeTemplate ? "template" : undefined);
+  const isTemplateCard = !!templateNameMatchMulti || hasOptionsLine;
+  const templateCardName = templateNameMatchSingle?.[1] || templateNameMatchMulti?.[1];
 
   // Parse expanded template content into sections
   const parseTemplateContent = (text: string) => {
