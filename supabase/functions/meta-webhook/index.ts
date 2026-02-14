@@ -646,8 +646,29 @@ async function processWhatsAppCloudEntry(
       } else if (msg.type === "reaction") {
         // Skip reactions for now
         continue;
+      } else if (msg.type === "button") {
+        // User replied to a template button
+        content = msg.button?.text || msg.button?.payload || "[Resposta de botão]";
+      } else if (msg.type === "interactive") {
+        // Interactive message response (button_reply, list_reply, etc.)
+        const interactive = msg.interactive;
+        if (interactive?.type === "button_reply") {
+          content = interactive.button_reply?.title || "[Resposta interativa]";
+        } else if (interactive?.type === "list_reply") {
+          content = interactive.list_reply?.title || "[Seleção de lista]";
+        } else {
+          content = `[Mensagem interativa: ${interactive?.type || 'desconhecido'}]`;
+        }
       } else {
         content = `[${msg.type}]`;
+      }
+
+      // Fallback: if content is still empty after all type checks
+      if (!content && !mediaId) {
+        console.warn("[meta-webhook] Empty content for message type:", msg.type, 
+          "Raw keys:", Object.keys(msg).join(','),
+          "Raw preview:", JSON.stringify(msg).slice(0, 300));
+        content = `[${msg.type || 'mensagem'}]`;
       }
 
       // Get contact name from contacts array
