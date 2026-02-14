@@ -1,68 +1,70 @@
 
+# Separar conexao de teste da conexao OAuth do Instagram
 
-# Corrigir Instagram OAuth - Redirect URI e Scopes
+## Problema
 
-## Problema 1: Redirect URI invalida
+A pagina `/meta-test` e a pagina de Integracoes compartilham a mesma tabela `meta_connections`. Quando voce salva uma conexao manual de teste, o card do Instagram em Configuracoes > Integracoes automaticamente mostra "Conectado" porque encontra o registro na tabela. E quando voce clica "Desconectar" nas Integracoes, ele deleta o registro de teste tambem.
 
-O erro "Invalid redirect_uri" acontece porque o Instagram Business Login tem suas proprias configuracoes de redirect URI, separadas do Facebook Login. No dashboard Meta, a URI configurada e `https://miauchat.com.br/`, mas o codigo envia `https://miauchat.com.br/auth/meta-callback`.
+O comportamento correto e:
+- A conexao de teste (meta-test) deve ficar salva independentemente
+- O card do Instagram nas Integracoes so deve mostrar "Conectado" apos o fluxo OAuth (botao "Conectar")
+- Desconectar nas Integracoes nao deve apagar a conexao de teste
 
-### Solucao (2 partes):
+## Solucao
 
-**Parte A - No Meta Dashboard (voce faz manualmente):**
+Adicionar uma coluna `source` na tabela `meta_connections` para diferenciar conexoes manuais de teste (`manual_test`) de conexoes OAuth (`oauth`).
 
-1. Ir em "Configuracoes do login da empresa" (botao na secao 4 do screenshot)
-2. Adicionar estas URIs como "Valid OAuth Redirect URIs":
-   - `https://miauchat.com.br/auth/meta-callback`
-   - `https://chatfmoteste.lovable.app/auth/meta-callback`
-3. Salvar
+### 1. Migracao do banco de dados
 
-**Parte B - No codigo (eu faco):**
+Adicionar coluna `source` do tipo `text` com valor padrao `'oauth'`:
 
-Criar uma funcao `getInstagramRedirectUri()` separada que retorna a URI correta para o fluxo Instagram, garantindo que bate com o que esta registrado no Meta.
+```sql
+ALTER TABLE meta_connections 
+  ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'oauth';
+```
 
-## Problema 2: Scopes incorretos para modo teste
+Isso faz com que todas as conexoes existentes sejam marcadas como `oauth` automaticamente.
 
-O dashboard mostra apenas 3 permissoes aprovadas:
-- `instagram_business_basic`
-- `instagram_manage_comments` (NAO `instagram_business_manage_comments`)
-- `instagram_business_manage_messages`
+### 2. `supabase/functions/meta-api/index.ts` (save_test_connection)
 
-O codigo pede 5 scopes, incluindo `instagram_business_content_publish` e `instagram_business_manage_insights` que podem nao estar aprovados. Em modo teste, pedir scopes nao aprovados pode causar erro.
+Na acao `save_test_connection`, ao fazer insert/update, incluir `source: 'manual_test'` no registro.
 
-### Solucao:
+### 3. `src/components/settings/integrations/InstagramIntegration.tsx`
 
-Atualizar `META_SCOPES.instagram` para usar apenas os 3 scopes aprovados, com o nome correto (`instagram_manage_comments` em vez de `instagram_business_manage_comments`).
+Alterar a query para filtrar apenas conexoes com `source = 'oauth'`:
 
-## Alteracoes no codigo
+```typescript
+const { data, error } = await supabase
+  .from("meta_connections")
+  .select("*")
+  .eq("law_firm_id", profile.law_firm_id)
+  .eq("type", "instagram")
+  .eq("source", "oauth")  // <-- novo filtro
+  .maybeSingle();
+```
 
-### `src/lib/meta-config.ts`
+A acao de desconectar ja usa `connection.id` para deletar, entao so vai deletar a conexao OAuth.
 
-| O que muda | De | Para |
-|------------|-----|------|
-| Scopes Instagram | `instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights` | `instagram_business_basic,instagram_business_manage_messages,instagram_manage_comments` |
+### 4. `supabase/functions/meta-oauth-callback/index.ts` (handleInstagramBusiness)
 
-Apenas a correcao dos scopes. A URL do endpoint e o App ID ja estao corretos.
+Incluir `source: 'oauth'` no upsert da conexao Instagram. Como o valor padrao ja e `'oauth'`, isso e apenas para ser explicito.
 
-### Nenhuma alteracao no backend
+### 5. Facebook Integration (mesmo padrao)
 
-O backend (`meta-oauth-callback`) ja esta correto -- a funcao `handleInstagramBusiness` usa o `redirectUri` que vem do body da request, entao vai funcionar com qualquer URI desde que bata com a registrada no Meta.
+Aplicar a mesma logica ao `FacebookIntegration.tsx` para consistencia, filtrando por `source = 'oauth'`.
 
-## Passos para voce (no Meta Dashboard)
+## Resumo de alteracoes
 
-1. Abrir o app no Meta Developers
-2. Ir em "API do Instagram" > "Configuracao da API com login d..."
-3. Clicar em "Configuracoes do login da empresa" (secao 4)
-4. Adicionar estas Redirect URIs:
-   - `https://miauchat.com.br/auth/meta-callback`
-   - `https://chatfmoteste.lovable.app/auth/meta-callback`
-5. Salvar
+| Arquivo | Alteracao |
+|---------|-----------|
+| Migracao SQL | Adicionar coluna `source` com default `'oauth'` |
+| `supabase/functions/meta-api/index.ts` | Setar `source: 'manual_test'` no `save_test_connection` |
+| `src/components/settings/integrations/InstagramIntegration.tsx` | Filtrar por `source = 'oauth'` na query |
+| `supabase/functions/meta-oauth-callback/index.ts` | Incluir `source: 'oauth'` explicitamente |
 
 ## Resultado esperado
 
-1. Usuario clica "Conectar" no card Instagram
-2. Popup abre em `instagram.com/oauth/authorize` com scopes corretos
-3. Instagram reconhece a redirect_uri como valida
-4. Usuario autoriza (usando conta de teste do app)
-5. Redirect para callback, backend troca code por token
-6. Conexao salva, popup fecha
-
+1. Voce salva a conexao de teste no `/meta-test` -- fica salva com `source = 'manual_test'`
+2. O card do Instagram em Integracoes continua mostrando "Conectar" (nao ve a conexao de teste)
+3. Voce clica "Conectar", faz o fluxo OAuth, e ai sim mostra "Conectado" (com `source = 'oauth'`)
+4. Se voce desconectar nas Integracoes, so remove a conexao OAuth, a de teste continua intacta
