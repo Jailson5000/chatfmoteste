@@ -79,7 +79,14 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Step 1: Exchange code for token (Facebook flow - used for both Facebook and Instagram)
+    // --- Instagram Business Login: must go BEFORE Facebook token exchange ---
+    // Instagram codes can only be exchanged at api.instagram.com, not graph.facebook.com
+    if (type === "instagram") {
+      const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || META_APP_ID;
+      return await handleInstagramBusiness(code, redirectUri || "", META_INSTAGRAM_APP_ID, META_APP_SECRET, lawFirmId, supabaseAdmin);
+    }
+
+    // Step 1: Exchange code for token (Facebook flow - used for Facebook and WhatsApp only)
     console.log("[meta-oauth] Exchanging code for token...");
     const tokenParams: Record<string, string> = {
       client_id: META_APP_ID,
@@ -154,12 +161,7 @@ Deno.serve(async (req) => {
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
-    // --- Instagram Business Login flow (separate endpoint + App ID) ---
-    if (type === "instagram") {
-      const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || META_APP_ID;
-      return await handleInstagramBusiness(code, body.redirectUri || "", META_INSTAGRAM_APP_ID, META_APP_SECRET, lawFirmId, supabaseAdmin);
-    }
-
+    // --- Facebook flow ---
     // --- Facebook flow ---
     // Auto-select page: use pageId if provided, otherwise pick the first suitable page
     let selectedPage: any;
