@@ -1,50 +1,58 @@
 
+# Corrigir Instagram OAuth + Campos de Token Separados para Cada Canal
 
-# Corrigir permissoes OAuth do Instagram (API antiga vs nova)
+## Problemas Identificados
 
-## Problema raiz
+### 1. Instagram OAuth quebrado
+O erro "Invalid Scopes: instagram_business_basic, instagram_business_manage_messages" acontece porque o app na Meta ainda nao tem essas permissoes aprovadas. Precisamos **reverter** para os scopes antigos que o app ja possui: `instagram_basic` e `instagram_manage_messages`.
 
-O codigo atual solicita os scopes **antigos** da API do Instagram no OAuth:
-- `instagram_basic`
-- `instagram_manage_messages`
+### 2. Falta campos de token manual para Facebook e Instagram
+Atualmente, a pagina de testes so tem campo para colar token do WhatsApp. Como cada canal gera um token diferente no painel da Meta, precisamos de campos separados para:
+- **WhatsApp Cloud**: Token + Phone Number ID + WABA ID (ja existe)
+- **Facebook Messenger**: Token + Page ID
+- **Instagram DM**: Token + Page ID + IG Account ID
 
-Porem, o app no Meta Developers esta configurado com a **nova API Instagram Business**, que exige:
-- `instagram_business_basic`
-- `instagram_business_manage_messages`
-- `instagram_business_manage_comments` (opcional, para comentarios)
-
-Resultado: o token OAuth nao recebe as permissoes corretas para enviar/receber mensagens.
-
-Alem disso, o backend (`meta-oauth-callback`) usa Graph API **v21.0** enquanto o frontend usa **v22.0** -- isso pode causar inconsistencias.
+### 3. Backend so salva conexao manual para WhatsApp
+A action `save_test_connection` no `meta-api` so cria conexoes do tipo `whatsapp_cloud`. Precisa aceitar um parametro `connectionType` para salvar tambem `facebook` e `instagram`.
 
 ## Alteracoes
 
-### 1. `src/lib/meta-config.ts` - Atualizar scopes do Instagram
+### 1. `src/lib/meta-config.ts` - Reverter scopes do Instagram
 
+Voltar para os scopes que o app ja tem aprovados:
 ```
-ANTES:
 instagram: "instagram_basic,instagram_manage_messages,pages_show_list"
-
-DEPOIS:
-instagram: "instagram_business_basic,instagram_business_manage_messages,pages_show_list"
 ```
 
-Isso faz com que o popup OAuth solicite as permissoes corretas da nova API.
+### 2. `src/pages/admin/MetaTestPage.tsx` - Adicionar campos para Facebook e Instagram
 
-### 2. `supabase/functions/meta-oauth-callback/index.ts` - Alinhar versao da API
+Adicionar duas novas secoes de conexao manual:
 
-Linha 5: Mudar de `v21.0` para `v22.0` para consistencia com o resto do sistema.
+**Facebook Messenger:**
+- Campo: Token (da pagina Configuracoes da API do Messenger)
+- Campo: Page ID (ID da pagina do Facebook)
 
-### 3. `src/pages/admin/MetaTestPage.tsx` - Corrigir testes de permissoes
+**Instagram DM:**
+- Campo: Token (da pagina Configuracoes do Instagram)
+- Campo: Page ID
+- Campo: IG Account ID
 
-Os testes do Messenger (linhas 196-201) ainda referenciam `instagram_basic` e `instagram_manage_messages`. Atualizar para os nomes corretos das novas permissoes para que os testes reflitam o que o app realmente usa.
+Cada secao tera um botao "Salvar Conexao" que chama `save_test_connection` com o tipo correto.
 
-## Resumo
+### 3. `supabase/functions/meta-api/index.ts` - Aceitar tipo de conexao no save_test_connection
+
+Modificar a action `save_test_connection` para aceitar `connectionType` (padrao: `whatsapp_cloud`), `pageId` e `igAccountId`, permitindo salvar conexoes de qualquer canal.
+
+### 4. `src/pages/admin/MetaTestPage.tsx` - Reverter nomes de permissoes nos testes
+
+Voltar os nomes das permissoes do Messenger para `instagram_manage_messages` e `instagram_basic` (os que o app realmente usa).
+
+## Resumo de arquivos
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Trocar scopes antigos por `instagram_business_basic` + `instagram_business_manage_messages` |
-| `supabase/functions/meta-oauth-callback/index.ts` | Atualizar Graph API de v21.0 para v22.0 |
-| `src/pages/admin/MetaTestPage.tsx` | Atualizar nomes das permissoes nos testes |
+| `src/lib/meta-config.ts` | Reverter scopes para `instagram_basic,instagram_manage_messages` |
+| `src/pages/admin/MetaTestPage.tsx` | Adicionar campos de token manual para Facebook e Instagram; reverter nomes de permissoes |
+| `supabase/functions/meta-api/index.ts` | Aceitar `connectionType`, `pageId`, `igAccountId` no `save_test_connection` |
 
-**Importante**: Apos a correcao, sera necessario **reconectar o Instagram** (desconectar e conectar novamente) para que o novo token seja gerado com as permissoes corretas.
+Deploy: `meta-api`
