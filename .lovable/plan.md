@@ -1,69 +1,58 @@
 
+# Corrigir Envio/Recebimento do Instagram e Nomes de Contatos
 
-# Corrigir Erro do Instagram: Codigo OAuth Usado Duas Vezes
+## Problemas identificados
 
-## Problema
+### 1. Instagram nao recebe mensagens (webhook)
+A conexao Instagram salva no banco tem `ig_account_id: NULL`. Quando o webhook recebe uma mensagem do Instagram, ele busca a conexao por `ig_account_id = 17841479677897649` e nao encontra nada. O log confirma: `"No active connection for instagram recipient: 178414796778..."`.
 
-O fluxo de dois passos do Instagram esta falhando porque o backend tenta trocar o **mesmo codigo OAuth duas vezes**:
+### 2. Instagram nao envia mensagens
+O erro retornado pela Meta e: **"O app nao tem acesso avancado a permissao instagram_manage_messages e o usuario destinatario nao tem funcao no app"** (erro #200, subcodigo 2534048). Isso significa que o app Meta esta em **Modo de Desenvolvimento** e so pode enviar mensagens para usuarios cadastrados como testadores no app.
 
-1. **Passo 1 (list_pages)**: Backend troca o codigo por token, busca paginas, retorna a lista -- **funciona**
-2. **Passo 2 (save)**: Backend tenta trocar o **mesmo codigo** novamente -- **FALHA** porque codigos OAuth sao de uso unico
+**Solucao (no painel da Meta, nao no codigo):**
+1. Acesse [developers.facebook.com](https://developers.facebook.com) > Seu App
+2. Va em **App Review > Permissions and Features**
+3. Solicite **Advanced Access** para `instagram_manage_messages`
+4. OU, para testes imediatos: va em **App Roles > Roles** e adicione o Instagram do destinatario como **Tester**
 
-O erro "Error validating verification code. Please make sure your redirect_uri is identical to the one you used in the OAuth dialog request" e a mensagem generica que a Meta retorna quando o codigo ja foi consumido.
-
-O Facebook funciona porque NAO usa dois passos -- ele salva direto.
-
-## Solucao
-
-Passar os tokens das paginas (criptografados) na resposta do `list_pages`, e no passo `save` o frontend envia o token criptografado de volta ao backend, eliminando a necessidade de trocar o codigo novamente.
+### 3. Nomes de contatos nao capturados (Facebook e Instagram)
+O webhook busca o nome/foto do perfil via Graph API apenas ao criar um cliente novo. Se o perfil nao retorna dados (por falta de permissao ou erro silencioso), o nome generico permanece. Alem disso, clientes ja existentes nunca tem o nome atualizado.
 
 ## Alteracoes tecnicas
 
-### 1. Backend: `supabase/functions/meta-oauth-callback/index.ts`
+### 1. Corrigir dados da conexao Instagram (migracao SQL)
+Atualizar a conexao Instagram existente para preencher o `ig_account_id` correto (`17841479677897649`), que ja esta salvo na conexao Facebook. Isso corrige o webhook imediatamente.
 
-**No passo `list_pages`** (tipo instagram):
-- Incluir o `pageAccessToken` criptografado na resposta de cada pagina
+### 2. Backend: `supabase/functions/meta-webhook/index.ts`
 
-**No passo `save`** (tipo instagram):
-- Aceitar um novo campo `encryptedPageToken` no body da requisicao
-- Se `encryptedPageToken` estiver presente, pular a troca de codigo e usar o token diretamente (descriptografar)
-- Se nao estiver presente, manter o fluxo atual como fallback
+**Melhorar lookup de conexao Instagram:**
+- Adicionar fallback: se a busca por `ig_account_id` nao encontrar conexao, tentar buscar pela coluna `page_id` usando o `entry.id` (que e o IG Account ID do dono da pagina)
+- Isso garante que mesmo conexoes antigas (sem `ig_account_id` preenchido) ainda funcionem
 
-Nenhuma alteracao no fluxo do Facebook.
+**Melhorar resolucao de nomes (Facebook e Instagram):**
+- Para clientes **ja existentes** que tem nome generico (ex: "FACEBOOK 2589", "INSTAGRAM 5644"), buscar o nome real via Graph API e atualizar
+- Atualizar tambem o `contact_name` na conversa quando o nome real for encontrado
+- Tratar erros de Graph API de forma mais explicita (logar o motivo da falha)
 
-### 2. Frontend: `src/components/settings/integrations/InstagramIntegration.tsx`
+### 3. Backend: `supabase/functions/meta-api/index.ts`
 
-- Na resposta de `list_pages`, armazenar o `encryptedToken` de cada pagina junto com os dados da pagina
-- No passo `save`, enviar o `encryptedPageToken` da pagina selecionada em vez do `code`
-
-### 3. Frontend: `src/components/settings/integrations/InstagramPagePickerDialog.tsx`
-
-- Atualizar o tipo `InstagramPage` para incluir o campo opcional `encryptedToken`
+**Melhorar lookup de conexao para envio Instagram:**
+- Na busca fallback por `type`, adicionar tambem busca por `source: 'oauth'` para evitar pegar conexoes de teste manual
+- Logar detalhes da conexao encontrada para facilitar debug
 
 ### 4. Deploy
+- Redeployer `meta-webhook` e `meta-api`
 
-- Redeployer edge function `meta-oauth-callback`
+## Resumo de acoes
 
-## Fluxo corrigido
-
-```text
-[OAuth popup] --> codigo
-      |
-[list_pages] --> troca codigo por token (1x)
-      |          retorna paginas + tokens criptografados
-      |
-[Dialog picker] --> usuario escolhe pagina
-      |
-[save] --> envia encryptedPageToken (SEM codigo)
-      |     backend descriptografa e salva
-      |
-[Conexao salva]
-```
+| Acao | Tipo | Resolve |
+|------|------|---------|
+| Atualizar `ig_account_id` na conexao Instagram | Migracao SQL | Recebimento de mensagens |
+| Fallback no lookup do webhook | Codigo | Robustez para conexoes antigas |
+| Atualizar nomes de clientes existentes | Codigo | Nomes genericos no Facebook e Instagram |
+| Solicitar Advanced Access no painel Meta | Manual (usuario) | Envio de mensagens Instagram |
 
 ## O que NAO muda
-
-- Fluxo do Facebook (nenhuma alteracao)
-- Fluxo do WhatsApp Cloud (nenhuma alteracao)
-- Logica de webhook e envio de mensagens
-- Criptografia e seguranca dos tokens
-
+- Fluxo de conexao/integracao (conforme solicitado)
+- Fluxo do Facebook (ja funciona)
+- Fluxo do WhatsApp Cloud
