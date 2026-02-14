@@ -190,46 +190,57 @@ Deno.serve(async (req) => {
         });
       }
 
-      const { accessToken: rawToken, phoneNumberId, wabaId: inputWabaId } = body;
-      if (!rawToken || !phoneNumberId) {
-        return new Response(JSON.stringify({ error: "Missing accessToken or phoneNumberId" }), {
+      const { accessToken: rawToken, phoneNumberId, wabaId: inputWabaId, connectionType = "whatsapp_cloud", pageId, igAccountId } = body;
+      if (!rawToken) {
+        return new Response(JSON.stringify({ error: "Missing accessToken" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
       const encryptedToken = await encryptToken(rawToken);
 
-      // Upsert a whatsapp_cloud connection for this tenant
+      // Determine type-specific fields
+      const connType = connectionType as string;
+      const effectivePageId = connType === "whatsapp_cloud" ? phoneNumberId : pageId;
+      const effectiveWabaId = connType === "whatsapp_cloud" ? (inputWabaId || null) : null;
+      const effectiveIgAccountId = connType === "instagram" ? (igAccountId || null) : null;
+      const pageName = connType === "whatsapp_cloud" ? "Teste WhatsApp Cloud"
+        : connType === "facebook" ? "Teste Facebook Messenger"
+        : "Teste Instagram DM";
+
+      // Upsert connection for this tenant and type
       const { data: existing } = await supabaseAdmin.from("meta_connections")
         .select("id")
         .eq("law_firm_id", prof.law_firm_id)
-        .eq("type", "whatsapp_cloud")
+        .eq("type", connType)
         .maybeSingle();
 
       let connectionId: string;
       if (existing) {
         await supabaseAdmin.from("meta_connections").update({
           access_token: encryptedToken,
-          page_id: phoneNumberId,
-          waba_id: inputWabaId || null,
+          page_id: effectivePageId || null,
+          waba_id: effectiveWabaId,
+          ig_account_id: effectiveIgAccountId,
           is_active: true,
-          page_name: "Teste WhatsApp Cloud",
+          page_name: pageName,
         }).eq("id", existing.id);
         connectionId = existing.id;
       } else {
         const { data: inserted } = await supabaseAdmin.from("meta_connections").insert({
           law_firm_id: prof.law_firm_id,
-          type: "whatsapp_cloud",
+          type: connType,
           access_token: encryptedToken,
-          page_id: phoneNumberId,
-          waba_id: inputWabaId || null,
+          page_id: effectivePageId || null,
+          waba_id: effectiveWabaId,
+          ig_account_id: effectiveIgAccountId,
           is_active: true,
-          page_name: "Teste WhatsApp Cloud",
+          page_name: pageName,
         }).select("id").single();
         connectionId = inserted?.id;
       }
 
-      console.log("[meta-api] save_test_connection success:", connectionId);
+      console.log(`[meta-api] save_test_connection (${connType}) success:`, connectionId);
       return new Response(JSON.stringify({ success: true, connectionId }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
