@@ -154,7 +154,13 @@ Deno.serve(async (req) => {
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
-    // --- Instagram / Facebook flow ---
+    // --- Instagram Business Login flow (separate endpoint + App ID) ---
+    if (type === "instagram") {
+      const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || META_APP_ID;
+      return await handleInstagramBusiness(code, body.redirectUri || "", META_INSTAGRAM_APP_ID, META_APP_SECRET, lawFirmId, supabaseAdmin);
+    }
+
+    // --- Facebook flow ---
     // Auto-select page: use pageId if provided, otherwise pick the first suitable page
     let selectedPage: any;
     if (pageId) {
@@ -449,6 +455,7 @@ async function handleWhatsAppCloudEmbedded(
       JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+  }
 }
 
 /**
@@ -577,4 +584,4 @@ async function handleInstagramBusiness(
     );
   }
 }
-}
+
