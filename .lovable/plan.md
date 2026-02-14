@@ -1,65 +1,68 @@
 
 
-# Corrigir Instagram OAuth - Usar endpoint e App ID corretos
+# Corrigir Instagram OAuth - Redirect URI e Scopes
 
-## Problema
+## Problema 1: Redirect URI invalida
 
-Existem dois problemas distintos que causaram as falhas anteriores:
+O erro "Invalid redirect_uri" acontece porque o Instagram Business Login tem suas proprias configuracoes de redirect URI, separadas do Facebook Login. No dashboard Meta, a URI configurada e `https://miauchat.com.br/`, mas o codigo envia `https://miauchat.com.br/auth/meta-callback`.
 
-1. Os scopes `instagram_business_*` sao **invalidos** no endpoint `facebook.com/dialog/oauth` (esse endpoint so aceita scopes do Facebook como `pages_show_list`). Por isso aparece "Invalid Scopes".
+### Solucao (2 partes):
 
-2. O endpoint `instagram.com/oauth/authorize` requer o **Instagram App ID** (que e diferente do Facebook App ID). Por isso apareceu "Invalid platform app" na tentativa anterior.
+**Parte A - No Meta Dashboard (voce faz manualmente):**
 
-A documentacao oficial da Meta confirma que o **Instagram Business Login** usa:
-- Endpoint: `https://www.instagram.com/oauth/authorize`
-- Client ID: o **Instagram App ID** (encontrado em App Dashboard > App Settings > Basic)
-- Scopes: `instagram_business_basic`, `instagram_business_manage_messages`, etc.
-- Token exchange: `https://api.instagram.com/oauth/access_token`
+1. Ir em "Configuracoes do login da empresa" (botao na secao 4 do screenshot)
+2. Adicionar estas URIs como "Valid OAuth Redirect URIs":
+   - `https://miauchat.com.br/auth/meta-callback`
+   - `https://chatfmoteste.lovable.app/auth/meta-callback`
+3. Salvar
 
-## Solucao
+**Parte B - No codigo (eu faco):**
 
-### 1. `src/lib/meta-config.ts`
+Criar uma funcao `getInstagramRedirectUri()` separada que retorna a URI correta para o fluxo Instagram, garantindo que bate com o que esta registrado no Meta.
 
-- Adicionar constante `META_INSTAGRAM_APP_ID` com valor `1447135433693990` (conforme URL fornecido pelo usuario)
-- Atualizar scopes do Instagram para incluir todos os scopes do URL de referencia (sem `pages_show_list`)
-- Alterar `buildMetaOAuthUrl` para usar `instagram.com/oauth/authorize` com o Instagram App ID quando `type === "instagram"`
+## Problema 2: Scopes incorretos para modo teste
 
-Scopes do Instagram:
-```
-instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights
-```
+O dashboard mostra apenas 3 permissoes aprovadas:
+- `instagram_business_basic`
+- `instagram_manage_comments` (NAO `instagram_business_manage_comments`)
+- `instagram_business_manage_messages`
 
-### 2. `supabase/functions/meta-oauth-callback/index.ts`
+O codigo pede 5 scopes, incluindo `instagram_business_content_publish` e `instagram_business_manage_insights` que podem nao estar aprovados. Em modo teste, pedir scopes nao aprovados pode causar erro.
 
-- Re-ativar o early return para `type === "instagram"` que chama `handleInstagramBusiness`
-- Atualizar `handleInstagramBusiness` para usar o Instagram App ID (via env var `META_INSTAGRAM_APP_ID` ou fallback para `META_APP_ID`)
-- A funcao `handleInstagramBusiness` ja existe no codigo e faz o flow correto:
-  1. Troca code por short-lived token via `api.instagram.com/oauth/access_token`
-  2. Troca por long-lived token via `graph.instagram.com/access_token`
-  3. Busca perfil via `graph.instagram.com/me`
-  4. Salva na `meta_connections`
+### Solucao:
 
-### 3. Secret `META_INSTAGRAM_APP_ID`
+Atualizar `META_SCOPES.instagram` para usar apenas os 3 scopes aprovados, com o nome correto (`instagram_manage_comments` em vez de `instagram_business_manage_comments`).
 
-- Adicionar o secret `META_INSTAGRAM_APP_ID` com valor `1447135433693990` para a edge function poder usar no token exchange
+## Alteracoes no codigo
 
-## Resumo de arquivos
+### `src/lib/meta-config.ts`
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `src/lib/meta-config.ts` | Instagram App ID separado + endpoint `instagram.com/oauth/authorize` + scopes corretos |
-| `supabase/functions/meta-oauth-callback/index.ts` | Re-ativar `handleInstagramBusiness` com Instagram App ID |
+| O que muda | De | Para |
+|------------|-----|------|
+| Scopes Instagram | `instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights` | `instagram_business_basic,instagram_business_manage_messages,instagram_manage_comments` |
 
-Deploy: `meta-oauth-callback`
+Apenas a correcao dos scopes. A URL do endpoint e o App ID ja estao corretos.
 
-## Fluxo corrigido
+### Nenhuma alteracao no backend
 
-```text
-1. Usuario clica "Conectar" no card do Instagram
-2. Popup abre em instagram.com/oauth/authorize (com Instagram App ID)
-3. Usuario autoriza a conta Instagram Professional
-4. Redirect para callback com code
-5. Backend troca code via api.instagram.com (com Instagram App ID + App Secret)
-6. Salva conexao, popup fecha, card mostra "Conectado"
-```
+O backend (`meta-oauth-callback`) ja esta correto -- a funcao `handleInstagramBusiness` usa o `redirectUri` que vem do body da request, entao vai funcionar com qualquer URI desde que bata com a registrada no Meta.
+
+## Passos para voce (no Meta Dashboard)
+
+1. Abrir o app no Meta Developers
+2. Ir em "API do Instagram" > "Configuracao da API com login d..."
+3. Clicar em "Configuracoes do login da empresa" (secao 4)
+4. Adicionar estas Redirect URIs:
+   - `https://miauchat.com.br/auth/meta-callback`
+   - `https://chatfmoteste.lovable.app/auth/meta-callback`
+5. Salvar
+
+## Resultado esperado
+
+1. Usuario clica "Conectar" no card Instagram
+2. Popup abre em `instagram.com/oauth/authorize` com scopes corretos
+3. Instagram reconhece a redirect_uri como valida
+4. Usuario autoriza (usando conta de teste do app)
+5. Redirect para callback, backend troca code por token
+6. Conexao salva, popup fecha
 
