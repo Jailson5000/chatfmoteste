@@ -30,16 +30,7 @@ export const META_SCOPES = {
  * This ensures the redirect_uri always matches what's registered in Meta,
  * regardless of which subdomain the user is on.
  */
-/**
- * Fixed redirect URI for Instagram - ALWAYS uses production domain
- * because Meta requires exact match with registered URI.
- */
-export const getInstagramRedirectUri = () => "https://miauchat.com.br/auth/meta-callback";
-
-export function getFixedRedirectUri(type?: string): string {
-  if (type === "instagram") {
-    return getInstagramRedirectUri();
-  }
+export function getFixedRedirectUri(): string {
   if (typeof window === "undefined") {
     return "https://miauchat.com.br/auth/meta-callback";
   }
@@ -52,15 +43,13 @@ export function getFixedRedirectUri(type?: string): string {
 
 /**
  * Build the OAuth URL for Instagram or Facebook login.
+ * Both use the Facebook dialog - the difference is the scopes.
  */
 export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
-  const redirectUri = getFixedRedirectUri(type);
+  const redirectUri = getFixedRedirectUri();
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
 
-  if (type === "instagram") {
-    return `https://www.instagram.com/oauth/authorize?client_id=${META_INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code&force_reauth=true`;
-  }
-
+  // Both Instagram Business and Facebook use the Facebook OAuth dialog
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 }

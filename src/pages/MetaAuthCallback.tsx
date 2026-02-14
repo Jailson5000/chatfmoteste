@@ -73,7 +73,7 @@ export default function MetaAuthCallback() {
         }
 
         // Use the same fixed redirect URI that was used in the OAuth URL
-        const redirectUri = getFixedRedirectUri(connectionType);
+        const redirectUri = getFixedRedirectUri();
 
         // Call the meta-oauth-callback edge function to exchange code for token
         const response = await supabase.functions.invoke("meta-oauth-callback", {

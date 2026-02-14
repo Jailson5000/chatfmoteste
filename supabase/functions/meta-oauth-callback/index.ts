@@ -79,12 +79,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- Instagram Business Login: must go BEFORE Facebook token exchange ---
-    // Instagram codes can only be exchanged at api.instagram.com, not graph.facebook.com
-    if (type === "instagram") {
-      const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || META_APP_ID;
-      return await handleInstagramBusiness(code, redirectUri || "", META_INSTAGRAM_APP_ID, META_APP_SECRET, lawFirmId, supabaseAdmin);
-    }
+    // Instagram Business now uses the same Facebook OAuth dialog,
+    // so the code is exchanged via graph.facebook.com (same as Facebook flow below)
 
     // Step 1: Exchange code for token (Facebook flow - used for Facebook and WhatsApp only)
     console.log("[meta-oauth] Exchanging code for token...");
