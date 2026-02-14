@@ -1,58 +1,56 @@
 
+# Corrigir erro 401 no OAuth do Facebook e Instagram
 
-# Corrigir erros de OAuth do Instagram e Facebook
+## Causa raiz identificada
 
-## Diagnostico
+Os logs da infraestrutura mostram que **todas as chamadas POST para `meta-oauth-callback` retornam status 401** (Unauthorized). O problema NAO e com o token da Meta ou o redirect_uri - a funcao nem chega a trocar o codigo.
 
-Analisei os logs e o codigo em detalhe. Existem **2 problemas distintos**:
+### Por que acontece o 401?
 
-### Problema 1: Erro generico no frontend (afeta TODOS os canais)
+O fluxo atual funciona assim:
 
-O `MetaAuthCallback.tsx` trata erros assim:
-```typescript
-if (response.error) {
-  throw new Error(response.error.message || "Falha ao processar autenticacao");
-}
-```
+1. Usuario esta logado em `suporte.miauchat.com.br/settings`
+2. Clica em "Conectar" -> abre popup para o OAuth da Meta
+3. Meta redireciona o popup para `https://miauchat.com.br/auth/meta-callback?code=...`
+4. O componente `MetaAuthCallback.tsx` no popup chama `supabase.functions.invoke("meta-oauth-callback", ...)`
+5. O cliente Supabase no popup tenta enviar o token de autenticacao do `localStorage`
+6. **PROBLEMA**: O popup esta em `miauchat.com.br`, mas o usuario fez login em `suporte.miauchat.com.br` - sao origens diferentes, entao o `localStorage` do popup NAO tem a sessao do usuario
+7. A funcao recebe um token vazio/invalido e retorna 401
 
-Quando o Supabase retorna non-2xx, `response.error.message` e sempre o texto generico **"Edge Function returned a non-2xx status code"**. O erro REAL esta dentro de `response.error.context` (um objeto Response que precisa ser lido com `.json()`). Isso explica porque voce ve a mesma mensagem generica tanto para Instagram quanto Facebook - o erro real esta sendo engolido.
-
-### Problema 2: Instagram redirect_uri mismatch
-
-Os logs confirmam que o `redirect_uri` enviado na troca do token e identico ao usado na URL de autorizacao (`https://miauchat.com.br/auth/meta-callback`). Mesmo assim, o Instagram rejeita.
-
-Possiveis causas:
-- O **Instagram App Secret** configurado no secret pode estar incorreto (o Instagram retorna erro enganoso de "redirect_uri" quando o secret e invalido)
-- O codigo pode ter expirado entre a autorizacao e a troca (improvavel mas possivel)
+Alem disso, a funcao usa `supabase.auth.getClaims(token)` que pode nao existir na versao do `@supabase/supabase-js@2` importada no Deno, causando erro que tambem resulta em 401.
 
 ## Solucao
 
-### 1. Corrigir tratamento de erros no MetaAuthCallback
+Mudar a arquitetura para que o popup NAO faca a chamada ao backend. Em vez disso, o popup apenas captura o `code` e envia de volta para a janela pai (que TEM a sessao) via `postMessage`.
 
-Extrair o erro real do `response.error.context` para que o toast mostre a mensagem util em vez do generico "non-2xx". Usar a funcao `getFunctionErrorMessage` que ja existe em `src/lib/supabaseFunctionError.ts`.
-
-### 2. Melhorar logging no backend
-
-Adicionar log do status HTTP e corpo da resposta do Instagram na troca de token para diagnosticar se o problema e realmente o redirect_uri ou o app secret.
-
-### 3. Verificar META_INSTAGRAM_APP_SECRET
-
-Apos o fix de erro, o toast mostrara a mensagem real do Instagram, permitindo diagnostico preciso.
-
-## Alteracoes tecnicas
+### Mudancas necessarias:
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/pages/MetaAuthCallback.tsx` | Importar `getFunctionErrorMessage` e usa-la para extrair o erro real do `response.error.context` antes de mostrar no toast |
-| `supabase/functions/meta-oauth-callback/index.ts` | Logar `tokenRes.status` e corpo da resposta do Instagram antes de checar erro, para diagnostico completo |
+| `src/pages/MetaAuthCallback.tsx` | Em vez de chamar `supabase.functions.invoke` diretamente, enviar o `code` e `type` de volta para a janela pai via `postMessage` e fechar o popup |
+| `src/components/settings/integrations/InstagramIntegration.tsx` | No handler de `postMessage`, receber o `code` e chamar `supabase.functions.invoke("meta-oauth-callback", ...)` a partir da janela pai (que tem sessao ativa) |
+| `src/components/settings/integrations/FacebookIntegration.tsx` | Mesma mudanca: receber o `code` via `postMessage` e fazer a chamada ao backend a partir da janela pai |
+| `supabase/functions/meta-oauth-callback/index.ts` | Substituir `supabase.auth.getClaims(token)` por `supabase.auth.getUser()` que e o metodo padrao e confiavel do Supabase JS v2 |
 
-Deploy: `meta-oauth-callback`
+### Fluxo corrigido:
 
-## Resultado esperado
+```text
+Usuario (suporte.miauchat.com.br)
+  |
+  v
+Clica "Conectar" -> Abre popup OAuth
+  |
+  v
+Meta autentica -> Redireciona popup para miauchat.com.br/auth/meta-callback?code=XXX
+  |
+  v
+MetaAuthCallback.tsx detecta que e popup -> Envia {type: "meta-oauth-code", code, connectionType} via postMessage -> Fecha popup
+  |
+  v
+Janela pai (suporte.miauchat.com.br) recebe o code -> Chama supabase.functions.invoke("meta-oauth-callback", {code, redirectUri, type}) COM sessao ativa
+  |
+  v
+Edge function recebe token valido -> Troca code por token Meta -> Salva conexao -> Retorna sucesso
+```
 
-Apos essas mudancas:
-1. O toast mostrara a mensagem de erro REAL (ex: "Error validating verification code..." ou "Invalid client_secret") em vez de "Edge Function returned a non-2xx status code"
-2. Os logs mostrarao o status HTTP exato e corpo da resposta do Instagram
-3. Poderemos identificar se o problema e o secret ou o redirect_uri
-4. Se for o secret, sera necessario reconfigura-lo com o valor correto do Instagram App Dashboard
-
+### Deploy: `meta-oauth-callback`
