@@ -104,6 +104,10 @@ export function InstagramIntegration() {
           step: "save",
           pageId: page.pageId,
           encryptedPageToken: page.encryptedToken,
+          igAccountId: page.igAccountId,
+          igName: page.igName,
+          igUsername: page.igUsername,
+          pageName: page.pageName,
         },
       });
 

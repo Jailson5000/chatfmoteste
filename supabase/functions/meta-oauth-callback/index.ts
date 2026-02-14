@@ -77,30 +77,45 @@ Deno.serve(async (req) => {
       
       const supabaseAdmin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       
-      // Fetch IG account details for this page
-      const GRAPH_API_BASE_LOCAL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
-      const pageInfoRes = await fetch(
-        `${GRAPH_API_BASE_LOCAL}/${pageId}?fields=name,instagram_business_account&access_token=${pageAccessToken}`
-      );
-      const pageInfo = await pageInfoRes.json();
-      const igBizId = pageInfo.instagram_business_account?.id;
+      // Use frontend-provided data as primary source (avoids Graph API re-fetch failures)
+      const { igAccountId: frontendIgAccountId, igName: frontendIgName, 
+              igUsername: frontendIgUsername, pageName: frontendPageName } = body;
       
-      let igUsername: string | null = null;
-      let igName: string | null = null;
-      if (igBizId) {
+      // Only fetch from Graph API if frontend didn't provide the data
+      let igBizId = frontendIgAccountId || null;
+      let igUsername: string | null = frontendIgUsername || null;
+      let igName: string | null = frontendIgName || null;
+      let apiPageName: string | null = frontendPageName || null;
+      
+      if (!igBizId) {
+        console.log("[meta-oauth] No frontend IG data, falling back to Graph API lookup");
+        const GRAPH_API_BASE_LOCAL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
         try {
-          const igRes = await fetch(
-            `${GRAPH_API_BASE_LOCAL}/${igBizId}?fields=username,name&access_token=${pageAccessToken}`
+          const pageInfoRes = await fetch(
+            `${GRAPH_API_BASE_LOCAL}/${pageId}?fields=name,instagram_business_account&access_token=${pageAccessToken}`
           );
-          const igData = await igRes.json();
-          igUsername = igData.username || null;
-          igName = igData.name || null;
-        } catch {}
+          const pageInfo = await pageInfoRes.json();
+          igBizId = pageInfo.instagram_business_account?.id || null;
+          apiPageName = apiPageName || pageInfo.name || null;
+          
+          if (igBizId) {
+            try {
+              const igRes = await fetch(
+                `${GRAPH_API_BASE_LOCAL}/${igBizId}?fields=username,name&access_token=${pageAccessToken}`
+              );
+              const igData = await igRes.json();
+              igUsername = igUsername || igData.username || null;
+              igName = igName || igData.name || null;
+            } catch {}
+          }
+        } catch (err) {
+          console.warn("[meta-oauth] Graph API fallback failed:", err);
+        }
       }
 
       const encryptedToken = await encryptToken(pageAccessToken);
       const tokenExpiresAt = new Date(Date.now() + 5184000 * 1000).toISOString();
-      const displayName = igName || pageInfo.name || pageId;
+      const displayName = igName || apiPageName || pageId;
       const displayUsername = igUsername || igBizId || "";
 
       const { data: saved, error: saveError } = await supabaseAdmin
