@@ -549,6 +549,7 @@ async function handleInstagramBusiness(
           access_token: encryptedToken,
           token_expires_at: tokenExpiresAt,
           is_active: true,
+          source: "oauth",
         },
         { onConflict: "law_firm_id,type,page_id" }
       )

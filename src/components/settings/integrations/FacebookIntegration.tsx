@@ -34,6 +34,7 @@ export function FacebookIntegration() {
         .select("*")
         .eq("law_firm_id", profile.law_firm_id)
         .eq("type", "facebook")
+        .eq("source", "oauth")
         .maybeSingle();
 
       if (error) throw error;

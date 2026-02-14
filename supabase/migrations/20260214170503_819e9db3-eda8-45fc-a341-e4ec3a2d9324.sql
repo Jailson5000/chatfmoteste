@@ -1,0 +1,1 @@
+ALTER TABLE meta_connections ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'oauth';

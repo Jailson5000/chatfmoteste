@@ -3960,6 +3960,7 @@ export type Database = {
           law_firm_id: string
           page_id: string
           page_name: string | null
+          source: string
           token_expires_at: string | null
           type: string
           updated_at: string
@@ -3979,6 +3980,7 @@ export type Database = {
           law_firm_id: string
           page_id: string
           page_name?: string | null
+          source?: string
           token_expires_at?: string | null
           type: string
           updated_at?: string
@@ -3998,6 +4000,7 @@ export type Database = {
           law_firm_id?: string
           page_id?: string
           page_name?: string | null
+          source?: string
           token_expires_at?: string | null
           type?: string
           updated_at?: string

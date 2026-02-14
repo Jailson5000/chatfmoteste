@@ -213,6 +213,7 @@ Deno.serve(async (req) => {
         .select("id")
         .eq("law_firm_id", prof.law_firm_id)
         .eq("type", connType)
+        .eq("source", "manual_test")
         .maybeSingle();
 
       let connectionId: string;
@@ -224,6 +225,7 @@ Deno.serve(async (req) => {
           ig_account_id: effectiveIgAccountId,
           is_active: true,
           page_name: pageName,
+          source: "manual_test",
         }).eq("id", existing.id);
         connectionId = existing.id;
       } else {
@@ -236,6 +238,7 @@ Deno.serve(async (req) => {
           ig_account_id: effectiveIgAccountId,
           is_active: true,
           page_name: pageName,
+          source: "manual_test",
         }).select("id").single();
         connectionId = inserted?.id;
       }
