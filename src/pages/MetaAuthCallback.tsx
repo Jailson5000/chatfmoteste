@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { getFixedRedirectUri } from "@/lib/meta-config";
-import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 import { Loader2 } from "lucide-react";
 
 /**
  * Meta OAuth Callback Handler
  * 
- * This page handles the redirect from Meta's OAuth flow for Instagram/Facebook integrations.
- * It exchanges the authorization code for a long-lived token and saves it to the database.
- * 
- * When opened as a popup, it communicates back to the opener via postMessage and closes itself.
+ * When opened as a popup (which is the normal flow), this page simply
+ * extracts the authorization code and sends it back to the opener window
+ * via postMessage. The opener (which has an active Supabase session) then
+ * calls the edge function. This avoids the cross-origin localStorage issue
+ * where the popup domain differs from the app domain.
+ *
+ * When opened as a full-page navigation (fallback), it shows an error
+ * asking the user to retry from the settings page.
  */
 export default function MetaAuthCallback() {
   const navigate = useNavigate();
@@ -21,115 +22,78 @@ export default function MetaAuthCallback() {
   const [isProcessing, setIsProcessing] = useState(true);
 
   useEffect(() => {
-    const handleCallback = async () => {
+    const handleCallback = () => {
       const isPopup = !!window.opener;
 
-      try {
-        const code = searchParams.get("code");
-        const error = searchParams.get("error");
-        const errorDescription = searchParams.get("error_description");
-        const stateParam = searchParams.get("state");
+      const code = searchParams.get("code");
+      const error = searchParams.get("error");
+      const errorDescription = searchParams.get("error_description");
+      const stateParam = searchParams.get("state");
 
-        // Parse state to get the connection type
-        let connectionType = "instagram"; // default
-        if (stateParam) {
-          try {
-            const parsed = JSON.parse(stateParam);
-            connectionType = parsed.type || "instagram";
-          } catch { /* ignore parse errors */ }
-        }
+      // Parse state to get the connection type
+      let connectionType = "instagram"; // default
+      if (stateParam) {
+        try {
+          const parsed = JSON.parse(stateParam);
+          connectionType = parsed.type || "instagram";
+        } catch { /* ignore parse errors */ }
+      }
 
-        const fallbackRoute = connectionType === "whatsapp_cloud" ? "/connections" : "/settings";
+      const fallbackRoute = connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations";
 
-        if (error) {
-          const errorMsg = errorDescription || error;
-          if (isPopup) {
-            window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
-            window.close();
-            return;
-          }
-          toast({
-            title: "Erro na autenticação",
-            description: errorMsg,
-            variant: "destructive",
-          });
-          navigate(fallbackRoute);
-          return;
-        }
-
-        if (!code) {
-          const errorMsg = "Código de autorização não encontrado";
-          if (isPopup) {
-            window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
-            window.close();
-            return;
-          }
-          toast({
-            title: "Erro",
-            description: errorMsg,
-            variant: "destructive",
-          });
-          navigate(fallbackRoute);
-          return;
-        }
-
-        // Use the same fixed redirect URI that was used in the OAuth URL
-        const redirectUri = getFixedRedirectUri(connectionType as "instagram" | "facebook" | "whatsapp_cloud");
-
-        // Call the meta-oauth-callback edge function to exchange code for token
-        const response = await supabase.functions.invoke("meta-oauth-callback", {
-          body: {
-            code,
-            redirectUri,
-            type: connectionType,
-          },
-        });
-
-        if (response.error) {
-          const realMsg = await getFunctionErrorMessage(response.error);
-          throw new Error(realMsg);
-        }
-
-        if (!response.data?.success) {
-          throw new Error(response.data?.error || "Falha ao salvar conexão");
-        }
-
-        // Success!
-        if (isPopup) {
-          window.opener.postMessage({ type: "meta-oauth-success", data: response.data }, "*");
-          window.close();
-          return;
-        }
-
-        const typeLabel = response.data.type === 'instagram' ? 'Instagram' 
-          : response.data.type === 'facebook' ? 'Facebook' 
-          : 'WhatsApp Cloud';
-
-        toast({
-          title: "Sucesso!",
-          description: `${typeLabel} conectado com sucesso.`,
-        });
-
-        navigate(connectionType === "whatsapp_cloud" ? "/connections" : "/settings?tab=integrations");
-      } catch (error) {
-        console.error("Meta callback error:", error);
-        const errorMsg = error instanceof Error ? error.message : "Falha ao conectar com Meta";
-
+      // Handle errors from Meta
+      if (error) {
+        const errorMsg = errorDescription || error;
         if (isPopup) {
           window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
           window.close();
           return;
         }
-
         toast({
-          title: "Erro ao conectar",
+          title: "Erro na autenticação",
           description: errorMsg,
           variant: "destructive",
         });
-        navigate("/settings");
-      } finally {
-        setIsProcessing(false);
+        navigate(fallbackRoute);
+        return;
       }
+
+      if (!code) {
+        const errorMsg = "Código de autorização não encontrado";
+        if (isPopup) {
+          window.opener.postMessage({ type: "meta-oauth-error", message: errorMsg }, "*");
+          window.close();
+          return;
+        }
+        toast({
+          title: "Erro",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        navigate(fallbackRoute);
+        return;
+      }
+
+      // SUCCESS: We have a code
+      if (isPopup) {
+        // Send the code back to the parent window which has the active session.
+        // The parent will call meta-oauth-callback with proper auth.
+        window.opener.postMessage(
+          { type: "meta-oauth-code", code, connectionType },
+          "*"
+        );
+        window.close();
+        return;
+      }
+
+      // Not a popup – can't process without a session on this origin.
+      toast({
+        title: "Erro",
+        description: "Não foi possível processar. Por favor, tente novamente pela página de configurações.",
+        variant: "destructive",
+      });
+      navigate(fallbackRoute);
+      setIsProcessing(false);
     };
 
     handleCallback();

@@ -1,11 +1,12 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { META_APP_ID, buildMetaOAuthUrl } from "@/lib/meta-config";
+import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
+import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 
 function InstagramIcon() {
   return (
@@ -18,6 +19,16 @@ function InstagramIcon() {
 export function InstagramIntegration() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
+
+  // Cleanup listener on unmount
+  useEffect(() => {
+    return () => {
+      if (listenerRef.current) {
+        window.removeEventListener("message", listenerRef.current);
+      }
+    };
+  }, []);
 
   // Fetch existing connection
   const { data: connection, isLoading } = useQuery({
@@ -85,28 +96,64 @@ export function InstagramIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("instagram");
-    const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+    window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
 
-    const handleMessage = (event: MessageEvent) => {
+    // Remove previous listener if any
+    if (listenerRef.current) {
+      window.removeEventListener("message", listenerRef.current);
+    }
+
+    const handleMessage = async (event: MessageEvent) => {
+      // Handle code from popup (new flow)
+      if (event.data?.type === "meta-oauth-code" && event.data.connectionType === "instagram") {
+        window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
+
+        const code = event.data.code;
+        const redirectUri = getFixedRedirectUri("instagram");
+
+        toast.loading("Conectando Instagram...", { id: "ig-connect" });
+
+        try {
+          const response = await supabase.functions.invoke("meta-oauth-callback", {
+            body: { code, redirectUri, type: "instagram" },
+          });
+
+          if (response.error) {
+            const realMsg = await getFunctionErrorMessage(response.error);
+            throw new Error(realMsg);
+          }
+
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
+          }
+
+          queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
+          toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
+        } catch (err) {
+          console.error("Instagram OAuth error:", err);
+          toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
+        }
+        return;
+      }
+
+      // Legacy handlers (backward compat)
       if (event.data?.type === "meta-oauth-success") {
         window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
         queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
         toast.success("Instagram conectado com sucesso!");
       }
       if (event.data?.type === "meta-oauth-error") {
         window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
         toast.error(event.data.message || "Erro ao conectar Instagram");
       }
     };
+
+    listenerRef.current = handleMessage;
     window.addEventListener("message", handleMessage);
   }, [queryClient]);
-
-  // Token expiry info
-  const tokenExpiresAt = connection?.token_expires_at ? new Date(connection.token_expires_at) : null;
-  const daysUntilExpiry = tokenExpiresAt
-    ? Math.ceil((tokenExpiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-    : null;
-  const isExpiringSoon = daysUntilExpiry !== null && daysUntilExpiry <= 7;
 
   if (!connection) {
     return (

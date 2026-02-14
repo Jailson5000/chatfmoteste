@@ -1,11 +1,12 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Facebook } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { META_APP_ID, buildMetaOAuthUrl } from "@/lib/meta-config";
+import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
+import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 
 function FacebookIcon() {
   return (
@@ -18,6 +19,15 @@ function FacebookIcon() {
 export function FacebookIntegration() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (listenerRef.current) {
+        window.removeEventListener("message", listenerRef.current);
+      }
+    };
+  }, []);
 
   const { data: connection, isLoading } = useQuery({
     queryKey: ["meta-connection", "facebook", user?.id],
@@ -82,19 +92,61 @@ export function FacebookIntegration() {
     }
 
     const authUrl = buildMetaOAuthUrl("facebook");
-    const popup = window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
+    window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
 
-    const handleMessage = (event: MessageEvent) => {
+    if (listenerRef.current) {
+      window.removeEventListener("message", listenerRef.current);
+    }
+
+    const handleMessage = async (event: MessageEvent) => {
+      // Handle code from popup (new flow)
+      if (event.data?.type === "meta-oauth-code" && event.data.connectionType === "facebook") {
+        window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
+
+        const code = event.data.code;
+        const redirectUri = getFixedRedirectUri("facebook");
+
+        toast.loading("Conectando Facebook...", { id: "fb-connect" });
+
+        try {
+          const response = await supabase.functions.invoke("meta-oauth-callback", {
+            body: { code, redirectUri, type: "facebook" },
+          });
+
+          if (response.error) {
+            const realMsg = await getFunctionErrorMessage(response.error);
+            throw new Error(realMsg);
+          }
+
+          if (!response.data?.success) {
+            throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
+          }
+
+          queryClient.invalidateQueries({ queryKey: ["meta-connection", "facebook"] });
+          toast.success("Facebook conectado com sucesso!", { id: "fb-connect" });
+        } catch (err) {
+          console.error("Facebook OAuth error:", err);
+          toast.error(err instanceof Error ? err.message : "Erro ao conectar Facebook", { id: "fb-connect" });
+        }
+        return;
+      }
+
+      // Legacy handlers
       if (event.data?.type === "meta-oauth-success") {
         window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
         queryClient.invalidateQueries({ queryKey: ["meta-connection", "facebook"] });
         toast.success("Facebook conectado com sucesso!");
       }
       if (event.data?.type === "meta-oauth-error") {
         window.removeEventListener("message", handleMessage);
+        listenerRef.current = null;
         toast.error(event.data.message || "Erro ao conectar Facebook");
       }
     };
+
+    listenerRef.current = handleMessage;
     window.addEventListener("message", handleMessage);
   }, [queryClient]);
 
