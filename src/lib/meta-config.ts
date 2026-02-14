@@ -21,7 +21,7 @@ export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights",
+  instagram: "pages_show_list,instagram_basic,instagram_manage_messages",
   facebook: "pages_messaging,pages_manage_metadata,pages_show_list",
 } as const;
 
@@ -56,11 +56,7 @@ export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
 
-  if (type === "instagram") {
-    // Instagram Business Login uses its own OAuth dialog and App ID
-    return `https://www.instagram.com/oauth/authorize?client_id=${META_INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
-  }
-
-  // Facebook uses the Facebook OAuth dialog
+  // Both Instagram and Facebook now use the Facebook OAuth dialog
+  // Instagram uses Facebook OAuth to access me/accounts and list linked IG business accounts
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 }

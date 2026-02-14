@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
 
     const lawFirmId = profile.law_firm_id;
     const body = await req.json();
-    const { code, redirectUri, type, pageId, phoneNumberId, wabaId } = body;
+    const { code, redirectUri, type, pageId, phoneNumberId, wabaId, step } = body;
 
     if (!code || !type) {
       return new Response(JSON.stringify({ error: "Missing code or type" }), {
@@ -71,15 +71,6 @@ Deno.serve(async (req) => {
 
     const META_APP_ID = Deno.env.get("META_APP_ID");
     const META_APP_SECRET = Deno.env.get("META_APP_SECRET");
-    const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || "1447135433693990";
-    const rawIgSecret = Deno.env.get("META_INSTAGRAM_APP_SECRET");
-    const META_INSTAGRAM_APP_SECRET = rawIgSecret || META_APP_SECRET;
-    console.log("[meta-oauth] Instagram secret config:", {
-      hasOwnSecret: !!rawIgSecret,
-      usingFallback: !rawIgSecret,
-      secretPrefix: META_INSTAGRAM_APP_SECRET?.substring(0, 4) + "...",
-      fbSecretPrefix: META_APP_SECRET?.substring(0, 4) + "...",
-    });
 
     if (!META_APP_ID || !META_APP_SECRET) {
       return new Response(JSON.stringify({ error: "Meta app not configured" }), {
@@ -88,22 +79,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Instagram Business Login uses separate endpoints (api.instagram.com)
-    // Must be handled before the Facebook token exchange
-    if (type === "instagram") {
-      // Force consistent redirect_uri - must match exactly what frontend used in OAuth dialog
-      const INSTAGRAM_FIXED_REDIRECT = "https://miauchat.com.br/auth/meta-callback";
-      const igRedirectUri = redirectUri || INSTAGRAM_FIXED_REDIRECT;
-      console.log("[meta-oauth] Instagram Business Login detected", {
-        receivedRedirectUri: redirectUri,
-        usingRedirectUri: igRedirectUri,
-        appId: META_INSTAGRAM_APP_ID,
-        codePrefix: code?.substring(0, 20) + "...",
-      });
-      return await handleInstagramBusiness(code, igRedirectUri, META_INSTAGRAM_APP_ID, META_INSTAGRAM_APP_SECRET!, lawFirmId, supabaseAdmin);
-    }
-
-    // Step 1: Exchange code for token (Facebook flow - used for Facebook and WhatsApp only)
+    // Step 1: Exchange code for token (Facebook flow - used for Facebook, Instagram, and WhatsApp)
     console.log("[meta-oauth] Exchanging code for token...");
     const tokenParams: Record<string, string> = {
       client_id: META_APP_ID,
@@ -182,17 +158,151 @@ Deno.serve(async (req) => {
       return await handleWhatsAppCloud(pagesData.data, userLongLivedToken, expiresIn, lawFirmId, supabaseAdmin);
     }
 
+    // --- Instagram flow: list pages with IG accounts or save selected one ---
+    if (type === "instagram") {
+      // Enrich pages with Instagram account details
+      const pagesWithIg: any[] = [];
+      for (const page of pagesData.data) {
+        const igBiz = page.instagram_business_account;
+        if (igBiz?.id) {
+          // Fetch IG username & profile picture
+          try {
+            const igRes = await fetch(
+              `${GRAPH_API_BASE}/${igBiz.id}?fields=username,name,profile_picture_url&access_token=${page.access_token}`
+            );
+            const igData = await igRes.json();
+            pagesWithIg.push({
+              pageId: page.id,
+              pageName: page.name,
+              pageAccessToken: page.access_token,
+              igAccountId: igBiz.id,
+              igUsername: igData.username || null,
+              igName: igData.name || null,
+              igProfilePicture: igData.profile_picture_url || null,
+            });
+          } catch {
+            pagesWithIg.push({
+              pageId: page.id,
+              pageName: page.name,
+              pageAccessToken: page.access_token,
+              igAccountId: igBiz.id,
+              igUsername: null,
+              igName: null,
+              igProfilePicture: null,
+            });
+          }
+        }
+      }
+
+      if (pagesWithIg.length === 0) {
+        return new Response(JSON.stringify({ 
+          error: "Nenhuma página com conta Instagram Profissional vinculada foi encontrada." 
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // If step is "list_pages" or no pageId, return the list for selection
+      if (step === "list_pages" || !pageId) {
+        console.log("[meta-oauth] Instagram: returning page list for selection", pagesWithIg.length);
+        return new Response(JSON.stringify({
+          success: true,
+          step: "list_pages",
+          pages: pagesWithIg.map(p => ({
+            pageId: p.pageId,
+            pageName: p.pageName,
+            igAccountId: p.igAccountId,
+            igUsername: p.igUsername,
+            igName: p.igName,
+            igProfilePicture: p.igProfilePicture,
+          })),
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // step === "save" or pageId provided: save specific page
+      const selectedIg = pagesWithIg.find(p => p.pageId === pageId);
+      if (!selectedIg) {
+        return new Response(JSON.stringify({ error: "Página selecionada não encontrada ou sem Instagram vinculado." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const encryptedIgToken = await encryptToken(selectedIg.pageAccessToken);
+      const igTokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+      const igDisplayName = selectedIg.igName || selectedIg.pageName;
+      const igUsername = selectedIg.igUsername || selectedIg.igAccountId;
+
+      const { data: savedIg, error: saveIgError } = await supabaseAdmin
+        .from("meta_connections")
+        .upsert(
+          {
+            law_firm_id: lawFirmId,
+            type: "instagram",
+            page_id: selectedIg.pageId,
+            page_name: `${igDisplayName} (@${igUsername})`,
+            ig_account_id: selectedIg.igAccountId,
+            access_token: encryptedIgToken,
+            token_expires_at: igTokenExpiresAt,
+            is_active: true,
+            source: "oauth",
+          },
+          { onConflict: "law_firm_id,type,page_id" }
+        )
+        .select("id")
+        .single();
+
+      if (saveIgError) {
+        console.error("[meta-oauth] Error saving Instagram connection:", saveIgError);
+        return new Response(JSON.stringify({ error: "Failed to save connection" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Subscribe page to webhooks for Instagram messaging
+      try {
+        console.log("[meta-oauth] Subscribing page to webhooks for Instagram:", selectedIg.pageId);
+        const subRes = await fetch(
+          `${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subscribed_fields: "messages,messaging_postbacks,messaging_optins",
+              access_token: selectedIg.pageAccessToken,
+            }),
+          }
+        );
+        const subData = await subRes.json();
+        console.log("[meta-oauth] Instagram subscribe result:", subData);
+      } catch (subErr) {
+        console.error("[meta-oauth] Failed to subscribe page for Instagram (non-blocking):", subErr);
+      }
+
+      console.log("[meta-oauth] Instagram connection saved:", { id: savedIg.id, igUsername });
+      return new Response(JSON.stringify({
+        success: true,
+        connectionId: savedIg.id,
+        pageName: `${igDisplayName} (@${igUsername})`,
+        type: "instagram",
+        igAccountId: selectedIg.igAccountId,
+        expiresAt: igTokenExpiresAt,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // --- Facebook flow ---
-    // --- Facebook flow ---
-    // Auto-select page: use pageId if provided, otherwise pick the first suitable page
     let selectedPage: any;
     if (pageId) {
       selectedPage = pagesData.data.find((p: any) => p.id === pageId);
-    } else if (type === "instagram") {
-      // Pick first page that has an Instagram business account
-      selectedPage = pagesData.data.find((p: any) => !!p.instagram_business_account?.id) || pagesData.data[0];
     } else {
-      // Facebook: pick first page
       selectedPage = pagesData.data[0];
     }
 
@@ -208,15 +318,6 @@ Deno.serve(async (req) => {
     const pageAccessToken = selectedPage.access_token;
     const pageName = selectedPage.name;
     const igAccountId = selectedPage.instagram_business_account?.id || null;
-
-    if (type === "instagram" && !igAccountId) {
-      return new Response(JSON.stringify({ 
-        error: "This Page has no linked Instagram Professional account." 
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     // Step 5: Encrypt and save
     const encryptedToken = await encryptToken(pageAccessToken);
@@ -482,145 +583,4 @@ async function handleWhatsAppCloudEmbedded(
   }
 }
 
-/**
- * Handle Instagram Business API OAuth flow.
- * Uses different endpoints than Facebook for token exchange.
- */
-async function handleInstagramBusiness(
-  code: string,
-  redirectUri: string,
-  appId: string,
-  appSecret: string,
-  lawFirmId: string,
-  supabaseAdmin: any
-) {
-  try {
-    // Step 1: Exchange code for short-lived Instagram token
-    console.log("[meta-oauth] Instagram: exchanging code for short-lived token...", {
-      redirectUri,
-      appId,
-      codeLength: code?.length,
-      codePrefix: code?.substring(0, 15),
-    });
-    const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: appId,
-        client_secret: appSecret,
-        grant_type: "authorization_code",
-        redirect_uri: redirectUri,
-        code,
-      }),
-    });
-
-    const tokenRawText = await tokenRes.text();
-    console.log("[meta-oauth] Instagram token response", {
-      status: tokenRes.status,
-      body: tokenRawText.substring(0, 500),
-    });
-
-    let tokenData: any;
-    try { tokenData = JSON.parse(tokenRawText); } catch { tokenData = { error_message: tokenRawText }; }
-
-    if (tokenData.error_type || tokenData.error_message || tokenData.error) {
-      console.error("[meta-oauth] Instagram token exchange failed:", tokenData);
-      return new Response(JSON.stringify({ 
-        error: "Instagram token exchange failed", 
-        message: tokenData.error_message || tokenData.error?.message || tokenData.error_type || "Unknown Instagram error",
-        details: tokenData.error_message || tokenData.error_type 
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const shortLivedToken = tokenData.access_token;
-    const igUserId = tokenData.user_id;
-    console.log("[meta-oauth] Instagram: got short-lived token for user", igUserId);
-
-    // Step 2: Exchange for long-lived token (60 days)
-    console.log("[meta-oauth] Instagram: exchanging for long-lived token...");
-    const longLivedRes = await fetch(
-      `https://graph.instagram.com/access_token?` +
-        new URLSearchParams({
-          grant_type: "ig_exchange_token",
-          client_secret: appSecret,
-          access_token: shortLivedToken,
-        })
-    );
-
-    const longLivedData = await longLivedRes.json();
-    if (longLivedData.error) {
-      console.error("[meta-oauth] Instagram long-lived token failed:", longLivedData.error);
-      // Fall back to short-lived token
-      console.log("[meta-oauth] Instagram: falling back to short-lived token");
-    }
-
-    const finalToken = longLivedData.access_token || shortLivedToken;
-    const expiresIn = longLivedData.expires_in || 3600;
-
-    // Step 3: Get user profile info
-    console.log("[meta-oauth] Instagram: fetching user profile...");
-    const profileRes = await fetch(
-      `https://graph.instagram.com/${GRAPH_API_VERSION}/me?fields=user_id,username,name,profile_picture_url&access_token=${finalToken}`
-    );
-    const profileData = await profileRes.json();
-    
-    const username = profileData.username || `ig_${igUserId}`;
-    const displayName = profileData.name || username;
-    console.log("[meta-oauth] Instagram: profile fetched:", { username, displayName });
-
-    // Step 4: Encrypt and save
-    const encryptedToken = await encryptToken(finalToken);
-    const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-
-    const { data: saved, error: saveError } = await supabaseAdmin
-      .from("meta_connections")
-      .upsert(
-        {
-          law_firm_id: lawFirmId,
-          type: "instagram",
-          page_id: String(igUserId),
-          page_name: `${displayName} (@${username})`,
-          ig_account_id: String(igUserId),
-          access_token: encryptedToken,
-          token_expires_at: tokenExpiresAt,
-          is_active: true,
-          source: "oauth",
-        },
-        { onConflict: "law_firm_id,type,page_id" }
-      )
-      .select("id")
-      .single();
-
-    if (saveError) {
-      console.error("[meta-oauth] Error saving Instagram connection:", saveError);
-      return new Response(JSON.stringify({ error: "Failed to save connection" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log("[meta-oauth] Instagram connection saved:", { id: saved.id, username });
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        connectionId: saved.id,
-        pageName: `${displayName} (@${username})`,
-        type: "instagram",
-        igAccountId: String(igUserId),
-        expiresAt: tokenExpiresAt,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err) {
-    console.error("[meta-oauth] Instagram Business error:", err);
-    return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : "Instagram auth failed" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-}
-
+// Legacy handleInstagramBusiness removed - Instagram now uses Facebook OAuth flow with page picker
