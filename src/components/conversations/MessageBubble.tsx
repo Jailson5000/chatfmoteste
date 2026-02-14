@@ -1860,19 +1860,25 @@ export function MessageBubble({
       if (looksLikeFileName) return "";
     }
 
-    // Detect [template: X] - will render as card below, suppress text
+    // Detect [template: X] - will render as card below, suppress text (single or multiline)
     const templateOnlyMatch = normalized.match(/^\[template:\s*(.+)\]$/i);
     if (templateOnlyMatch) return "";
+    // Multiline template: suppress entire content since card renders it
+    if (/^\[template:\s*.+\]/im.test(normalized)) return "";
 
     return normalized;
   })();
 
   // Template card detection
   const rawContent = content || "";
-  const templateNameMatch = rawContent.match(/^\[template:\s*(.+)\]$/i);
+  const templateNameMatchSingle = rawContent.match(/^\[template:\s*(.+)\]$/i);
+  const templateNameMatchMulti = rawContent.match(/^\[template:\s*(.+)\]/im);
   const hasOptionsLine = /\[Opç?o?e?s?:\s*.+\|.+\]/i.test(rawContent);
-  const isTemplateCard = !!templateNameMatch || hasOptionsLine;
-  const templateCardName = templateNameMatch?.[1];
+  // Fallback: detect templates by structural pattern (footer in _text_ format + from me)
+  const hasItalicFooter = /^_[^_]+_$/m.test(rawContent);
+  const looksLikeTemplate = isFromMe && !templateNameMatchMulti && hasItalicFooter && rawContent.split('\n').filter(l => l.trim()).length >= 2;
+  const isTemplateCard = !!templateNameMatchMulti || hasOptionsLine || looksLikeTemplate;
+  const templateCardName = templateNameMatchSingle?.[1] || templateNameMatchMulti?.[1] || (looksLikeTemplate ? "template" : undefined);
 
   // Parse expanded template content into sections
   const parseTemplateContent = (text: string) => {

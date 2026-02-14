@@ -430,7 +430,7 @@ Deno.serve(async (req) => {
                         if (btnTexts?.length) parts.push(`[Opções: ${btnTexts.join(" | ")}]`);
                       }
                     }
-                    if (parts.length > 0) finalContent = parts.join("\n\n");
+                    if (parts.length > 0) finalContent = `[template: ${tplName}]\n${parts.join("\n\n")}`;
                   }
                 }
               } catch (_e) { /* keep fallback */ }

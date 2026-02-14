@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Trash2, RefreshCw, Loader2, FileText, Link2, Reply } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { WhatsAppTemplatePreview } from "./WhatsAppTemplatePreview";
 
 interface Template {
   name: string;
@@ -241,12 +242,13 @@ export function WhatsAppTemplatesManager({ connectionId }: WhatsAppTemplatesMana
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Novo Template de Mensagem</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5">
-            {/* Basic info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Left column: Form */}
+            <div className="space-y-5">
             <div className="space-y-2">
               <Label>Nome (snake_case)</Label>
               <Input
@@ -371,6 +373,20 @@ export function WhatsAppTemplatesManager({ connectionId }: WhatsAppTemplatesMana
                   </Button>
                 </div>
               )}
+            </div>
+            </div>
+
+            {/* Right column: Preview */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground">PRÉ-VISUALIZAÇÃO</Label>
+              <div className="border rounded-md p-3 min-h-[400px] bg-muted/20">
+                <WhatsAppTemplatePreview
+                  headerText={headerType === "TEXT" ? headerText : ""}
+                  body={newBody}
+                  footerText={footerText}
+                  buttons={buttons}
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
