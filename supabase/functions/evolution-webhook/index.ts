@@ -4877,9 +4877,15 @@ serve(async (req) => {
             }
           }
           
+          // Add [template:] marker for incoming templates so frontend renders as styled card
+          const tplId = template.templateId || hydrated?.templateId || 'template';
+          if (messageContent.trim() && messageType === 'text') {
+            messageContent = `[template: ${tplId}]\n${messageContent}`;
+          }
+          
           logDebug('WABA_TEMPLATE', 'Template message processed', { 
             requestId, 
-            templateId: template.templateId || hydrated?.templateId,
+            templateId: tplId,
             hasMedia: !!mediaUrl,
             mediaType: messageType,
             contentLength: messageContent.length,
@@ -4932,6 +4938,27 @@ serve(async (req) => {
             requestId, 
             count: contacts.length 
           });
+        }
+
+        // FALLBACK: If messageContent is still empty after all type checks,
+        // try to extract something from the raw message payload
+        if (!messageContent && !mediaUrl && data.message) {
+          const rawMessage = JSON.stringify(data.message);
+          
+          // Log the unknown format for future debugging
+          logDebug('UNKNOWN_TYPE', 'Message type not recognized - raw payload', {
+            requestId,
+            messageKeys: Object.keys(data.message).join(','),
+            rawPreview: rawMessage.slice(0, 500),
+          });
+          
+          // Try to find any text content in the raw payload
+          const textMatch = rawMessage.match(/"(?:text|body|content|caption|hydratedContentText|conversation)"\s*:\s*"([^"]{3,})"/);
+          if (textMatch) {
+            messageContent = textMatch[1];
+          } else {
+            messageContent = '[Mensagem recebida - formato não suportado]';
+          }
         }
 
         logDebug('MESSAGE', `Message content extracted`, {
