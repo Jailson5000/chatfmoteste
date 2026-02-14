@@ -72,7 +72,14 @@ Deno.serve(async (req) => {
     const META_APP_ID = Deno.env.get("META_APP_ID");
     const META_APP_SECRET = Deno.env.get("META_APP_SECRET");
     const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || "1447135433693990";
-    const META_INSTAGRAM_APP_SECRET = Deno.env.get("META_INSTAGRAM_APP_SECRET") || META_APP_SECRET;
+    const rawIgSecret = Deno.env.get("META_INSTAGRAM_APP_SECRET");
+    const META_INSTAGRAM_APP_SECRET = rawIgSecret || META_APP_SECRET;
+    console.log("[meta-oauth] Instagram secret config:", {
+      hasOwnSecret: !!rawIgSecret,
+      usingFallback: !rawIgSecret,
+      secretPrefix: META_INSTAGRAM_APP_SECRET?.substring(0, 4) + "...",
+      fbSecretPrefix: META_APP_SECRET?.substring(0, 4) + "...",
+    });
 
     if (!META_APP_ID || !META_APP_SECRET) {
       return new Response(JSON.stringify({ error: "Meta app not configured" }), {
@@ -227,6 +234,7 @@ Deno.serve(async (req) => {
           access_token: encryptedToken,
           token_expires_at: tokenExpiresAt,
           is_active: true,
+          source: "oauth",
         },
         { onConflict: "law_firm_id,type,page_id" }
       )
