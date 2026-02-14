@@ -1,78 +1,84 @@
 
+# Analise Completa: WhatsApp Cloud - Mensagens Nao Entregues
 
-# Corrigir Conexao Instagram - Dados Incorretos e Webhook
+## Diagnostico
 
-## Problema
+Apos analise dos logs, codigo e documentacao da Meta, o resultado e claro:
 
-A conexao Instagram salva no banco esta com dados incorretos:
-- `page_name`: "977414192123496 (@)" em vez de "MiauChat - Solucoes Digitais (@miau.chat)"
-- `ig_account_id`: NULL em vez de "17841479677897649"
+**O codigo do sistema esta funcionando corretamente.** A API da Meta retorna `200 OK` com `message_status: "accepted"` e um `wamid` valido. O problema e uma limitacao do numero de teste.
 
-Isso acontece porque o passo "save" do `meta-oauth-callback` re-busca informacoes da pagina via Graph API usando o token descriptografado, mas essa segunda chamada falha silenciosamente. O resultado: `pageInfo.name` vem undefined, e o sistema usa o `pageId` numerico como nome.
+## Evidencias dos Logs
 
-O webhook do Instagram nao encontra a conexao porque busca por `ig_account_id` (que esta NULL) e depois por `page_id` (que tem o valor `977414192123496`, diferente do IG Account ID `17841479677897649` enviado pelo webhook).
+```text
+21:16:11 - Message sent: graphMessageId = "wamid.HBgMNTU2Mzk5Mjk5MDg5..."
+21:10:39 - send_test_message result: 200 {"message_status":"accepted"}
+```
 
-## Causa raiz
+Nenhum erro nos logs. A Meta **aceitou** as mensagens.
 
-O frontend (`InstagramPagePickerDialog`) ja tem todos os dados corretos vindos do passo `list_pages`:
-- `igAccountId`: "17841479677897649"
-- `igName`: "MiauChat - Solucoes Digitais"
-- `igUsername`: "miau.chat"
+## Causa Raiz: Limitacao do Numero de Teste da Meta
 
-Porem, o `handleSelectPage` no `InstagramIntegration.tsx` so envia `pageId` e `encryptedToken` para o backend. O backend tenta re-buscar os dados via Graph API (que falha), em vez de usar os dados ja disponoveis.
+Segundo a documentacao oficial da Meta e multiplos relatos na comunidade de desenvolvedores:
 
-## Solucao
+1. **Numero de teste e dos EUA (+1 555 159 0933)**: Numeros de teste fornecidos pela Meta sao americanos e tem restricoes severas de envio para numeros internacionais.
 
-### 1. Frontend: `src/components/settings/integrations/InstagramIntegration.tsx`
+2. **"Accepted" nao significa "Delivered"**: A resposta `200` com `message_status: "accepted"` indica apenas que a Meta recebeu e validou o request. A entrega real e comunicada via webhooks de `statuses` -- que nosso sistema ainda nao processa.
 
-Passar os dados enriquecidos (`igAccountId`, `igName`, `igUsername`) para o backend no passo "save", evitando que o backend precise re-buscar via Graph API:
+3. **Limitacao geografica documentada**: Numeros de teste dos EUA frequentemente **nao conseguem entregar mensagens para numeros fora dos EUA** (como os numeros brasileiros +55).
+
+4. **Limite de 5 destinatarios**: O numero de teste so pode enviar para ate 5 numeros cadastrados na lista de teste.
+
+## Solucao Real
+
+Para enviar e receber mensagens de verdade, voce precisa **registrar um numero de telefone proprio** (brasileiro) no WhatsApp Business API, substituindo o numero de teste. Isso e feito no painel da Meta em:
+
+**WhatsApp > API Setup > Etapa 1 > Adicionar numero de telefone**
+
+## Melhoria Tecnica Recomendada
+
+Embora o envio funcione, ha uma melhoria que podemos fazer: **processar webhooks de status de entrega** (`delivered`, `read`, `failed`) para mostrar no sistema se a mensagem foi realmente entregue ou falhou.
+
+### Alteracao: `supabase/functions/meta-webhook/index.ts`
+
+Na funcao `processWhatsAppCloudEntry`, atualmente o codigo ignora eventos que nao contem `value.messages`. Porem, eventos de `statuses` (delivery receipts) tambem chegam pelo mesmo webhook e contem informacoes de entrega.
+
+A melhoria consiste em:
+
+1. **Detectar eventos de `statuses`** no payload do webhook
+2. **Logar o status de entrega** para diagnostico futuro (delivered, read, failed)
+3. **Atualizar a mensagem no banco** com o status de entrega quando disponivel
 
 ```typescript
-// No handleSelectPage, adicionar os campos:
-body: {
-  type: "instagram",
-  step: "save",
-  pageId: page.pageId,
-  encryptedPageToken: page.encryptedToken,
-  igAccountId: page.igAccountId,     // NOVO
-  igName: page.igName,               // NOVO
-  igUsername: page.igUsername,        // NOVO
-  pageName: page.pageName,           // NOVO
+// Apos processar messages, verificar se ha statuses
+if (value.statuses?.length) {
+  for (const status of value.statuses) {
+    const { id: wamid, status: deliveryStatus, errors } = status;
+    console.log(`[meta-webhook] Delivery status: ${deliveryStatus} for ${wamid}`);
+    
+    if (deliveryStatus === "failed" && errors?.length) {
+      console.error("[meta-webhook] Delivery failed:", errors);
+    }
+    
+    // Atualizar external_id com status na tabela messages (opcional)
+    // Isso permitira mostrar indicadores de "entregue" / "lido" no chat
+  }
 }
 ```
 
-### 2. Backend: `supabase/functions/meta-oauth-callback/index.ts`
+### Deploy
+- Redeployer `meta-webhook`
 
-No passo "save" (linha 73), usar os dados recebidos do frontend como primarios, e a re-busca via Graph API apenas como fallback:
+## Resumo
 
-```typescript
-const { igAccountId: frontendIgAccountId, igName: frontendIgName, 
-        igUsername: frontendIgUsername, pageName: frontendPageName } = body;
-
-// Usar dados do frontend se disponiveis, senao buscar via API
-const igBizId = frontendIgAccountId || pageInfo.instagram_business_account?.id;
-const displayName = frontendIgName || igName || pageInfo.name || frontendPageName || pageId;
-const displayUsername = frontendIgUsername || igUsername || igBizId || "";
-```
-
-### 3. Corrigir dados existentes (SQL)
-
-Atualizar a conexao Instagram existente com os dados corretos para funcionar imediatamente:
-
-```sql
-UPDATE meta_connections 
-SET ig_account_id = '17841479677897649',
-    page_name = 'MiauChat - Soluções Digitais (@miau.chat)'
-WHERE type = 'instagram' AND source = 'oauth' AND page_id = '977414192123496';
-```
-
-### 4. Deploy
-
-- Redeployer `meta-oauth-callback`
+| Item | Status |
+|------|--------|
+| Codigo de envio (`sendWhatsAppCloudMessage`) | Correto, sem alteracao |
+| API retorna sucesso | Sim (200 + wamid) |
+| Mensagem chega no celular | Nao - limitacao do numero de teste |
+| Solucao definitiva | Registrar numero brasileiro proprio |
+| Melhoria tecnica | Processar webhooks de delivery status |
 
 ## O que NAO muda
-
-- Facebook (ja funciona perfeitamente)
-- Webhook (`meta-webhook`) - a logica de lookup ja suporta `ig_account_id`, so precisava do dado correto no banco
-- Fluxo de desconexao/reconexao
-
+- Facebook (funcionando)
+- Instagram (funcionando)
+- Logica de envio do `meta-api`
