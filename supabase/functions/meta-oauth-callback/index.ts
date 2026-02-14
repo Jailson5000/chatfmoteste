@@ -79,13 +79,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- Instagram Business API uses a completely different token flow ---
-    if (type === "instagram") {
-      console.log("[meta-oauth] Instagram Business flow detected");
-      return await handleInstagramBusiness(code, redirectUri, META_APP_ID, META_APP_SECRET, lawFirmId, supabaseAdmin);
-    }
-
-    // Step 1: Exchange code for token (Facebook flow)
+    // Step 1: Exchange code for token (Facebook flow - used for both Facebook and Instagram)
     console.log("[meta-oauth] Exchanging code for token...");
     const tokenParams: Record<string, string> = {
       client_id: META_APP_ID,
