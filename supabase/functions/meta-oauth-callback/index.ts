@@ -84,8 +84,15 @@ Deno.serve(async (req) => {
     // Instagram Business Login uses separate endpoints (api.instagram.com)
     // Must be handled before the Facebook token exchange
     if (type === "instagram") {
-      console.log("[meta-oauth] Instagram Business Login detected, using Instagram-specific flow");
-      const igRedirectUri = redirectUri || "https://miauchat.com.br/auth/meta-callback";
+      // Force consistent redirect_uri - must match exactly what frontend used in OAuth dialog
+      const INSTAGRAM_FIXED_REDIRECT = "https://miauchat.com.br/auth/meta-callback";
+      const igRedirectUri = redirectUri || INSTAGRAM_FIXED_REDIRECT;
+      console.log("[meta-oauth] Instagram Business Login detected", {
+        receivedRedirectUri: redirectUri,
+        usingRedirectUri: igRedirectUri,
+        appId: META_INSTAGRAM_APP_ID,
+        codePrefix: code?.substring(0, 20) + "...",
+      });
       return await handleInstagramBusiness(code, igRedirectUri, META_INSTAGRAM_APP_ID, META_INSTAGRAM_APP_SECRET!, lawFirmId, supabaseAdmin);
     }
 
@@ -477,7 +484,12 @@ async function handleInstagramBusiness(
 ) {
   try {
     // Step 1: Exchange code for short-lived Instagram token
-    console.log("[meta-oauth] Instagram: exchanging code for short-lived token...");
+    console.log("[meta-oauth] Instagram: exchanging code for short-lived token...", {
+      redirectUri,
+      appId,
+      codeLength: code?.length,
+      codePrefix: code?.substring(0, 15),
+    });
     const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
