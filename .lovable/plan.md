@@ -1,47 +1,58 @@
 
 
-# Corrigir erro de redirect_uri no Instagram Business Login
+# Corrigir erros de OAuth do Instagram e Facebook
 
 ## Diagnostico
 
-Os logs mostram repetidamente:
+Analisei os logs e o codigo em detalhe. Existem **2 problemas distintos**:
+
+### Problema 1: Erro generico no frontend (afeta TODOS os canais)
+
+O `MetaAuthCallback.tsx` trata erros assim:
+```typescript
+if (response.error) {
+  throw new Error(response.error.message || "Falha ao processar autenticacao");
+}
 ```
-Error validating verification code. Please make sure your redirect_uri is identical to the one you used in the OAuth dialog request
-```
 
-O Instagram exige que o `redirect_uri` na troca do token seja **identico** ao usado na URL de autorizacao. O problema pode ser:
+Quando o Supabase retorna non-2xx, `response.error.message` e sempre o texto generico **"Edge Function returned a non-2xx status code"**. O erro REAL esta dentro de `response.error.context` (um objeto Response que precisa ser lido com `.json()`). Isso explica porque voce ve a mesma mensagem generica tanto para Instagram quanto Facebook - o erro real esta sendo engolido.
 
-1. **Mismatch de dominio**: O usuario esta em `suporte.miauchat.com.br`, mas o `redirect_uri` no OAuth aponta para `https://miauchat.com.br/auth/meta-callback`. Se `miauchat.com.br` redireciona para outro dominio antes de carregar a pagina de callback, o `redirect_uri` enviado ao backend pode nao bater.
+### Problema 2: Instagram redirect_uri mismatch
 
-2. **URI nao salva corretamente no Meta Dashboard**: A URI registrada no Instagram Business Login settings pode ter diferenca sutil (trailing slash, www, etc.).
+Os logs confirmam que o `redirect_uri` enviado na troca do token e identico ao usado na URL de autorizacao (`https://miauchat.com.br/auth/meta-callback`). Mesmo assim, o Instagram rejeita.
+
+Possiveis causas:
+- O **Instagram App Secret** configurado no secret pode estar incorreto (o Instagram retorna erro enganoso de "redirect_uri" quando o secret e invalido)
+- O codigo pode ter expirado entre a autorizacao e a troca (improvavel mas possivel)
 
 ## Solucao
 
-### 1. Backend: Adicionar logging de debug
+### 1. Corrigir tratamento de erros no MetaAuthCallback
 
-Antes de tentar trocar o token, logar o `redirect_uri` exato que esta sendo enviado para comparar com o usado na URL de autorizacao.
+Extrair o erro real do `response.error.context` para que o toast mostre a mensagem util em vez do generico "non-2xx". Usar a funcao `getFunctionErrorMessage` que ja existe em `src/lib/supabaseFunctionError.ts`.
 
-### 2. Backend: Garantir consistencia
+### 2. Melhorar logging no backend
 
-O `redirect_uri` hardcoded no backend deve ser exatamente `https://miauchat.com.br/auth/meta-callback` (sem trailing slash, sem www), identico ao usado no frontend pelo `getFixedRedirectUri("instagram")`.
+Adicionar log do status HTTP e corpo da resposta do Instagram na troca de token para diagnosticar se o problema e realmente o redirect_uri ou o app secret.
 
-### 3. Verificacao no Meta Dashboard
+### 3. Verificar META_INSTAGRAM_APP_SECRET
 
-Na configuracao do **Instagram Business Login**, a URI de redirecionamento deve ser exatamente:
-```
-https://miauchat.com.br/auth/meta-callback
-```
-- Sem barra final
-- Sem `www`
-- Com `https://`
+Apos o fix de erro, o toast mostrara a mensagem real do Instagram, permitindo diagnostico preciso.
 
 ## Alteracoes tecnicas
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `supabase/functions/meta-oauth-callback/index.ts` | Adicionar `console.log` com redirect_uri, appId, e code (parcial) antes da troca de token no `handleInstagramBusiness`. Forcar redirect_uri hardcoded `https://miauchat.com.br/auth/meta-callback` como fallback seguro |
+| `src/pages/MetaAuthCallback.tsx` | Importar `getFunctionErrorMessage` e usa-la para extrair o erro real do `response.error.context` antes de mostrar no toast |
+| `supabase/functions/meta-oauth-callback/index.ts` | Logar `tokenRes.status` e corpo da resposta do Instagram antes de checar erro, para diagnostico completo |
 
 Deploy: `meta-oauth-callback`
 
-Apos o deploy, o usuario testa novamente e verificamos nos logs qual redirect_uri exato esta sendo enviado vs o que foi usado na autorizacao.
+## Resultado esperado
+
+Apos essas mudancas:
+1. O toast mostrara a mensagem de erro REAL (ex: "Error validating verification code..." ou "Invalid client_secret") em vez de "Edge Function returned a non-2xx status code"
+2. Os logs mostrarao o status HTTP exato e corpo da resposta do Instagram
+3. Poderemos identificar se o problema e o secret ou o redirect_uri
+4. Se for o secret, sera necessario reconfigura-lo com o valor correto do Instagram App Dashboard
 
