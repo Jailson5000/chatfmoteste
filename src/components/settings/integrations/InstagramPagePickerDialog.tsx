@@ -17,6 +17,7 @@ export interface InstagramPage {
   igUsername: string | null;
   igName: string | null;
   igProfilePicture: string | null;
+  encryptedToken?: string;
 }
 
 interface Props {

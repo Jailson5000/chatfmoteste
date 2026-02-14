@@ -60,10 +60,104 @@ Deno.serve(async (req) => {
 
     const lawFirmId = profile.law_firm_id;
     const body = await req.json();
-    const { code, redirectUri, type, pageId, phoneNumberId, wabaId, step } = body;
+    const { code, redirectUri, type, pageId, phoneNumberId, wabaId, step, encryptedPageToken } = body;
 
-    if (!code || !type) {
-      return new Response(JSON.stringify({ error: "Missing code or type" }), {
+    if (!type) {
+      return new Response(JSON.stringify({ error: "Missing type" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Instagram save step: use encrypted token directly, skip OAuth code exchange
+    if (type === "instagram" && step === "save" && encryptedPageToken && pageId) {
+      console.log("[meta-oauth] Instagram save step: using encrypted token directly");
+      const { decryptToken } = await import("../_shared/encryption.ts");
+      const pageAccessToken = await decryptToken(encryptedPageToken);
+      
+      const supabaseAdmin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      
+      // Fetch IG account details for this page
+      const GRAPH_API_BASE_LOCAL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+      const pageInfoRes = await fetch(
+        `${GRAPH_API_BASE_LOCAL}/${pageId}?fields=name,instagram_business_account&access_token=${pageAccessToken}`
+      );
+      const pageInfo = await pageInfoRes.json();
+      const igBizId = pageInfo.instagram_business_account?.id;
+      
+      let igUsername: string | null = null;
+      let igName: string | null = null;
+      if (igBizId) {
+        try {
+          const igRes = await fetch(
+            `${GRAPH_API_BASE_LOCAL}/${igBizId}?fields=username,name&access_token=${pageAccessToken}`
+          );
+          const igData = await igRes.json();
+          igUsername = igData.username || null;
+          igName = igData.name || null;
+        } catch {}
+      }
+
+      const encryptedToken = await encryptToken(pageAccessToken);
+      const tokenExpiresAt = new Date(Date.now() + 5184000 * 1000).toISOString();
+      const displayName = igName || pageInfo.name || pageId;
+      const displayUsername = igUsername || igBizId || "";
+
+      const { data: saved, error: saveError } = await supabaseAdmin
+        .from("meta_connections")
+        .upsert(
+          {
+            law_firm_id: lawFirmId,
+            type: "instagram",
+            page_id: pageId,
+            page_name: `${displayName} (@${displayUsername})`,
+            ig_account_id: igBizId || null,
+            access_token: encryptedToken,
+            token_expires_at: tokenExpiresAt,
+            is_active: true,
+            source: "oauth",
+          },
+          { onConflict: "law_firm_id,type,page_id" }
+        )
+        .select("id")
+        .single();
+
+      if (saveError) {
+        console.error("[meta-oauth] Error saving Instagram connection:", saveError);
+        return new Response(JSON.stringify({ error: "Failed to save connection" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Subscribe page to webhooks for Instagram messaging
+      try {
+        await fetch(`${GRAPH_API_BASE_LOCAL}/${pageId}/subscribed_apps`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subscribed_fields: "messages,messaging_postbacks,messaging_optins",
+            access_token: pageAccessToken,
+          }),
+        });
+      } catch {}
+
+      console.log("[meta-oauth] Instagram connection saved via encrypted token:", { id: saved.id, igUsername: displayUsername });
+      return new Response(JSON.stringify({
+        success: true,
+        connectionId: saved.id,
+        pageName: `${displayName} (@${displayUsername})`,
+        type: "instagram",
+        igAccountId: igBizId || null,
+        expiresAt: tokenExpiresAt,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!code) {
+      return new Response(JSON.stringify({ error: "Missing code" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -206,17 +300,24 @@ Deno.serve(async (req) => {
       // If step is "list_pages" or no pageId, return the list for selection
       if (step === "list_pages" || !pageId) {
         console.log("[meta-oauth] Instagram: returning page list for selection", pagesWithIg.length);
-        return new Response(JSON.stringify({
-          success: true,
-          step: "list_pages",
-          pages: pagesWithIg.map(p => ({
+        
+        // Encrypt page tokens so frontend can send them back in step 2 (save)
+        const pagesWithEncryptedTokens = await Promise.all(
+          pagesWithIg.map(async (p: any) => ({
             pageId: p.pageId,
             pageName: p.pageName,
             igAccountId: p.igAccountId,
             igUsername: p.igUsername,
             igName: p.igName,
             igProfilePicture: p.igProfilePicture,
-          })),
+            encryptedToken: await encryptToken(p.pageAccessToken),
+          }))
+        );
+        
+        return new Response(JSON.stringify({
+          success: true,
+          step: "list_pages",
+          pages: pagesWithEncryptedTokens,
         }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -23,7 +23,7 @@ export function InstagramIntegration() {
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerPages, setPickerPages] = useState<InstagramPage[]>([]);
-  const [pendingOAuthData, setPendingOAuthData] = useState<{ code: string; redirectUri: string } | null>(null);
+  // pendingOAuthData removed - tokens are now passed via encryptedToken in page picker
 
   // Cleanup listener on unmount
   useEffect(() => {
@@ -95,21 +95,15 @@ export function InstagramIntegration() {
 
   // Save selected Instagram page
   const handleSelectPage = useCallback(async (page: InstagramPage) => {
-    if (!pendingOAuthData) {
-      toast.error("Dados de autenticação não encontrados. Tente novamente.");
-      return;
-    }
-
     toast.loading("Conectando Instagram...", { id: "ig-connect" });
 
     try {
       const response = await supabase.functions.invoke("meta-oauth-callback", {
         body: {
-          code: pendingOAuthData.code,
-          redirectUri: pendingOAuthData.redirectUri,
           type: "instagram",
           step: "save",
           pageId: page.pageId,
+          encryptedPageToken: page.encryptedToken,
         },
       });
 
@@ -125,13 +119,13 @@ export function InstagramIntegration() {
       queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
       toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
       setPickerOpen(false);
-      setPendingOAuthData(null);
+      // no longer need pendingOAuthData
       setPickerPages([]);
     } catch (err) {
       console.error("Instagram save error:", err);
       toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
     }
-  }, [pendingOAuthData, queryClient]);
+  }, [queryClient]);
 
   const handleConnect = useCallback(() => {
     if (!META_APP_ID) {
@@ -179,8 +173,8 @@ export function InstagramIntegration() {
             throw new Error("Nenhuma conta Instagram encontrada vinculada às suas páginas.");
           }
 
-          // Store OAuth data for step 2
-          setPendingOAuthData({ code, redirectUri });
+          // Pages now include encryptedToken from backend
+          setPickerPages(pages);
           setPickerPages(pages);
           setPickerOpen(true);
           toast.dismiss("ig-connect");
