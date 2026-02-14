@@ -253,11 +253,10 @@ async function processMessagingEntry(
     // Find the meta_connection for this page/account
     const selectFields = "id, law_firm_id, access_token, default_department_id, default_status_id, default_automation_id, default_handler_type, default_human_agent_id";
     let connection: any = null;
-    let connError: any = null;
 
     if (connectionType === "instagram") {
-      // Instagram sends IG account ID as recipient, not page ID
-      const { data, error } = await supabase
+      // Instagram sends IG account ID as recipient — try ig_account_id first
+      const { data } = await supabase
         .from("meta_connections")
         .select(selectFields)
         .eq("ig_account_id", recipientId)
@@ -265,10 +264,39 @@ async function processMessagingEntry(
         .eq("is_active", true)
         .maybeSingle();
       connection = data;
-      connError = error;
+
+      // Fallback: try page_id (older connections may have ig account id stored there)
+      if (!connection) {
+        const { data: fallback } = await supabase
+          .from("meta_connections")
+          .select(selectFields)
+          .eq("page_id", recipientId)
+          .eq("type", connectionType)
+          .eq("is_active", true)
+          .maybeSingle();
+        connection = fallback;
+        if (fallback) {
+          console.log("[meta-webhook] Instagram connection found via page_id fallback");
+        }
+      }
+
+      // Fallback 2: try using entry.id (page ID from the entry)
+      if (!connection && pageId) {
+        const { data: fallback2 } = await supabase
+          .from("meta_connections")
+          .select(selectFields)
+          .eq("page_id", pageId)
+          .eq("type", connectionType)
+          .eq("is_active", true)
+          .maybeSingle();
+        connection = fallback2;
+        if (fallback2) {
+          console.log("[meta-webhook] Instagram connection found via entry.id fallback");
+        }
+      }
     } else {
       // Facebook sends page ID as recipient
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("meta_connections")
         .select(selectFields)
         .eq("page_id", recipientId)
@@ -276,11 +304,10 @@ async function processMessagingEntry(
         .eq("is_active", true)
         .maybeSingle();
       connection = data;
-      connError = error;
     }
 
-    if (connError || !connection) {
-      console.warn("[meta-webhook] No active connection for", connectionType, "recipient:", recipientId?.slice(0, 12));
+    if (!connection) {
+      console.warn("[meta-webhook] No active connection for", connectionType, "recipient:", recipientId?.slice(0, 12), "pageId:", pageId?.slice(0, 12));
       continue;
     }
 
@@ -314,17 +341,24 @@ async function processMessagingEntry(
     // Find or create client by remote_jid (sender's scoped ID)
     const remoteJid = senderId;
     let clientId: string | null = null;
+    let clientNeedsNameUpdate = false;
 
     const { data: existingClient } = await supabase
       .from("clients")
-      .select("id")
+      .select("id, name")
       .eq("law_firm_id", lawFirmId)
       .eq("phone", remoteJid)
       .maybeSingle();
 
     if (existingClient) {
       clientId = existingClient.id;
+      // Check if name is still generic (e.g. "INSTAGRAM 5644", "FACEBOOK 2589")
+      const genericPattern = /^(INSTAGRAM|FACEBOOK|WHATSAPP_CLOUD)\s+\w{2,6}$/i;
+      if (genericPattern.test(existingClient.name?.trim() || "")) {
+        clientNeedsNameUpdate = true;
+      }
     } else {
+      clientNeedsNameUpdate = true; // New client, will try to fetch name
       // Create new client with generic name first
       const genericName = `${origin} ${remoteJid.slice(-4)}`;
       const { data: newClient, error: clientErr } = await supabase
@@ -343,34 +377,36 @@ async function processMessagingEntry(
         continue;
       }
       clientId = newClient.id;
+    }
 
-      // Try to fetch real profile name and photo from Graph API
-      if (connection.access_token) {
-        try {
-          const token = await decryptToken(connection.access_token);
-          const fields = connectionType === "instagram" 
-            ? "name,username,profile_pic" 
-            : "name,profile_pic";
-          const profileRes = await fetch(
-            `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
-          );
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            const realName = profile.name || profile.username || null;
-            const avatarUrl = profile.profile_pic || null;
-            if (realName || avatarUrl) {
-              const updateData: Record<string, any> = {};
-              if (realName) updateData.name = realName;
-              if (avatarUrl) updateData.avatar_url = avatarUrl;
-              await supabase.from("clients").update(updateData).eq("id", clientId);
-              console.log("[meta-webhook] Profile fetched:", { name: realName, hasAvatar: !!avatarUrl });
-            }
-          } else {
-            console.warn("[meta-webhook] Profile fetch failed:", profileRes.status);
+    // Fetch real profile name and photo from Graph API (for new clients or those with generic names)
+    let resolvedName: string | null = null;
+    if (clientNeedsNameUpdate && connection.access_token) {
+      try {
+        const token = await decryptToken(connection.access_token);
+        const fields = connectionType === "instagram" 
+          ? "name,username,profile_pic" 
+          : "name,profile_pic";
+        const profileRes = await fetch(
+          `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
+        );
+        if (profileRes.ok) {
+          const profile = await profileRes.json();
+          resolvedName = profile.name || profile.username || null;
+          const avatarUrl = profile.profile_pic || null;
+          if (resolvedName || avatarUrl) {
+            const updateData: Record<string, any> = {};
+            if (resolvedName) updateData.name = resolvedName;
+            if (avatarUrl) updateData.avatar_url = avatarUrl;
+            await supabase.from("clients").update(updateData).eq("id", clientId);
+            console.log("[meta-webhook] Profile resolved:", { name: resolvedName, hasAvatar: !!avatarUrl });
           }
-        } catch (profileErr) {
-          console.warn("[meta-webhook] Could not fetch profile:", profileErr);
+        } else {
+          const errBody = await profileRes.text();
+          console.warn("[meta-webhook] Profile fetch failed:", profileRes.status, errBody.slice(0, 200));
         }
+      } catch (profileErr) {
+        console.warn("[meta-webhook] Could not fetch profile:", profileErr);
       }
     }
 
@@ -393,6 +429,10 @@ async function processMessagingEntry(
         last_message_at: new Date(normalizeTimestamp(timestamp)).toISOString(),
         updated_at: new Date().toISOString(),
       };
+      // Update contact_name if we resolved a real name
+      if (resolvedName) {
+        updatePayload.contact_name = resolvedName;
+      }
       if (existingConv.archived_at) {
         updatePayload.archived_at = null;
         updatePayload.archived_reason = null;
@@ -404,9 +444,9 @@ async function processMessagingEntry(
         .update(updatePayload)
         .eq("id", conversationId);
     } else {
-      // Get the client name (may have been updated with real profile name)
-      let contactDisplayName = `${origin} ${remoteJid.slice(-4)}`;
-      if (clientId) {
+      // Use resolved name or fetch from client record
+      let contactDisplayName = resolvedName || `${origin} ${remoteJid.slice(-4)}`;
+      if (!resolvedName && clientId) {
         const { data: clientData } = await supabase.from("clients").select("name").eq("id", clientId).single();
         if (clientData?.name) contactDisplayName = clientData.name;
       }
