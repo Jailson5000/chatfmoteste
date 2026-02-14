@@ -35,6 +35,7 @@ export function InstagramIntegration() {
         .select("*")
         .eq("law_firm_id", profile.law_firm_id)
         .eq("type", "instagram")
+        .eq("source", "oauth")
         .maybeSingle();
 
       if (error) throw error;
