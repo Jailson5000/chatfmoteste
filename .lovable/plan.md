@@ -1,77 +1,47 @@
 
 
-# Corrigir Instagram Business Login - Usar endpoints corretos da documentacao oficial
+# Corrigir erro de redirect_uri no Instagram Business Login
 
-## Problema
+## Diagnostico
 
-O erro "Invalid Scopes: instagram_business_basic, instagram_business_manage_messages" ocorre porque os scopes `instagram_business_*` so sao validos no dialogo do **Instagram** (`instagram.com/oauth/authorize`), NAO no dialogo do Facebook (`facebook.com/dialog/oauth`).
-
-A documentacao oficial da Meta confirma que o Instagram Business Login usa endpoints totalmente separados do Facebook Login:
-
-- **Autorizacao**: `https://www.instagram.com/oauth/authorize`
-- **Token exchange**: `POST https://api.instagram.com/oauth/access_token`
-- **Long-lived token**: `GET https://graph.instagram.com/access_token`
-- **Client ID**: Instagram App ID (nao o Facebook App ID)
-- **Client Secret**: Instagram App Secret (nao o Facebook App Secret)
-
-## Alteracoes necessarias
-
-### 1. Frontend: `src/lib/meta-config.ts`
-
-Restaurar `buildMetaOAuthUrl("instagram")` para usar o dialogo do Instagram:
-
-```text
-ANTES (errado):
-  https://www.facebook.com/v22.0/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,...
-
-DEPOIS (correto - conforme docs):
-  https://www.instagram.com/oauth/authorize?client_id=1447135433693990&scope=instagram_business_basic,...&redirect_uri=https://miauchat.com.br/auth/meta-callback&response_type=code&state=...
+Os logs mostram repetidamente:
+```
+Error validating verification code. Please make sure your redirect_uri is identical to the one you used in the OAuth dialog request
 ```
 
-Usar `META_INSTAGRAM_APP_ID` (1447135433693990) e forcar `redirect_uri` fixa para `https://miauchat.com.br/auth/meta-callback` (independente do dominio atual).
+O Instagram exige que o `redirect_uri` na troca do token seja **identico** ao usado na URL de autorizacao. O problema pode ser:
 
-### 2. Backend: `supabase/functions/meta-oauth-callback/index.ts`
+1. **Mismatch de dominio**: O usuario esta em `suporte.miauchat.com.br`, mas o `redirect_uri` no OAuth aponta para `https://miauchat.com.br/auth/meta-callback`. Se `miauchat.com.br` redireciona para outro dominio antes de carregar a pagina de callback, o `redirect_uri` enviado ao backend pode nao bater.
 
-Re-adicionar o early return para Instagram ANTES do token exchange do Facebook. A funcao `handleInstagramBusiness` ja existe e esta correta:
-- Troca code em `api.instagram.com/oauth/access_token`
-- Obtem long-lived token em `graph.instagram.com/access_token`
-- Salva conexao com `source: "oauth"`
+2. **URI nao salva corretamente no Meta Dashboard**: A URI registrada no Instagram Business Login settings pode ter diferenca sutil (trailing slash, www, etc.).
 
-Porem precisa usar o **Instagram App Secret** (nao o Facebook App Secret). Adicionar leitura de `META_INSTAGRAM_APP_SECRET` (com fallback para `META_APP_SECRET`).
+## Solucao
 
-### 3. Secret: `META_INSTAGRAM_APP_SECRET`
+### 1. Backend: Adicionar logging de debug
 
-O secret `META_INSTAGRAM_APP_ID` ja existe. Precisamos tambem do **Instagram App Secret** que e diferente do Facebook App Secret.
+Antes de tentar trocar o token, logar o `redirect_uri` exato que esta sendo enviado para comparar com o usado na URL de autorizacao.
 
-Esse valor esta em: **App Dashboard > Instagram > API setup with Instagram login > 3. Set up Instagram business login > Business login settings > Instagram app secret**
+### 2. Backend: Garantir consistencia
 
-### 4. Meta Dashboard: URI de redirecionamento
+O `redirect_uri` hardcoded no backend deve ser exatamente `https://miauchat.com.br/auth/meta-callback` (sem trailing slash, sem www), identico ao usado no frontend pelo `getFixedRedirectUri("instagram")`.
 
-Na configuracao do Instagram Business Login no Meta Dashboard, a URI de redirecionamento deve ser exatamente:
-`https://miauchat.com.br/auth/meta-callback`
+### 3. Verificacao no Meta Dashboard
 
-## Resumo de alteracoes
+Na configuracao do **Instagram Business Login**, a URI de redirecionamento deve ser exatamente:
+```
+https://miauchat.com.br/auth/meta-callback
+```
+- Sem barra final
+- Sem `www`
+- Com `https://`
+
+## Alteracoes tecnicas
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Instagram usa `instagram.com/oauth/authorize` com `META_INSTAGRAM_APP_ID`, redirect fixo para `miauchat.com.br/auth/meta-callback` |
-| `src/pages/MetaAuthCallback.tsx` | Passar tipo para `getFixedRedirectUri` para Instagram usar URI fixa |
-| `supabase/functions/meta-oauth-callback/index.ts` | Re-adicionar early return do Instagram usando `handleInstagramBusiness` com `META_INSTAGRAM_APP_SECRET` |
-| Secret | Solicitar `META_INSTAGRAM_APP_SECRET` ao usuario |
+| `supabase/functions/meta-oauth-callback/index.ts` | Adicionar `console.log` com redirect_uri, appId, e code (parcial) antes da troca de token no `handleInstagramBusiness`. Forcar redirect_uri hardcoded `https://miauchat.com.br/auth/meta-callback` como fallback seguro |
 
 Deploy: `meta-oauth-callback`
 
-## Fluxo correto (conforme documentacao oficial)
-
-```text
-1. Usuario clica "Conectar Instagram"
-2. Popup: instagram.com/oauth/authorize?client_id=1447135433693990&redirect_uri=https://miauchat.com.br/auth/meta-callback&scope=instagram_business_basic,...
-3. Usuario autoriza
-4. Redirect: miauchat.com.br/auth/meta-callback?code=XXX
-5. Frontend envia code ao backend (meta-oauth-callback)
-6. Backend troca code em api.instagram.com/oauth/access_token (Instagram App ID + Secret)
-7. Backend troca short-lived por long-lived em graph.instagram.com/access_token
-8. Backend busca perfil em graph.instagram.com/v22.0/me
-9. Salva conexao na tabela meta_connections
-```
+Apos o deploy, o usuario testa novamente e verificamos nos logs qual redirect_uri exato esta sendo enviado vs o que foi usado na autorizacao.
 
