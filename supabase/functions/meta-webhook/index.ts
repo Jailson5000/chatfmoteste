@@ -533,6 +533,50 @@ async function processWhatsAppCloudEntry(
     const value = change.value;
     const phoneNumberId = value.metadata?.phone_number_id;
     
+    // Process delivery statuses (delivered, read, failed) even if no messages
+    if (value.statuses?.length) {
+      // Find connection for status updates
+      const { data: statusConn } = await supabase
+        .from("meta_connections")
+        .select("id, law_firm_id")
+        .eq("page_id", phoneNumberId)
+        .eq("type", connectionType)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (statusConn) {
+        for (const status of value.statuses) {
+          const { id: wamid, status: deliveryStatus, errors, timestamp: statusTs } = status;
+          console.log(`[meta-webhook] Delivery status: ${deliveryStatus} for wamid=${wamid?.slice(0, 20)}...`);
+
+          if (deliveryStatus === "failed" && errors?.length) {
+            console.error("[meta-webhook] Delivery FAILED:", JSON.stringify(errors));
+          }
+
+          // Update message delivery status in database if we have the external_id
+          if (wamid && (deliveryStatus === "delivered" || deliveryStatus === "read" || deliveryStatus === "failed")) {
+            const updateData: Record<string, any> = {
+              delivery_status: deliveryStatus,
+            };
+            if (deliveryStatus === "failed" && errors?.length) {
+              updateData.delivery_error = JSON.stringify(errors);
+            }
+            const { error: updateErr } = await supabase
+              .from("messages")
+              .update(updateData)
+              .eq("external_id", wamid)
+              .eq("law_firm_id", statusConn.law_firm_id);
+            
+            if (updateErr) {
+              console.warn("[meta-webhook] Could not update delivery status:", updateErr.message);
+            } else {
+              console.log(`[meta-webhook] Updated delivery status to '${deliveryStatus}' for ${wamid?.slice(0, 20)}`);
+            }
+          }
+        }
+      }
+    }
+
     if (!value.messages?.length) continue;
 
     // Find connection by phone_number_id (stored as page_id for WABA)
