@@ -32,11 +32,22 @@ export default function MetaTestPage() {
   const navigate = useNavigate();
   const [results, setResults] = useState<Record<string, TestResult>>({});
 
-  // Test connection form state
+  // WhatsApp test connection form state
   const [testToken, setTestToken] = useState("");
   const [testPhoneNumberId, setTestPhoneNumberId] = useState("920102187863212");
   const [testWabaId, setTestWabaId] = useState("1243984223971997");
   const [savingConnection, setSavingConnection] = useState(false);
+
+  // Facebook test connection form state
+  const [fbToken, setFbToken] = useState("");
+  const [fbPageId, setFbPageId] = useState("");
+  const [savingFbConnection, setSavingFbConnection] = useState(false);
+
+  // Instagram test connection form state
+  const [igToken, setIgToken] = useState("");
+  const [igPageId, setIgPageId] = useState("");
+  const [igAccId, setIgAccId] = useState("");
+  const [savingIgConnection, setSavingIgConnection] = useState(false);
 
   // Test message form state
   const [recipientPhone, setRecipientPhone] = useState("5563984622450");
@@ -106,37 +117,60 @@ export default function MetaTestPage() {
     toast.success("JSON copiado!");
   };
 
-  // Save test connection
-  const handleSaveTestConnection = async () => {
-    if (!testToken.trim()) {
-      toast.error("Cole o token temporário do painel da Meta");
+  // Generic save connection handler
+  const handleSaveConnection = async (
+    connectionType: string,
+    token: string,
+    extra: Record<string, string>,
+    setLoading: (v: boolean) => void,
+    label: string
+  ) => {
+    if (!token.trim()) {
+      toast.error(`Cole o token temporário para ${label}`);
       return;
     }
-    setSavingConnection(true);
+    setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("meta-api", {
         body: {
           action: "save_test_connection",
-          accessToken: testToken.trim(),
-          phoneNumberId: testPhoneNumberId.trim(),
-          wabaId: testWabaId.trim(),
+          connectionType,
+          accessToken: token.trim(),
+          ...extra,
         },
       });
       if (error) throw error;
       if (data?.error) {
-        const errMsg = typeof data.error === 'object' 
-          ? JSON.stringify(data.error, null, 2) 
+        const errMsg = typeof data.error === 'object'
+          ? JSON.stringify(data.error, null, 2)
           : String(data.error);
         throw new Error(errMsg);
       }
-      toast.success(`Conexão salva! ID: ${data.connectionId}`);
+      toast.success(`Conexão ${label} salva! ID: ${data.connectionId}`);
       refetchConnections();
     } catch (err: any) {
       toast.error(`Erro: ${err.message}`);
     } finally {
-      setSavingConnection(false);
+      setLoading(false);
     }
   };
+
+  const handleSaveTestConnection = () =>
+    handleSaveConnection("whatsapp_cloud", testToken, {
+      phoneNumberId: testPhoneNumberId.trim(),
+      wabaId: testWabaId.trim(),
+    }, setSavingConnection, "WhatsApp Cloud");
+
+  const handleSaveFbConnection = () =>
+    handleSaveConnection("facebook", fbToken, {
+      pageId: fbPageId.trim(),
+    }, setSavingFbConnection, "Facebook");
+
+  const handleSaveIgConnection = () =>
+    handleSaveConnection("instagram", igToken, {
+      pageId: igPageId.trim(),
+      igAccountId: igAccId.trim(),
+    }, setSavingIgConnection, "Instagram");
 
   // Send test message
   const handleSendTestMessage = async (useTemplate: boolean) => {
@@ -183,33 +217,33 @@ export default function MetaTestPage() {
   };
 
   // Build dynamic endpoints
-  const fbPageId = (fbConnection as any)?.page_id || "PAGE_ID";
+  const fbPageIdVal = (fbConnection as any)?.page_id || "PAGE_ID";
   const fbIgAccountId = (fbConnection as any)?.ig_account_id || "IG_ID";
-  const igPageId = (igConnection as any)?.page_id || "PAGE_ID";
+  const igPageIdVal = (igConnection as any)?.page_id || "PAGE_ID";
   const igAccountId = (igConnection as any)?.ig_account_id || "IG_ID";
   const waPhoneId = (waConnection as any)?.page_id || "PHONE_ID";
   const wabaIdVal = (waConnection as any)?.waba_id || "WABA_ID";
 
   const messengerTests: PermissionTest[] = [
-    { key: "msg_pages_utility", permission: "pages_utility_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
+    { key: "msg_pages_utility", permission: "pages_utility_messaging", endpoint: `/${fbPageIdVal}/conversations?limit=3`, required: true },
     { key: "msg_pages_metadata", permission: "pages_manage_metadata", endpoint: `/me/accounts?fields=id,name,category`, required: true },
     { key: "msg_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
-    { key: "msg_pages_messaging", permission: "pages_messaging", endpoint: `/${fbPageId}/conversations?limit=3`, required: true },
-    { key: "msg_ig_messages", permission: "instagram_business_manage_messages", endpoint: `/${fbPageId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "msg_pages_messaging", permission: "pages_messaging", endpoint: `/${fbPageIdVal}/conversations?limit=3`, required: true },
+    { key: "msg_ig_messages", permission: "instagram_manage_messages", endpoint: `/${fbPageIdVal}/conversations?platform=instagram&limit=3`, required: true },
     { key: "msg_pages_show", permission: "pages_show_list", endpoint: `/me/accounts?fields=id,name`, required: true },
-    { key: "msg_ig_basic", permission: "instagram_business_basic", endpoint: `/${fbIgAccountId}?fields=id,username`, required: true },
+    { key: "msg_ig_basic", permission: "instagram_basic", endpoint: `/${fbIgAccountId}?fields=id,username`, required: true },
     { key: "msg_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
   ];
 
   const instagramTests: PermissionTest[] = [
-    { key: "ig_manage_messages", permission: "instagram_business_manage_messages", endpoint: `/${igAccountId}/conversations?platform=instagram&limit=3`, required: true },
-    { key: "ig_business_basic", permission: "instagram_business_basic", endpoint: `/me?fields=id,name,username,profile_picture_url`, required: true },
+    { key: "ig_manage_messages", permission: "instagram_manage_messages", endpoint: `/${igAccountId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "ig_business_basic", permission: "instagram_basic", endpoint: `/me?fields=id,name,username,profile_picture_url`, required: true },
     { key: "ig_public_profile", permission: "public_profile", endpoint: `/me?fields=id,name`, required: true },
     { key: "ig_manage_comments", permission: "instagram_manage_comments", endpoint: `/${igAccountId}/media?limit=3&fields=id,comments_count`, required: true },
-    { key: "ig_messages", permission: "instagram_manage_messages", endpoint: `/${igPageId}/conversations?platform=instagram&limit=3`, required: true },
+    { key: "ig_messages", permission: "instagram_manage_messages", endpoint: `/${igPageIdVal}/conversations?platform=instagram&limit=3`, required: true },
     { key: "ig_pages_show", permission: "pages_show_list", endpoint: `/me/accounts?fields=id,name`, required: true },
     { key: "ig_basic", permission: "instagram_basic", endpoint: `/${igAccountId}?fields=id,username`, required: true },
-    { key: "ig_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: true },
+    { key: "ig_business", permission: "business_management", endpoint: `/me/businesses?limit=3`, required: false },
   ];
 
   const whatsappTests: PermissionTest[] = [
@@ -385,7 +419,107 @@ export default function MetaTestPage() {
         </CardContent>
       </Card>
 
-      {/* ===== SEÇÃO: Envio de Mensagem de Teste ===== */}
+      {/* ===== SEÇÃO: Conexão Manual Facebook Messenger ===== */}
+      <Card className="border-2 border-blue-500/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Facebook className="h-5 w-5" />
+            1b. Conexão Manual (Facebook Messenger)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Cole o token da página e o Page ID do painel Meta Developer.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Token da Página</Label>
+            <Textarea
+              placeholder="EAARlzIjg37wBO..."
+              value={fbToken}
+              onChange={(e) => setFbToken(e.target.value)}
+              rows={3}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Page ID</Label>
+            <Input
+              placeholder="123456789012345"
+              value={fbPageId}
+              onChange={(e) => setFbPageId(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          <Button onClick={handleSaveFbConnection} disabled={savingFbConnection || !fbToken.trim()}>
+            {savingFbConnection ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Salvar Conexão Facebook
+          </Button>
+          {fbConnection && (
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <span className="text-green-600 font-medium">Conexão Facebook ativa</span>
+              <span className="text-muted-foreground">({(fbConnection as any).page_id})</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ===== SEÇÃO: Conexão Manual Instagram ===== */}
+      <Card className="border-2 border-pink-500/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Instagram className="h-5 w-5" />
+            1c. Conexão Manual (Instagram DM)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Cole o token, Page ID e IG Account ID do painel Meta Developer.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Token da Página</Label>
+            <Textarea
+              placeholder="EAARlzIjg37wBO..."
+              value={igToken}
+              onChange={(e) => setIgToken(e.target.value)}
+              rows={3}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Page ID</Label>
+              <Input
+                placeholder="123456789012345"
+                value={igPageId}
+                onChange={(e) => setIgPageId(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>IG Account ID</Label>
+              <Input
+                placeholder="17841400123456"
+                value={igAccId}
+                onChange={(e) => setIgAccId(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+          </div>
+          <Button onClick={handleSaveIgConnection} disabled={savingIgConnection || !igToken.trim()}>
+            {savingIgConnection ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Salvar Conexão Instagram
+          </Button>
+          {igConnection && (
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <span className="text-green-600 font-medium">Conexão Instagram ativa</span>
+              <span className="text-muted-foreground">({(igConnection as any).page_id} / {(igConnection as any).ig_account_id})</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border-2 border-primary/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
