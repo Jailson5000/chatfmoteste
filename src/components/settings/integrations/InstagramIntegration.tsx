@@ -1,9 +1,6 @@
-import { useState, useCallback, useEffect } from "react";
-import { Instagram, ExternalLink, Loader2, Trash2, RefreshCw } from "lucide-react";
+import { useCallback } from "react";
+import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,7 +18,6 @@ function InstagramIcon() {
 export function InstagramIntegration() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [isConnecting, setIsConnecting] = useState(false);
 
   // Fetch existing connection
   const { data: connection, isLoading } = useQuery({

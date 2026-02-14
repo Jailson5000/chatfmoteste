@@ -18,7 +18,7 @@ export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "instagram_basic,instagram_manage_messages,pages_show_list",
+  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish",
   facebook: "pages_messaging,pages_manage_metadata,pages_show_list",
 } as const;
 
@@ -45,6 +45,11 @@ export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
   const redirectUri = getFixedRedirectUri();
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
+
+  if (type === "instagram") {
+    // Instagram Business API uses a different OAuth endpoint
+    return `https://www.instagram.com/oauth/authorize?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code&enable_fb_login=0&force_authentication=1`;
+  }
 
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 }
