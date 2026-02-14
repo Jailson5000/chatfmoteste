@@ -1,84 +1,114 @@
 
-# Analise Completa: WhatsApp Cloud - Mensagens Nao Entregues
 
-## Diagnostico
+# Corrigir Renderizacao de Templates WhatsApp + Preview na Criacao
 
-Apos analise dos logs, codigo e documentacao da Meta, o resultado e claro:
+## Problema 1: Templates nao aparecem como cards estilizados no chat
 
-**O codigo do sistema esta funcionando corretamente.** A API da Meta retorna `200 OK` com `message_status: "accepted"` e um `wamid` valido. O problema e uma limitacao do numero de teste.
+Os templates enviados pelo WhatsApp Cloud sao salvos no banco como texto puro, **sem** o marcador `[template: nome]` que o `MessageBubble` usa para detectar e renderizar como card estilizado com borda verde, icone e botoes.
 
-## Evidencias dos Logs
+**Causa**: No `meta-api/index.ts` (linha 433), quando o sistema busca o conteudo expandido do template na Graph API, ele substitui o fallback `[template: hello_world]` pelo texto expandido:
 
 ```text
-21:16:11 - Message sent: graphMessageId = "wamid.HBgMNTU2Mzk5Mjk5MDg5..."
-21:10:39 - send_test_message result: 200 {"message_status":"accepted"}
+// O que e salvo:
+Hello World
+
+Welcome and congratulations!!...
+
+_WhatsApp Business Platform sample message_
+
+// O que deveria ser salvo (com marcador):
+[template: hello_world]
+Hello World
+
+Welcome and congratulations!!...
+
+_WhatsApp Business Platform sample message_
 ```
 
-Nenhum erro nos logs. A Meta **aceitou** as mensagens.
+Sem o marcador `[template:]`, o `MessageBubble.tsx` (linha 1872) nao detecta como template e renderiza como texto comum.
 
-## Causa Raiz: Limitacao do Numero de Teste da Meta
+## Problema 2: Falta preview na criacao de templates
 
-Segundo a documentacao oficial da Meta e multiplos relatos na comunidade de desenvolvedores:
+O dialog de criacao de templates em `WhatsAppTemplatesManager.tsx` nao mostra uma pre-visualizacao do template sendo criado. E preciso adicionar um painel lateral de preview que simule a aparencia do template no WhatsApp (com header, body, footer e botoes).
 
-1. **Numero de teste e dos EUA (+1 555 159 0933)**: Numeros de teste fornecidos pela Meta sao americanos e tem restricoes severas de envio para numeros internacionais.
+## Solucao
 
-2. **"Accepted" nao significa "Delivered"**: A resposta `200` com `message_status: "accepted"` indica apenas que a Meta recebeu e validou o request. A entrega real e comunicada via webhooks de `statuses` -- que nosso sistema ainda nao processa.
+### 1. Backend: Preservar marcador `[template:]` no conteudo salvo
 
-3. **Limitacao geografica documentada**: Numeros de teste dos EUA frequentemente **nao conseguem entregar mensagens para numeros fora dos EUA** (como os numeros brasileiros +55).
+**Arquivo**: `supabase/functions/meta-api/index.ts`
 
-4. **Limite de 5 destinatarios**: O numero de teste so pode enviar para ate 5 numeros cadastrados na lista de teste.
-
-## Solucao Real
-
-Para enviar e receber mensagens de verdade, voce precisa **registrar um numero de telefone proprio** (brasileiro) no WhatsApp Business API, substituindo o numero de teste. Isso e feito no painel da Meta em:
-
-**WhatsApp > API Setup > Etapa 1 > Adicionar numero de telefone**
-
-## Melhoria Tecnica Recomendada
-
-Embora o envio funcione, ha uma melhoria que podemos fazer: **processar webhooks de status de entrega** (`delivered`, `read`, `failed`) para mostrar no sistema se a mensagem foi realmente entregue ou falhou.
-
-### Alteracao: `supabase/functions/meta-webhook/index.ts`
-
-Na funcao `processWhatsAppCloudEntry`, atualmente o codigo ignora eventos que nao contem `value.messages`. Porem, eventos de `statuses` (delivery receipts) tambem chegam pelo mesmo webhook e contem informacoes de entrega.
-
-A melhoria consiste em:
-
-1. **Detectar eventos de `statuses`** no payload do webhook
-2. **Logar o status de entrega** para diagnostico futuro (delivered, read, failed)
-3. **Atualizar a mensagem no banco** com o status de entrega quando disponivel
+Na funcao `send_test_message` (linha ~408-437), alterar a logica para **sempre** incluir o marcador `[template: nome]` na primeira linha do conteudo expandido:
 
 ```typescript
-// Apos processar messages, verificar se ha statuses
-if (value.statuses?.length) {
-  for (const status of value.statuses) {
-    const { id: wamid, status: deliveryStatus, errors } = status;
-    console.log(`[meta-webhook] Delivery status: ${deliveryStatus} for ${wamid}`);
-    
-    if (deliveryStatus === "failed" && errors?.length) {
-      console.error("[meta-webhook] Delivery failed:", errors);
-    }
-    
-    // Atualizar external_id com status na tabela messages (opcional)
-    // Isso permitira mostrar indicadores de "entregue" / "lido" no chat
-  }
-}
+// Linha 433 - alterar de:
+if (parts.length > 0) finalContent = parts.join("\n\n");
+
+// Para:
+if (parts.length > 0) finalContent = `[template: ${tplName}]\n${parts.join("\n\n")}`;
 ```
 
-### Deploy
-- Redeployer `meta-webhook`
+Isso garante que o conteudo salvo sempre comece com `[template: hello_world]`, ativando a deteccao do card no `MessageBubble`.
 
-## Resumo
+### 2. Backend: Fazer o mesmo para envio normal via chat
 
-| Item | Status |
-|------|--------|
-| Codigo de envio (`sendWhatsAppCloudMessage`) | Correto, sem alteracao |
-| API retorna sucesso | Sim (200 + wamid) |
-| Mensagem chega no celular | Nao - limitacao do numero de teste |
-| Solucao definitiva | Registrar numero brasileiro proprio |
-| Melhoria tecnica | Processar webhooks de delivery status |
+**Arquivo**: `supabase/functions/meta-api/index.ts`
+
+Adicionar suporte a um novo action `send_template` que permite enviar templates a partir da tela de conversas (nao apenas pelo meta-test). Este action:
+- Recebe `conversationId`, `templateName`, `templateLang` e opcionalmente `templateComponents` (parametros)
+- Envia o template via WhatsApp Cloud API
+- Salva a mensagem no banco com o marcador `[template: nome]` + conteudo expandido
+
+### 3. Frontend: Melhorar deteccao de templates no MessageBubble
+
+**Arquivo**: `src/components/conversations/MessageBubble.tsx`
+
+Melhorar o `parseTemplateContent` para tambem detectar templates pelo padrao de conteudo (Header + Body + Footer com `_texto_`), mesmo sem o marcador `[template:]`. Isso corrige mensagens ja salvas no banco:
+
+- Detectar mensagens que possuem footer no formato `_texto_` (indicador de template WhatsApp)
+- Combinar com `is_from_me: true` e `message_type: "text"` para evitar falsos positivos
+
+### 4. Frontend: Preview de template na criacao
+
+**Arquivo**: `src/components/connections/WhatsAppTemplatesManager.tsx`
+
+Expandir o dialog de criacao (`max-w-lg` para `max-w-3xl`) com layout de duas colunas:
+- **Coluna esquerda**: formulario atual (header, body, footer, botoes)
+- **Coluna direita**: preview em tempo real estilizado como WhatsApp
+
+O preview mostrara:
+- Fundo verde claro simulando bolha do WhatsApp
+- Header em negrito (se preenchido)
+- Body com variaveis `{{1}}` destacadas
+- Footer em italico e cor mais clara
+- Botoes como chips clicaveis abaixo da mensagem
+- Borda lateral verde (mesmo estilo usado no chat)
+
+### 5. Corrigir mensagens existentes no banco (SQL)
+
+Atualizar as mensagens de template ja salvas para incluir o marcador:
+
+```sql
+UPDATE messages 
+SET content = '[template: hello_world]' || E'\n' || content
+WHERE content LIKE 'Hello World%' 
+  AND content LIKE '%WhatsApp Business Platform sample message%'
+  AND content NOT LIKE '[template:%'
+  AND is_from_me = true;
+```
+
+## Resumo de alteracoes
+
+| Arquivo | Tipo | Descricao |
+|---------|------|-----------|
+| `supabase/functions/meta-api/index.ts` | Backend | Preservar marcador `[template:]` ao salvar + novo action `send_template` |
+| `src/components/conversations/MessageBubble.tsx` | Frontend | Melhorar deteccao de templates (fallback para conteudo sem marcador) |
+| `src/components/connections/WhatsAppTemplatesManager.tsx` | Frontend | Adicionar painel de preview na criacao de templates |
+| SQL | Dados | Corrigir mensagens existentes no banco |
 
 ## O que NAO muda
 - Facebook (funcionando)
 - Instagram (funcionando)
-- Logica de envio do `meta-api`
+- Webhook `meta-webhook` (sem alteracoes)
+- Templates internos do sistema (`EditableTemplate.tsx`, `TemplatePopup.tsx`)
+- Logica de envio de mensagens normais (texto, imagem, etc.)
+
