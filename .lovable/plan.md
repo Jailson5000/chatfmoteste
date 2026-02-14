@@ -1,53 +1,65 @@
 
-# Corrigir "Invalid platform app" no Instagram OAuth
+# Corrigir fluxo OAuth do Instagram Business
 
-## Problema identificado
+## Problema raiz
 
-Analisando as imagens e o erro:
+O Instagram Business Login (permissoes `instagram_business_basic`, `instagram_business_manage_messages`) usa o **dialogo do Facebook** (`facebook.com/dialog/oauth`) com o **Facebook App ID** (`1237829051015100`). 
 
-1. No Meta Dashboard, a URI de redirecionamento cadastrada para Instagram Business Login e: `https://miauchat.com.br/`
-2. Voce esta acessando o app pela URL de preview: `chatfmoteste.lovable.app`
-3. O codigo envia `redirect_uri=https://chatfmoteste.lovable.app/auth/meta-callback`
-4. Essa URI NAO esta registrada no Meta -> erro "Invalid platform app"
+O codigo atual usa incorretamente:
+- Endpoint: `instagram.com/oauth/authorize` (errado - isso e para o Instagram Consumer API)
+- App ID: `META_INSTAGRAM_APP_ID` (`1447135433693990`) (errado - deve usar o Facebook App ID)
 
-O Instagram exige que a `redirect_uri` enviada na requisicao seja EXATAMENTE igual a uma das URIs cadastradas no dashboard.
+Isso gera o erro "Invalid platform app" porque o Instagram nao reconhece esse App ID nesse endpoint.
 
-## Solucao (2 partes)
+## Solucao
 
-### Parte 1 - Codigo: Forcar redirect_uri fixa para Instagram
+### 1. Frontend: `src/lib/meta-config.ts`
 
-Alterar `getFixedRedirectUri()` em `src/lib/meta-config.ts` para SEMPRE usar `https://miauchat.com.br/auth/meta-callback` para o fluxo Instagram, independente de qual dominio o usuario esta acessando. O popup do OAuth vai abrir no dominio correto e o `postMessage` funciona cross-origin.
+Mudar `buildMetaOAuthUrl("instagram")` para usar o **mesmo dialogo do Facebook** mas com os scopes do Instagram:
 
 ```text
-ANTES:
-  Se esta em chatfmoteste.lovable.app -> retorna chatfmoteste.lovable.app/auth/meta-callback
-  Se esta em miauchat.com.br -> retorna miauchat.com.br/auth/meta-callback
+ANTES (errado):
+  https://www.instagram.com/oauth/authorize?client_id=1447135433693990&...
 
-DEPOIS:
-  Sempre retorna https://miauchat.com.br/auth/meta-callback (para Instagram)
-  Para Facebook, mantem o comportamento atual
+DEPOIS (correto):
+  https://www.facebook.com/v22.0/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,instagram_business_manage_messages,instagram_manage_comments&...
 ```
 
-Isso garante que a redirect_uri SEMPRE bate com o que esta no Meta.
+Ambos Instagram e Facebook usam `facebook.com/dialog/oauth` -- a diferenca sao os **scopes**.
 
-### Parte 2 - Meta Dashboard: Atualizar a URI
+### 2. Backend: `supabase/functions/meta-oauth-callback/index.ts`
 
-Voce precisa alterar a URI no campo "URIs de redirecionamento do OAuth" nas configuracoes do login da empresa:
+Remover o early return do Instagram (linhas 82-87). O code gerado pelo dialogo do Facebook deve ser trocado via `graph.facebook.com/oauth/access_token` (fluxo normal do Facebook).
 
-**Trocar** `https://miauchat.com.br/` **por** `https://miauchat.com.br/auth/meta-callback`
+O codigo existente nas linhas 164-198 **ja sabe** tratar `type === "instagram"`:
+- Seleciona a pagina que tem `instagram_business_account`
+- Salva o `ig_account_id`
+- Faz subscribe nos webhooks
 
-Esta e a unica alteracao manual necessaria. Sem isso, o Instagram rejeita a requisicao porque a URI nao bate.
+A funcao `handleInstagramBusiness` (que usa `api.instagram.com`) nao sera mais usada pelo OAuth, mas pode ser mantida para referencia.
 
-## Alteracoes no codigo
+### 3. Frontend: redirect_uri
+
+Como agora o Instagram usa o dialogo do Facebook, a redirect_uri deve ser a mesma do Facebook (nao precisa mais da URI fixa do Instagram). O `getFixedRedirectUri` para Instagram passa a seguir a mesma logica do Facebook.
+
+## Fluxo corrigido
+
+```text
+1. Usuario clica "Conectar" Instagram
+2. Popup abre: facebook.com/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,...
+3. Usuario autoriza no Facebook
+4. Redirect para /auth/meta-callback?code=XXX&state={"type":"instagram"}
+5. Backend troca code via graph.facebook.com/oauth/access_token (fluxo Facebook normal)
+6. Backend busca paginas via me/accounts
+7. Backend seleciona pagina com instagram_business_account
+8. Salva conexao com type="instagram" e ig_account_id
+```
+
+## Alteracoes
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Criar funcao `getInstagramRedirectUri()` que sempre retorna `https://miauchat.com.br/auth/meta-callback`, e usar no `buildMetaOAuthUrl` para Instagram |
-| `src/pages/MetaAuthCallback.tsx` | Usar a mesma URI fixa ao enviar para o backend |
+| `src/lib/meta-config.ts` | Instagram usa `facebook.com/dialog/oauth` com `META_APP_ID` em vez de `instagram.com/oauth/authorize` |
+| `supabase/functions/meta-oauth-callback/index.ts` | Remover early return do Instagram (linhas 82-87). Deixar o fluxo Facebook normal tratar, que ja tem logica para `type === "instagram"` |
 
-## Resumo da alteracao no Meta Dashboard
-
-Na modal "Configuracoes do login da empresa" que aparece no seu screenshot:
-1. Remover `https://miauchat.com.br/`
-2. Adicionar `https://miauchat.com.br/auth/meta-callback`
-3. Salvar
+Deploy: `meta-oauth-callback`
