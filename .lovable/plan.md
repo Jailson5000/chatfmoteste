@@ -1,65 +1,77 @@
 
-# Corrigir fluxo OAuth do Instagram Business
 
-## Problema raiz
+# Corrigir Instagram Business Login - Usar endpoints corretos da documentacao oficial
 
-O Instagram Business Login (permissoes `instagram_business_basic`, `instagram_business_manage_messages`) usa o **dialogo do Facebook** (`facebook.com/dialog/oauth`) com o **Facebook App ID** (`1237829051015100`). 
+## Problema
 
-O codigo atual usa incorretamente:
-- Endpoint: `instagram.com/oauth/authorize` (errado - isso e para o Instagram Consumer API)
-- App ID: `META_INSTAGRAM_APP_ID` (`1447135433693990`) (errado - deve usar o Facebook App ID)
+O erro "Invalid Scopes: instagram_business_basic, instagram_business_manage_messages" ocorre porque os scopes `instagram_business_*` so sao validos no dialogo do **Instagram** (`instagram.com/oauth/authorize`), NAO no dialogo do Facebook (`facebook.com/dialog/oauth`).
 
-Isso gera o erro "Invalid platform app" porque o Instagram nao reconhece esse App ID nesse endpoint.
+A documentacao oficial da Meta confirma que o Instagram Business Login usa endpoints totalmente separados do Facebook Login:
 
-## Solucao
+- **Autorizacao**: `https://www.instagram.com/oauth/authorize`
+- **Token exchange**: `POST https://api.instagram.com/oauth/access_token`
+- **Long-lived token**: `GET https://graph.instagram.com/access_token`
+- **Client ID**: Instagram App ID (nao o Facebook App ID)
+- **Client Secret**: Instagram App Secret (nao o Facebook App Secret)
+
+## Alteracoes necessarias
 
 ### 1. Frontend: `src/lib/meta-config.ts`
 
-Mudar `buildMetaOAuthUrl("instagram")` para usar o **mesmo dialogo do Facebook** mas com os scopes do Instagram:
+Restaurar `buildMetaOAuthUrl("instagram")` para usar o dialogo do Instagram:
 
 ```text
 ANTES (errado):
-  https://www.instagram.com/oauth/authorize?client_id=1447135433693990&...
+  https://www.facebook.com/v22.0/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,...
 
-DEPOIS (correto):
-  https://www.facebook.com/v22.0/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,instagram_business_manage_messages,instagram_manage_comments&...
+DEPOIS (correto - conforme docs):
+  https://www.instagram.com/oauth/authorize?client_id=1447135433693990&scope=instagram_business_basic,...&redirect_uri=https://miauchat.com.br/auth/meta-callback&response_type=code&state=...
 ```
 
-Ambos Instagram e Facebook usam `facebook.com/dialog/oauth` -- a diferenca sao os **scopes**.
+Usar `META_INSTAGRAM_APP_ID` (1447135433693990) e forcar `redirect_uri` fixa para `https://miauchat.com.br/auth/meta-callback` (independente do dominio atual).
 
 ### 2. Backend: `supabase/functions/meta-oauth-callback/index.ts`
 
-Remover o early return do Instagram (linhas 82-87). O code gerado pelo dialogo do Facebook deve ser trocado via `graph.facebook.com/oauth/access_token` (fluxo normal do Facebook).
+Re-adicionar o early return para Instagram ANTES do token exchange do Facebook. A funcao `handleInstagramBusiness` ja existe e esta correta:
+- Troca code em `api.instagram.com/oauth/access_token`
+- Obtem long-lived token em `graph.instagram.com/access_token`
+- Salva conexao com `source: "oauth"`
 
-O codigo existente nas linhas 164-198 **ja sabe** tratar `type === "instagram"`:
-- Seleciona a pagina que tem `instagram_business_account`
-- Salva o `ig_account_id`
-- Faz subscribe nos webhooks
+Porem precisa usar o **Instagram App Secret** (nao o Facebook App Secret). Adicionar leitura de `META_INSTAGRAM_APP_SECRET` (com fallback para `META_APP_SECRET`).
 
-A funcao `handleInstagramBusiness` (que usa `api.instagram.com`) nao sera mais usada pelo OAuth, mas pode ser mantida para referencia.
+### 3. Secret: `META_INSTAGRAM_APP_SECRET`
 
-### 3. Frontend: redirect_uri
+O secret `META_INSTAGRAM_APP_ID` ja existe. Precisamos tambem do **Instagram App Secret** que e diferente do Facebook App Secret.
 
-Como agora o Instagram usa o dialogo do Facebook, a redirect_uri deve ser a mesma do Facebook (nao precisa mais da URI fixa do Instagram). O `getFixedRedirectUri` para Instagram passa a seguir a mesma logica do Facebook.
+Esse valor esta em: **App Dashboard > Instagram > API setup with Instagram login > 3. Set up Instagram business login > Business login settings > Instagram app secret**
 
-## Fluxo corrigido
+### 4. Meta Dashboard: URI de redirecionamento
 
-```text
-1. Usuario clica "Conectar" Instagram
-2. Popup abre: facebook.com/dialog/oauth?client_id=1237829051015100&scope=instagram_business_basic,...
-3. Usuario autoriza no Facebook
-4. Redirect para /auth/meta-callback?code=XXX&state={"type":"instagram"}
-5. Backend troca code via graph.facebook.com/oauth/access_token (fluxo Facebook normal)
-6. Backend busca paginas via me/accounts
-7. Backend seleciona pagina com instagram_business_account
-8. Salva conexao com type="instagram" e ig_account_id
-```
+Na configuracao do Instagram Business Login no Meta Dashboard, a URI de redirecionamento deve ser exatamente:
+`https://miauchat.com.br/auth/meta-callback`
 
-## Alteracoes
+## Resumo de alteracoes
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Instagram usa `facebook.com/dialog/oauth` com `META_APP_ID` em vez de `instagram.com/oauth/authorize` |
-| `supabase/functions/meta-oauth-callback/index.ts` | Remover early return do Instagram (linhas 82-87). Deixar o fluxo Facebook normal tratar, que ja tem logica para `type === "instagram"` |
+| `src/lib/meta-config.ts` | Instagram usa `instagram.com/oauth/authorize` com `META_INSTAGRAM_APP_ID`, redirect fixo para `miauchat.com.br/auth/meta-callback` |
+| `src/pages/MetaAuthCallback.tsx` | Passar tipo para `getFixedRedirectUri` para Instagram usar URI fixa |
+| `supabase/functions/meta-oauth-callback/index.ts` | Re-adicionar early return do Instagram usando `handleInstagramBusiness` com `META_INSTAGRAM_APP_SECRET` |
+| Secret | Solicitar `META_INSTAGRAM_APP_SECRET` ao usuario |
 
 Deploy: `meta-oauth-callback`
+
+## Fluxo correto (conforme documentacao oficial)
+
+```text
+1. Usuario clica "Conectar Instagram"
+2. Popup: instagram.com/oauth/authorize?client_id=1447135433693990&redirect_uri=https://miauchat.com.br/auth/meta-callback&scope=instagram_business_basic,...
+3. Usuario autoriza
+4. Redirect: miauchat.com.br/auth/meta-callback?code=XXX
+5. Frontend envia code ao backend (meta-oauth-callback)
+6. Backend troca code em api.instagram.com/oauth/access_token (Instagram App ID + Secret)
+7. Backend troca short-lived por long-lived em graph.instagram.com/access_token
+8. Backend busca perfil em graph.instagram.com/v22.0/me
+9. Salva conexao na tabela meta_connections
+```
+
