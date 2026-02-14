@@ -1,33 +1,23 @@
 
-# Corrigir Facebook e Instagram OAuth
 
-## Problema 1: Facebook conecta mas aparece desconectado
+# Atualizar META_INSTAGRAM_APP_SECRET
 
-**Causa raiz**: O backend salva a conexao do Facebook SEM o campo `source: "oauth"`. O valor padrao da coluna e `"manual_test"`. O frontend filtra conexoes com `.eq("source", "oauth")`, entao nunca encontra a conexao salva.
+O problema do Instagram esta confirmado: o **App Secret** configurado no backend esta incorreto. Por isso o Instagram retorna erro na troca do codigo por token.
 
-**Evidencia**: A consulta ao banco mostra a conexao Facebook com `source: "manual_test"` apesar de ter vindo do fluxo OAuth.
+## Acao necessaria
 
-**Correcao**: Adicionar `source: "oauth"` no upsert do Facebook na edge function `meta-oauth-callback`.
+Atualizar o secret `META_INSTAGRAM_APP_SECRET` com o valor correto do painel Meta Developer Console.
 
-## Problema 2: Instagram erro de redirect_uri
+### Onde encontrar o valor correto:
+1. Acesse [developers.facebook.com](https://developers.facebook.com)
+2. Selecione o app do Instagram (ID: `1447135433693990`)
+3. Va em **App Settings > Basic**
+4. Copie o campo **App Secret**
 
-**Causa raiz**: O erro "Error validating verification code" do Instagram pode significar:
-- redirect_uri diferente (ja verificamos que e identico)
-- App Secret incorreto (Instagram retorna erro enganoso de redirect_uri quando o secret esta errado)
-- Codigo ja expirado ou usado
+### Alteracao tecnica
 
-O `META_INSTAGRAM_APP_SECRET` no backend usa fallback para `META_APP_SECRET` (o secret do Facebook). Se o Instagram App tem um secret diferente do Facebook App, a troca do token vai falhar com esse erro enganoso.
+| Acao | Detalhe |
+|------|---------|
+| Atualizar secret `META_INSTAGRAM_APP_SECRET` | Substituir o valor atual (que comeca com `2eee...`) pelo App Secret correto do painel da Meta |
 
-**Correcao**: Adicionar log do `appSecret` (primeiros 4 caracteres) para confirmar qual secret esta sendo usado, e logar se esta usando o fallback ou um secret dedicado.
-
-## Alteracoes tecnicas
-
-| Arquivo | Alteracao |
-|---------|-----------|
-| `supabase/functions/meta-oauth-callback/index.ts` | 1. Adicionar `source: "oauth"` no upsert do Facebook (linha ~222). 2. Logar se `META_INSTAGRAM_APP_SECRET` esta configurado ou se esta usando fallback do `META_APP_SECRET`. 3. Logar primeiros 4 chars do secret usado para diagnostico |
-
-## Correcao do registro existente
-
-Alem da correcao no codigo, a conexao Facebook ja salva no banco (id: `04857f90-...`) precisa ter o `source` atualizado de `"manual_test"` para `"oauth"` via migracao SQL.
-
-Deploy: `meta-oauth-callback`
+Nenhuma alteracao de codigo e necessaria. Apenas a atualizacao do secret.
