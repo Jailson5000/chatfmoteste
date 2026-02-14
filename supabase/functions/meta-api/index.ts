@@ -623,7 +623,7 @@ Deno.serve(async (req) => {
       connection = specificConn;
     }
     
-    // Fallback: find by type
+    // Fallback: find by type (prefer oauth connections over manual_test)
     if (!connection) {
       const { data: fallbackConn } = await supabaseAdmin
         .from("meta_connections")
@@ -631,9 +631,27 @@ Deno.serve(async (req) => {
         .eq("law_firm_id", lawFirmId)
         .eq("type", connectionType)
         .eq("is_active", true)
+        .eq("source", "oauth")
         .limit(1)
         .maybeSingle();
       connection = fallbackConn;
+      
+      // If no oauth connection, try any active connection
+      if (!connection) {
+        const { data: anyConn } = await supabaseAdmin
+          .from("meta_connections")
+          .select("id, access_token, page_id")
+          .eq("law_firm_id", lawFirmId)
+          .eq("type", connectionType)
+          .eq("is_active", true)
+          .limit(1)
+          .maybeSingle();
+        connection = anyConn;
+      }
+      
+      if (connection) {
+        console.log("[meta-api] Using fallback connection:", connection.id, "for", connectionType);
+      }
     }
 
     if (!connection) {
