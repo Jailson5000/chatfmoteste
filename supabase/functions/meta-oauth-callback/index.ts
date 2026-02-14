@@ -71,6 +71,8 @@ Deno.serve(async (req) => {
 
     const META_APP_ID = Deno.env.get("META_APP_ID");
     const META_APP_SECRET = Deno.env.get("META_APP_SECRET");
+    const META_INSTAGRAM_APP_ID = Deno.env.get("META_INSTAGRAM_APP_ID") || "1447135433693990";
+    const META_INSTAGRAM_APP_SECRET = Deno.env.get("META_INSTAGRAM_APP_SECRET") || META_APP_SECRET;
 
     if (!META_APP_ID || !META_APP_SECRET) {
       return new Response(JSON.stringify({ error: "Meta app not configured" }), {
@@ -79,8 +81,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Instagram Business now uses the same Facebook OAuth dialog,
-    // so the code is exchanged via graph.facebook.com (same as Facebook flow below)
+    // Instagram Business Login uses separate endpoints (api.instagram.com)
+    // Must be handled before the Facebook token exchange
+    if (type === "instagram") {
+      console.log("[meta-oauth] Instagram Business Login detected, using Instagram-specific flow");
+      const igRedirectUri = redirectUri || "https://miauchat.com.br/auth/meta-callback";
+      return await handleInstagramBusiness(code, igRedirectUri, META_INSTAGRAM_APP_ID, META_INSTAGRAM_APP_SECRET!, lawFirmId, supabaseAdmin);
+    }
 
     // Step 1: Exchange code for token (Facebook flow - used for Facebook and WhatsApp only)
     console.log("[meta-oauth] Exchanging code for token...");

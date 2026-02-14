@@ -21,16 +21,21 @@ export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_manage_comments",
+  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights",
   facebook: "pages_messaging,pages_manage_metadata,pages_show_list",
 } as const;
 
 /**
  * Returns a fixed redirect URI based on the current environment.
- * This ensures the redirect_uri always matches what's registered in Meta,
- * regardless of which subdomain the user is on.
+ * For Instagram, always uses the production URI since it must match
+ * what's registered in the Meta Dashboard for Instagram Business Login.
  */
-export function getFixedRedirectUri(): string {
+export function getFixedRedirectUri(type?: "instagram" | "facebook" | "whatsapp_cloud"): string {
+  // Instagram Business Login requires the exact URI registered in Meta Dashboard
+  if (type === "instagram") {
+    return "https://miauchat.com.br/auth/meta-callback";
+  }
+
   if (typeof window === "undefined") {
     return "https://miauchat.com.br/auth/meta-callback";
   }
@@ -43,13 +48,19 @@ export function getFixedRedirectUri(): string {
 
 /**
  * Build the OAuth URL for Instagram or Facebook login.
- * Both use the Facebook dialog - the difference is the scopes.
+ * Instagram Business Login uses instagram.com/oauth/authorize with the Instagram App ID.
+ * Facebook uses facebook.com/dialog/oauth with the Facebook App ID.
  */
 export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
-  const redirectUri = getFixedRedirectUri();
+  const redirectUri = getFixedRedirectUri(type);
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
 
-  // Both Instagram Business and Facebook use the Facebook OAuth dialog
+  if (type === "instagram") {
+    // Instagram Business Login uses its own OAuth dialog and App ID
+    return `https://www.instagram.com/oauth/authorize?client_id=${META_INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
+  }
+
+  // Facebook uses the Facebook OAuth dialog
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 }
