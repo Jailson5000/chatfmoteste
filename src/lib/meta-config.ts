@@ -30,7 +30,16 @@ export const META_SCOPES = {
  * This ensures the redirect_uri always matches what's registered in Meta,
  * regardless of which subdomain the user is on.
  */
-export function getFixedRedirectUri(): string {
+/**
+ * Fixed redirect URI for Instagram - ALWAYS uses production domain
+ * because Meta requires exact match with registered URI.
+ */
+export const getInstagramRedirectUri = () => "https://miauchat.com.br/auth/meta-callback";
+
+export function getFixedRedirectUri(type?: string): string {
+  if (type === "instagram") {
+    return getInstagramRedirectUri();
+  }
   if (typeof window === "undefined") {
     return "https://miauchat.com.br/auth/meta-callback";
   }
@@ -45,7 +54,7 @@ export function getFixedRedirectUri(): string {
  * Build the OAuth URL for Instagram or Facebook login.
  */
 export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
-  const redirectUri = getFixedRedirectUri();
+  const redirectUri = getFixedRedirectUri(type);
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
 
