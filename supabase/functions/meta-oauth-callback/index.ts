@@ -113,7 +113,11 @@ Deno.serve(async (req) => {
     const tokenData = await tokenRes.json();
     if (tokenData.error) {
       console.error("[meta-oauth] Token exchange failed:", tokenData.error);
-      return new Response(JSON.stringify({ error: "OAuth token exchange failed", details: tokenData.error }), {
+      return new Response(JSON.stringify({ 
+        error: "OAuth token exchange failed", 
+        message: tokenData.error?.message || tokenData.error?.error_user_msg || "Token exchange failed",
+        details: tokenData.error 
+      }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -502,11 +506,20 @@ async function handleInstagramBusiness(
       }),
     });
 
-    const tokenData = await tokenRes.json();
-    if (tokenData.error_type || tokenData.error_message) {
+    const tokenRawText = await tokenRes.text();
+    console.log("[meta-oauth] Instagram token response", {
+      status: tokenRes.status,
+      body: tokenRawText.substring(0, 500),
+    });
+
+    let tokenData: any;
+    try { tokenData = JSON.parse(tokenRawText); } catch { tokenData = { error_message: tokenRawText }; }
+
+    if (tokenData.error_type || tokenData.error_message || tokenData.error) {
       console.error("[meta-oauth] Instagram token exchange failed:", tokenData);
       return new Response(JSON.stringify({ 
         error: "Instagram token exchange failed", 
+        message: tokenData.error_message || tokenData.error?.message || tokenData.error_type || "Unknown Instagram error",
         details: tokenData.error_message || tokenData.error_type 
       }), {
         status: 400,

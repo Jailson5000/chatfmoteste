@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getFixedRedirectUri } from "@/lib/meta-config";
+import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -85,7 +86,8 @@ export default function MetaAuthCallback() {
         });
 
         if (response.error) {
-          throw new Error(response.error.message || "Falha ao processar autenticação");
+          const realMsg = await getFunctionErrorMessage(response.error);
+          throw new Error(realMsg);
         }
 
         if (!response.data?.success) {
