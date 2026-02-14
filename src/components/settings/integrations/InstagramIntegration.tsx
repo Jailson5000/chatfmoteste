@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
 import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
+import { InstagramPagePickerDialog, type InstagramPage } from "./InstagramPagePickerDialog";
 
 function InstagramIcon() {
   return (
@@ -20,6 +21,9 @@ export function InstagramIntegration() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerPages, setPickerPages] = useState<InstagramPage[]>([]);
+  const [pendingOAuthData, setPendingOAuthData] = useState<{ code: string; redirectUri: string } | null>(null);
 
   // Cleanup listener on unmount
   useEffect(() => {
@@ -89,6 +93,46 @@ export function InstagramIntegration() {
     onError: () => toast.error("Erro ao remover conexão"),
   });
 
+  // Save selected Instagram page
+  const handleSelectPage = useCallback(async (page: InstagramPage) => {
+    if (!pendingOAuthData) {
+      toast.error("Dados de autenticação não encontrados. Tente novamente.");
+      return;
+    }
+
+    toast.loading("Conectando Instagram...", { id: "ig-connect" });
+
+    try {
+      const response = await supabase.functions.invoke("meta-oauth-callback", {
+        body: {
+          code: pendingOAuthData.code,
+          redirectUri: pendingOAuthData.redirectUri,
+          type: "instagram",
+          step: "save",
+          pageId: page.pageId,
+        },
+      });
+
+      if (response.error) {
+        const realMsg = await getFunctionErrorMessage(response.error);
+        throw new Error(realMsg);
+      }
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
+      toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
+      setPickerOpen(false);
+      setPendingOAuthData(null);
+      setPickerPages([]);
+    } catch (err) {
+      console.error("Instagram save error:", err);
+      toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
+    }
+  }, [pendingOAuthData, queryClient]);
+
   const handleConnect = useCallback(() => {
     if (!META_APP_ID) {
       toast.error("META_APP_ID não configurado. Configure nas variáveis de ambiente.");
@@ -112,11 +156,12 @@ export function InstagramIntegration() {
         const code = event.data.code;
         const redirectUri = getFixedRedirectUri("instagram");
 
-        toast.loading("Conectando Instagram...", { id: "ig-connect" });
+        toast.loading("Buscando contas Instagram...", { id: "ig-connect" });
 
         try {
+          // Step 1: List pages with IG accounts
           const response = await supabase.functions.invoke("meta-oauth-callback", {
-            body: { code, redirectUri, type: "instagram" },
+            body: { code, redirectUri, type: "instagram", step: "list_pages" },
           });
 
           if (response.error) {
@@ -125,11 +170,20 @@ export function InstagramIntegration() {
           }
 
           if (!response.data?.success) {
-            throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
+            throw new Error(response.data?.error || response.data?.message || "Falha ao buscar contas");
           }
 
-          queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
-          toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
+          const pages: InstagramPage[] = response.data.pages || [];
+
+          if (pages.length === 0) {
+            throw new Error("Nenhuma conta Instagram encontrada vinculada às suas páginas.");
+          }
+
+          // Store OAuth data for step 2
+          setPendingOAuthData({ code, redirectUri });
+          setPickerPages(pages);
+          setPickerOpen(true);
+          toast.dismiss("ig-connect");
         } catch (err) {
           console.error("Instagram OAuth error:", err);
           toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
@@ -157,34 +211,50 @@ export function InstagramIntegration() {
 
   if (!connection) {
     return (
-      <IntegrationCard
-        icon={<InstagramIcon />}
-        title="Instagram DM"
-        description="Receba e responda mensagens do Instagram Direct diretamente na plataforma. Requer conta Instagram Profissional."
-        isLoading={isLoading}
-        onConnect={handleConnect}
-      />
+      <>
+        <IntegrationCard
+          icon={<InstagramIcon />}
+          title="Instagram DM"
+          description="Receba e responda mensagens do Instagram Direct diretamente na plataforma. Requer conta Instagram Profissional."
+          isLoading={isLoading}
+          onConnect={handleConnect}
+        />
+        <InstagramPagePickerDialog
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          pages={pickerPages}
+          onSelect={handleSelectPage}
+        />
+      </>
     );
   }
 
   return (
-    <IntegrationCard
-      icon={<InstagramIcon />}
-      title="Instagram DM"
-      description={`Conectado: ${connection.page_name || "Página"}`}
-      isConnected={true}
-      isActive={connection.is_active}
-      isLoading={isLoading}
-      onToggle={(checked) => toggleMutation.mutate(checked)}
-      toggleDisabled={toggleMutation.isPending}
-      onSettings={() => {
-        toast.info(`Página: ${connection.page_name}${connection.ig_account_id ? ` | IG: ${connection.ig_account_id}` : ""}`);
-      }}
-      onDisconnect={() => {
-        if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
-          deleteMutation.mutate();
-        }
-      }}
-    />
+    <>
+      <IntegrationCard
+        icon={<InstagramIcon />}
+        title="Instagram DM"
+        description={`Conectado: ${connection.page_name || "Página"}`}
+        isConnected={true}
+        isActive={connection.is_active}
+        isLoading={isLoading}
+        onToggle={(checked) => toggleMutation.mutate(checked)}
+        toggleDisabled={toggleMutation.isPending}
+        onSettings={() => {
+          toast.info(`Página: ${connection.page_name}${connection.ig_account_id ? ` | IG: ${connection.ig_account_id}` : ""}`);
+        }}
+        onDisconnect={() => {
+          if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
+            deleteMutation.mutate();
+          }
+        }}
+      />
+      <InstagramPagePickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        pages={pickerPages}
+        onSelect={handleSelectPage}
+      />
+    </>
   );
 }
