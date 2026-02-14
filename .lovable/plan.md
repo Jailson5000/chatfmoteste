@@ -1,58 +1,76 @@
 
-# Corrigir Instagram OAuth + Campos de Token Separados para Cada Canal
+# Corrigir fluxo OAuth do Instagram para funcionar igual ao Facebook
 
-## Problemas Identificados
+## Problema
 
-### 1. Instagram OAuth quebrado
-O erro "Invalid Scopes: instagram_business_basic, instagram_business_manage_messages" acontece porque o app na Meta ainda nao tem essas permissoes aprovadas. Precisamos **reverter** para os scopes antigos que o app ja possui: `instagram_basic` e `instagram_manage_messages`.
+O componente `InstagramIntegration.tsx` ja tem o mesmo codigo do `FacebookIntegration.tsx` (popup OAuth com `buildMetaOAuthUrl("instagram")`), porem quando o usuario clica "Conectar", o popup da Meta rejeita os scopes e nao completa o fluxo. Resultado: a unica forma de conectar Instagram e pela pagina de teste manual, que nao serve para filmar a demonstracao para o App Review.
 
-### 2. Falta campos de token manual para Facebook e Instagram
-Atualmente, a pagina de testes so tem campo para colar token do WhatsApp. Como cada canal gera um token diferente no painel da Meta, precisamos de campos separados para:
-- **WhatsApp Cloud**: Token + Phone Number ID + WABA ID (ja existe)
-- **Facebook Messenger**: Token + Page ID
-- **Instagram DM**: Token + Page ID + IG Account ID
+Os logs confirmam: Facebook OAuth funciona (token trocado, conexao salva, webhook inscrito), mas nenhuma tentativa de Instagram OAuth chegou ao backend -- o erro acontece no dialog da Meta antes do redirect.
 
-### 3. Backend so salva conexao manual para WhatsApp
-A action `save_test_connection` no `meta-api` so cria conexoes do tipo `whatsapp_cloud`. Precisa aceitar um parametro `connectionType` para salvar tambem `facebook` e `instagram`.
+## Causa raiz
 
-## Alteracoes
+O app Meta esta configurado com a **nova API Instagram Business** (`instagram_business_basic`, `instagram_business_manage_messages`), mas o codigo solicita os scopes **legados** (`instagram_basic`, `instagram_manage_messages`). Meta rejeita scopes que nao estao configurados no app.
 
-### 1. `src/lib/meta-config.ts` - Reverter scopes do Instagram
+O problema anterior de "Invalid Scopes" com os scopes business provavelmente aconteceu porque as permissoes estavam em status "Ready for testing" e nao "Approved for testing". Ou porque faltava o scope `business_management` que e pre-requisito.
 
-Voltar para os scopes que o app ja tem aprovados:
+## Solucao
+
+### 1. `src/lib/meta-config.ts` - Scopes corretos com fallback
+
+Atualizar os scopes do Instagram para usar os da nova API Business, que e o que esta configurado no app Meta:
+
 ```
+ANTES:
 instagram: "instagram_basic,instagram_manage_messages,pages_show_list"
+
+DEPOIS:
+instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish"
 ```
 
-### 2. `src/pages/admin/MetaTestPage.tsx` - Adicionar campos para Facebook e Instagram
+**Nota importante**: os scopes da nova Instagram Business API **nao** usam `pages_show_list` -- esse e um scope do Facebook Login. Para Instagram Business Login, os scopes sao diferentes.
 
-Adicionar duas novas secoes de conexao manual:
+### 2. `src/lib/meta-config.ts` - Usar endpoint correto para Instagram
 
-**Facebook Messenger:**
-- Campo: Token (da pagina Configuracoes da API do Messenger)
-- Campo: Page ID (ID da pagina do Facebook)
+A nova API Instagram Business usa um endpoint de OAuth **diferente** do Facebook:
+- Facebook: `https://www.facebook.com/v22.0/dialog/oauth`
+- Instagram Business: `https://www.instagram.com/oauth/authorize`
 
-**Instagram DM:**
-- Campo: Token (da pagina Configuracoes do Instagram)
-- Campo: Page ID
-- Campo: IG Account ID
+Atualizar `buildMetaOAuthUrl` para usar o endpoint correto quando `type === "instagram"`.
 
-Cada secao tera um botao "Salvar Conexao" que chama `save_test_connection` com o tipo correto.
+### 3. `supabase/functions/meta-oauth-callback/index.ts` - Tratar token do Instagram Business
 
-### 3. `supabase/functions/meta-api/index.ts` - Aceitar tipo de conexao no save_test_connection
+O flow de token do Instagram Business API e diferente:
+- O token retornado e um token de curta duracao do Instagram (nao do Facebook)
+- A troca por long-lived token usa endpoint diferente: `https://graph.instagram.com/access_token`
+- O token do Instagram acessa diretamente a conta IG (sem precisar de page_id intermediario)
 
-Modificar a action `save_test_connection` para aceitar `connectionType` (padrao: `whatsapp_cloud`), `pageId` e `igAccountId`, permitindo salvar conexoes de qualquer canal.
+Adicionar tratamento especifico para `type === "instagram"` que:
+1. Troca o code por short-lived token via `https://api.instagram.com/oauth/access_token`
+2. Troca por long-lived token via `https://graph.instagram.com/access_token`
+3. Busca info da conta via `https://graph.instagram.com/v22.0/me?fields=user_id,username,name,profile_picture_url`
+4. Salva na `meta_connections` com os dados corretos
 
-### 4. `src/pages/admin/MetaTestPage.tsx` - Reverter nomes de permissoes nos testes
+### 4. `src/components/settings/integrations/InstagramIntegration.tsx` - Limpar codigo
 
-Voltar os nomes das permissoes do Messenger para `instagram_manage_messages` e `instagram_basic` (os que o app realmente usa).
+Remover imports nao utilizados (`useState`, `Card`, `CardContent`, `CardHeader`, `CardTitle`, `Badge`, `ExternalLink`, `Loader2`, `Trash2`, `RefreshCw`) e o state `isConnecting` que nao e usado. Deixar identico ao padrao do Facebook.
 
 ## Resumo de arquivos
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Reverter scopes para `instagram_basic,instagram_manage_messages` |
-| `src/pages/admin/MetaTestPage.tsx` | Adicionar campos de token manual para Facebook e Instagram; reverter nomes de permissoes |
-| `supabase/functions/meta-api/index.ts` | Aceitar `connectionType`, `pageId`, `igAccountId` no `save_test_connection` |
+| `src/lib/meta-config.ts` | Scopes business + endpoint OAuth do Instagram separado |
+| `supabase/functions/meta-oauth-callback/index.ts` | Flow de token especifico para Instagram Business API |
+| `src/components/settings/integrations/InstagramIntegration.tsx` | Limpar imports nao usados |
 
-Deploy: `meta-api`
+Deploy: `meta-oauth-callback`
+
+## Fluxo apos a correcao
+
+1. Usuario clica "Conectar" no card do Instagram
+2. Popup abre em `instagram.com/oauth/authorize` (nao facebook.com)
+3. Usuario escolhe a conta Instagram e autoriza
+4. Redirect para callback com code
+5. Backend troca code por token do Instagram, busca dados da conta
+6. Salva conexao no banco, popup fecha, card mostra "Conectado"
+
+Esse fluxo e filmavel para o App Review da Meta.
