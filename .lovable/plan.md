@@ -1,58 +1,65 @@
 
 
-# Corrigir OAuth do Instagram - Usar mesmo fluxo do Facebook
+# Corrigir Instagram OAuth - Usar endpoint e App ID corretos
 
 ## Problema
 
-O erro "Invalid platform app" acontece porque o endpoint `instagram.com/oauth/authorize` so funciona para apps configurados como plataforma "Instagram" no Meta Developers. O seu app usa "Facebook Login for Business", entao o Instagram **tambem deve usar o dialog do Facebook** (`facebook.com/dialog/oauth`), igual ao Facebook Messenger.
+Existem dois problemas distintos que causaram as falhas anteriores:
 
-O fluxo correto e: usuario faz login pelo Facebook, autoriza a pagina, e o backend detecta a conta Instagram Professional vinculada a essa pagina.
+1. Os scopes `instagram_business_*` sao **invalidos** no endpoint `facebook.com/dialog/oauth` (esse endpoint so aceita scopes do Facebook como `pages_show_list`). Por isso aparece "Invalid Scopes".
 
-## Alteracoes
+2. O endpoint `instagram.com/oauth/authorize` requer o **Instagram App ID** (que e diferente do Facebook App ID). Por isso apareceu "Invalid platform app" na tentativa anterior.
 
-### 1. `src/lib/meta-config.ts` - Reverter endpoint e scopes do Instagram
+A documentacao oficial da Meta confirma que o **Instagram Business Login** usa:
+- Endpoint: `https://www.instagram.com/oauth/authorize`
+- Client ID: o **Instagram App ID** (encontrado em App Dashboard > App Settings > Basic)
+- Scopes: `instagram_business_basic`, `instagram_business_manage_messages`, etc.
+- Token exchange: `https://api.instagram.com/oauth/access_token`
 
-O Instagram deve usar o **mesmo endpoint OAuth do Facebook** (`facebook.com/dialog/oauth`), apenas com scopes diferentes que incluem acesso ao Instagram:
+## Solucao
 
+### 1. `src/lib/meta-config.ts`
+
+- Adicionar constante `META_INSTAGRAM_APP_ID` com valor `1447135433693990` (conforme URL fornecido pelo usuario)
+- Atualizar scopes do Instagram para incluir todos os scopes do URL de referencia (sem `pages_show_list`)
+- Alterar `buildMetaOAuthUrl` para usar `instagram.com/oauth/authorize` com o Instagram App ID quando `type === "instagram"`
+
+Scopes do Instagram:
 ```
-ANTES (quebrado):
-instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish"
-+ endpoint separado instagram.com/oauth/authorize
-
-DEPOIS (correto):
-instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish,pages_show_list"
-+ mesmo endpoint facebook.com/dialog/oauth
+instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights
 ```
 
-Remover o `if (type === "instagram")` que redireciona para `instagram.com`. Ambos os tipos usam o mesmo endpoint do Facebook. A unica diferenca sao os scopes solicitados.
+### 2. `supabase/functions/meta-oauth-callback/index.ts`
 
-### 2. `supabase/functions/meta-oauth-callback/index.ts` - Manter flow do Instagram via Facebook Pages
+- Re-ativar o early return para `type === "instagram"` que chama `handleInstagramBusiness`
+- Atualizar `handleInstagramBusiness` para usar o Instagram App ID (via env var `META_INSTAGRAM_APP_ID` ou fallback para `META_APP_ID`)
+- A funcao `handleInstagramBusiness` ja existe no codigo e faz o flow correto:
+  1. Troca code por short-lived token via `api.instagram.com/oauth/access_token`
+  2. Troca por long-lived token via `graph.instagram.com/access_token`
+  3. Busca perfil via `graph.instagram.com/me`
+  4. Salva na `meta_connections`
 
-O backend ja tem a logica correta para Instagram quando vem pelo Facebook OAuth:
-- Troca code por token (mesmo endpoint do Facebook)
-- Busca `me/accounts` com `instagram_business_account`
-- Detecta a conta IG vinculada a pagina
-- Salva conexao
+### 3. Secret `META_INSTAGRAM_APP_ID`
 
-O handler `handleInstagramBusiness` (que usa `api.instagram.com`) deve ser removido ou mantido apenas como fallback, pois nao se aplica ao fluxo atual. O flow principal do Facebook OAuth ja trata `type === "instagram"` corretamente (linhas que buscam `instagram_business_account` das pages).
+- Adicionar o secret `META_INSTAGRAM_APP_ID` com valor `1447135433693990` para a edge function poder usar no token exchange
 
-Remover o early return para `type === "instagram"` que desvia para `handleInstagramBusiness`, deixando o fluxo principal tratar o Instagram igual ao Facebook.
-
-## Resumo
+## Resumo de arquivos
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/lib/meta-config.ts` | Remover endpoint separado do Instagram; usar mesmo dialog do Facebook; adicionar `pages_show_list` aos scopes do Instagram |
-| `supabase/functions/meta-oauth-callback/index.ts` | Remover early return para `handleInstagramBusiness`; deixar fluxo principal (via Facebook Pages) tratar Instagram |
+| `src/lib/meta-config.ts` | Instagram App ID separado + endpoint `instagram.com/oauth/authorize` + scopes corretos |
+| `supabase/functions/meta-oauth-callback/index.ts` | Re-ativar `handleInstagramBusiness` com Instagram App ID |
 
 Deploy: `meta-oauth-callback`
 
-## Resultado esperado
+## Fluxo corrigido
 
+```text
 1. Usuario clica "Conectar" no card do Instagram
-2. Popup abre no **facebook.com/dialog/oauth** (mesmo do Facebook)
-3. Usuario escolhe a pagina do Facebook que tem Instagram vinculado
-4. Backend detecta a conta Instagram Professional da pagina
-5. Salva conexao, popup fecha, card mostra "Conectado"
+2. Popup abre em instagram.com/oauth/authorize (com Instagram App ID)
+3. Usuario autoriza a conta Instagram Professional
+4. Redirect para callback com code
+5. Backend troca code via api.instagram.com (com Instagram App ID + App Secret)
+6. Salva conexao, popup fecha, card mostra "Conectado"
+```
 
-Esse e o mesmo fluxo que funcionava antes e que e filmavel para o App Review.
