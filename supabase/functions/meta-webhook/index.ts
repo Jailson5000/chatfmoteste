@@ -384,15 +384,28 @@ async function processMessagingEntry(
     if (clientNeedsNameUpdate && connection.access_token) {
       try {
         const token = await decryptToken(connection.access_token);
-        const fields = connectionType === "instagram" 
-          ? "name,username,profile_pic" 
-          : "name,profile_pic";
+        const fields = "name,profile_pic";
         const profileRes = await fetch(
           `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
         );
+        let profile: any = null;
         if (profileRes.ok) {
-          const profile = await profileRes.json();
-          resolvedName = profile.name || profile.username || null;
+          profile = await profileRes.json();
+        } else {
+          // Fallback: try with only "name" in case profile_pic is not supported
+          console.warn("[meta-webhook] Profile fetch failed with fields:", fields, "- retrying with name only");
+          const fallbackRes = await fetch(
+            `https://graph.facebook.com/v22.0/${senderId}?fields=name&access_token=${token}`
+          );
+          if (fallbackRes.ok) {
+            profile = await fallbackRes.json();
+          } else {
+            const errBody = await fallbackRes.text();
+            console.warn("[meta-webhook] Profile fallback also failed:", fallbackRes.status, errBody.slice(0, 200));
+          }
+        }
+        if (profile) {
+          resolvedName = profile.name || null;
           const avatarUrl = profile.profile_pic || null;
           if (resolvedName || avatarUrl) {
             const updateData: Record<string, any> = {};
@@ -401,9 +414,6 @@ async function processMessagingEntry(
             await supabase.from("clients").update(updateData).eq("id", clientId);
             console.log("[meta-webhook] Profile resolved:", { name: resolvedName, hasAvatar: !!avatarUrl });
           }
-        } else {
-          const errBody = await profileRes.text();
-          console.warn("[meta-webhook] Profile fetch failed:", profileRes.status, errBody.slice(0, 200));
         }
       } catch (profileErr) {
         console.warn("[meta-webhook] Could not fetch profile:", profileErr);
