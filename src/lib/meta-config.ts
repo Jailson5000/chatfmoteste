@@ -7,8 +7,11 @@
  * O App Secret (META_APP_SECRET) continua como secret no backend.
  */
 
-// App ID from Meta Developers console
+// App ID from Meta Developers console (Facebook)
 export const META_APP_ID = import.meta.env.VITE_META_APP_ID || "1237829051015100";
+
+// Instagram App ID (separate from Facebook App ID)
+export const META_INSTAGRAM_APP_ID = import.meta.env.VITE_META_INSTAGRAM_APP_ID || "1447135433693990";
 
 // Config ID for WhatsApp Embedded Signup (set via VITE_META_CONFIG_ID when available)
 export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "1461954655333752";
@@ -18,7 +21,7 @@ export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_content_publish,pages_show_list",
+  instagram: "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights",
   facebook: "pages_messaging,pages_manage_metadata,pages_show_list",
 } as const;
 
@@ -45,6 +48,10 @@ export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
   const redirectUri = getFixedRedirectUri();
   const scope = META_SCOPES[type];
   const state = JSON.stringify({ type });
+
+  if (type === "instagram") {
+    return `https://www.instagram.com/oauth/authorize?client_id=${META_INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code&force_reauth=true`;
+  }
 
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
 }
