@@ -1,35 +1,51 @@
 
-# Correcao: Erro PGRST201 no fetchSingleConversation
+# Correção: Erro PGRST200 no fetchSingleConversation
 
 ## Causa Raiz
 
-O log do console mostra claramente o erro:
+O log mostra um **novo erro** diferente do anterior:
 
 ```
-[fetchSingleConversation] Direct query error:
-  code: "PGRST201"
-  message: "Could not embed because more than one relationship found 
-            for 'conversations' and 'whatsapp_instances'"
+PGRST200: Could not find a relationship between 'conversations' and 'profiles'
 ```
 
-A tabela `conversations` tem **mais de uma foreign key** apontando para `whatsapp_instances`. O PostgREST nao sabe qual usar e retorna erro. A query precisa especificar o nome da FK explicitamente.
+A FK `conversations_assigned_to_fkey` aponta para `auth.users(id)`, **NÃO** para `public.profiles`. O PostgREST não consegue fazer o join implícito `profiles!conversations_assigned_to_fkey` porque a FK não referencia essa tabela.
 
-## Correcao
+O RPC `get_conversations_with_metadata` funciona porque usa SQL direto (`LEFT JOIN profiles p ON p.id = c.assigned_to`), sem depender de FK.
 
-### Arquivo: `src/hooks/useConversations.tsx` (linha 1215)
+## Correção
 
-Trocar:
+### Arquivo: `src/hooks/useConversations.tsx` (~linha 1210-1242)
+
+1. **Remover** o join `assigned_profile:profiles!conversations_assigned_to_fkey(full_name)` da query `.select()`
+2. **Após** obter o resultado, buscar o profile separadamente se `assigned_to` existir:
+
+```text
+// Pseudo-código:
+const directData = await supabase.from('conversations').select(`
+  *,
+  last_message:messages(...),
+  whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(...),
+  current_automation:automations!conversations_current_automation_id_fkey(...),
+  client:clients(...),
+  department:departments(...)
+`).eq('id', conversationId)...
+
+// Buscar profile separado se assigned_to existe
+let assignedProfile = null;
+if (directData.assigned_to) {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', directData.assigned_to)
+    .maybeSingle();
+  assignedProfile = profile;
+}
+
+// Montar resultado com assigned_profile
+return { ...directData, assigned_profile: assignedProfile };
 ```
-whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number)
-```
-
-Por:
-```
-whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(instance_name, display_name, phone_number)
-```
-
-Esse e o mesmo padrao ja usado em outros hooks do projeto (ex: `useClients.tsx` linha 71).
 
 ## Risco
 
-**Zero**. Apenas adicionamos a dica de FK que o PostgREST precisa para desambiguar. Nenhuma outra mudanca necessaria.
+**Zero**. Removemos um join que nunca funcionou (FK aponta para auth.users, não profiles) e substituímos por uma busca direta que funciona. O fluxo principal via RPC não é afetado.
