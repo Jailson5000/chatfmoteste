@@ -1206,7 +1206,7 @@ export function useConversations() {
   const fetchSingleConversation = useCallback(async (conversationId: string) => {
     if (!lawFirm?.id) return null;
     
-    // Direct query by ID with the same joins pattern
+    // Direct query by ID — no profiles join (FK points to auth.users, not public.profiles)
     const { data: directData, error: directError } = await supabase
       .from('conversations')
       .select(`
@@ -1214,7 +1214,6 @@ export function useConversations() {
         last_message:messages(content, created_at, message_type, is_from_me),
         whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(instance_name, display_name, phone_number),
         current_automation:automations!conversations_current_automation_id_fkey(id, name),
-        assigned_profile:profiles!conversations_assigned_to_fkey(full_name),
         client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
         department:departments(id, name, color)
       `)
@@ -1229,9 +1228,21 @@ export function useConversations() {
       return null;
     }
 
+    // Fetch assigned profile separately (FK goes to auth.users, not profiles)
+    let assignedProfile: { full_name: string } | null = null;
+    if ((directData as any).assigned_to) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', (directData as any).assigned_to)
+        .maybeSingle();
+      assignedProfile = profile;
+    }
+
     // Map to the same structure as mapRpcRowToConversation
     const conv: any = {
       ...directData,
+      assigned_profile: assignedProfile,
       last_message: Array.isArray(directData.last_message) ? directData.last_message[0] || null : directData.last_message,
       unread_count: 0,
       client_tags: [],
