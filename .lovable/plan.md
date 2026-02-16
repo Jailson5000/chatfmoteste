@@ -1,99 +1,79 @@
 
+# Limpeza de Banco + Correcao de Bug: get_global_ai_usage
 
-# Otimizacao de Performance: staleTime Global + Lazy Loading
+## Resumo
 
-## O que vamos fazer
-
-Duas otimizacoes no arquivo `src/App.tsx` que melhoram significativamente a velocidade do sistema sem alterar nenhuma logica de negocio.
+3 acoes de banco de dados, sendo 1 correcao de bug ativo e 2 limpezas de manutencao. Nenhum arquivo frontend alterado.
 
 ---
 
-## 1. staleTime Global no QueryClient
+## 1. CORRECAO DE BUG: Funcao `get_global_ai_usage` (CRITICO)
 
-**Problema atual**: Toda vez que o usuario navega entre paginas (ex: Dashboard -> Conversas -> Kanban), TODOS os dados sao buscados novamente do banco, mesmo que tenham sido carregados 5 segundos atras.
+**O problema**: A funcao RPC `get_global_ai_usage` referencia a coluna `quantity` na tabela `usage_records`, mas essa coluna nao existe. O nome real e `count`. Isso gera erros `column "quantity" does not exist` toda vez que voce acessa o painel Global Admin (rota `/global-admin`).
 
-**Solucao**: Configurar o QueryClient para considerar dados "frescos" por 2 minutos. Dados buscados nos ultimos 2 minutos nao disparam nova requisicao.
+**Impacto atual**: Os dados de uso de IA (conversas IA e minutos TTS) no dashboard de infraestrutura estao completamente quebrados -- mostram erro ou zero.
 
-**Impacto**: ~60% menos requisicoes ao banco durante navegacao normal.
+**Correcao**: Recriar a funcao substituindo `SUM(quantity)` por `SUM(count)` em 4 ocorrencias.
 
-**Mudanca**:
-```typescript
-// ANTES (linha 68)
-const queryClient = new QueryClient();
+**Risco**: Zero. Apenas corrige uma funcao que ja esta falhando.
 
-// DEPOIS
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 2 * 60 * 1000,   // 2 minutos - dados ficam "frescos"
-      gcTime: 10 * 60 * 1000,     // 10 minutos - cache mantido em memoria
-      retry: 1,                    // 1 retry em caso de erro (em vez de 3)
-    },
-  },
-});
+---
+
+## 2. LIMPEZA: webhook_logs - Reduzir retencao de 3 dias para 1 dia
+
+**Situacao atual**: 174.499 registros ocupando **170 MB** (33% do banco). A funcao `cleanup_old_webhook_logs` atualmente limpa logs com mais de 3 dias.
+
+**Acao**: Atualizar a funcao para limpar logs com mais de **1 dia** e executar a limpeza imediatamente.
+
+**Economia estimada**: ~110 MB liberados imediatamente.
+
+**Risco**: Zero. Logs de webhook sao apenas para debug temporario. O cron existente (`cleanup-webhook-logs-daily` as 03h) continuara rodando com a nova retencao.
+
+---
+
+## 3. LIMPEZA: instance_status_history + ai_processing_queue
+
+**instance_status_history**: 46.558 registros desde dezembro/2025, ocupando 9 MB. Manter apenas os ultimos 30 dias.
+
+**ai_processing_queue**: 2.057 registros `completed` que nao servem mais. Limpar todos com mais de 24h.
+
+**Risco**: Zero. Dados historicos antigos e tarefas ja concluidas.
+
+---
+
+## Implementacao (SQL apenas)
+
+### Migration 1: Corrigir get_global_ai_usage
+```sql
+CREATE OR REPLACE FUNCTION public.get_global_ai_usage()
+-- Trocar SUM(quantity) por SUM(count) em 4 lugares
 ```
 
-**Risco**: Zero. O Realtime ja atualiza dados em tempo real via WebSocket. O staleTime apenas evita refetches redundantes na navegacao. Qualquer `invalidateQueries` manual continua funcionando normalmente.
+### Migration 2: Atualizar cleanup_old_webhook_logs
+```sql
+CREATE OR REPLACE FUNCTION public.cleanup_old_webhook_logs()
+-- Trocar interval '3 days' por interval '1 day'
+```
+
+### Execucao imediata (via SQL):
+```sql
+DELETE FROM webhook_logs WHERE created_at < now() - interval '1 day';
+DELETE FROM instance_status_history WHERE changed_at < now() - interval '30 days';
+DELETE FROM ai_processing_queue WHERE status = 'completed' AND created_at < now() - interval '1 day';
+```
 
 ---
 
-## 2. Lazy Loading de Rotas Secundarias
+## Impacto total
 
-**Problema atual**: O browser carrega o codigo de TODAS as 35+ paginas no bundle inicial, mesmo que o usuario so use 3-4 paginas (Conversas, Kanban, Dashboard). Isso torna o primeiro carregamento mais lento.
+| Acao | Espaco liberado | Risco |
+|------|----------------|-------|
+| Corrigir get_global_ai_usage | 0 (corrige bug) | Zero |
+| webhook_logs 1 dia | ~110 MB | Zero |
+| instance_status_history 30d | ~7 MB | Zero |
+| ai_processing_queue cleanup | ~1 MB | Zero |
+| **Total** | **~118 MB** | **Zero** |
 
-**Solucao**: Usar `React.lazy()` para carregar paginas secundarias sob demanda (apenas quando o usuario navegar ate elas).
+Apos as limpezas o banco passara de **518 MB para ~400 MB** (5% do limite de 8GB).
 
-### Paginas que serao lazy-loaded (19 paginas):
-
-| Grupo | Paginas | Motivo |
-|-------|---------|--------|
-| Global Admin (16) | Todas as paginas `/global-admin/*` | So acessadas pelo admin global -- 0.1% dos usuarios |
-| Secundarias (3) | AgendaPro, KnowledgeBase, AIVoice | Visitadas esporadicamente |
-| Utilidades (4) | Tutorials, Support, Profile, MetaTestPage | Visitadas raramente |
-| Publicas (4) | Register, PaymentSuccess, PublicBooking, ConfirmAppointment | Visitadas 1x |
-| Legais (2) | PrivacyPolicy, TermsOfService | Quase nunca visitadas |
-
-### Paginas que ficam SINCRONAS (carregamento imediato):
-
-| Pagina | Motivo |
-|--------|--------|
-| Index (Landing) | Primeira pagina que o usuario ve |
-| Auth, AuthCallback, MetaAuthCallback | Fluxo de login -- precisa ser instantaneo |
-| ResetPassword, ChangePassword | Fluxo de senha |
-| Dashboard | Pagina principal apos login |
-| Conversations | Pagina mais usada do sistema |
-| Kanban | Segunda pagina mais usada |
-| Settings | Usada frequentemente |
-| Contacts | Usada frequentemente |
-| Connections | Usada por admins frequentemente |
-| AIAgents, AIAgentEdit | Usada por admins frequentemente |
-| Tasks | Usada diariamente |
-| Onboarding | Fluxo inicial |
-| NotFound | Precisa estar sempre disponivel |
-
-### Como funciona o lazy loading
-
-Quando o usuario clicar em uma pagina lazy-loaded, aparecera um breve indicador de carregamento (< 1 segundo) na primeira vez. Nas visitas seguintes, o codigo ja estara em cache do browser.
-
-**Implementacao**: Envolver cada import lazy com `React.lazy()` e cada `<Route>` com `<Suspense fallback={...}>`.
-
----
-
-## Resumo do Impacto
-
-| Metrica | Antes | Depois |
-|---------|-------|--------|
-| Bundle inicial | 100% das paginas | ~55% (apenas paginas frequentes) |
-| Requisicoes ao navegar | Toda navegacao = refetch | Apenas se dados > 2 min |
-| Primeiro carregamento | Mais lento (carrega tudo) | ~35% mais rapido |
-| Risco de quebrar algo | - | Zero (nenhuma logica alterada) |
-
-## Arquivo alterado
-
-Apenas **1 arquivo**: `src/App.tsx`
-
-- Linha 68: QueryClient com defaultOptions
-- Linhas 1-66: Imports convertidos para React.lazy onde aplicavel
-- Rotas com Suspense wrapper para paginas lazy
-
-Nenhum outro arquivo do projeto e alterado. Nenhuma dependencia nova necessaria.
+Nenhum arquivo frontend sera alterado. Nenhuma funcionalidade sera afetada.
