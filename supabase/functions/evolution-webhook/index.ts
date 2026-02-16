@@ -326,9 +326,49 @@ async function fetchAndUpdateProfilePicture(
     const profilePicUrl = result?.profilePictureUrl || result?.picture || result?.url || result?.pictureUrl;
 
     if (profilePicUrl && typeof profilePicUrl === 'string' && profilePicUrl.startsWith('http')) {
+      // Download image and persist to Storage to avoid expiring WhatsApp URLs
+      let permanentUrl = profilePicUrl; // fallback to original URL if Storage upload fails
+      try {
+        const imageResponse = await fetch(profilePicUrl);
+        if (imageResponse.ok) {
+          const imageBuffer = await imageResponse.arrayBuffer();
+          const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+          
+          // Get law_firm_id for the client to namespace the file
+          const { data: clientInfo } = await supabaseClient
+            .from('clients')
+            .select('law_firm_id')
+            .eq('id', clientId)
+            .maybeSingle();
+          
+          if (clientInfo?.law_firm_id) {
+            const filePath = `${clientInfo.law_firm_id}/avatars/${clientId}.jpg`;
+            const { error: uploadError } = await supabaseClient.storage
+              .from('chat-media')
+              .upload(filePath, imageBuffer, { contentType, upsert: true });
+            
+            if (!uploadError) {
+              const { data: urlData } = supabaseClient.storage
+                .from('chat-media')
+                .getPublicUrl(filePath);
+              if (urlData?.publicUrl) {
+                permanentUrl = urlData.publicUrl;
+                logDebug('AVATAR', 'Image persisted to Storage', { clientId, filePath });
+              }
+            } else {
+              logDebug('AVATAR', 'Storage upload failed, using original URL', { clientId, error: uploadError.message });
+            }
+          }
+        }
+      } catch (storageErr) {
+        logDebug('AVATAR', 'Failed to persist image to Storage, using original URL', { 
+          clientId, error: storageErr instanceof Error ? storageErr.message : String(storageErr) 
+        });
+      }
+
       const { error } = await supabaseClient
         .from('clients')
-        .update({ avatar_url: profilePicUrl })
+        .update({ avatar_url: permanentUrl })
         .eq('id', clientId);
       
       if (error) {
@@ -337,7 +377,8 @@ async function fetchAndUpdateProfilePicture(
         logDebug('AVATAR', 'Profile picture updated successfully', { 
           clientId, 
           hasUrl: true,
-          urlPreview: profilePicUrl.substring(0, 50) + '...'
+          isPersisted: permanentUrl !== profilePicUrl,
+          urlPreview: permanentUrl.substring(0, 50) + '...'
         });
       }
     } else {
@@ -4494,6 +4535,21 @@ serve(async (req) => {
           break;
         } else {
           logDebug('DB', `Found existing conversation`, { requestId, conversationId: conversation.id });
+
+          // Background avatar retry: if client exists but has no avatar, try fetching
+          if (conversation.client_id) {
+            const { data: clientAvatarCheck } = await supabaseClient
+              .from('clients')
+              .select('avatar_url')
+              .eq('id', conversation.client_id)
+              .maybeSingle();
+            
+            if (clientAvatarCheck && !clientAvatarCheck.avatar_url) {
+              fetchAndUpdateProfilePicture(
+                supabaseClient, instance, phoneNumber, conversation.client_id
+              ).catch(err => logDebug('AVATAR', 'Background avatar retry failed', { error: String(err) }));
+            }
+          }
           
           // IMPORTANT: If conversation exists but has no client_id, create/link client now
           // This can happen if client creation failed previously due to unique constraint

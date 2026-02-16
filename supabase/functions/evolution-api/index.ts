@@ -3730,10 +3730,39 @@ serve(async (req) => {
           profileData?.profilePicture;
 
         if (profilePicUrl && typeof profilePicUrl === "string" && profilePicUrl.startsWith("http")) {
-          // Update client avatar in database
+          // Download image and persist to Storage to avoid expiring WhatsApp URLs
+          let permanentUrl = profilePicUrl;
+          try {
+            const imageResponse = await fetch(profilePicUrl);
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+              
+              const filePath = `${lawFirmId}/avatars/${body.clientId}.jpg`;
+              const { error: uploadError } = await supabaseClient.storage
+                .from("chat-media")
+                .upload(filePath, imageBuffer, { contentType, upsert: true });
+              
+              if (!uploadError) {
+                const { data: urlData } = supabaseClient.storage
+                  .from("chat-media")
+                  .getPublicUrl(filePath);
+                if (urlData?.publicUrl) {
+                  permanentUrl = urlData.publicUrl;
+                  console.log("[fetch_profile_picture] Image persisted to Storage:", filePath);
+                }
+              } else {
+                console.warn("[fetch_profile_picture] Storage upload failed, using original URL:", uploadError.message);
+              }
+            }
+          } catch (storageErr) {
+            console.warn("[fetch_profile_picture] Failed to persist to Storage, using original URL:", storageErr);
+          }
+
+          // Update client avatar in database with permanent URL
           const { error: updateError } = await supabaseClient
             .from("clients")
-            .update({ avatar_url: profilePicUrl })
+            .update({ avatar_url: permanentUrl })
             .eq("id", body.clientId);
 
           if (updateError) {
@@ -3741,12 +3770,12 @@ serve(async (req) => {
             throw new Error(`Failed to update avatar: ${updateError.message}`);
           }
 
-          console.log("[fetch_profile_picture] Avatar updated for client:", body.clientId);
+          console.log("[fetch_profile_picture] Avatar updated for client:", body.clientId, "persisted:", permanentUrl !== profilePicUrl);
 
           return new Response(
             JSON.stringify({
               success: true,
-              avatarUrl: profilePicUrl,
+              avatarUrl: permanentUrl,
               message: "Foto de perfil atualizada com sucesso",
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
