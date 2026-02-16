@@ -1206,21 +1206,7 @@ export function useConversations() {
   const fetchSingleConversation = useCallback(async (conversationId: string) => {
     if (!lawFirm?.id) return null;
     
-    const { data, error: rpcError } = await supabase
-      .rpc('get_conversations_with_metadata', {
-        _law_firm_id: lawFirm.id,
-        _limit: 1,
-        _offset: 0,
-        _include_archived: true,
-      });
-
-    if (rpcError) {
-      console.error('[fetchSingleConversation] RPC error:', rpcError);
-      return null;
-    }
-
-    // The RPC doesn't support filtering by ID, so we query directly
-    // Use a direct query with the same joins pattern
+    // Direct query by ID with the same joins pattern
     const { data: directData, error: directError } = await supabase
       .from('conversations')
       .select(`
