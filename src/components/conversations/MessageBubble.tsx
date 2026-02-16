@@ -126,17 +126,19 @@ function AudioPlayer({
   // Decrypt audio on mount if needed - check IndexedDB first, then memory cache, then fetch
   useEffect(() => {
     if (!needsDecryption) return;
+    let cancelled = false;
     
     const loadAudio = async () => {
       // Check memory cache first (fastest)
       const memoryCached = memoryCache.get(whatsappMessageId!);
       if (memoryCached) {
-        setDecryptedSrc(memoryCached);
+        if (!cancelled) setDecryptedSrc(memoryCached);
         return;
       }
 
       // Check IndexedDB cache (persistent)
       const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (cancelled) return;
       if (dbCached) {
         memoryCache.set(whatsappMessageId!, dbCached); // Also cache in memory
         setDecryptedSrc(dbCached);
@@ -154,6 +156,8 @@ function AudioPlayer({
           },
         });
 
+        if (cancelled) return;
+
         if (response.error || !response.data?.success || !response.data?.base64) {
           console.error("Failed to decrypt audio:", response.error || response.data?.error);
           setError(true);
@@ -167,12 +171,12 @@ function AudioPlayer({
         memoryCache.set(whatsappMessageId!, dataUrl);
         await setCachedAudio(whatsappMessageId!, dataUrl);
         
-        setDecryptedSrc(dataUrl);
+        if (!cancelled) setDecryptedSrc(dataUrl);
       } catch (err) {
         console.error("Error decrypting audio:", err);
-        setError(true);
+        if (!cancelled) setError(true);
       } finally {
-        setIsDecrypting(false);
+        if (!cancelled) setIsDecrypting(false);
       }
     };
 
@@ -180,6 +184,7 @@ function AudioPlayer({
     
     // Cleanup old cache entries periodically
     cleanupOldCache();
+    return () => { cancelled = true; };
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 
   // Check for cached transcription

@@ -179,17 +179,19 @@ function KanbanAudioPlayer({
   // Decrypt audio on mount if needed
   useEffect(() => {
     if (!needsDecryption) return;
+    let cancelled = false;
     
     const loadAudio = async () => {
       // Check memory cache first
       const memoryCached = audioMemoryCache.get(whatsappMessageId!);
       if (memoryCached) {
-        setDecryptedSrc(memoryCached);
+        if (!cancelled) setDecryptedSrc(memoryCached);
         return;
       }
 
       // Check IndexedDB cache
       const dbCached = await getCachedAudio(whatsappMessageId!);
+      if (cancelled) return;
       if (dbCached) {
         audioMemoryCache.set(whatsappMessageId!, dbCached);
         setDecryptedSrc(dbCached);
@@ -207,6 +209,8 @@ function KanbanAudioPlayer({
           },
         });
 
+        if (cancelled) return;
+
         if (response.error || !response.data?.success || !response.data?.base64) {
           setError(true);
           return;
@@ -218,16 +222,17 @@ function KanbanAudioPlayer({
         audioMemoryCache.set(whatsappMessageId!, dataUrl);
         await setCachedAudio(whatsappMessageId!, dataUrl);
         
-        setDecryptedSrc(dataUrl);
+        if (!cancelled) setDecryptedSrc(dataUrl);
       } catch (err) {
-        setError(true);
+        if (!cancelled) setError(true);
       } finally {
-        setIsDecrypting(false);
+        if (!cancelled) setIsDecrypting(false);
       }
     };
 
     loadAudio();
     cleanupOldCache();
+    return () => { cancelled = true; };
   }, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 
   // Check for cached transcription
