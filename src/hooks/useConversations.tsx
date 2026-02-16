@@ -1212,7 +1212,7 @@ export function useConversations() {
       .select(`
         *,
         last_message:messages(content, created_at, message_type, is_from_me),
-        whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
+        whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(instance_name, display_name, phone_number),
         current_automation:automations!conversations_current_automation_id_fkey(id, name),
         assigned_profile:profiles!conversations_assigned_to_fkey(full_name),
         client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
