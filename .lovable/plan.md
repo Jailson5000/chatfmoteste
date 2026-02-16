@@ -1,105 +1,128 @@
 
 
-# Arquivamento de Mensagens com mais de 90 Dias
+# Otimizacao de Crons para Escalar ate 30-50 Empresas
 
-## Resumo
+## Problema Atual
 
-Mover mensagens com mais de 90 dias da tabela `messages` para uma tabela `messages_archive`. O sistema continua funcionando normalmente porque todas as queries do dia a dia trabalham com mensagens recentes. Quando o usuario rolar o historico ate o fim, o frontend busca automaticamente do arquivo.
+Os cron jobs consomem **~125.310 invocacoes/mes** de Edge Functions -- **25% do limite de 500k** do plano Pro. Isso deixa apenas ~375k invocacoes para webhooks de mensagens reais. Com 30 empresas enviando ~500 msgs/dia, os webhooks sozinhos consumiriam ~450k/mes, estourando o limite.
 
-## Analise de Impacto -- O que NAO quebra
+## Crons que podem ser otimizados
 
-Analisei todos os pontos do codigo que leem da tabela `messages`:
+### 1. `auto-reconnect-every-minute` -- de `* * * * *` para `*/5 * * * *`
+- **Economia**: 43.200 → 8.640 (-34.560/mes)
+- **Risco**: Instancias desconectadas levarao ate 5 minutos para reconectar em vez de 1
+- **Aceitavel?** Sim. Reconexao em 5 minutos e imperceptivel para o usuario. O webhook da Evolution API ja notifica desconexoes em tempo real
 
-| Componente | Como usa | Impacto |
-|-----------|---------|--------|
-| `useMessagesWithPagination` | Busca mensagens por `conversation_id`, paginadas do mais recente para o mais antigo | **Unico que precisa de ajuste** -- adicionar fallback para `messages_archive` no `loadMore` |
-| `useDashboardMetrics` | Filtra por `created_at` com `gte`/`lte` (periodo selecionado, geralmente 7-30 dias) | **Nenhum impacto** -- nunca busca mensagens de 90+ dias |
-| `generate-summary` | `LIMIT 100` mensagens mais recentes | **Nenhum impacto** |
-| `extract-client-facts` | `LIMIT 50` mensagens mais recentes | **Nenhum impacto** |
-| `KanbanChatPanel` | Insere/atualiza mensagens (star, reaction, notes) | **Nenhum impacto** -- opera sobre mensagens recentes |
-| `evolution-webhook` | Insere novas mensagens | **Nenhum impacto** |
-| `get_conversations_with_metadata` | Busca `last_message` (subquery `ORDER BY created_at DESC LIMIT 1`) | **Risco minimo** -- so afeta conversas inativas ha 90+ dias, onde o preview ficaria vazio |
-| `resolveReplyTo` (realtime) | Busca `reply_to_message_id` na tabela `messages` | **Risco baixo** -- se a mensagem original foi arquivada, a resposta aparece sem preview (ja funciona assim hoje com `reply_to: null`) |
-| `mark_messages_as_read` | Atualiza `read_at` de mensagens nao lidas | **Nenhum impacto** -- mensagens de 90+ dias ja foram lidas |
-| `useSystemMetrics` (Global Admin) | `count` total de mensagens | **Mudanca cosmetica** -- contagem diminui, mas podemos somar com archive |
+### 2. `process-follow-ups-every-minute` -- de `* * * * *` para `*/2 * * * *`
+- **Economia**: 43.200 → 21.600 (-21.600/mes)
+- **Risco**: Follow-ups podem atrasar ate 2 minutos em vez de 1
+- **Aceitavel?** Sim. Follow-ups sao agendados com delay de horas/dias. 2 minutos de variacao e irrelevante
+
+### 3. `process-birthday-messages` -- de `*/5 * * * *` para `0 * * * *` (1x por hora)
+- **Economia**: 8.640 → 720 (-7.920/mes)
+- **Risco**: Nenhum. Aniversarios sao verificados por dia, nao por minuto
+- **Aceitavel?** Sim. 1x por hora e mais que suficiente
+
+### 4. `retry-failed-n8n-workflows` -- de `*/15 * * * *` para `0 */2 * * *` (a cada 2 horas)
+- **Economia**: 2.880 → 360 (-2.520/mes)
+- **Risco**: Workflows falhados esperam ate 2h para retry em vez de 15min
+- **Aceitavel?** Sim. Retries nao sao urgentes
+
+## O que NAO mudar
+
+| Job | Por que manter |
+|-----|---------------|
+| `check-instance-alerts` (`*/5`) | Ja esta em 5min, adequado para alertas de infra |
+| `process-agenda-pro-scheduled-messages` (`*/5`) | Mensagens agendadas para hora especifica precisam de precisao |
+| `process-appointment-reminders` (`*/5`) | Lembretes de consulta sao sensiveis ao tempo |
+| `tenant-health-check` (`0 * * * *`) | Ja e 1x por hora |
+| `process-task-due-alerts-hourly` (`0 * * * *`) | Ja e 1x por hora |
+| `process-trial-reminders-daily` (`0 12 * * *`) | Ja e 1x por dia |
+
+## Resultado da Otimizacao
+
+| Metrica | Antes | Depois | Economia |
+|---------|-------|--------|----------|
+| Invocacoes de cron/mes | ~125.310 | ~58.630 | **-66.680 (-53%)** |
+| % do limite 500k usado por crons | 25% | 12% | **-13 pontos** |
+| Invocacoes disponiveis para webhooks | ~375k | ~441k | **+66k** |
+
+### Capacidade estimada apos otimizacao
+
+- Com ~441k invocacoes disponiveis para webhooks
+- Cada mensagem = 1 invocacao (webhook da Evolution API)
+- **30 empresas x 500 msgs/dia = 450k/mes** -- fica no limite
+- **25 empresas x 500 msgs/dia = 375k/mes** -- confortavel
+
+**Conclusao**: A otimizacao dos crons permite suportar **ate ~25-28 empresas** no plano Pro com folga, e **30 empresas** no limite. Para 50+ empresas, o upgrade de plano continua sendo necessario.
 
 ## Implementacao
 
-### 1. Migration SQL
-
-**Criar tabela `messages_archive`** com a mesma estrutura da `messages`, mais um campo `archived_at`. Indices otimizados para consultas por `conversation_id` + `created_at`. RLS identica a `messages` (isolamento por `law_firm_id`).
-
-**Criar funcao `archive_old_messages()`**:
-- Processa em batches de 5.000 registros
-- Usa `FOR UPDATE SKIP LOCKED` para nao travar outras queries
-- `pg_sleep(0.1)` entre batches para nao sobrecarregar
-- Mensagens com `is_starred = true` NAO sao arquivadas
-- Antes de mover, desvincula `reply_to_message_id` de mensagens que apontam para as que serao arquivadas (evita FK violation)
-- Registra resultado em `system_settings` para monitoramento
-
-**Criar cron job**: domingos as 4h da manha
-
-### 2. Frontend -- `useMessagesWithPagination.tsx`
-
-Unica alteracao no frontend. No `loadMore`, quando a query retorna 0 resultados da tabela `messages` mas o usuario esta rolando para cima:
-
-```text
-1. loadMore() busca da tabela "messages"
-2. Se retorna 0 resultados:
-   a. Busca da tabela "messages_archive" com mesmos filtros
-   b. Se encontra mensagens, adiciona ao estado normalmente
-   c. Se nao encontra, marca hasMoreMessages = false
-3. UX permanece identica -- usuario nem percebe a diferenca
-```
-
-A tipagem `messages_archive` sera automaticamente gerada no `types.ts` pela migration, entao o Supabase client aceita `.from("messages_archive")` sem erros de tipo.
-
-### 3. (Opcional) `resolveReplyTo` -- fallback para archive
-
-Quando uma mensagem recente responde a uma mensagem que foi arquivada, a busca na tabela `messages` retorna vazio. Podemos adicionar um fallback:
-
-```text
-1. Busca em "messages" (como hoje)
-2. Se nao encontra, busca em "messages_archive"
-3. Se nao encontra, retorna reply_to: null (como hoje)
-```
-
-Isso e uma melhoria, nao e obrigatorio. Sem ele, o comportamento atual ja e seguro (mostra a mensagem sem o preview da resposta).
-
-## Riscos e Mitigacoes
-
-| Risco | Probabilidade | Impacto | Mitigacao |
-|-------|--------------|---------|----------|
-| Preview de `last_message` vazio em conversas inativas | Baixa | Cosmetico | So afeta conversas sem atividade por 90+ dias. Podem ser ignoradas ou receber fallback para archive |
-| `reply_to` aponta para mensagem arquivada | Baixa | Cosmetico | A mensagem aparece sem "em resposta a..." -- mesmo comportamento de quando a mensagem original nao e encontrada |
-| Job de arquivamento causa lentidao | Muito baixa | Temporario | Batches de 5.000 com `SKIP LOCKED` e pausa de 100ms. Roda domingo 4h da manha (menor uso) |
-| Contagem total de mensagens no Global Admin diminui | Certa | Cosmetico | Podemos somar `messages` + `messages_archive` na query do `useSystemMetrics` |
-| `is_starred` mensagens sao arquivadas por engano | Zero | -- | Filtro explicito `is_starred = false` na query de arquivamento |
-
-## Como Reverter
-
-Se algo der errado, reverter e simples:
+A alteracao e feita exclusivamente via SQL (atualizar os schedules dos cron jobs existentes). Nenhum arquivo de codigo precisa ser alterado.
 
 ```sql
--- Mover tudo de volta (sem archived_at)
-INSERT INTO messages (id, conversation_id, sender_type, ...)
-SELECT id, conversation_id, sender_type, ...
-FROM messages_archive;
+-- 1. auto-reconnect: de * * * * * para */5 * * * *
+SELECT cron.unschedule('auto-reconnect-every-minute');
+SELECT cron.schedule(
+  'auto-reconnect-every-5min',
+  '*/5 * * * *',
+  $$ SELECT net.http_post(
+    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/auto-reconnect-instances',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer ANON_KEY"}'::jsonb,
+    body:='{"scheduled": true}'::jsonb
+  ) AS request_id; $$
+);
 
--- Limpar
-DELETE FROM messages_archive;
+-- 2. follow-ups: de * * * * * para */2 * * * *
+SELECT cron.unschedule('process-follow-ups-every-minute');
+SELECT cron.schedule(
+  'process-follow-ups-every-2min',
+  '*/2 * * * *',
+  $$ SELECT net.http_post(
+    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/process-follow-ups',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer ANON_KEY"}'::jsonb,
+    body:='{"scheduled": true}'::jsonb
+  ) AS request_id; $$
+);
 
--- Desativar cron
-SELECT cron.unschedule('archive-old-messages-weekly');
+-- 3. birthday: de */5 * * * * para 0 * * * *
+SELECT cron.unschedule('process-birthday-messages');
+SELECT cron.schedule(
+  'process-birthday-messages-hourly',
+  '0 * * * *',
+  $$ SELECT net.http_post(
+    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/process-birthday-messages',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer ANON_KEY"}'::jsonb,
+    body:='{}'::jsonb
+  ) AS request_id; $$
+);
+
+-- 4. retry-n8n: de */15 * * * * para 0 */2 * * *
+SELECT cron.unschedule('retry-failed-n8n-workflows');
+SELECT cron.schedule(
+  'retry-failed-n8n-workflows-2h',
+  '0 */2 * * *',
+  $$ SELECT net.http_post(
+    url:='https://jiragtersejnarxruqyd.supabase.co/functions/v1/retry-failed-workflows',
+    headers:='{"Content-Type": "application/json", "Authorization": "Bearer ANON_KEY"}'::jsonb,
+    body:='{"scheduled": true}'::jsonb
+  ) AS request_id; $$
+);
 ```
 
-## Arquivos Alterados
+## Riscos
 
-| Arquivo | Tipo de Alteracao |
-|---------|-----------------|
-| Migration SQL (novo) | Criar tabela, funcao, cron job, indices, RLS |
-| `src/hooks/useMessagesWithPagination.tsx` | Adicionar fallback para `messages_archive` no `loadMore` (~20 linhas) |
-| (Opcional) `src/hooks/useMessagesWithPagination.tsx` | Fallback no `resolveReplyTo` para buscar no archive (~5 linhas) |
+| Risco | Probabilidade | Mitigacao |
+|-------|--------------|----------|
+| Follow-up atrasa 2min | Certa (mas irrelevante) | Follow-ups sao agendados com horas/dias de antecedencia |
+| Reconexao WhatsApp demora 5min | Baixa (webhook ja notifica) | Usuarios podem reconectar manualmente pelo painel |
+| Birthday duplicado se rodar mais de 1x/hora | Zero | A funcao ja verifica `last_birthday_sent_at` |
 
-Nenhuma outra parte do sistema precisa ser alterada.
+## Como reverter
+
+Basta rodar `cron.unschedule` nos novos jobs e recriar os antigos com os schedules originais.
+
+## Nenhum arquivo frontend alterado
+
+Toda a implementacao e via SQL no banco de dados.
 
