@@ -1,37 +1,80 @@
 
-# Correção: Departamento não atualiza visualmente na sidebar
+# Correção: Áudios se sobrescrevendo na conversa
 
-## Causa Raiz
+## Problemas identificados
 
-Bug na atualização otimista do `updateConversationDepartment` dentro de `useConversations.tsx`.
+### 1. `handleReply` invalida `memo(MessageBubble)` a cada mensagem
+Em `src/pages/Conversations.tsx` (linha 936-941), o callback `handleReply` depende de `[messages]`. Como `messages` muda a cada evento Realtime, **todos** os `MessageBubble` (e seus `AudioPlayer`) re-renderizam desnecessariamente, causando re-execução dos efeitos de descriptografia.
 
-O código busca departamentos do cache do React Query usando a chave **errada**:
+### 2. Efeito de descriptografia sem cancelamento (AudioPlayer e KanbanAudioPlayer)
+Os `useEffect` de descriptografia em ambos os players não possuem flag de abort. Re-renders rápidos disparam múltiplas chamadas à API, e respostas fora de ordem podem sobrescrever o áudio correto com o de outra mensagem.
 
-```text
-ERRADO:  queryClient.getQueryData(["departments"])       --> undefined
-CORRETO: queryClient.getQueryData(["departments", lawFirm?.id])
-```
+## Correções
 
-O `useDepartments` armazena os dados com a chave `["departments", lawFirmId]`, mas a atualização otimista procura em `["departments"]` (sem o ID do tenant). Como o resultado é sempre `undefined`, o campo `department` (o objeto com nome e cor) fica `null` na atualização otimista.
+### Arquivo 1: `src/pages/Conversations.tsx` (linhas 936-941)
 
-**Consequência**: O card na sidebar perde o badge de departamento imediatamente após a mudança. Após 3 segundos (quando expira o lock otimista), o refetch traz o dado correto, mas a experiência visual é ruim -- o badge desaparece e reaparece.
+Estabilizar `handleReply` usando `useRef` para evitar re-renders em cascata:
 
-## Correção
-
-### Arquivo: `src/hooks/useConversations.tsx` (~linha 715)
-
-Trocar:
 ```typescript
-const cachedDepartments = queryClient.getQueryData<any[]>(["departments"]);
+// Adicionar ref antes do callback:
+const messagesRef = useRef(messages);
+messagesRef.current = messages;
+
+const handleReply = useCallback((messageId: string) => {
+  const message = messagesRef.current.find(m => m.id === messageId);
+  if (message) {
+    setReplyToMessage(message as any);
+  }
+}, []); // Sem dependência em messages
 ```
 
-Por:
+### Arquivo 2: `src/components/conversations/MessageBubble.tsx` (linhas 127-183)
+
+Adicionar flag `cancelled` no useEffect de descriptografia:
+
 ```typescript
-const cachedDepartments = queryClient.getQueryData<any[]>(["departments", lawFirm?.id]);
+useEffect(() => {
+  if (!needsDecryption) return;
+  let cancelled = false;
+
+  const loadAudio = async () => {
+    // ... cache checks (sem mudança) ...
+    const response = await supabase.functions.invoke(...);
+    if (cancelled) return; // Ignorar se efeito foi limpo
+    // ... resto da lógica ...
+  };
+
+  loadAudio();
+  cleanupOldCache();
+  return () => { cancelled = true; };
+}, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
 ```
 
-Isso permite que a atualização otimista encontre o departamento no cache e construa o objeto `{ id, name, color }` corretamente, mantendo o badge visível durante toda a transição.
+### Arquivo 3: `src/components/kanban/KanbanChatPanel.tsx` (linhas 180-231)
+
+Mesma correção de abort no KanbanAudioPlayer:
+
+```typescript
+useEffect(() => {
+  if (!needsDecryption) return;
+  let cancelled = false;
+
+  const loadAudio = async () => {
+    // ... cache checks ...
+    const response = await supabase.functions.invoke(...);
+    if (cancelled) return;
+    // ... resto ...
+  };
+
+  loadAudio();
+  cleanupOldCache();
+  return () => { cancelled = true; };
+}, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+```
 
 ## Risco
 
-**Zero**. Apenas corrige a chave de leitura do cache. Nenhuma outra lógica é afetada.
+**Zero**. As mudanças são aditivas e isoladas:
+- A ref é um padrão React comum para estabilizar callbacks
+- O abort apenas ignora resultados de chamadas já canceladas
+- Nenhuma lógica existente é alterada
