@@ -1,113 +1,137 @@
 
-# Correção: IA respondendo múltiplas vezes (respostas duplicadas)
 
-## Causa Raiz
+# Correção: Risco de Mensagem Sem Resposta (e Duplicata Residual)
 
-O sistema de debounce usa a tabela `ai_processing_queue` com um índice único **apenas** para `status = 'pending'`:
+## Problema Encontrado
+
+O índice único criado bloqueia a combinacao "1 pending + 1 processing" para a mesma conversa, mas o fluxo correto PRECISA permitir isso:
 
 ```text
-CREATE UNIQUE INDEX idx_ai_queue_pending_conversation 
-  ON ai_processing_queue(conversation_id) 
-  WHERE status = 'pending';
+Timeline do problema:
+1. Item A: pending -> processing (OK)
+2. Mensagem nova chega -> tenta criar Item B: pending 
+3. UNIQUE INDEX bloqueia! (pending + processing = 2 ativos)
+4. Fallback: processa direto -> RESPOSTA DUPLICADA
+   OU: mensagem perdida sem resposta
 ```
-
-**O que acontece:**
-
-1. Cliente envia mensagem 1 e 2 rapidamente -- agrupadas na Queue #1 (status: `pending`)
-2. Debounce expira -- Queue #1 muda para `processing`
-3. Cliente envia mensagem 3 enquanto Queue #1 ainda está processando
-4. Como não existe item `pending`, o sistema **cria Queue #2** (o unique index permite)
-5. Queue #1 e Queue #2 geram respostas independentes -- resultando em respostas duplicadas
-6. Ambas as respostas vão para o WhatsApp
 
 ## Correção
 
-### Arquivo: `supabase/functions/evolution-webhook/index.ts`
+### 1. Migração SQL: Trocar o indice
 
-Na função `queueMessageForAIProcessing` (linha ~1127), **antes** de criar um novo item na fila, verificar se já existe um item com `status = 'processing'` para a mesma conversa. Se existir, aguardar que ele termine antes de iniciar novo processamento.
+Remover o indice que bloqueia `pending + processing` juntos e criar **dois indices separados**:
 
-**Mudança 1**: Após a busca por itens `pending` (linha 1128-1133), adicionar verificação de itens `processing`:
+```sql
+-- Remover indice restritivo demais
+DROP INDEX IF EXISTS idx_ai_queue_active_conversation;
+
+-- Manter apenas: no maximo 1 pending por conversa
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_queue_pending_conversation 
+  ON public.ai_processing_queue(conversation_id) 
+  WHERE status = 'pending';
+
+-- Novo: no maximo 1 processing por conversa
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_queue_processing_conversation 
+  ON public.ai_processing_queue(conversation_id) 
+  WHERE status = 'processing';
+```
+
+Isso permite ter 1 pending E 1 processing simultaneamente, mas nunca 2 pendings ou 2 processings.
+
+### 2. Simplificar o tratamento de erro no evolution-webhook
+
+No bloco `insertError` (linhas 1217-1228), remover a recursao e tratar de forma mais segura:
 
 ```text
-// Se não existe pending, verificar se existe processing
-if (!existingQueue) {
-  const { data: processingItem } = await supabaseClient
-    .from('ai_processing_queue')
-    .select('id')
-    .eq('conversation_id', context.conversationId)
-    .eq('status', 'processing')
-    .maybeSingle();
-
-  if (processingItem) {
-    // Já tem item sendo processado. Criar como pending e o scheduler
-    // vai processar depois que o atual terminar.
-    // (o insert vai funcionar pois o unique index é só para pending)
-    // MAS precisamos garantir que o novo item só será processado
-    // APÓS o processing atual terminar.
-    // Solução: aumentar o debounce para dar tempo do processing atual terminar
-    const extendedDebounce = Math.max(debounceSeconds, 15); // mínimo 15s
-    const extendedProcessAfter = new Date(Date.now() + extendedDebounce * 1000).toISOString();
-    // ... criar novo item com processAfter estendido
+if (insertError) {
+  if (insertError.code === '23505') {
+    // Ja existe um pending -- buscar e adicionar mensagem a ele
+    const { data: existingPending } = await supabaseClient
+      .from('ai_processing_queue')
+      .select('id, messages, message_count')
+      .eq('conversation_id', context.conversationId)
+      .eq('status', 'pending')
+      .maybeSingle();
+    
+    if (existingPending) {
+      // Append message to existing pending item
+      const updatedMessages = [...(existingPending.messages || []), messageData];
+      await supabaseClient
+        .from('ai_processing_queue')
+        .update({
+          messages: updatedMessages,
+          message_count: updatedMessages.length,
+          process_after: effectiveProcessAfter, // reset debounce
+        })
+        .eq('id', existingPending.id);
+    }
+    // Se nao encontrou pending, significa que tem processing -- a mensagem
+    // sera coberta pelo proximo processamento (ver nextPending check)
+  } else {
+    // Erro desconhecido -- fallback para processamento direto
+    await processAutomations(supabaseClient, context as AutomationContext);
   }
 }
 ```
 
-**Mudança 2**: Na função `processQueuedMessages` (linha ~1329), após completar o processamento, verificar se há um novo item `pending` que chegou durante o processamento e processá-lo em sequência:
+### 3. Garantir que mensagens durante processing nao se percam
+
+Ajustar a logica: quando ha um `processingItem` ativo, o INSERT de um novo `pending` DEVE funcionar (com os 2 indices separados). Se ainda assim falhar, fazer append ao pending existente em vez de recursao.
+
+Tambem adicionar o `process_after` com verificacao mais robusta no `nextPending` check (linhas 1465-1471):
 
 ```text
-// Após marcar como completed (linha 1409):
-// Verificar se há novo item pending que chegou durante processing
+// Apos completar o processing, esperar 2s e verificar pending
+// (para dar tempo de mensagens em transito serem enfileiradas)
 const { data: nextPending } = await supabaseClient
   .from('ai_processing_queue')
   .select('id')
   .eq('conversation_id', conversationId)
   .eq('status', 'pending')
-  .lte('process_after', new Date().toISOString())
-  .maybeSingle();
+  .maybeSingle(); // Remover filtro de process_after para pegar QUALQUER pending
 
 if (nextPending) {
-  // Processar o próximo item em sequência (não em paralelo)
+  // Aguardar o debounce restante antes de processar
+  const { data: nextDetails } = await supabaseClient
+    .from('ai_processing_queue')
+    .select('process_after')
+    .eq('id', nextPending.id)
+    .single();
+  
+  const waitMs = Math.max(0, 
+    new Date(nextDetails.process_after).getTime() - Date.now()
+  );
+  
+  if (waitMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+  
   await processQueuedMessages(supabaseClient, conversationId, requestId);
 }
 ```
 
-**Mudança 3**: Adicionar cleanup de itens `processing` travados (safety net). Se um item ficou em `processing` por mais de 2 minutos, marcá-lo como `failed` para desbloquear a fila:
+## Fluxo Corrigido
 
 ```text
-// No início de processQueuedMessages:
-// Cleanup de itens travados
-await supabaseClient
-  .from('ai_processing_queue')
-  .update({ status: 'failed', error_message: 'Timeout: stuck in processing' })
-  .eq('conversation_id', conversationId)
-  .eq('status', 'processing')
-  .lt('processing_started_at', new Date(Date.now() - 120000).toISOString());
+1. Mensagem 1 chega -> Cria pending (idx_pending OK)
+2. Mensagem 2 chega -> Append ao pending (idx_pending bloqueia duplicata)
+3. Debounce expira -> pending vira processing (idx_processing OK, idx_pending liberado)
+4. Mensagem 3 chega -> Cria novo pending (idx_pending OK, idx_processing ja existe = permitido)
+5. Processing completa -> Verifica pending -> Processa sequencialmente
+6. Resultado: 1 resposta para msgs 1+2, 1 resposta para msg 3 (correto!)
 ```
 
-### Migração SQL (Opcional mas recomendada)
+## Resumo das Mudancas
 
-Adicionar um segundo índice único que impede ter um item `processing` e `pending` simultaneamente:
-
-```sql
--- Impedir mais de 1 item "ativo" (pending ou processing) por conversa
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_queue_active_conversation 
-  ON public.ai_processing_queue(conversation_id) 
-  WHERE status IN ('pending', 'processing');
-```
-
-Isso garante que, **no nível do banco de dados**, nunca existam dois itens ativos para a mesma conversa.
-
-## Resumo das Mudanças
-
-| Mudança | Arquivo | Risco |
+| Arquivo | Mudanca | Risco |
 |---------|---------|-------|
-| Verificar `processing` antes de criar novo item | evolution-webhook | Zero -- apenas adiciona check |
-| Processar próximo item após completar | evolution-webhook | Baixo -- recursão controlada |
-| Cleanup de itens travados | evolution-webhook | Zero -- safety net |
-| Índice único `pending+processing` | Migração SQL | Zero -- proteção no banco |
+| Migracao SQL | Trocar 1 indice por 2 separados | Zero -- mais permissivo |
+| evolution-webhook | Remover recursao, usar append | Baixo -- simplifica logica |
+| evolution-webhook | Melhorar nextPending check | Zero -- espera debounce |
 
 ## Resultado Esperado
 
-- Cada conversa terá no máximo **1 resposta da IA** por "rajada" de mensagens
-- Mensagens que chegam durante processamento serão enfileiradas e processadas após a resposta atual
-- Itens travados são automaticamente liberados após 2 minutos
+- Nenhuma mensagem fica sem resposta
+- Nenhuma resposta duplicada
+- Mensagens que chegam durante processing sao agrupadas no proximo batch
+- Processamento sequencial garantido pelos indices + check pos-completion
