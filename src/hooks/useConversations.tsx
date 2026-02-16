@@ -712,7 +712,7 @@ export function useConversations() {
       // Build full department object from cache for immediate Kanban rendering
       let departmentObject: { id: string; name: string; color: string } | null = null;
       if (departmentId) {
-        const cachedDepartments = queryClient.getQueryData<any[]>(["departments"]);
+        const cachedDepartments = queryClient.getQueryData<any[]>(["departments", lawFirm?.id]);
         const dept = cachedDepartments?.find((d: any) => d.id === departmentId);
         if (dept) {
           departmentObject = { id: dept.id, name: dept.name, color: dept.color || '#gray' };
